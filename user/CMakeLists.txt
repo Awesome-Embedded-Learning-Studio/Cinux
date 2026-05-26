@@ -8,7 +8,6 @@ set(USER_COMPILE_FLAGS
     -fno-stack-protector
     -mcmodel=small
     -mno-red-zone
-    -std=c++23
     -Wall
     -Wextra
     -O2

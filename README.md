@@ -5,8 +5,8 @@
 ### x86_64 操作系统 · 现代 C++ 实现
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)]()
-[![GCC](https://img.shields.io/badge/GCC-15.0%2B-blue)]()
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)]()
+[![GCC](https://img.shields.io/badge/GCC-12%2B-blue)]()
 [![QEMU](https://img.shields.io/badge/QEMU-8.0%2B-orange)]()
 
 一个基于 x86_64 架构的操作系统——从 Bootloader 到 GUI 桌面，全链路实现。
@@ -103,8 +103,8 @@ fork/execve/CoW 页表复制 + Pipe IPC，每个终端绑定独立 shell 进程
 <tr>
 <td>
 
-🔧 **现代 C++23 实现**
-`constexpr` 编译期生成 GDT/IDT / `concepts` 类型约束 / RAII 锁管理 / `enum class` 驱动接口 / 支持用户态内核态 SSE （故支持-O2 Release构建）
+🔧 **现代 C++17 实现**
+`constexpr` 编译期生成 GDT/IDT / RAII 锁管理 / `enum class` 驱动接口 / 支持用户态内核态 SSE （故支持-O2 Release构建）
 
 </td>
 </tr>
@@ -206,9 +206,9 @@ bash scripts/launch_qemu_debug.sh
 <details>
 <summary><b>🔍 现代 C++ 内核开发</b></summary>
 
-- ✅ **C++23 特性**：`constexpr` / `concepts` / `requires`
+- ✅ **C++17 特性**：`constexpr` / `if constexpr` / 结构化绑定
 - ✅ **编译期魔法**：GDT/IDT 描述符 `constexpr` 生成，桌面图标 `constexpr` 像素数据
-- ✅ **类型安全**：`enum class` 作为 API 一等公民，`concepts` 约束驱动接口
+- ✅ **类型安全**：`enum class` 作为 API 一等公民
 - ✅ **RAII 资源管理**：Spinlock::guard、InterruptGuard、锁自动释放
 - ✅ **零标准库依赖**： freestanding，自实现 memset/memcpy/string
 

@@ -93,12 +93,7 @@ target_link_libraries(test_pmm PRIVATE -pthread)
 add_cinux_test(sync_concurrent)
 target_link_libraries(test_sync_concurrent PRIVATE -pthread)
 
-# ============================================================
-# Tests with C++23 requirement
-# ============================================================
-
 add_cinux_test(kprintf)
-target_compile_features(test_kprintf PRIVATE cxx_std_23)
 
 # ============================================================
 # Tests with extra kernel sources
