@@ -9,6 +9,9 @@
 
 set(CINUX_HOST_TEST ON)
 
+# Host tests need standard library; override kernel toolchain linker flags
+set(CMAKE_EXE_LINKER_FLAGS "")
+
 set(TEST_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/test/framework
     ${CMAKE_SOURCE_DIR}/kernel
