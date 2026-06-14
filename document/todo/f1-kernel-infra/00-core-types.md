@@ -3,6 +3,8 @@
 > F1 的前置基础。为所有后续 Milestone 和 Feature 域提供零 OS 耦合的通用类型库。
 > 所有组件均为 header-only constexpr 实现，无动态内存分配，无系统调用依赖。
 
+> **📌 状态（2026-06）：M0 的 T1–T4（ErrorOr / StringView / Span / Buffer）已通过 [Cinux-Base 子模块](../../../third_party/Cinux-Base/)提供，不在 `kernel/lib/` 下重新实现。下方原始设计保留作参考，文末「实现现状」给出实际映射。**
+
 ## 目标
 
 在 `kernel/lib/` 下实现 5 个核心类型，替代内核中的 C 风格原始类型组合（`T* + length`、`void* + size`、裸 int 错误码）。
@@ -318,3 +320,28 @@ private:
 - [ ] `kernel/lib/array.hpp` — Array\<T, N\>
 - [ ] `kernel/test/test_core_types.cpp` — 单元测试
 - [ ] 编译通过 + 测试通过
+
+---
+
+## 实现现状（2026-06 更新）
+
+M0 类型未在 `kernel/lib/` 下实现，而是抽离到独立的 **Cinux-Base** 子模块（零 OS 耦合、header-only、`namespace cinux::lib`），内核通过 CMake include 路径消费（见 [`third_party/CMakeLists.txt`](../../../third_party/CMakeLists.txt)）。
+
+| 组件 | 文档原计划 | 实际位置 | 状态 |
+|------|-----------|---------|------|
+| `ErrorOr<T>` / `Error` | `kernel/lib/expected.hpp` | [`cinux/expected.hpp`](../../../third_party/Cinux-Base/include/cinux/expected.hpp) | ✅ 已实现（含 `ErrorOr<void>` 特化、`error_string`） |
+| `StringView` | `kernel/lib/string_view.hpp` | [`cinux/string_view.hpp`](../../../third_party/Cinux-Base/include/cinux/string_view.hpp) | ✅ 已实现（`find`/`rfind`/`substr`/比较运算符） |
+| `Span<T>` | `kernel/lib/span.hpp` | [`cinux/span.hpp`](../../../third_party/Cinux-Base/include/cinux/span.hpp) | ✅ 已实现（含 `ByteSpan`/`ConstByteSpan`、迭代器） |
+| `BufferView` / `StaticBuffer<N>` | `kernel/lib/buffer.hpp` | [`cinux/buffer.hpp`](../../../third_party/Cinux-Base/include/cinux/buffer.hpp) | ✅ 已实现 |
+| `Array<T,N>` | `kernel/lib/array.hpp` | — | ⏸ Cinux-Base 暂未提供。当前内核无消费方；后续视需求补入 Cinux-Base，或评估 `static_string` / `buffer` 覆盖 |
+
+**测试**：
+
+- Cinux-Base 自带：[`third_party/Cinux-Base/test/`](../../../third_party/Cinux-Base/test/)（test_expected / test_string_view / test_span / test_buffer 等，Catch2）
+- 内核侧冒烟测试（本次新增）：[`test/unit/test_cinux_base_types.cpp`](../../../test/unit/test_cinux_base_types.cpp) — 验证这些类型在内核 include 路径下可编译使用（13 项，全绿）
+
+**内核消费迁移进展**：
+
+- ✅ [`kernel/syscall/path_util.cpp`](../../../kernel/syscall/path_util.cpp) 的 `split_pathname` 已用 `StringView` 重写，并消除 `sys_mkdir` / `sys_unlink` / `sys_rmdir` / `sys_creat` 4 份重复副本
+- ⏳ `ErrorOr` 大规模迁移（proc / fs 子系统）→ 下一个 F1 子任务
+- ⏳ VFS `InodeOps` 接口（`create`/`mkdir`/`unlink` 的 `(const char*, uint32_t)` 对 → StringView）→ 留待 F6

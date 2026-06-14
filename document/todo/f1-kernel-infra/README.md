@@ -2,6 +2,8 @@
 
 > Phase 0 完成后的第一项任务。为所有后续 Feature 域（驱动、文件系统、内存管理）提供基础设施。
 
+> **📌 M0 状态（2026-06）：核心类型（ErrorOr / StringView / Span / Buffer）已通过 [Cinux-Base 子模块](../../../third_party/Cinux-Base/)完成，不在 `kernel/lib/` 下重写。详见 [00-core-types.md](00-core-types.md) 文末「实现现状」。内核侧消费迁移进行中（`split_pathname` 已迁移到 StringView）。**
+
 ## 实现决策
 
 | 决策 | 选择 |

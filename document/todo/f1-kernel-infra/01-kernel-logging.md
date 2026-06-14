@@ -3,6 +3,8 @@
 > 基于 M1 的 Ring Buffer，增强内核日志到 dmesg 级别。
 > 添加日志级别过滤、时间戳、ring buffer sink、用户态读取接口。
 
+> **📌 状态（2026-06）：`LogLevel` 枚举与 `Logger` 类（sink 回调模式）已在 [Cinux-Base](../../../third_party/Cinux-Base/include/cinux/logger.hpp) 提供。本 milestone 的增量工作是**内核特定部分**：`KernelLog` 单例、`ConcurrentRingBuffer` sink（线程安全，复用 M1）、dmesg 用户态读取接口，以及与现有 `kprintf` 多 sink 架构的桥接。`kprintf` 本身（[`kernel/lib/kprintf.hpp`](../../../kernel/lib/kprintf.hpp)）保留不动。
+
 ## 目标
 
 在现有 kprintf sink 架构上叠加 ring buffer 日志，提供结构化的内核日志系统。

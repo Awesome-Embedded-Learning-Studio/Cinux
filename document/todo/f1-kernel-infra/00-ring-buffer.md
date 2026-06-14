@@ -3,6 +3,8 @@
 > 通用可复用环形缓冲区，作为 kernel/lib/ 的基础组件。
 > 后续被 klog (M2)、IPC pipe 改造、serial 缓冲等复用。
 
+> **📌 状态（2026-06）：基础 `RingBuffer<T,N>` / `ByteRingBuffer<N>` 已在 [Cinux-Base](../../../third_party/Cinux-Base/include/cinux/ring_buffer.hpp) 提供。本 milestone 的增量工作聚焦**内核特定的并发封装**（基于 `kernel/proc/sync.hpp` Spinlock 的 MPSC 版本）以及与 klog / pipe 的集成，而非重新实现叶子模板。
+
 ## 目标
 
 在 `kernel/lib/` 下实现类型安全的环形缓冲区模板，支持单生产者-单消费者（SPSC）和多线程安全（MPSC）两种模式。
