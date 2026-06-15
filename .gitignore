@@ -1,8 +1,9 @@
 build*/
 .cache
 helpers
-.claude/
-CLAUDE.md
+# Claude Code: 忽略本地态(settings.local.json 等)，但跟踪项目命令
+.claude/*
+!.claude/commands/
 
 # ============================================================
 # Python virtual environment & profiles
