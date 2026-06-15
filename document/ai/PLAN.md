@@ -12,13 +12,15 @@
 | 批2a | InodeOps::create/mkdir/unlink/stat → ErrorOr | ✅ | 93e2870 | 662/0 ×2 |
 | 批2b | InodeOps::read/write/readdir → ErrorOr<int64_t> | ✅ | 6d47c99 | 662/0 |
 | 批3 | ~~proc ErrorOr 化~~ 侦察：无高价值目标（见 NEXT） | ⏭️ 并入批4 | — | — |
-| 批4 | syscall 边界 Error→errno 翻译（接回 userspace） | ✅ | — | 662/0 |
-| 收尾 | 文档(本文+document/todo) + 全量 run-kernel-test | 🔄 NEXT | — | — |
+| 批4 | syscall 边界 Error→errno 翻译（接回 userspace） | ✅ | a81536a | 662/0 |
+| 收尾 | 文档(本文+ROADMAP+todo+DEVLOG) + 全量 run-kernel-test | ✅ | — | 662/0 |
 
-最近提交：`—`(2026-06-15) `refactor(syscall): 引入 to_errno，syscall 失败返回 -errno 而非 -1 (M0 批4)`，16 files（新 `kernel/errno.hpp` + 10 handler + 4 test）。commit hash 待回填。
+最近提交：`a81536a`(2026-06-15) `refactor(syscall): 引入 to_errno，syscall 失败返回 -errno 而非 -1 (M0 批4)`，16 files（新 `kernel/errno.hpp` + 10 handler + 4 test）。本次收尾 doc-sync（ROADMAP/todo/DEVLOG）commit hash 待回填。
 
-## NEXT — 收尾：文档 + 全量验证
-范围：① 回填本批 commit hash；② `document/todo` 同步 M0 状态；③ 全量 `run-kernel-test` 复跑确认无回归。M0（ErrorOr 消费迁移）至此收口——FS 层（批1/2a/2b）已返回 ErrorOr，syscall 边界（批4）已 `Error→errno` 接回用户态；proc 边界类型（execve/waitpid/fork）按批3 侦察结论保留 errno-encoded 形态，不强行 ErrorOr 化。
+## ✅ M0（ErrorOr 消费迁移）已完成 — 2026-06-15
+FS 层（批1/2a/2b）返回 ErrorOr；syscall 边界（批4，`a81536a`）经 `to_errno` 把 `Error→errno` 接回用户态；proc 边界类型（execve/waitpid/fork）按批3 侦察结论保留 errno-encoded 形态，不强行 ErrorOr 化。批表全 ✅，662/0 验证通过（`a81536a` 即 clang-format 后复验树，HEAD 已确认无回归）。
+
+**下一焦点待定**：F1-M1 RingBuffer（自然延续）或另行 `/milestone` 拆批。本文（PLAN）进入待命——新里程碑启动时重写本节。
 
 ## 批4 落地纪要
 - 新建 `kernel/errno.hpp`：`cinux::to_errno(Error)` 全 14 变体映射 + `kPascalCase` POSIX errno 常量（freestanding，不引 libc `<errno.h>`）。

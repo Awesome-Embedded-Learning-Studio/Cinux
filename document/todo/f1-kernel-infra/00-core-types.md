@@ -343,5 +343,5 @@ M0 类型未在 `kernel/lib/` 下实现，而是抽离到独立的 **Cinux-Base*
 **内核消费迁移进展**：
 
 - ✅ [`kernel/syscall/path_util.cpp`](../../../kernel/syscall/path_util.cpp) 的 `split_pathname` 已用 `StringView` 重写，并消除 `sys_mkdir` / `sys_unlink` / `sys_rmdir` / `sys_creat` 4 份重复副本
-- ⏳ `ErrorOr` 大规模迁移（proc / fs 子系统）→ 下一个 F1 子任务
+- ✅ `ErrorOr` 消费迁移完成：FS 层（批1/2a/2b）VFS/InodeOps 返回 `ErrorOr`；syscall 边界（批4，`a81536a`）经新增 [`kernel/errno.hpp`](../../../kernel/errno.hpp) 的 `to_errno` 把 `Error→errno` 接回用户态。proc 边界（execve/waitpid/fork）按侦察结论保留 errno-encoded 形态，不强行 ErrorOr 化
 - ⏳ VFS `InodeOps` 接口（`create`/`mkdir`/`unlink` 的 `(const char*, uint32_t)` 对 → StringView）→ 留待 F6

@@ -15,6 +15,12 @@
 
 <!-- 新条目插在此行下方（最新在最上） -->
 
+## 2026-06-15 批4 — syscall 边界 Error→errno，接回 userspace (commit a81536a)
+- 改动：新建 [`kernel/errno.hpp`](../../kernel/errno.hpp)（`cinux::to_errno(Error)` 全 14 变体映射 + `kPascalCase` POSIX errno 常量，freestanding 不引 libc errno.h）；10 个 FS syscall handler（open/read/write/stat/creat/mkdir/unlink/rmdir/getdents/chdir）失败路径由 `return -1` 改为 `return -to_errno(r.error())` 或具体 `-errno`（EFAULT/EBADF/ENOENT/EMFILE/ENOTDIR/ENOTEMPTY…）；28 处受影响测试断言 `== -1` → `< 0`。
+- 决策/why：**批3 侦察后并入批4**——proc 无高价值 ErrorOr 目标（execve/waitpid 已是 errno-enum、保真高于 `ErrorOr<void>+Error`，因 `Error` 缺 ENOEXEC/EISDIR/ESRCH；fork 错误全平凡且 ErrorOr 撞 `fork_child_trampoline` 的 rax 锻造；`handle_cow_fault` 是谓词非错误通道）。故 M0 收口落在 syscall 边界：批1/2a/2b 让 FS 返 ErrorOr，批4 把 `Error` 经 `to_errno` 翻成 `-errno` 接回用户态——批1/2a/2b 的投资此前在边界被压成 `-1` 丢弃。
+- 陷阱/弯路：找受影响测试断言用了限定变量名的正则 `[a-z_]*`，漏掉带数字的 `r0/r1/r2/r3`（test_syscall/test_shell 的 sys_write 测试），首轮 4 failed；补一记全量 grep + 逐条分类后转绿。与批2b「箭头/点号两形态」同类盲点。
+- 验证：662 passed, 0 failed（clang-format 前后各一）。M0（ErrorOr 消费迁移）至此收口。
+
 ## 2026-06-15 meta — CODING-TASTE 风格权威 + 接线 (commit 8831b24)
 - 改动：新增 `document/ai/CODING-TASTE.md`（扎根 `.clang-format`+真实代码）；`DIRECTIVES` B、`CLAUDE.md`、`AGENTS.md` 加指针；旧 `document/ai_prompts/code_conventions.md` 与本地 `helpers/CodingStyle.md` 转指针。
 - 决策/why：注释**全英文**（代码现状如此）；常量/枚举值**迁 k 前缀**（目标态，legacy 迁移中、不批量重写）；clang-format 为机械风格唯一权威。
