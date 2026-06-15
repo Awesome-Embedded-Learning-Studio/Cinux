@@ -14,9 +14,9 @@
 
 #include <stdint.h>
 
-#include "kernel/fs/inode.hpp"
-
 #include <cinux/expected.hpp>
+
+#include "kernel/fs/inode.hpp"
 
 namespace cinux::fs {
 

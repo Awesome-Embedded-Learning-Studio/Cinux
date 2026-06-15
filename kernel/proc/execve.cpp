@@ -247,8 +247,8 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
                     copy_len = avail;
                 }
 
-                auto bread = inode->ops->read(inode, phdr.p_offset + seg_offset,
-                                              dst + in_page_off, copy_len);
+                auto bread = inode->ops->read(inode, phdr.p_offset + seg_offset, dst + in_page_off,
+                                              copy_len);
                 if (!bread.ok() || bread.value() < static_cast<int64_t>(copy_len)) {
                     cinux::lib::kprintf("[EXECVE] segment read failed at offset %lu\n",
                                         static_cast<unsigned long>(phdr.p_offset + seg_offset));

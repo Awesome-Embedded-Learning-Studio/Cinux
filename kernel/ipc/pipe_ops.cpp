@@ -19,7 +19,8 @@ namespace cinux::ipc {
 
 PipeReadOps::PipeReadOps(Pipe* pipe) : pipe_(pipe) {}
 
-cinux::lib::ErrorOr<int64_t> PipeReadOps::read(const cinux::fs::Inode*, uint64_t, void* buf, uint64_t count) {
+cinux::lib::ErrorOr<int64_t> PipeReadOps::read(const cinux::fs::Inode*, uint64_t, void* buf,
+                                               uint64_t count) {
     if (pipe_ == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -36,7 +37,8 @@ cinux::lib::ErrorOr<int64_t> PipeReadOps::read(const cinux::fs::Inode*, uint64_t
 
 PipeWriteOps::PipeWriteOps(Pipe* pipe) : pipe_(pipe) {}
 
-cinux::lib::ErrorOr<int64_t> PipeWriteOps::write(cinux::fs::Inode*, uint64_t, const void* buf, uint64_t count) {
+cinux::lib::ErrorOr<int64_t> PipeWriteOps::write(cinux::fs::Inode*, uint64_t, const void* buf,
+                                                 uint64_t count) {
     if (pipe_ == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }

@@ -19,8 +19,8 @@
 
 #include <new>
 
-#include "kernel/mm/heap.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/mm/heap.hpp"
 
 extern "C" {
 

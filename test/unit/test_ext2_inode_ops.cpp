@@ -85,18 +85,21 @@ public:
         return -1;  // no more entries
     }
 
-    cinux::lib::ErrorOr<Inode*> create(Inode* /*dir*/, const char* /*name*/, uint32_t /*namelen*/) override {
+    cinux::lib::ErrorOr<Inode*> create(Inode* /*dir*/, const char* /*name*/,
+                                       uint32_t /*namelen*/) override {
         // Return a pointer to a static Inode to simulate creation
         static Inode fake{42, 0, InodeType::Regular, nullptr, nullptr};
         return &fake;
     }
 
-    cinux::lib::ErrorOr<Inode*> mkdir(Inode* /*dir*/, const char* /*name*/, uint32_t /*namelen*/) override {
+    cinux::lib::ErrorOr<Inode*> mkdir(Inode* /*dir*/, const char* /*name*/,
+                                      uint32_t /*namelen*/) override {
         static Inode fake{99, 1024, InodeType::Directory, nullptr, nullptr};
         return &fake;
     }
 
-    cinux::lib::ErrorOr<void> unlink(Inode* /*dir*/, const char* /*name*/, uint32_t /*namelen*/) override {
+    cinux::lib::ErrorOr<void> unlink(Inode* /*dir*/, const char* /*name*/,
+                                     uint32_t /*namelen*/) override {
         return {};  // success
     }
 };

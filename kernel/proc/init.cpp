@@ -42,7 +42,7 @@ void kernel_init_thread() {
 
     cinux::lib::kprintf("[INIT] ===== Milestone 028: ext2 Filesystem =====\n");
     static cinux::fs::Ext2 ext2(cinux::drivers::ahci::AHCI::instance(), 1);
-    auto mount_result = ext2.mount();
+    auto                   mount_result = ext2.mount();
     if (!mount_result.ok()) {
         cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n",
                             cinux::lib::error_string(mount_result.error()));

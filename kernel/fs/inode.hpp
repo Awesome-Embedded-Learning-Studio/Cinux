@@ -52,13 +52,16 @@ class InodeOps {
 public:
     virtual ~InodeOps() = default;
 
-    virtual cinux::lib::ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count);
-    virtual cinux::lib::ErrorOr<int64_t> write(Inode* inode, uint64_t offset, const void* buf, uint64_t count);
-    virtual cinux::lib::ErrorOr<int64_t> readdir(const Inode* inode, uint64_t index, char* name, uint64_t name_max);
-    virtual cinux::lib::ErrorOr<Inode*> create(Inode* dir, const char* name, uint32_t namelen);
-    virtual cinux::lib::ErrorOr<Inode*> mkdir(Inode* dir, const char* name, uint32_t namelen);
-    virtual cinux::lib::ErrorOr<void>   unlink(Inode* dir, const char* name, uint32_t namelen);
-    virtual cinux::lib::ErrorOr<void>   stat(const Inode* inode, struct stat* st);
+    virtual cinux::lib::ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf,
+                                              uint64_t count);
+    virtual cinux::lib::ErrorOr<int64_t> write(Inode* inode, uint64_t offset, const void* buf,
+                                               uint64_t count);
+    virtual cinux::lib::ErrorOr<int64_t> readdir(const Inode* inode, uint64_t index, char* name,
+                                                 uint64_t name_max);
+    virtual cinux::lib::ErrorOr<Inode*>  create(Inode* dir, const char* name, uint32_t namelen);
+    virtual cinux::lib::ErrorOr<Inode*>  mkdir(Inode* dir, const char* name, uint32_t namelen);
+    virtual cinux::lib::ErrorOr<void>    unlink(Inode* dir, const char* name, uint32_t namelen);
+    virtual cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st);
 };
 
 // ============================================================
