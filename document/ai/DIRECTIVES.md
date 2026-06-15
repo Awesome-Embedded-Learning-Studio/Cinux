@@ -11,9 +11,11 @@
 - 子系统架构细节见 `document/design/`；里程碑静态规划见 `document/todo/`。
 
 ## B. 编码 / 注释约定
-- 命名：类型/类/模板/枚举值 `PascalCase`；函数/变量 `snake_case`；成员变量后缀 `_`（`value_`、`is_ok_`、`data_`）。Google variant，4 空格。
-- 标识符/API 一律英文。注释可中文（`//` 或 `/** */`）；doc comment 建议英文，与同文件风格一致。`[待补: 用户最终裁定 doc-comment 语言]`
-- ErrorOr 范式：成功 `return ErrorOr<T>(v);` 或 `return {};`；失败 `return Error::Xxx;`；调用方 `if (auto r=foo(); !r.ok()) return r.error();`。`[待补: 完整 Error→errno 映射表；Error 枚举值以子模块 expected.hpp 为准]`
+详见 `CODING-TASTE.md`（单一权威：命名/注释/ErrorOr 惯用法/clang-format/测试/panic）。要点：
+- 命名：类型 `PascalCase`、函数/变量 `snake_case`、私有成员后缀 `_`(必须)、常量与枚举值 `kPascalCase`(目标，legacy UPPER_SNAKE/PascalCase 迁移中)、宏 `UPPER_SNAKE`。
+- 注释一律英文（Doxygen 文件/API 头 + `//` 行内）。
+- 机械风格以 `.clang-format` 为准（4 空格/K&R/100 列/namespace 不缩进/指针左），跑 clang-format 不手调。
+- ErrorOr：成功 `return value;` / `return {};`，失败 `return Error::Xxx;`，调用方 `if(!r.ok()){...}`。`[Error→errno 映射表批4 补]`
 
 ## C. 操作模型（长期，Claude 主力开发）
 - **L1 一批一commit一验证**：`cmake --build build --target run-kernel-test -j$(nproc)` 全绿才提交；红则不提交、不更新 PLAN。
