@@ -14,7 +14,7 @@
 ## /done
 跑 cmake --build build --target run-kernel-test -j$(nproc)(别用 run/test_host 当门)。passed 且 0 failed=绿。
 - 红:列失败项,不改 PLAN,不提交,给方向后停。
-- 绿:①更新 PLAN.md(批标✅+commit短hash+测试数,挪 NEXT,必要时同步 ROADMAP) ②起草提交 `<type>(<scope>): <简述>` 无 Co-Auth,不自动提交 ③报告改动+测试+建议 git 命令。
+- 绿:①更新 PLAN.md(批标✅+commit短hash+测试数,挪 NEXT,必要时同步 ROADMAP) ②起草提交 `<type>(<scope>): <简述>` 无 Co-Auth,不自动提交 ③追加 DEVLOG.md(最新在最上:粗略改动+决策why+弯路+验证,非 diff 复述) ④报告改动+测试+建议 git 命令。
 
 ## /roadmap
 读 document/ai/ROADMAP.md,紧凑打印里程碑树+依赖瓶颈,指出"当前焦点之后下一个可启动的里程碑/Feature"。只读。
