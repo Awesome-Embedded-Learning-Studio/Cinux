@@ -1,5 +1,7 @@
 # M1: AHCI DMA 升级
 
+> ✅ **已完成（2026-06-16）**——详见 `document/ai/PLAN.md` F5-M1 章节 / `document/notes/2026-06-16-f5-m1-ahci-dma.md`。目标 1/2/4 完成（DmaPool command list/FIS、PrdtBuilder scatter-gather、AHCIBlockDevice identify+flush）；目标 3 中断驱动留后续（仍轮询 CI 位）。
+
 > 将现有 AHCI 驱动从 PIO/single-PRDT 升级到 DMA scatter-gather。
 > 利用 F1 的 DMA Pool 和 PRDT Builder。
 
