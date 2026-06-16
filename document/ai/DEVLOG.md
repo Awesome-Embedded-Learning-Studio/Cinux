@@ -15,6 +15,12 @@
 
 <!-- 新条目插在此行下方（最新在最上） -->
 
+## 2026-06-16 批1 — pipe 内部环形缓冲迁移至 cinux::lib::RingBuffer (commit 0746ebf)
+- 改动：[`kernel/ipc/pipe.{hpp,cpp}`](../../kernel/ipc/pipe.cpp) 移除手写 `buffer_[4096]/head_/tail_/count_` 及 write/read/try_read/try_write 的两段回绕拷贝，改用 Cinux-Base `RingBuffer<char,4096>` 的 `push_batch/pop_batch`；私有存储收敛为单个 `buf_`。外层 `Spinlock` + `irq_save/restore` + spin-wait + reader/writer open 标志位原样保留。
+- 决策/why：M1 是 M0 同款「消费迁移」——`RingBuffer` 类型 Cinux-Base 早已提供（freestanding header-only，文档明写"用于日志和管道"），内核却手写了一套几乎同款（连用 `count_` 区分满空的策略都一致）。故本里程碑不是造轮子，而是消灭 kernel/ 重复实现，回归「kernel 消费 cinux::lib」层化铁律。只换存储层、不动公共接口 → pipe_ops 与 syscall 边界零影响。
+- 陷阱/弯路：RingBuffer 的 `push_batch/pop_batch` 返 `size_t`（新增 size_t 依赖，IDE 报 IWYU，补 `<stddef.h>`）；它非线程安全，靠外层锁保护——正好契合 pipe 既有模型。read 返回的 `writer_open_ ? 0 : 0`（两分支皆 0）是历史形态，保留不"修"。净减 ~109 行。
+- 验证：run-kernel-test 662/0；host test_pipe 37/0 + test_sys_pipe 13/0（含 try 往返/partial/满空/EOF/多轮回绕全覆盖）。
+
 ## 2026-06-15 批4 — syscall 边界 Error→errno，接回 userspace (commit a81536a)
 - 改动：新建 [`kernel/errno.hpp`](../../kernel/errno.hpp)（`cinux::to_errno(Error)` 全 14 变体映射 + `kPascalCase` POSIX errno 常量，freestanding 不引 libc errno.h）；10 个 FS syscall handler（open/read/write/stat/creat/mkdir/unlink/rmdir/getdents/chdir）失败路径由 `return -1` 改为 `return -to_errno(r.error())` 或具体 `-errno`（EFAULT/EBADF/ENOENT/EMFILE/ENOTDIR/ENOTEMPTY…）；28 处受影响测试断言 `== -1` → `< 0`。
 - 决策/why：**批3 侦察后并入批4**——proc 无高价值 ErrorOr 目标（execve/waitpid 已是 errno-enum、保真高于 `ErrorOr<void>+Error`，因 `Error` 缺 ENOEXEC/EISDIR/ESRCH；fork 错误全平凡且 ErrorOr 撞 `fork_child_trampoline` 的 rax 锻造；`handle_cow_fault` 是谓词非错误通道）。故 M0 收口落在 syscall 边界：批1/2a/2b 让 FS 返 ErrorOr，批4 把 `Error` 经 `to_errno` 翻成 `-errno` 接回用户态——批1/2a/2b 的投资此前在边界被压成 `-1` 丢弃。
