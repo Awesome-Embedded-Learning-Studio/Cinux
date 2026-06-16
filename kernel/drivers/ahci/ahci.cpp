@@ -186,13 +186,13 @@ void AHCI::setup_port(uint8_t port_index) {
                         (void*)cmd_list_phys, (void*)fis_buf_phys);
 }
 
-void AHCI::build_cfis(HBACommandTable* cmd_tbl, bool write_cmd, uint64_t lba, uint16_t count) {
+void AHCI::build_cfis(HBACommandTable* cmd_tbl, uint8_t command, uint64_t lba, uint16_t count) {
     // Build the Register H2D FIS in the first 20 bytes of cfis[]
     auto* fis = reinterpret_cast<RegH2DFIS*>(cmd_tbl->cfis);
 
     fis->fis_type = FisType::REG_H2D;
     fis->flags    = 0x80;  // Bit 6 set = command, bit 7 = reserved (set to 1 by convention)
-    fis->command  = write_cmd ? AtaCmd::WRITE_DMA_EXT : AtaCmd::READ_DMA_EXT;
+    fis->command  = command;
     fis->feature  = 0;  // Features (low 8 bits)
 
     // 48-bit LBA: LBA0-LBA2 hold low 24 bits, LBA3-LBA5 hold upper 24 bits
@@ -213,7 +213,7 @@ void AHCI::build_cfis(HBACommandTable* cmd_tbl, bool write_cmd, uint64_t lba, ui
     fis->control = 0;
 }
 
-bool AHCI::execute_command(uint8_t port_index, uint8_t slot, bool write_cmd, uint64_t lba,
+bool AHCI::execute_command(uint8_t port_index, uint8_t slot, uint8_t command, uint64_t lba,
                            uint16_t count, uint64_t buf_phys) {
     auto* port = &hba_mem_->ports[port_index];
 
@@ -232,7 +232,7 @@ bool AHCI::execute_command(uint8_t port_index, uint8_t slot, bool write_cmd, uin
     }
 
     // Build the Command FIS
-    build_cfis(cmd_tbl, write_cmd, lba, count);
+    build_cfis(cmd_tbl, command, lba, count);
 
     // Build the PRDT via the device-independent PrdtBuilder (splits at the AHCI
     // 22-bit per-segment cap; a single contiguous buffer yields one entry).
@@ -252,7 +252,7 @@ bool AHCI::execute_command(uint8_t port_index, uint8_t slot, bool write_cmd, uin
     // Configure the command header
     headers[slot].cfl   = sizeof(RegH2DFIS) / 4;  // FIS length in dwords
     headers[slot].prdtl = static_cast<uint16_t>(prdt.count());
-    headers[slot].write = write_cmd ? 1 : 0;
+    headers[slot].write = (command == AtaCmd::WRITE_DMA_EXT) ? 1 : 0;
     headers[slot].ctba  = static_cast<uint32_t>(cmd_tbl_phys & 0xFFFFFFFF);
     headers[slot].ctbau = static_cast<uint32_t>(cmd_tbl_phys >> 32);
     headers[slot].prdbc = 0;
@@ -363,7 +363,7 @@ bool AHCI::read(uint8_t port_index, uint64_t lba, uint16_t count, uint64_t buf) 
         return false;
     }
 
-    return execute_command(port_index, 0, false, lba, count, buf);
+    return execute_command(port_index, 0, AtaCmd::READ_DMA_EXT, lba, count, buf);
 }
 
 bool AHCI::write(uint8_t port_index, uint64_t lba, uint16_t count, uint64_t buf) {
@@ -376,7 +376,36 @@ bool AHCI::write(uint8_t port_index, uint64_t lba, uint16_t count, uint64_t buf)
         return false;
     }
 
-    return execute_command(port_index, 0, true, lba, count, buf);
+    return execute_command(port_index, 0, AtaCmd::WRITE_DMA_EXT, lba, count, buf);
+}
+
+cinux::lib::ErrorOr<uint64_t> AHCI::identify(uint8_t port_index) {
+    if (hba_mem_ == nullptr || port_index >= MAX_PORTS || !cmd_list_buf_[port_index].valid()) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // IDENTIFY DEVICE returns one 512-byte sector of device data.
+    auto buf = cinux::drivers::dma::g_dma_pool.alloc(SECTOR_SIZE);
+    if (!buf.ok()) {
+        return buf.error();
+    }
+    if (!execute_command(port_index, 0, AtaCmd::IDENTIFY, 0, 1, buf.value().phys())) {
+        return cinux::lib::Error::IOError;
+    }
+    // 28-bit capacity: words 60-61 hold max LBA as a 32-bit value.
+    const auto* data    = static_cast<const uint16_t*>(buf.value().virt());
+    uint64_t    max_lba = static_cast<uint64_t>(data[60]) | (static_cast<uint64_t>(data[61]) << 16);
+    return max_lba + 1;
+}
+
+cinux::lib::ErrorOr<void> AHCI::flush(uint8_t port_index) {
+    if (hba_mem_ == nullptr || port_index >= MAX_PORTS || !cmd_list_buf_[port_index].valid()) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // FLUSH CACHE EXT carries no data (PRDT stays empty: add(0,0) -> 0 entries).
+    if (!execute_command(port_index, 0, AtaCmd::FLUSH_CACHE_EXT, 0, 0, 0)) {
+        return cinux::lib::Error::IOError;
+    }
+    return {};
 }
 
 HBAMem* AHCI::hba_mem() const {

@@ -59,7 +59,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 |----|------|------|--------|------|
 | 批1 | setup_port DMA 收编：command list+tables / FIS 手动 PMM+VMM+硬编码偏移 → `g_dma_pool`（DmaBuffer per-port 成员，替 `cmd_list_phys_`/`fis_buf_phys_`），布局不变。GOTCHA #7（release 只 free phys） | ✅ | — | 705/0（重构，数不变） |
 | 批2 | execute_command PRDT 手动 `prdt[0]` → `PrdtBuilder`（scatter-gather，单段也用，输出→`HBAPrdtEntry`） | ✅ | — | 705/0（重构，数不变） |
-| 批3 | ATA IDENTIFY（`AHCI::identify`→容量，`block_count()` 真值）+ FLUSH CACHE（`AHCI::flush`，`flush()` 真命令） | ⏳ | — | — |
+| 批3 | ATA IDENTIFY（`AHCI::identify`→容量，`block_count()` 真值）+ FLUSH CACHE（`AHCI::flush`，`flush()` 真命令） | ✅ | — | 705/0（identify/flush 真机过） |
 | 批4 | 收尾：ROADMAP/PLAN/todo/notes + 全量验证（FORTIFY 对等：`make -C build run-kernel-test` + `test_host`） | ⏳ | — | — |
 
 ## OPEN GOTCHAS（跨里程碑通用，活警告）
