@@ -25,7 +25,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | DmaBuffer（move-only，phys/virt/size，RAII 析构归还）+ 测试 | ⏳ | — | — |
+| 批1 | DmaBuffer（move-only，phys/virt/size，RAII release 回调）+ 测试 | ✅ | 49b7413 | 681/0（+7）|
 | 批2 | DmaPool（`ErrorOr<DmaBuffer>`，封装 PMM+VMM+对齐，消除 magic）+ 测试 | ⏳ | — | — |
 | 批3 | PrdtBuilder（scatter-gather segment 列表，>4KB 拆段）+ 测试 | ⏳ | — | — |
 | 批4 | 收尾：memory_layout.hpp 注释语义化 + notes + 全量验证 | ⏳ | — | — |
