@@ -15,6 +15,12 @@
 
 <!-- 新条目插在此行下方（最新在最上） -->
 
+## 2026-06-16 M2 收尾 — 内核日志/dmesg 完成（ConcurrentRingBuffer + KernelLog + sys_dmesg）
+- 改动：批1 [`concurrent_ring_buffer.hpp`](../../kernel/lib/concurrent_ring_buffer.hpp)（MPSC，RingBuffer + `Spinlock::irq_guard`）；批2 [`klog.{hpp,cpp}`](../../kernel/lib/klog.cpp)（LogEntry ring + `klog_*` 宏 + kprintf 攒行 sink）；批3 [`sys_dmesg.cpp`](../../kernel/syscall/sys_dmesg.cpp)（SYS_dmesg=103，手动格式化历史）；批4a `KernelLog::log` 加实时 console 输出（reentrancy guard 避双重）；批4b [`exception_handlers.cpp`](../../kernel/arch/x86_64/exception_handlers.cpp) `[FATAL]`/`[EXCEPTION]`→`klog_error`/`klog_warn`。662→674（+12 测试）。
+- 决策/why：dmesg 全链路——Cinux-Base `Logger`/`LogLevel`/`RingBuffer` 就绪，增量是内核持久化（ring sink）+ 用户态读取（sys_dmesg）。`ConcurrentRingBuffer` 是 M1 推迟项落地（MPSC，日志可在 IRQ/panic）。批4a 实时输出是 kprintf→klog_* 迁移前提（否则丢 console 调试）。批4b 高价值优先：崩溃 ring 读不到但 #DB/#BP/#GP-user 非崩溃进 ring；kpanic/dump 保留 kprintf（实时/halt）。
+- 陷阱/弯路：`vkprintf_impl` 第三参是 **va_list** 不是可变参数，sys_dmesg 改手动 append helpers；klog_* 实时输出 + klog sink 双重入队用 `g_klog_emit_depth` reentrancy guard 避免；`g_klog_emit_depth` 须定义在 `log()` 前（首版放 anonymous namespace 后部致 undeclared，编译红）。kprintf 全量迁移 294（除 mini 148）未做，留渐进。
+- 验证：run-kernel-test 674/0（全程绿）；M2 全为 kernel QEMU 测试，无 host 单测涉及。
+
 ## 2026-06-16 M1 收尾 — RingBuffer 消费迁移完成
 - 改动：批1（pipe）+ 批2（keyboard）两处 kernel/ 手写环形缓冲统一复用 `cinux::lib::RingBuffer`；ROADMAP F1-M1 ⏳→✅、PLAN 进入待命。
 - 决策/why：M1 与 M0 同构——Cinux-Base 既有类型就绪，工作是消费迁移而非造轮子。这是「层化」铁律的兑现：kernel/ 消费 cinux::lib，不在 kernel/ 重写。净减代码、消除两套同款环形缓冲逻辑。

@@ -1,35 +1,28 @@
 # CinuxOS — 当前焦点（批级进度）
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
-> **F1-M2 = 内核日志（dmesg 级）**：Cinux-Base `Logger`/`LogLevel`/`RingBuffer` 已就绪（✅），本里程碑增量是内核持久化——`ConcurrentRingBuffer`（MPSC，M1 推迟项）+ `KernelLog`（历史 ring buffer sink）+ kprintf 桥接 + `sys_dmesg`。同 M0/M1 消费迁移思路。
+> **F1-M2 = 内核日志（dmesg 级）✅ 完成（2026-06-16）**。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
-## 批表
+## ✅ M2（内核日志）已完成 — 2026-06-16
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | `ConcurrentRingBuffer<T,N>`（kernel/lib/，MPSC：RingBuffer+Spinlock，push/pop/batch 单次加锁）+ 测试 | 🔄 | — | — |
-| 批2 | `KernelLog`（LogEntry+单例+ring sink 注册到 Logger+log/read/dropped）+ `klog_*` 宏 + kprintf 攒行桥接 + 测试 | ⏳ | — | — |
-| 批3 | `sys_dmesg` syscall（read→`[LEVEL] tick: msg\n`→用户态）+ syscall 编号 + 测试 | ⏳ | — | — |
-| 批4 | grep kprintf 迁移范围报告（仅规模/分布，不迁移） | ⏳ | — | — |
-| 收尾 | 文档(本文+ROADMAP+todo+DEVLOG) + 全量 run-kernel-test | ⏳ | — | — |
+| 批1 | ConcurrentRingBuffer（kernel/lib/，MPSC irq_guard Spinlock）+ 测试 | ✅ | 974e406 | 667/0（+5）|
+| 批2 | KernelLog（LogEntry ring + klog_*宏 + kprintf 攒行 sink）+ 测试 | ✅ | d2936a6 | 671/0（+4）|
+| 批3 | sys_dmesg（SYS_dmesg=103，格式化历史读取）+ 测试 | ✅ | 4b3b95f | 674/0（+3）|
+| 批4a | KernelLog::log 加实时 console 输出（reentrancy guard 避双重） | ✅ | cbcbb3a | 674/0 |
+| 批4b | exception_handlers [FATAL]/[EXCEPTION] → klog_error/warn | ✅ | 809bf7d | 674/0 |
+| 收尾 | 文档(本文+ROADMAP+todo+DEVLOG) + 全量 run-kernel-test | ✅ | (本次) | 674/0 |
 
-## 范围裁定
-- **Cinux-Base 已就绪 → 复用**：`Logger`（单例/多 sink/level/printf/dropped）、`LogLevel`、`RingBuffer`。**不在 kernel/ 重定义 LogLevel**（修正 todo T1 规划——那会违反子模块边界）。
-- **内核增量**：`ConcurrentRingBuffer`（用 kernel Spinlock，故放 kernel/lib/ 而非 Cinux-Base——后者 freestanding 无锁概念）、`KernelLog`、kprintf 桥接、`sys_dmesg`、`klog_*` 宏。
-- **推迟**：todo T6「全量迁移现有 kprintf → klog_*」是大工程（kprintf 遍布内核），批4 仅 grep 报范围，迁移留后续；`kprintf` 保留用于早期启动（ring buffer 未就绪时）。
+dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→ `sys_dmesg` 格式化 `[LEVEL] tick: msg` 给用户态。ConcurrentRingBuffer 落地（M1 推迟的 MPSC 封装）。`klog_*` 经批4a 实时 console + ring；exception 高价值 error 迁 `klog_error/warn`（API 统一）。`kprintf` 全量迁移（294 除 mini）留后续渐进。662 → 674（+12 新测试）。
 
-## OPEN GOTCHAS
-1. **验证 target**：内核改动用 run-kernel-test（~662 项）；host 单测不在其中，改被 mock 类后 push 前补全量编译（L5）。
+**下一焦点待定**：F1-M3 DMA（自然延续）或另行 `/milestone` 拆批。本文进入待命。
+
+## OPEN GOTCHAS（跨里程碑通用，活警告）
+1. **验证 target**：内核改动用 run-kernel-test（~674 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补全量编译（L5）。
 2. **Cinux-Base 是子模块**：`Logger`/`LogLevel`/`RingBuffer` 在 `third_party/Cinux-Base/include/cinux/*.hpp`，复用勿重写。
-3. **R1（最高）kprintf 攒行并发**：kprintf sink 逐字符、Logger sink 整消息。多 CPU 同时 kprintf 逐字符攒行会**交错**。批2 须锁内攒行（Spinlock 保护行缓冲）或 per-CPU 缓冲。
-4. **R2 中断上下文**：日志可能在 IRQ 上下文（panic/驱动），`ConcurrentRingBuffer` 的锁须禁中断保护（irq_save），否则死锁。
-5. **R3 启动顺序**：kprintf 早期就绪（serial），KernelLog ring buffer 后初始化；klog sink 注册时机避免早期日志丢失/空指针。
-6. **R6 LogEntry 固定 message 长度**：长消息截断，与 Logger formatted message 协调。
-
-## M2 基础设施笔记
-- Cinux-Base `Logger`：`instance()` 单例、`register_sink(LogSink, ctx)`（`LogSink=void(*)(LogLevel,const char*,void*)`）、`log(level,fmt,...)`、`set_level`、`dropped_count`。**非线程安全**（caller 同步）。
-- kprintf sink：`OutputSink=void(*)(char,void*)` 逐字符，`kprintf_register_sink`。
-- 桥接方向：kprintf 逐字符 → 攒行（遇 `\n`）→ `Logger::instance().log(INFO, line)`；ring buffer 作为 Logger 的一个 sink 存历史供 dmesg 读。
-- 时间戳：`kernel/drivers/pit/pit.hpp` tick 计数（单核；SMP 后需全局/per-CPU tick）。
-- 跨里程碑通用 gotcha（M1 遗产）：grep 调用方两种形态（箭头+点号）；多 Edit 应用过程 IDE 诊断是中间态噪音、以编译为准；里程碑定义区分「类型就绪」vs「内核消费」。
+3. **里程碑区分「类型就绪」vs「内核消费」**（M0/M1/M2 同构）：Cinux-Base 类型常先就绪，待办是 kernel/ 增量消费。
+4. **klog_* 实时输出的 reentrancy guard**（批4a）：`g_klog_emit_depth` 让 klog sink 跳过 log 自身的 kprintf，避免同一行双重入队——是 kprintf→klog_* 迁移的前提（否则迁后丢 console）。定义须在 `log()` 前。
+5. **崩溃 ring 读不到**：fatal_halt/kpanic 死循环，ring 历史崩溃后读不到；非崩溃异常(#DB/#BP/#GP-user)/error 进 ring 可 dmesg 读。kpanic/dump 保留 kprintf（实时诊断/halt）。
+6. **kprintf 全量迁移未做**：294 个（除 mini 148）留渐进；mini 148 不迁（早期启动无 ring）。vkprintf_impl 第三参是 va_list 非 va_args，需 va_list 或手动 format。
