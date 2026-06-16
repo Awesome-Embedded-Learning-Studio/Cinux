@@ -1,24 +1,28 @@
 # CinuxOS — 当前焦点（批级进度）
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
-> **F1-M1 = RingBuffer 消费迁移 ✅ 完成（2026-06-16）**。
+> **F1-M2 = 内核日志（dmesg 级）✅ 完成（2026-06-16）**。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
-## ✅ M1（RingBuffer 消费迁移）已完成 — 2026-06-16
+## ✅ M2（内核日志）已完成 — 2026-06-16
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | pipe 内部存储 → `RingBuffer<char,4096>` push_batch/pop_batch（保留 Spinlock+irq_save+阻塞+EOF） | ✅ | 0746ebf | 662/0 + host 50/0 |
-| 批2 | keyboard 事件队列 → `RingBuffer<KeyEvent,64>` push/pop（drop-newest + InterruptGuard 保留） | ✅ | 715a00f | 662/0 |
-| 收尾 | 文档(本文+ROADMAP+DEVLOG) + 全量 run-kernel-test | ✅ | (本次) | 662/0 |
+| 批1 | ConcurrentRingBuffer（kernel/lib/，MPSC irq_guard Spinlock）+ 测试 | ✅ | 974e406 | 667/0（+5）|
+| 批2 | KernelLog（LogEntry ring + klog_*宏 + kprintf 攒行 sink）+ 测试 | ✅ | d2936a6 | 671/0（+4）|
+| 批3 | sys_dmesg（SYS_dmesg=103，格式化历史读取）+ 测试 | ✅ | 4b3b95f | 674/0（+3）|
+| 批4a | KernelLog::log 加实时 console 输出（reentrancy guard 避双重） | ✅ | cbcbb3a | 674/0 |
+| 批4b | exception_handlers [FATAL]/[EXCEPTION] → klog_error/warn | ✅ | 809bf7d | 674/0 |
+| 收尾 | 文档(本文+ROADMAP+todo+document/notes) + 全量 run-kernel-test | ✅ | (本次) | 674/0 |
 
-Cinux-Base 的 `cinux::lib::RingBuffer<T,N>` 早已就绪（freestanding header-only），内核此前在 pipe/keyboard 各手写一套同款环形缓冲。本里程碑消灭重复、回归「kernel 消费 cinux::lib」层化铁律——同 M0 的消费迁移模式，非造轮子。pipe 保留外层锁/阻塞/EOF 语义；keyboard drop-newest 语义不变（容量 63→64，不再牺牲槽位）。批表全 ✅，662/0 验证通过。
+dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→ `sys_dmesg` 格式化 `[LEVEL] tick: msg` 给用户态。ConcurrentRingBuffer 落地（M1 推迟的 MPSC 封装）。`klog_*` 经批4a 实时 console + ring；exception 高价值 error 迁 `klog_error/warn`（API 统一）。`kprintf` 全量迁移（294 除 mini）留后续渐进。662 → 674（+12 新测试）。
 
-**下一焦点待定**：F1-M2 日志（自然延续）或另行 `/milestone` 拆批。本文进入待命——新里程碑启动时重写本节。
+**下一焦点待定**：F1-M3 DMA（自然延续）或另行 `/milestone` 拆批。本文进入待命。
 
 ## OPEN GOTCHAS（跨里程碑通用，活警告）
-1. **验证 target**：内核改动用 run-kernel-test（QEMU 真内核 ~662 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补 `cmake --build build` 全量或 `make test_host`（L5）。但 **test_keyboard 是 QEMU in-kernel 测试**（big_kernel_test.h 框架，在 662 内），别误当 host。
-2. **Cinux-Base 是子模块**：容器/类型在 `third_party/Cinux-Base/include/cinux/*.hpp`，`#include <cinux/xxx.hpp>` 即用；勿在 kernel/ 重写。当前就绪：ErrorOr/StringView/Span/Buffer/RingBuffer/IntrusiveList/StaticHashMap…（`Array<T,N>` 仍未提供）。
-3. **里程碑定义区分「类型就绪」vs「内核消费」**（M0/M1 教训）：ROADMAP 的 ⏳ 易被误读为"待实现"，实则 Cinux-Base 类型常已就绪、待办是 kernel/ 消费迁移。写里程碑描述要标清（如「类型就绪+消费迁移」格式）。
-4. **grep 调用方两种形态**：`->ops->op()` 箭头 **和** `ops_obj.op()` 点号（如 test_pipe.cpp 的 `PipeReadOps` 局部对象），都 grep。
-5. **多 Edit 应用过程的 IDE 诊断是中间态噪音**（批2 教训）：同文件连续 Edit 时，IDE 会报"已删成员未定义"Error，实为部分 Edit 未反映的快照；以编译为 ground truth。
+1. **验证 target**：内核改动用 run-kernel-test（~674 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补全量编译（L5）。
+2. **Cinux-Base 是子模块**：`Logger`/`LogLevel`/`RingBuffer` 在 `third_party/Cinux-Base/include/cinux/*.hpp`，复用勿重写。
+3. **里程碑区分「类型就绪」vs「内核消费」**（M0/M1/M2 同构）：Cinux-Base 类型常先就绪，待办是 kernel/ 增量消费。
+4. **klog_* 实时输出的 reentrancy guard**（批4a）：`g_klog_emit_depth` 让 klog sink 跳过 log 自身的 kprintf，避免同一行双重入队——是 kprintf→klog_* 迁移的前提（否则迁后丢 console）。定义须在 `log()` 前。
+5. **崩溃 ring 读不到**：fatal_halt/kpanic 死循环，ring 历史崩溃后读不到；非崩溃异常(#DB/#BP/#GP-user)/error 进 ring 可 dmesg 读。kpanic/dump 保留 kprintf（实时诊断/halt）。
+6. **kprintf 全量迁移未做**：294 个（除 mini 148）留渐进；mini 148 不迁（早期启动无 ring）。vkprintf_impl 第三参是 va_list 非 va_args，需 va_list 或手动 format。
