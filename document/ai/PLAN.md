@@ -27,7 +27,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 |----|------|------|--------|------|
 | 批1 | DmaBuffer（move-only，phys/virt/size，RAII release 回调）+ 测试 | ✅ | 49b7413 | 681/0（+7）|
 | 批2 | DmaPool（`ErrorOr<DmaBuffer>`，封装 PMM+VMM，复用 direct-map 永久映射）+ 测试 | ✅ | fd65b4c | 687/0（+6）|
-| 批3 | PrdtBuilder（scatter-gather segment 列表，>4KB 拆段）+ 测试 | ⏳ | — | — |
+| 批3 | PrdtBuilder（设备无关 scatter-gather segment 构建器）+ 测试 | ✅ | 6426417 | 694/0（+7）|
 | 批4 | 收尾：memory_layout.hpp 注释语义化 + notes + 全量验证 | ⏳ | — | — |
 
 架构契合：A.6 `ErrorOr<DmaBuffer>`（内部 PMM/VMM bool→Error 转译）；A.7 不入 Cinux-Base（依赖 PMM/VMM 破无堆）；A.8/9 复用 cinux::lib。风险：phys→virt 策略(VMM.map)、页内对齐、启动序。
