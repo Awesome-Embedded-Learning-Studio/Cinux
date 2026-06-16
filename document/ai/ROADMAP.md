@@ -14,7 +14,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F2 | 内存管理增强 | M1 VMA⏳ M2 mmap⏳ M3 brk⏳ M4 Page Cache⏳ M5 Demand Paging⏳ M6 ext2 Cache⏳ M7 Buddy+Slab⏳ | mmap/Page Cache/brk/分层分配器 |
 | F3 | 进程与线程 | M1 信号⏳ M2 clone/futex/TLS⏳ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
-| F5 | 设备驱动 | M1 AHCI DMA⏳ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
+| F5 | 设备驱动 | M1 AHCI DMA🔄 M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
 | F7 | 网络协议栈 | M1 以太网⏳ M2 ARP⏳ M3 IPv4/ICMP⏳ M4 UDP⏳ M5 TCP⏳ M6 Socket⏳ | TCP/IP+Socket API |
 | F8 | IPC 扩展 | M1 Pipe增强⏳ M2 FIFO⏳ M3 Unix Socket⏳ M4 共享内存⏳ M5 epoll⏳ | CV/PTY/shm/epoll |
@@ -25,7 +25,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
 
 ## 当前焦点
-**F1-M4 ✅ 完成**（块设备抽象：`IBlockDevice` 接口（ErrorOr）+ `RAMBlockDevice` 桩 + `AHCIBlockDevice` 适配器（复用 DmaPool）+ Ext2 解耦（淘汰 ad-hoc DMA），694→705。详见 `PLAN.md`，教训 GOTCHA #8 QEMU AHCI 容量边界）。**F1（内核基础设施）全部里程碑完成**。下一焦点待定——F2 内存管理增强（VMA/mmap）或 `/milestone` 拆批。
+**F5-M1 🔄 进行中**（AHCI DMA 迁移：ahci.cpp ad-hoc DMA → M3 DmaPool/PrdtBuilder + ATA IDENTIFY + FLUSH CACHE，闭环 block device→AHCI 栈，详见 `PLAN.md`）。F1-M4 ✅ 块设备抽象已完成（694→705，GOTCHA #8 QEMU AHCI 容量）。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
