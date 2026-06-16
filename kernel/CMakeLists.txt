@@ -165,6 +165,7 @@ add_executable(big_kernel_test
     test/test_dma_buffer.cpp
     test/test_dma_pool.cpp
     test/test_prdt_builder.cpp
+    test/test_block_device.cpp
 )
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)
