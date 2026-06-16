@@ -27,6 +27,7 @@
 #include <stdint.h>
 
 #include "ahci_config.hpp"
+#include "kernel/drivers/dma/dma_buffer.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 
 namespace cinux::drivers::ahci {
@@ -167,11 +168,11 @@ private:
 
     static AHCI* s_instance_;
 
-    /// Physical addresses of per-port command lists
-    uint64_t cmd_list_phys_[MAX_PORTS]{};
+    /// Per-port command list + command table DMA (command list + tables share one page)
+    cinux::drivers::dma::DmaBuffer cmd_list_buf_[MAX_PORTS];
 
-    /// Physical addresses of per-port FIS buffers
-    uint64_t fis_buf_phys_[MAX_PORTS]{};
+    /// Per-port FIS receive buffer DMA
+    cinux::drivers::dma::DmaBuffer fis_buf_[MAX_PORTS];
 };
 
 }  // namespace cinux::drivers::ahci
