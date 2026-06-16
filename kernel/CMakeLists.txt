@@ -163,6 +163,7 @@ add_executable(big_kernel_test
     test/test_klog.cpp
     test/test_sys_dmesg.cpp
     test/test_dma_buffer.cpp
+    test/test_dma_pool.cpp
 )
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)
