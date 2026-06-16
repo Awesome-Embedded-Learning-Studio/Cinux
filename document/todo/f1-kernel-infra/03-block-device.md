@@ -1,5 +1,7 @@
 # M4: Block Device Abstraction
 
+> ✅ **已完成（2026-06-16）**——详见 `document/ai/PLAN.md` F1-M4 章节 / `document/notes/2026-06-16-f1-m4-block-device.md`。偏离：`block_count()` ATA IDENTIFY + `flush()` 真命令留 F5-M1。下方任务清单为原规划快照。
+
 > 极简 IBlockDevice 接口，解耦 ext2 与 AHCI。
 > 为 NVMe、VirtIO Block、Page Cache 提供统一接入点。
 

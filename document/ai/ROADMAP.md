@@ -10,7 +10,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 
 | F | 名称 | Milestones（状态） | 关键产出 |
 |---|------|--------------------|---------|
-| F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 🔄 | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
+| F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
 | F2 | 内存管理增强 | M1 VMA⏳ M2 mmap⏳ M3 brk⏳ M4 Page Cache⏳ M5 Demand Paging⏳ M6 ext2 Cache⏳ M7 Buddy+Slab⏳ | mmap/Page Cache/brk/分层分配器 |
 | F3 | 进程与线程 | M1 信号⏳ M2 clone/futex/TLS⏳ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
@@ -25,7 +25,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
 
 ## 当前焦点
-**F1-M4 🔄 进行中**（块设备抽象：`IBlockDevice` 接口 + `RAMBlockDevice` 桩 + `AHCIBlockDevice` 适配器 + Ext2 解耦，详见 `PLAN.md`）。F1-M3 ✅ DMA 基础设施已完成（`DmaBuffer`/`DmaPool`/`PrdtBuilder`，662→694，教训 GOTCHA #7 direct-map 勿 unmap）。
+**F1-M4 ✅ 完成**（块设备抽象：`IBlockDevice` 接口（ErrorOr）+ `RAMBlockDevice` 桩 + `AHCIBlockDevice` 适配器（复用 DmaPool）+ Ext2 解耦（淘汰 ad-hoc DMA），694→705。详见 `PLAN.md`，教训 GOTCHA #8 QEMU AHCI 容量边界）。**F1（内核基础设施）全部里程碑完成**。下一焦点待定——F2 内存管理增强（VMA/mmap）或 `/milestone` 拆批。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
