@@ -25,4 +25,4 @@
 - **L5 验证**：内核改动用 `run-kernel-test`（QEMU 真内核 ~662 项，首选）；`run`/`make run`(GUI 无断言)非验证。**CI 对等盲区**：`run-kernel-test` 不编译 `test/unit/` host 单测（host mock，不跑真内核），而 CI 的 host-tests job 另跑 `make test_host` 当构建门禁——改公共接口/`InodeOps`/被 mock 的类后，push 前补 `cmake --build build -j$(nproc)`（全量，含 host 编译）或 `make test_host`，否则 host 单测破了本地 run-kernel-test 抓不到（批2b 教训，2026-06）。
 - **L6 省 token**：命令与文档保持紧凑，不堆仪式；`CLAUDE.md` 常驻须薄，重内容按需读。
 - **L7 编译并行**：所有 `cmake --build` 都带 `-j$(nproc)`（本机 14 核）；验证即 `cmake --build build --target run-kernel-test -j$(nproc)`，大幅省编译时间。
-- **L8 开发日志**：每批 / 每个有意义的迭代，`/done` 自动追加 `DEVLOG.md`（最新在最上；粗略代码改动 + 决策 why + 弯路 + 验证），编年叙事，条目写定不改。
+- **L8 工作记录**：每批 / 每个有意义的迭代，`/done` 写 `document/notes/<date>-<topic>.md`（正式发布质量：背景/目标/设计/决策/陷阱/验证，参考 `document/notes/` 既有风格）。2026-06-16 起取代旧 DEVLOG 编年日志（`DEVLOG.md` 已归档留壳，不再追加）。

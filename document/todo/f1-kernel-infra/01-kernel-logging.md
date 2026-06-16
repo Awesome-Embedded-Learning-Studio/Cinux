@@ -3,7 +3,7 @@
 > 基于 M1 的 Ring Buffer，增强内核日志到 dmesg 级别。
 > 添加日志级别过滤、时间戳、ring buffer sink、用户态读取接口。
 
-> **📌 状态（2026-06-16 更新）：M2 已完成 ✅。** `LogLevel`/`Logger` 由 Cinux-Base 提供（复用，T1 跳过）；内核增量已全部落地：`KernelLog` 单例（[`klog.hpp`](../../../kernel/lib/klog.hpp)）、`ConcurrentRingBuffer`（M1 推迟项，[`concurrent_ring_buffer.hpp`](../../../kernel/lib/concurrent_ring_buffer.hpp)，非 Cinux-Base 的 sink 而是独立的 IRQ-safe ring）、`sys_dmesg`（SYS_dmesg=103）、kprintf 攒行 sink、`klog_*` 实时+历史输出。**T6 全量迁移 kprintf→klog_* 仅做了高价值（exception_handlers 的 [FATAL]/[EXCEPTION]，批4b），其余 294 个（除 mini 148）留渐进**——`kprintf` 保留用于早期启动/实时诊断/halt。详见 `document/ai/PLAN.md` + `DEVLOG.md`。下方 T1–T7 任务清单保留作原始规划参考。
+> **📌 状态（2026-06-16 更新）：M2 已完成 ✅。** `LogLevel`/`Logger` 由 Cinux-Base 提供（复用，T1 跳过）；内核增量已全部落地：`KernelLog` 单例（[`klog.hpp`](../../../kernel/lib/klog.hpp)）、`ConcurrentRingBuffer`（M1 推迟项，[`concurrent_ring_buffer.hpp`](../../../kernel/lib/concurrent_ring_buffer.hpp)，非 Cinux-Base 的 sink 而是独立的 IRQ-safe ring）、`sys_dmesg`（SYS_dmesg=103）、kprintf 攒行 sink、`klog_*` 实时+历史输出。**T6 全量迁移 kprintf→klog_* 仅做了高价值（exception_handlers 的 [FATAL]/[EXCEPTION]，批4b），其余 294 个（除 mini 148）留渐进**——`kprintf` 保留用于早期启动/实时诊断/halt。详见 `document/ai/PLAN.md` + `document/notes/2026-06-16-f1-m2-kernel-logging.md`。下方 T1–T7 任务清单保留作原始规划参考。
 
 ## 目标
 

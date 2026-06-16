@@ -7,7 +7,7 @@
 > - 基础 `RingBuffer<T,N>` / `ByteRingBuffer<N>` 由 [Cinux-Base](../../../third_party/Cinux-Base/include/cinux/ring_buffer.hpp) 提供 → **T1/T3 跳过**（不在 kernel/ 重写）；**T4 单测** Cinux-Base 已有 `test_ring_buffer.cpp`。
 > - **实际完成 = 消费迁移**：[`kernel/ipc/pipe.cpp`](../../../kernel/ipc/pipe.cpp)（批1，commit 0746ebf）+ [`kernel/drivers/keyboard/keyboard.cpp`](../../../kernel/drivers/keyboard/keyboard.cpp)（批2，commit 715a00f）两处手写环形缓冲统一复用 `cinux::lib::RingBuffer`。
 > - **T2 ConcurrentRingBuffer（MPSC 通用封装）推迟到 M2 日志**：M1 的两个消费者都是 SPSC——pipe 已自带 Spinlock + irq_save + 阻塞 spin-wait + EOF 语义（外层保护，非通用 MPSC），keyboard 是 IRQ 单生产者 + poll 单消费者（InterruptGuard 保护）。两者各自的定制同步比通用 ConcurrentRingBuffer 更贴合，强行套用反而损失语义。ConcurrentRingBuffer 的真正用户是 M2 日志（多 CPU 多生产者写 dmesg，需 MPSC），届时再实现。
-> - 详见 `document/ai/PLAN.md` + `DEVLOG.md`。下方的 T1–T4 任务清单与代码示例保留作原始规划参考。
+> - 详见 `document/ai/PLAN.md` + `document/notes/2026-06-16-f1-m1-ringbuffer-migration.md`。下方的 T1–T4 任务清单与代码示例保留作原始规划参考。
 
 ## 目标
 
