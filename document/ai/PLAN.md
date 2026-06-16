@@ -1,7 +1,7 @@
 # CinuxOS — 当前焦点（批级进度）
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
-> **F1-M2 = 内核日志（dmesg 级）✅ 完成（2026-06-16）**。
+> **F1-M3 = DMA 基础设施 🔄 进行中（2026-06-16 启动）**；M2 内核日志 ✅ 完成。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -17,7 +17,20 @@
 
 dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→ `sys_dmesg` 格式化 `[LEVEL] tick: msg` 给用户态。ConcurrentRingBuffer 落地（M1 推迟的 MPSC 封装）。`klog_*` 经批4a 实时 console + ring；exception 高价值 error 迁 `klog_error/warn`（API 统一）。`kprintf` 全量迁移（294 除 mini）留后续渐进。662 → 674（+12 新测试）。
 
-**下一焦点待定**：F1-M3 DMA（自然延续）或另行 `/milestone` 拆批。本文进入待命。
+## 🔄 F1-M3（DMA 基础设施）— 进行中（2026-06-16 启动）
+
+> 目标：设备无关 DMA 基建，收编 ad-hoc（PMM + VMM + 硬编码 phys→virt 偏移 `0xFFFFFFFF80000000ULL`）。下游契约 = F5-M1 AHCI（`DmaPool.alloc()→DmaBuffer` + `PrdtBuilder`）。
+> 决策：PrdtBuilder 纳入 M3（批3）；归属 `kernel/drivers/dma/`；phys→virt 用 `VMM.map`（批2 定）。
+> 不碰 `ahci.cpp`(F5-M1)/`IBlockDevice`(M4)；不动早期启动 ad-hoc（PMM 就绪前用不了，OPEN GOTCHA #5 同类启动序约束）。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | DmaBuffer（move-only，phys/virt/size，RAII 析构归还）+ 测试 | ⏳ | — | — |
+| 批2 | DmaPool（`ErrorOr<DmaBuffer>`，封装 PMM+VMM+对齐，消除 magic）+ 测试 | ⏳ | — | — |
+| 批3 | PrdtBuilder（scatter-gather segment 列表，>4KB 拆段）+ 测试 | ⏳ | — | — |
+| 批4 | 收尾：memory_layout.hpp 注释语义化 + notes + 全量验证 | ⏳ | — | — |
+
+架构契合：A.6 `ErrorOr<DmaBuffer>`（内部 PMM/VMM bool→Error 转译）；A.7 不入 Cinux-Base（依赖 PMM/VMM 破无堆）；A.8/9 复用 cinux::lib。风险：phys→virt 策略(VMM.map)、页内对齐、启动序。
 
 ## OPEN GOTCHAS（跨里程碑通用，活警告）
 1. **验证 target**：内核改动用 run-kernel-test（~674 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补全量编译（L5）。
