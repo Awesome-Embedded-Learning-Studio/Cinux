@@ -69,6 +69,7 @@ void run_kprintf_format_tests();
 void run_concurrent_ring_buffer_tests();
 void run_klog_tests();
 void run_sys_dmesg_tests();
+void run_dma_buffer_tests();
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -135,6 +136,9 @@ extern "C" void kernel_main() {
     run_concurrent_ring_buffer_tests();
     run_klog_tests();
     run_sys_dmesg_tests();
+
+    // DMA tests (M3-1): DmaBuffer value type (no PMM/VMM dependency)
+    run_dma_buffer_tests();
 
     cinux::arch::usermode_init();
     run_usermode_tests();
