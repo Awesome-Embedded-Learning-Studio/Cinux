@@ -25,6 +25,11 @@ using cinux::lib::detail::vkprintf_impl;
 
 LogLevel g_klog_threshold = LogLevel::DEBUG;
 
+// Reentrancy guard: while KernelLog::log() prints its real-time console
+// copy via kprintf, the klog sink skips that line (it is pushed to the
+// ring directly below, avoiding double-entry).  Single-core safe.
+std::size_t g_klog_emit_depth = 0;
+
 void set_klog_level(LogLevel level) {
     g_klog_threshold = level;
 }
@@ -76,6 +81,12 @@ void KernelLog::log(LogLevel level, const char* fmt, ...) {
         },
         fmt, args);
     va_end(args);
+    buf[len] = '\0';
+    // Real-time console copy.  Guarded so the klog kprintf sink skips
+    // this line (it is pushed to the ring right below).
+    g_klog_emit_depth++;
+    kprintf("[%s] %s\n", log_level_string(level), buf);
+    g_klog_emit_depth--;
     push_entry(level, buf, len);
 }
 
@@ -128,6 +139,11 @@ struct LineBuffer {
 LineBuffer g_klog_line;
 
 void klog_kprintf_sink(char c, void* /*ctx*/) {
+    // Skip lines that KernelLog::log() is itself emitting in real time --
+    // they are pushed to the ring directly; capturing here would double.
+    if (g_klog_emit_depth > 0) {
+        return;
+    }
     auto guard = g_klog_line.lock.irq_guard();
     if (c == '\n') {
         g_klog_line.buf[g_klog_line.len] = '\0';
