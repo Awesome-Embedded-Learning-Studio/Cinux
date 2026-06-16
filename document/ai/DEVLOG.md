@@ -15,6 +15,18 @@
 
 <!-- 新条目插在此行下方（最新在最上） -->
 
+## 2026-06-16 M1 收尾 — RingBuffer 消费迁移完成
+- 改动：批1（pipe）+ 批2（keyboard）两处 kernel/ 手写环形缓冲统一复用 `cinux::lib::RingBuffer`；ROADMAP F1-M1 ⏳→✅、PLAN 进入待命。
+- 决策/why：M1 与 M0 同构——Cinux-Base 既有类型就绪，工作是消费迁移而非造轮子。这是「层化」铁律的兑现：kernel/ 消费 cinux::lib，不在 kernel/ 重写。净减代码、消除两套同款环形缓冲逻辑。
+- 陷阱/弯路：迁移前发现 ROADMAP 把 M1 标成「RingBuffer ⏳」误导成待实现，实则 Cinux-Base 早已提供（README 列为 4 大容器之一、文档明写"用于日志和管道"）——里程碑定义应区分「类型就绪」与「内核消费」，已据此修正 ROADMAP/PLAN 描述。
+- 验证：全量 run-kernel-test 662/0；批1 另跑 host test_pipe 37/0 + test_sys_pipe 13/0。
+
+## 2026-06-16 批2 — keyboard 事件队列迁移至 cinux::lib::RingBuffer (commit 715a00f)
+- 改动：[`keyboard.{hpp,cpp}`](../../kernel/drivers/keyboard/keyboard.cpp) 移除手写 `queue_[64]/head_/tail_`（牺牲槽位策略：head_==tail_ 判空、next==head_ 判满）及 enqueue/poll 逻辑，复用 `RingBuffer<KeyEvent,KEY_QUEUE_SIZE>` 的 `push/pop`；静态存储收敛为 `buf_`，init 重置用 `clear()`。
+- 决策/why：与批1 同理。原队列牺牲槽位（容量 63），RingBuffer 用 count_ 不牺牲（容量 64），更贴合 KEY_QUEUE_SIZE 字面；enqueue 满 drop-newest 由 `push` 返 false 实现，InterruptGuard 同步保留。公共接口（init/irq1_handler/poll）签名不变 → sys_read/gui/main 等调用方零波及。
+- 陷阱/弯路：IDE 在多 Edit 应用过程中报 queue_/head_/tail_ 未定义 Error——中间 Edit 快照噪音（hpp 已删成员但 cpp 后续 Edit 未反映），全 Edit 应用后消失，编译一次过。test_keyboard 是 QEMU in-kernel 测试（非 host），验证只需 run-kernel-test。
+- 验证：run-kernel-test 662/0（test_keyboard 13 项 + dual_path 全过）。
+
 ## 2026-06-16 批1 — pipe 内部环形缓冲迁移至 cinux::lib::RingBuffer (commit 0746ebf)
 - 改动：[`kernel/ipc/pipe.{hpp,cpp}`](../../kernel/ipc/pipe.cpp) 移除手写 `buffer_[4096]/head_/tail_/count_` 及 write/read/try_read/try_write 的两段回绕拷贝，改用 Cinux-Base `RingBuffer<char,4096>` 的 `push_batch/pop_batch`；私有存储收敛为单个 `buf_`。外层 `Spinlock` + `irq_save/restore` + spin-wait + reader/writer open 标志位原样保留。
 - 决策/why：M1 是 M0 同款「消费迁移」——`RingBuffer` 类型 Cinux-Base 早已提供（freestanding header-only，文档明写"用于日志和管道"），内核却手写了一套几乎同款（连用 `count_` 区分满空的策略都一致）。故本里程碑不是造轮子，而是消灭 kernel/ 重复实现，回归「kernel 消费 cinux::lib」层化铁律。只换存储层、不动公共接口 → pipe_ops 与 syscall 边界零影响。
