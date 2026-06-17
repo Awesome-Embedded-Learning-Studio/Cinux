@@ -32,6 +32,7 @@ void run_pic_pit_tests();
 void run_video_tests();
 void run_keyboard_tests();
 void run_pmm_tests();
+void run_buddy_tests();
 void run_vmm_tests();
 void run_heap_tests();
 void run_heap_lock_stress_tests();
@@ -135,6 +136,7 @@ extern "C" void kernel_main() {
     auto* boot_info = reinterpret_cast<const BootInfo*>(BOOT_INFO_PHYS);
     cinux::mm::g_pmm.init(*boot_info);
     run_pmm_tests();
+    run_buddy_tests();
 
     // VMM tests: initialise VMM after PMM, then run tests
     cinux::mm::g_vmm.init();
