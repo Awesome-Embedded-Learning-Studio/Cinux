@@ -3,10 +3,10 @@
  * @brief QEMU in-kernel tests for the BuddyAllocator (F2-M7 batch 1)
  *
  * Exercises the buddy allocator in isolation over a fake "physical" region of
- * real mapped kernel memory.  The fake region's virtual address is chosen so
- * that base_phys + page*PAGE_SIZE + KERNEL_VMA lands inside it, letting the
- * allocator's intrusive free-list links (stored in the pages' own direct map)
- * work exactly as they do over real RAM.  No PMM or scheduler is involved.
+ * real mapped kernel memory.  base_phys is the fake region's physical address
+ * (its KERNEL_VMA virtual address minus KERNEL_VMA); the allocator reaches each
+ * page through DIRECT_MAP_BASE + phys, which identity-maps the same physical
+ * pages.  No PMM or scheduler is involved.
  *
  * Validates: init stats, single-page alloc/free, contiguous order-N blocks,
  * bulk alloc/free with exact count restoration, double-free / out-of-range

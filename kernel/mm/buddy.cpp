@@ -65,13 +65,33 @@ void BuddyAllocator::push_free(uint64_t page, int order) {
 }
 
 uint64_t BuddyAllocator::pop_free(int order) {
-    FreeBlock* b = free_lists_[order];
-    if (b == nullptr) {
+    if (free_lists_[order] == nullptr) {
         return kInvalidPage;
     }
-    free_lists_[order] = b->next;
-    uint64_t virt      = reinterpret_cast<uint64_t>(b);
-    return (virt - base_phys_ - cinux::arch::KERNEL_VMA) / cinux::arch::PAGE_SIZE;
+    // Low-first: hand out the block with the smallest page index.  The free
+    // lists are LIFO and mark_free_region pushes low->high, so a plain head-pop
+    // would surface the *highest* phys first -- letting allocs/DMA grab phantom
+    // pages beyond real RAM (F2-M7 wiring gotcha).  The direct map is an
+    // identity window, so a lower virtual address is a lower phys.
+    FreeBlock* best      = free_lists_[order];
+    FreeBlock* best_prev = nullptr;
+    FreeBlock* prev      = best;
+    FreeBlock* cur       = best->next;
+    while (cur != nullptr) {
+        if (cur < best) {
+            best      = cur;
+            best_prev = prev;
+        }
+        prev = cur;
+        cur  = cur->next;
+    }
+    if (best_prev == nullptr) {
+        free_lists_[order] = best->next;
+    } else {
+        best_prev->next = best->next;
+    }
+    uint64_t virt = reinterpret_cast<uint64_t>(best);
+    return (virt - base_phys_ - cinux::arch::DIRECT_MAP_BASE) / cinux::arch::PAGE_SIZE;
 }
 
 bool BuddyAllocator::remove_free(uint64_t page, int order) {

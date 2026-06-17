@@ -83,10 +83,13 @@ private:
     uint64_t   total_pages_{0};
     uint64_t   free_pages_{0};
 
-    /// Direct-mapped kernel virtual address of a given page index.
+    /// Direct-mapped kernel virtual address of a given page index.  Uses the
+    /// loader's DIRECT_MAP_BASE window (PML4[272], all RAM identity-mapped with
+    /// 1 GB huge pages), NOT KERNEL_VMA -- the latter only covers the first 1 GB,
+    /// so high-phys pages would fault.  See GOTCHA #13.
     FreeBlock* page_to_block(uint64_t page) const {
         return reinterpret_cast<FreeBlock*>(base_phys_ + page * cinux::arch::PAGE_SIZE +
-                                            cinux::arch::KERNEL_VMA);
+                                            cinux::arch::DIRECT_MAP_BASE);
     }
 
     static uint64_t buddy_of(uint64_t page, int order) { return page ^ (1ULL << order); }
