@@ -3,6 +3,8 @@
 > 日期 2026-06-17 · 交接文档（上下文将满，写下个 session 接手）· 态度：彻底修复，不糊
 > 接手第一步：`/resume`（读 PLAN + memory）→ 本 note → checkout `feat/f2-m7-direct-map`。
 
+> **⚠️ 更新（2026-06-17 续，Bug1 已修，fresh 734/0）**：根因**不是**下文「Bug 1」段猜的"loader 踩 PT 区"——加诊断证实 direct-map 页表建后（`PML4[272]=0x10003 PDPT[0]=0x83`）与 load_elf 后都正确，破坏发生在 **big kernel 运行时**。真凶 = **`DmaPool::alloc` 对 direct-map 区域调 `g_vmm.map(virt=phys+DIRECT_MAP_BASE,…)`** → `VMM::map` 的 `walk_level` 命中 direct-map 的 **1GB huge entry（PDPT[0]=0x83，PS bit）** → 触发 huge-split → 把 `pdpt[0]` 改成 4KB PT pointer → **破坏全局 direct-map** → 后续 `phys_to_virt` walk 错乱命中 phys 0 BIOS 数据当 PT → reserved PF（err=0x9）。触发点 = `test_cache_reads_real_file` 首次 AHCI init 的 `g_dma_pool.alloc`。M3 时 DmaPool virt 在 KERNEL_VMA 窗口（2MB/4KB）map 无害，批2 迁 direct-map 后**漏删 map** → 变破坏源。**修 = 删 `DmaPool::alloc` 的 `VMM.map`**（direct-map 已被 loader 永久 identity 映射，不需 map）+ `test_dma_pool` Test1 `translate`→CPU round-trip（原断言依赖 split 副作用）。**fresh build 734/0 全绿**。下文「Bug 1」段为历史诊断（其"loader 踩"猜测已被推翻，PT 区实际未被碰），保留供参考；**Bug 2（buddy wiring）仍未做**，仍按下文方向。
+
 ## 大目标
 
 F2-M7 = buddy 伙伴系统替换 PMM bitmap。做 buddy 时发现 **direct-map 架构缺失**（buddy 崩的根因），先做 direct-map 真修，再做 buddy wiring。**两个都还没真正收敛，有真 bug。**

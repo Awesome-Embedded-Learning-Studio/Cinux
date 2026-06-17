@@ -25,7 +25,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
 
 ## 当前焦点
-**direct-map + buddy wiring ⛔ 受阻**（2026-06-17：F2-M7 真修，fresh build 暴露 reserved-bits PF——增量 build 掩盖、之前误报绿灯。direct-map PD[0]/phys 0x11000 问题 + buddy 踩踏，均未 push。**交接 + 根因 + 彻底修复路径见 `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**）。solid 基线 = main（M6 #12，734/0）。F2 进度 6/7（M1-M6 ✅）。
+**direct-map Bug1 已修，buddy wiring 待**（2026-06-17：F2-M7 direct-map 前置的 reserved-bits PF 已定位+修复——根因 `DmaPool::alloc` 对 direct-map 调 `VMM.map` 触发 `walk_level` split 1GB huge，破坏全局 direct-map；删 map 即修，**fresh build 734/0**。buddy wiring（Bug2 踩踏）仍未做。**详见 `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**）。solid 基线 = main（M6 #12，734/0）。F2 进度 6/7（M1-M6 ✅，M7 direct-map 前置 ✅ Bug1，buddy 待）。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
