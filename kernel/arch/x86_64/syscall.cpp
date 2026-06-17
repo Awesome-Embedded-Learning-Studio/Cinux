@@ -86,6 +86,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_waitpid, sys_waitpid);
     syscall_register(SyscallNr::SYS_dmesg, sys_dmesg);
     syscall_register(SyscallNr::SYS_mmap, sys_mmap);
+    syscall_register(SyscallNr::SYS_munmap, sys_munmap);
 }
 
 }  // anonymous namespace

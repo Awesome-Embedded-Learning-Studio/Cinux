@@ -26,6 +26,7 @@ using cinux::syscall::MAP_PRIVATE;
 using cinux::syscall::PROT_READ;
 using cinux::syscall::PROT_WRITE;
 using cinux::syscall::sys_mmap;
+using cinux::syscall::sys_munmap;
 
 namespace {
 
@@ -138,16 +139,87 @@ void test_invalid_args() {
 }  // namespace test_mmap_reject
 
 // ============================================================
+// Test 5: munmap removes a full mapping
+// ============================================================
+
+namespace test_munmap_full {
+
+void test_munmap_removes_mapping() {
+    cinux::mm::AddressSpace as;
+    cinux::proc::Task       tmp{};
+    tmp.addr_space = &as;
+    CurrentTaskGuard guard(&tmp);
+
+    int64_t r = sys_mmap(0, 8192, PROT_READ, kPrivAnon, 0, 0);
+    TEST_ASSERT_TRUE(r > 0);
+    TEST_ASSERT_TRUE(as.vmas().count() == 1);
+
+    int64_t u = sys_munmap(static_cast<uint64_t>(r), 8192, 0, 0, 0, 0);
+    TEST_ASSERT_TRUE(u == 0);
+    TEST_ASSERT_TRUE(as.vmas().count() == 0);
+    TEST_ASSERT_NULL(as.vmas().find(static_cast<uint64_t>(r)));
+}
+
+}  // namespace test_munmap_full
+
+// ============================================================
+// Test 6: munmap of a subrange splits the VMA
+// ============================================================
+
+namespace test_munmap_split {
+
+void test_munmap_splits_vma() {
+    cinux::mm::AddressSpace as;
+    cinux::proc::Task       tmp{};
+    tmp.addr_space = &as;
+    CurrentTaskGuard guard(&tmp);
+
+    int64_t  base = sys_mmap(0, 12288, PROT_READ, kPrivAnon, 0, 0);  // 3 pages
+    uint64_t b    = static_cast<uint64_t>(base);
+    TEST_ASSERT_TRUE(base > 0);
+
+    // Punch out the middle page -> two VMAs remain.
+    TEST_ASSERT_TRUE(sys_munmap(b + 4096, 4096, 0, 0, 0, 0) == 0);
+    TEST_ASSERT_TRUE(as.vmas().count() == 2);
+    TEST_ASSERT_NOT_NULL(as.vmas().find(b));         // left  [b, b+4096)
+    TEST_ASSERT_NULL(as.vmas().find(b + 4096));      // middle gone
+    TEST_ASSERT_NOT_NULL(as.vmas().find(b + 8192));  // right [b+8192, b+12288)
+}
+
+}  // namespace test_munmap_split
+
+// ============================================================
+// Test 7: munmap of an unmapped region is benign
+// ============================================================
+
+namespace test_munmap_empty {
+
+void test_munmap_unmapped_ok() {
+    cinux::mm::AddressSpace as;
+    cinux::proc::Task       tmp{};
+    tmp.addr_space = &as;
+    CurrentTaskGuard guard(&tmp);
+
+    // Nothing is mapped here -- munmap must succeed (POSIX: not an error).
+    TEST_ASSERT_TRUE(sys_munmap(USER_MMAP_BASE, 4096, 0, 0, 0, 0) == 0);
+}
+
+}  // namespace test_munmap_empty
+
+// ============================================================
 // Entry point
 // ============================================================
 
 extern "C" void run_mmap_tests() {
-    TEST_SECTION("mmap Tests (F2-M2-1)");
+    TEST_SECTION("mmap Tests (F2-M2-1/2)");
 
     RUN_TEST(test_mmap_anon::test_anon_mmap_registers_vma);
     RUN_TEST(test_mmap_distinct::test_two_mappings_distinct);
     RUN_TEST(test_mmap_fixed::test_map_fixed_and_unaligned);
     RUN_TEST(test_mmap_reject::test_invalid_args);
+    RUN_TEST(test_munmap_full::test_munmap_removes_mapping);
+    RUN_TEST(test_munmap_split::test_munmap_splits_vma);
+    RUN_TEST(test_munmap_empty::test_munmap_unmapped_ok);
 
     TEST_SUMMARY();
 }

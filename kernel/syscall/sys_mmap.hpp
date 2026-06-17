@@ -47,4 +47,15 @@ constexpr uint64_t MAP_ANONYMOUS = 0x20;
 int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, uint64_t fd,
                  uint64_t offset);
 
+/**
+ * @brief Unmap virtual memory (Linux syscall 11)
+ *
+ * Removes VMAs covering [addr, addr+length) and frees any physical pages that
+ * were demand-paged into the range, dropping their PTEs.  Partial overlap
+ * splits a VMA.  Unmapping a region with no mapping is not an error.
+ *
+ * @return 0 on success, or -errno on failure.
+ */
+int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t, uint64_t);
+
 }  // namespace cinux::syscall

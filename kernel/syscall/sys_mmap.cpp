@@ -16,6 +16,7 @@
 #include "kernel/errno.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
+#include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -113,6 +114,39 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
     }
 
     return static_cast<int64_t>(map_addr);
+}
+
+int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t, uint64_t) {
+    if (length == 0 || !page_aligned(addr)) {
+        return -kEinval;
+    }
+    const uint64_t aligned_len = align_up(length);
+    if (addr + aligned_len < addr) {
+        return -kEinval;  // overflow
+    }
+
+    auto* task = cinux::proc::Scheduler::current();
+    if (task == nullptr || task->addr_space == nullptr) {
+        return -kEinval;
+    }
+
+    // Free any demand-paged physical pages in the range and drop their PTEs.
+    // These are user pages, not the higher-half direct map, so unmapping is
+    // safe (cf. GOTCHA #7 -- never unmap phys+KERNEL_VMA).
+    for (uint64_t v = addr; v < addr + aligned_len; v += kPageSize) {
+        const uint64_t phys = task->addr_space->translate(v);
+        if (phys != 0) {
+            task->addr_space->unmap(v);
+            cinux::mm::g_pmm.free_page(phys);
+        }
+    }
+
+    // Remove the VMA range (splits a VMA when only its interior is taken).
+    auto r = task->addr_space->vmas().remove(addr, addr + aligned_len);
+    if (!r.ok()) {
+        return -to_errno(r.error());
+    }
+    return 0;
 }
 
 }  // namespace cinux::syscall

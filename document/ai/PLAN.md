@@ -97,7 +97,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
 | 批1 | `sys_mmap`（9）：匿名映射 + `find_free_area`/MAP_FIXED + VMA insert（懒分配）+ PROT/MAP 常量 + errno + 单测（set_current 模式） | ✅ | — | 716/0（+4） |
-| 批2 | `sys_munmap`（11）：VMA `remove` 拆分 + 释放物理页 + `unmap` + 单测 | ⏳ | — | — |
+| 批2 | `sys_munmap`（11）：VMA `remove` 拆分 + 释放 demand-paged 物理页 + `unmap` + 单测 | ✅ | — | 719/0（+3） |
 | 批3 | `sys_mprotect`（10）：VMA flags + PTE 权限更新 + 单测 | ⏳ | — | — |
 | 批4 | fork VMA 复制（T6）+ 文件映射基础（fd→`backing_inode`）+ 收尾 + 实机冒烟 | ⏳ | — | — |
 
