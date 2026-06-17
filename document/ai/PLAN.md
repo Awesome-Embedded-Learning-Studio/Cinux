@@ -64,7 +64,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 **完成总结**（705→705，F5-M1 重构+新功能，测试数不变）：ahci.cpp 内部 ad-hoc DMA 全收编 M3 基建——`setup_port`（command list+tables/FIS → `g_dma_pool` DmaBuffer per-port，替手动 PMM+VMM+硬编码 `+0xFFFFFFFF80000000ULL`，删未用 MMIO 映射）+ `execute_command` PRDT（手动 `prdt[0]` → `PrdtBuilder` scatter-gather）+ ATA IDENTIFY/FLUSH CACHE（`execute_command`/`build_cfis` 参数化 `command` byte；`AHCI::identify` 解析 words 60-61 28-bit 容量 → `AHCIBlockDevice::block_count()` 真值；`AHCI::flush` → `AHCIBlockDevice::flush()` 真命令）。**闭环 block device→AHCI DMA 栈**：M3 DmaPool/PrdtBuilder 真正落地到 AHCI 驱动。验证 QEMU 真机 `block_count()>0`（IDENTIFY 过）+ flush 不崩 + FORTIFY 对等（本地复现 CI）。遗留：中断驱动（仍轮询，todo 目标 3）留后续。
 
-## 🔄 F2-M1（VMA 区域记账）— 进行中（2026-06-16 起）
+## ✅ F2-M1（VMA 区域记账）已完成 — 2026-06-16（PR #7 `a65d8ff` squash）
 
 > 目标：给 `AddressSpace` 补 VMA（Virtual Memory Area）区域记账——追踪每进程"哪段虚拟地址 / 什么权限 / 匿名还是文件映射"，为 mmap/munmap/brk/demand paging/CoW 提供单一事实源。M1 只做记账 + 让 PF handler 用它做合法性校验（无 VMA 命中 → 真 segfault），不做 mmap（→M2）/brk（→M3）。
 > 决策（propose 已确认）：
@@ -78,14 +78,14 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | `vma.hpp/cpp`：`VmaFlags` + `VMA` 结构体 + `IVMAStore` 抽象 + `LinkedListVMAStore`（insert 有序+合并 / find / remove 拆分 / find_free_area）+ 单测 | ✅ | — | 710/0（+5） |
-| 批2 | `AddressSpace` 持 `LinkedListVMAStore`+`Spinlock` 成员（`vmas()`/`vma_lock()` 访问器，构造建/析构 RAII）+ `LinkedListVMAStore` 补 move（AddressSpace move-only 需成员可 move）+ `memory_layout` 加 `USER_BRK`/`MAP` 常量（按实际栈顶≈32GB 校正，非 todo 127TB） | ✅ | — | 712/0（+2） |
-| 批3 | execve ELF 段（PF_W/PF_X→VmaFlags）+ init/gui_init 用户栈（Stack flag）注册 VMA；insert 失败→路径失败保 VMA 完整 | ✅ | — | 712/0（启动路径未被 run-kernel-test 执行，靠批4 实机） |
-| 批4 | PF demand paging 加 VMA `find()` 诊断（未命中 klog_warn 但仍 demand page，不改行为；真 segfault 留 M5）+ 收尾 + 实机冒烟 | ✅ | — | 712/0 + 实机启动不炸 |
+| 批1 | `vma.hpp/cpp`：`VmaFlags` + `VMA` 结构体 + `IVMAStore` 抽象 + `LinkedListVMAStore`（insert 有序+合并 / find / remove 拆分 / find_free_area）+ 单测 | ✅ | a65d8ff | 710/0（+5） |
+| 批2 | `AddressSpace` 持 `LinkedListVMAStore`+`Spinlock` 成员（`vmas()`/`vma_lock()` 访问器，构造建/析构 RAII）+ `LinkedListVMAStore` 补 move（AddressSpace move-only 需成员可 move）+ `memory_layout` 加 `USER_BRK`/`MAP` 常量（按实际栈顶≈32GB 校正，非 todo 127TB） | ✅ | a65d8ff | 712/0（+2） |
+| 批3 | execve ELF 段（PF_W/PF_X→VmaFlags）+ init/gui_init 用户栈（Stack flag）注册 VMA；insert 失败→路径失败保 VMA 完整 | ✅ | a65d8ff | 712/0（启动路径未被 run-kernel-test 执行，靠批4 实机） |
+| 批4 | PF demand paging 加 VMA `find()` 诊断（未命中 klog_warn 但仍 demand page，不改行为；真 segfault 留 M5）+ 收尾 + 实机冒烟 | ✅ | a65d8ff | 712/0 + 实机启动不炸 |
 
 **完成总结**（705→712，F2-M1 +7）：VMA 记账基础设施落地——`LinkedListVMAStore`（侵入式有序链表，insert 合并 / remove 拆分 / find / find_free_area，store-owns RAII）+ `IVMAStore` 抽象（可换红黑树）+ AddressSpace 集成（值成员 `vma_store_` + `Spinlock`，补 move）+ execve/栈注册（PF_W/PF_X→VmaFlags；Stack flag）+ PF demand paging VMA `find()` 诊断（未命中 warn 不改行为，真 segfault 留 M5）。架构：A.6 ErrorOr（逻辑错误）；A.7 不入 Cinux-Base（依赖 heap）；用户布局常量按实际栈顶≈32GB 校正（非 todo 草案 127TB）。关键教训：operator new 返 nullptr 非 panic（OOM 崩惯例）；klog_warn 是宏禁加命名空间前缀；启动路径不被 run-kernel-test 覆盖（靠实机冒烟）。遗留：PF 硬门控（M5）/ fork VMA 复制（F3）。
 
-## 🔄 F2-M2（mmap/munmap/mprotect）— 进行中（2026-06-17 起）
+## ✅ F2-M2（mmap/munmap/mprotect）已完成 — 2026-06-17（PR #8 `d3b7cfa` squash）
 
 > 目标：实现 mmap/munmap/mprotect syscall（Linux 9/11/10），消费 M1 VMA（`find_free_area`+`insert` / `remove` / flags），让用户程序动态内存映射。mmap 懒分配（仅建 VMA，PF 时 demand page，兼容 M1 批4 诊断）。
 > 决策（propose 已确认）：
@@ -96,14 +96,14 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | `sys_mmap`（9）：匿名映射 + `find_free_area`/MAP_FIXED + VMA insert（懒分配）+ PROT/MAP 常量 + errno + 单测（set_current 模式） | ✅ | — | 716/0（+4） |
-| 批2 | `sys_munmap`（11）：VMA `remove` 拆分 + 释放 demand-paged 物理页 + `unmap` + 单测 | ✅ | — | 719/0（+3） |
-| 批3 | `sys_mprotect`（10）：VMA flags（保留 base 替换 R/W/X）+ PTE re-map + 单测 | ✅ | — | 721/0（+2） |
-| 批4 | fork VMA 复制（T6，含 backing）+ 文件映射基础（fd→Inode backing，内容 M4）+ vma.hpp backing 修正 InodeOps*→Inode* + 收尾 + 实机冒烟 | ✅ | — | 721/0 + 实机不炸 |
+| 批1 | `sys_mmap`（9）：匿名映射 + `find_free_area`/MAP_FIXED + VMA insert（懒分配）+ PROT/MAP 常量 + errno + 单测（set_current 模式） | ✅ | d3b7cfa | 716/0（+4） |
+| 批2 | `sys_munmap`（11）：VMA `remove` 拆分 + 释放 demand-paged 物理页 + `unmap` + 单测 | ✅ | d3b7cfa | 719/0（+3） |
+| 批3 | `sys_mprotect`（10）：VMA flags（保留 base 替换 R/W/X）+ PTE re-map + 单测 | ✅ | d3b7cfa | 721/0（+2） |
+| 批4 | fork VMA 复制（T6，含 backing）+ 文件映射基础（fd→Inode backing，内容 M4）+ vma.hpp backing 修正 InodeOps*→Inode* + 收尾 + 实机冒烟 | ✅ | d3b7cfa | 721/0 + 实机不炸 |
 
 **完成总结**（712→721，F2-M2 +9）：mmap 三 syscall 落地——`sys_mmap`（9，匿名/文件映射，懒分配 + `find_free_area`/MAP_FIXED + VMA insert）+ `sys_munmap`（11，VMA remove 拆分 + 释放 demand-paged 页 + unmap）+ `sys_mprotect`（10，保留 base 替换 R/W/X + PTE re-map）+ fork VMA 复制（CoW 页表后克隆父 VMA 含 backing）+ 文件映射基础（fd→Inode backing，内容 demand-read 留 M4）。架构：A 翻译边界（ErrorOr→errno，`errno.hpp`）；syscall handler 统一 6 参（SyscallFn）；VmaFlags 补 `operator&`（mprotect 提取 base）。关键校正：批1 VMA backing 用 `InodeOps*` 错（inode.hpp 是 `struct Inode` + `InodeOps` vtable），批4 改 `Inode*`。实机冒烟启动到 GUI 不炸。遗留：文件映射 demand-read 内容（M4 Page Cache）/ PF 真 segfault（M5）。
 
-## 🔄 F2-M3（brk）— 进行中（2026-06-17 起）
+## ✅ F2-M3（brk）已完成 — 2026-06-17（PR #9 `4331853` squash）
 
 > 目标：`sys_brk`（Linux 12）用户态堆（malloc 底层）。**懒 brk**：调 `brk_current`（边界检查），不 map/unmap 页，堆区访问 PF 时 demand page（和 M2 mmap 懒分配一致，复用 M1 批4 诊断）。
 > 决策：懒 brk（非 todo eager map，与 M2 统一）；Task 加 `brk_current`/`brk_initial`/`brk_max`；execve 设 `brk_initial`（ELF 段末尾）+ Heap VMA `[brk_initial, USER_BRK_MAX)`。
@@ -111,8 +111,8 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | Task brk 字段 + `sys_brk`（12，懒：addr==0 返当前 / 越界返当前 / 否则调 brk_current）+ 注册 + 单测 | ✅ | — | 722/0（+1） |
-| 批2 | execve 设 `brk_initial`（ELF 段末尾）+ Heap VMA `[brk_initial, USER_BRK_MAX)` + 收尾 + 实机冒烟 | ✅ | — | 722/0 + 实机不炸 |
+| 批1 | Task brk 字段 + `sys_brk`（12，懒：addr==0 返当前 / 越界返当前 / 否则调 brk_current）+ 注册 + 单测 | ✅ | 4331853 | 722/0（+1） |
+| 批2 | execve 设 `brk_initial`（ELF 段末尾）+ Heap VMA `[brk_initial, USER_BRK_MAX)` + 收尾 + 实机冒烟 | ✅ | 4331853 | 722/0 + 实机不炸 |
 
 **完成总结**（721→722，F2-M3 +1）：brk 落地——`sys_brk`（12，懒：调 `brk_current`，边界 `[brk_initial, brk_max]`，不 map/unmap，PF demand page）+ Task `brk_current`/`brk_initial`/`brk_max` 字段 + execve 设 `brk_initial`（ELF 段末尾页对齐）+ Heap VMA `[brk_initial, USER_BRK_MAX)`。架构：**懒 brk**（与 mmap 统一，复用 demand paging）；syscall handler 6 参；brk 不返 errno（返地址，Linux 语义）。实机冒烟启动到 GUI 不炸。遗留：`user/test_brk.c` + sbrk libc wrapper（用户程序实际用 brk 时加）。
 
@@ -130,11 +130,31 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| 批1 | `page_cache.hpp/cpp`（`CachedPage`+`PageCache` 256-bucket hash，`lookup`/`get_page` 填充+EOF 零填/`release`/stats，`ErrorOr`，irq-guard Spinlock，direct-map virt）+ fake `InodeOps` mock + `test_page_cache.cpp` 单测（命中/未命中填充/refcount/同 inode+offset 二次命中/EOF 零填） | ✅ | — | 728/0（+6） |
-| 批2 | `handle_pf` 文件感知（file-backed VMA→`get_page`→`map_nolock`；PTE Write→WRITABLE，NX 留 F9 NXE；读锁外 insert 锁内）+ `sys_mmap` offset 页对齐校验 + mprotect 移除 NX（NXE 未启用保留位）+ 匿名路径不变 | ✅ | — | 728/0（回归；文件路径单测 dormant，批3 Test B 锻炼） |
-| 批3 | 真文件 mmap 闭环（`test_file_mmap.cpp`：Test A `get_page` 真盘读 ext2 字节比对 + cache hit；Test B 文件 VMA `as.activate()` 后访存经 #PF→handle_pf 文件路径→字节比对，端到端验证 wiring）+ NX 修复 + 收尾 | ✅ | — | 730/0（+2） |
+| 批1 | `page_cache.hpp/cpp`（`CachedPage`+`PageCache` 256-bucket hash，`lookup`/`get_page` 填充+EOF 零填/`release`/stats，`ErrorOr`，irq-guard Spinlock，direct-map virt）+ fake `InodeOps` mock + `test_page_cache.cpp` 单测（命中/未命中填充/refcount/同 inode+offset 二次命中/EOF 零填） | ✅ | db42957 | 728/0（+6） |
+| 批2 | `handle_pf` 文件感知（file-backed VMA→`get_page`→`map_nolock`；PTE Write→WRITABLE，NX 留 F9 NXE；读锁外 insert 锁内）+ `sys_mmap` offset 页对齐校验 + mprotect 移除 NX（NXE 未启用保留位）+ 匿名路径不变 | ✅ | db42957 | 728/0（回归；文件路径单测 dormant，批3 Test B 锻炼） |
+| 批3 | 真文件 mmap 闭环（`test_file_mmap.cpp`：Test A `get_page` 真盘读 ext2 字节比对 + cache hit；Test B 文件 VMA `as.activate()` 后访存经 #PF→handle_pf 文件路径→字节比对，端到端验证 wiring）+ NX 修复 + 收尾 | ✅ | db42957 | 730/0（+2） |
 
 **完成总结**（722→730，F2-M4 +8）：Page Cache 落地——`CachedPage` + `PageCache`（256-bucket hash，`(Inode*, page_offset)` 键，direct-map virt = `phys + KERNEL_VMA`，ref_count，无淘汰）+ `get_page`（命中 bump ref / 未命中 alloc 页 → 锁外 `inode->ops->read` 填充 + EOF 零填 → 锁内 insert，IF=0 安全）+ `lookup`/`release`/stats + `handle_pf` 文件感知（file-backed VMA → `get_page` → `map_nolock`，PTE Write→WRITABLE，NX 留 F9 NXE；匿名路径不变；execve ELF 段是匿名故 boot 走匿名）+ `sys_mmap` offset 页对齐校验。验证：批3 `test_file_mmap` Test A（cache 真盘读 ext2 字节比对 + cache hit）+ Test B（文件 VMA `as.activate()` 后访存经 #PF→handle_pf 文件路径→字节比对，端到端验证 wiring）。架构：A.6 ErrorOr（`get_page`→`ErrorOr<CachedPage*>`）；A.7 不入 Cinux-Base（依赖 heap/PMM/Inode）；复用 direct-map（GOTCHA #7 同 DmaPool，不 temp-map 不 unmap）。关键教训 GOTCHA #10（NXE 未启用→NX 保留位，Test B PF round-trip 定位）。MVP 只做读路径：脏页写回 / MAP_SHARED 写一致性 / 全 `read()` 经缓存 / LRU+跨进程共享+CoW 留后续（M6/F3/M5）。
+
+## ✅ F2-M5（Demand Paging 硬门控）已完成 — 2026-06-17
+
+> 目标：把 PF handler「VMA 未命中→映射零页容错」（[exception_handlers.cpp:258-271](kernel/arch/x86_64/exception_handlers.cpp#L258-L271)）升级为 **VMA 硬门控**——用户态 not-present PF 无 VMA 命中 → 真 segfault（终止进程），兑现 M1 记账价值。命中合法 VMA → 照常 demand page（匿名零页 / 文件 page cache，M4 路径不变）。
+> 决策（propose 已确认，2026-06-17）：
+> - **#1 segfault 终止**：批1 两种方式都 spike（直接 `exit_current()` vs 标记 Dead+延迟退出）再定，按 IF=0 中断栈 task switch 语义选稳的。
+> - **#2 栈增长**：Stack VMA 扩到 ~1MB 向下 demand-page 自动增长 + 栈底 guard page（溢出→segfault），现有程序不崩。
+> - **#3 权限门控范围**：只做「无 VMA→segfault」；写只读/执行权限违规留后续（NX 因 NXE 未启用留 F9，GOTCHA #10）。
+> 终止机制复用 [scheduler.cpp:179-200](kernel/proc/scheduler.cpp#L179-L200) `Scheduler::exit_current()`（F3 信号未做，临时等价 SIGSEGV-killed）。
+> 依赖就绪：M1 VMA find / M2 mmap / M3 brk / M4 page cache / fork CoW（present 分支不受 not-present 门控影响）。
+> 不做：SIGSEGV 信号交付（F3）/ NX 强制（F9）/ 栈 ulimit / page cache 跨进程 CoW（F3）/ mmap 脏页写回（后续）。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | spike segfault 终止（`exit_current` 在 PF handler IF=0 中断栈可行性）+ handle_pf not-present user 硬门控（无 VMA→segfault；命中→demand 不变）+ 单测 | ✅ | 02e22c2 | 730/0（回归） |
+| 批2 | Stack VMA 扩 ~1MB 自动增长 + 栈底 guard page（溢出→segfault） | ✅ | 652f698 | 730/0（回归） |
+| 批3 | 全路径回归（execve ELF/brk/mmap/fork CoW 硬门控下合法放行）+ 修漏注册 VMA + 实机冒烟迭代 | ✅ | —（纯验证，无代码改动） | 730/0 + GUI 实机不炸 |
+| 批4 | 收尾 + 全量 run-kernel-test + 实机冒烟（init/gui/shell 不崩=成败判据）+ ROADMAP/PLAN/todo/notes + GOTCHA（PF-exit 约束/栈增长/NXE 留 F9） | ✅ | (本次) | 730/0 + 实机不炸 |
+
+**完成总结**（730→730，F2-M5 门控+栈增长，测试数不变）：demand paging 硬门控落地——`handle_pf` not-present user PF，`vma==nullptr` 时真实 user-mode fault（`err&0x04`）→ `klog_error` + `Scheduler::exit_current()` 终止进程（SIGSEGV 等价，F3 信号前临时方案；`context_switch` 抛弃 prev 中断帧切 next，不返回此处）；kernel-mode 访问用户地址（ring0 test / `copy_to_from_user`，`!(err&0x04)`）保持零页容错（不误杀 kernel-test PF 注入）。命中合法 VMA → demand 不变（匿名零页 / M4 文件 page cache）。栈增长：`USER_STACK_GROWTH=1MB` 常量（[usermode.hpp](kernel/arch/x86_64/usermode.hpp)），init.cpp/gui_init.cpp Stack VMA 扩到 `[TOP-1MB, TOP)`（仅顶 16KB 预分配，余 demand 增长），VMA 底外→segfault（guard）。架构：user-mode 判定靠 `err&0x04`（test 豁免天然分界，无需新 ErrorOr，复用 `exit_current`）。关键教训 GOTCHA #11（PF 硬门控 user-mode 判定 + 栈增长配套 + execve 复用 AS 不清 VMA）。验证：730/0 回归（kernel-mode 路径）+ `make run` GUI 启动到桌面不崩（user-mode 路径，无 segfault/panic）+ 全路径代码分析（所有合法 demand PF 有 VMA 覆盖）。遗留：SIGSEGV 信号（F3）/ NX 强制（F9）/ 权限违规门控（写只读）/ segfault 进程资源清理（`exit_current` leak，待 task exit cleanup）。
 
 ## OPEN GOTCHAS（跨里程碑通用，活警告）
 1. **验证 target**：内核改动用 run-kernel-test（~694 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补全量编译（L5）。
@@ -147,3 +167,4 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 8. **QEMU AHCI 容量 ≠ ext2.img 文件大小**（M4 批2 教训，2026-06）：写高号 sector（如 7000，文件层面 8192 sector 内）仍 `[AHCI] command timeout`——QEMU AHCI IDENTIFY 报告的容量几何 < 文件大小，越界写不响应。真机写测试用已知可写的低 sector（`test_ahci_write` 的 sector 2000 = ext2 块 1000）+ 读原值/写回 restore，避免破坏 ext2（后续 ext2 套件同次运行依赖干净盘）。`AHCIBlockDevice::block_count()` 精确值待 F5-M1 ATA IDENTIFY。
 9. **kernel freestanding 内存操作用 `kernel/lib/string.hpp`，禁 `<cstring>`/`<string.h>`**（M4 CI 教训，2026-06）：CI（Ubuntu glibc + 编译器 spec 默认 `_FORTIFY_SOURCE=2`）把 `<cstring>`/`<string.h>` 的 `memcpy`/`memset` 宏改写为 `__memcpy_chk`，但 kernel freestanding 不链 libc → `big_kernel_test`/host 链接 `undefined reference to __memcpy_chk`（PR #5 kernel-tests+host-tests Build 双炸）。本地无 FORTIFY spec 故未复现（GOTCHA #1 同类盲区：本地绿≠CI 绿）。一律用 `kernel/lib/string.hpp` 的 kernel 实现（非 fortify）；`memcmp` 不被 fortify 改写但为一致同源。
 10. **EFER.NXE 未启用 → NX bit（bit63）是保留位**（F2-M4 批3 教训，2026-06）：F9 NX/SMEP/SMAP 未做，NXE 关闭。PTE 设 `FLAG_NX`（bit63）后访问该页触发 **reserved-bit #PF（err=0x8）循环**——`handle_pf` 文件路径初版给非 exec 页设 NX，致 Test B PF round-trip 无限循环。诊断：PF handler 临时打印 err/cr3/asPml4/translate，err=0x8(RSVD) + translate==phys 确认 PTE 设对、是保留位违例。修复：`handle_pf` 文件路径 + `sys_mprotect` 都**暂不设 NX**（非 exec 页不强 NX），留 F9 启用 NXE 后再开。另：单测验 `handle_pf` 文件 PF 需 `as.activate()` 切到进程 PML4 再访存（boot PML4 user 半空）；`get_page` 读文件在 cache 锁外、insert 在锁内（IF=0 防 IO-under-lock 重入死锁）；缓存页 virt 复用 direct-map（GOTCHA #7 同 DmaPool）。
+11. **PF handler 硬门控的 user-mode 判定 + 栈增长配套**（F2-M5 教训，2026-06）：`handle_pf` 杀进程（`exit_current`）必须判 `err & 0x04`（真实 user-mode fault）——kernel-test 是 ring0 访问用户地址（`err&0x04=0`），误杀会让测试 hang（test_file_mmap Test B 模式：`CurrentTaskGuard` 设 tmp task 但 ring0 访存）。`exit_current` 的 `context_switch` 抛弃 prev 中断帧切 next，不返回 PF handler（segfault 终止可行；"标记 Dead+延迟退出"反而要伪造中断帧，更复杂）。**栈 VMA 必须与硬门控配套**：门控上了但栈仍固定 16KB → 深调用栈用户程序栈 PF 落 VMA 外 → segfault（run-kernel-test 不跑真实用户深栈故绿，掩盖此依赖；init.cpp/gui_init.cpp 用 `USER_STACK_GROWTH=1MB` 扩 Stack VMA）。**execve `clear_user_mappings` 只清页表不清 VMA store**——Stack VMA 经 fork 继承 / execve 复用 AS 保留传播到所有用户程序。run-kernel-test 全 kernel-mode fault，不覆盖 user-mode segfault/demand 路径（靠 `make run` 实机 + `test_shell_*` 间接）。
