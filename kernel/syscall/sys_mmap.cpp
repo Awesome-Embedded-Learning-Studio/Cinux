@@ -15,6 +15,9 @@
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/errno.hpp"
+#include "kernel/fs/file.hpp"
+#include "kernel/fs/inode.hpp"
+#include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -38,7 +41,10 @@ constexpr bool page_aligned(uint64_t v) {
 
 /// Translate POSIX prot/flags into the kernel VmaFlags (anonymous mappings).
 cinux::mm::VmaFlags to_vma_flags(uint64_t prot, uint64_t flags) {
-    cinux::mm::VmaFlags v = cinux::mm::VmaFlags::Anonymous;
+    cinux::mm::VmaFlags v = cinux::mm::VmaFlags::None;
+    if ((flags & MAP_ANONYMOUS) != 0) {
+        v |= cinux::mm::VmaFlags::Anonymous;
+    }
     if (prot & PROT_READ) {
         v |= cinux::mm::VmaFlags::Read;
     }
@@ -58,23 +64,26 @@ cinux::mm::VmaFlags to_vma_flags(uint64_t prot, uint64_t flags) {
 
 int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, uint64_t fd,
                  uint64_t offset) {
-    // fd/offset apply only to file mappings (batch 4); anonymous ignores them.
-    (void)fd;
-    (void)offset;
-
     if (length == 0) {
         return -kEinval;
     }
 
-    // Batch 1: anonymous mappings only.
+    // Resolve the backing: anonymous mappings have none; file mappings take
+    // fd -> inode (basic -- demand-reading file contents arrives in M4).
+    cinux::fs::Inode* backing_inode = nullptr;
     if ((flags & MAP_ANONYMOUS) == 0) {
-        return -kEnosys;
-    }
-    // Linux requires exactly one of MAP_SHARED / MAP_PRIVATE.
-    const bool shared = (flags & MAP_SHARED) != 0;
-    const bool priv   = (flags & MAP_PRIVATE) != 0;
-    if (shared == priv) {
-        return -kEinval;
+        auto* file = cinux::fs::current_fd_table().get(static_cast<int>(fd));
+        if (file == nullptr) {
+            return -kEbadf;
+        }
+        backing_inode = file->inode;
+    } else {
+        // Anonymous mappings require exactly one of MAP_SHARED / MAP_PRIVATE.
+        const bool shared = (flags & MAP_SHARED) != 0;
+        const bool priv   = (flags & MAP_PRIVATE) != 0;
+        if (shared == priv) {
+            return -kEinval;
+        }
     }
 
     auto* task = cinux::proc::Scheduler::current();
@@ -112,6 +121,16 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
                                               to_vma_flags(prot, flags));
     if (!ir.ok()) {
         return -to_errno(ir.error());
+    }
+
+    // Attach the file backing (if any) to the freshly recorded VMA.  Contents
+    // are demand-read via the Page Cache in M4; here we only remember the inode.
+    if (backing_inode != nullptr) {
+        cinux::mm::VMA* v = task->addr_space->vmas().find(map_addr);
+        if (v != nullptr) {
+            v->backing     = backing_inode;
+            v->file_offset = offset;
+        }
     }
 
     return static_cast<int64_t>(map_addr);
