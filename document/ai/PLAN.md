@@ -4,6 +4,7 @@
 > **F1-M3 = DMA 基础设施 ✅ 完成（2026-06-16）**。
 > **F1-M4 = 块设备抽象 ✅ 完成（2026-06-16）**。
 > **F5-M1 = AHCI DMA 迁移 ✅ 完成（2026-06-16）**。
+> **F2-M6 = ext2 Cache ✅ 完成（2026-06-17）**。F2 进度 6/7（M1-M6 ✅），下一 **F2-M7 Buddy**（Slab → M7b）。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -168,3 +169,21 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 9. **kernel freestanding 内存操作用 `kernel/lib/string.hpp`，禁 `<cstring>`/`<string.h>`**（M4 CI 教训，2026-06）：CI（Ubuntu glibc + 编译器 spec 默认 `_FORTIFY_SOURCE=2`）把 `<cstring>`/`<string.h>` 的 `memcpy`/`memset` 宏改写为 `__memcpy_chk`，但 kernel freestanding 不链 libc → `big_kernel_test`/host 链接 `undefined reference to __memcpy_chk`（PR #5 kernel-tests+host-tests Build 双炸）。本地无 FORTIFY spec 故未复现（GOTCHA #1 同类盲区：本地绿≠CI 绿）。一律用 `kernel/lib/string.hpp` 的 kernel 实现（非 fortify）；`memcmp` 不被 fortify 改写但为一致同源。
 10. **EFER.NXE 未启用 → NX bit（bit63）是保留位**（F2-M4 批3 教训，2026-06）：F9 NX/SMEP/SMAP 未做，NXE 关闭。PTE 设 `FLAG_NX`（bit63）后访问该页触发 **reserved-bit #PF（err=0x8）循环**——`handle_pf` 文件路径初版给非 exec 页设 NX，致 Test B PF round-trip 无限循环。诊断：PF handler 临时打印 err/cr3/asPml4/translate，err=0x8(RSVD) + translate==phys 确认 PTE 设对、是保留位违例。修复：`handle_pf` 文件路径 + `sys_mprotect` 都**暂不设 NX**（非 exec 页不强 NX），留 F9 启用 NXE 后再开。另：单测验 `handle_pf` 文件 PF 需 `as.activate()` 切到进程 PML4 再访存（boot PML4 user 半空）；`get_page` 读文件在 cache 锁外、insert 在锁内（IF=0 防 IO-under-lock 重入死锁）；缓存页 virt 复用 direct-map（GOTCHA #7 同 DmaPool）。
 11. **PF handler 硬门控的 user-mode 判定 + 栈增长配套**（F2-M5 教训，2026-06）：`handle_pf` 杀进程（`exit_current`）必须判 `err & 0x04`（真实 user-mode fault）——kernel-test 是 ring0 访问用户地址（`err&0x04=0`），误杀会让测试 hang（test_file_mmap Test B 模式：`CurrentTaskGuard` 设 tmp task 但 ring0 访存）。`exit_current` 的 `context_switch` 抛弃 prev 中断帧切 next，不返回 PF handler（segfault 终止可行；"标记 Dead+延迟退出"反而要伪造中断帧，更复杂）。**栈 VMA 必须与硬门控配套**：门控上了但栈仍固定 16KB → 深调用栈用户程序栈 PF 落 VMA 外 → segfault（run-kernel-test 不跑真实用户深栈故绿，掩盖此依赖；init.cpp/gui_init.cpp 用 `USER_STACK_GROWTH=1MB` 扩 Stack VMA）。**execve `clear_user_mappings` 只清页表不清 VMA store**——Stack VMA 经 fork 继承 / execve 复用 AS 保留传播到所有用户程序。run-kernel-test 全 kernel-mode fault，不覆盖 user-mode segfault/demand 路径（靠 `make run` 实机 + `test_shell_*` 间接）。
+12. **read() 经 PageCache 的递归规避 + pipe 判别**（F2-M6 教训，2026-06）：`read_bytes` 是**新函数**（sys_read 对 `is_page_cacheable()` 真者调它），其内部 `get_page` 填充走 `inode->ops->read`（Ext2FileOps 读盘原语）——`Ext2FileOps::read` **不改不调 page_cache**，否则 read→get_page→read 死循环。判别"磁盘文件 vs pipe"不能用 `inode->type`（pipe 的 type 也是 `Regular`，[test_sys_pipe.cpp:105]），禁 RTTI 无法 dynamic_cast；用 `InodeOps::is_page_cacheable()` virtual（默认 false，Ext2FileOps override true）。`g_page_cache.hit_count()` 是 boot 全局跨测试累积，断言"二读命中"须在二读前捕获基线。
+
+## ✅ F2-M6（ext2 Cache）已完成 — 2026-06-17
+
+> 目标：`sys_read` 对磁盘文件走 PageCache，与 demand paging 共用 `(Inode*, page_offset)` 缓存——重复读命中免读盘，闭环读路径唯一缓存层。M4 PageCache 此前只服务 file-backed mmap 的 PF 路径，read() 直走 Ext2FileOps 每块读盘无缓存。
+> 决策（propose 已确认）：
+> - **#1 read() 走 read_bytes**（复用 M4 get_page，不另起缓存逻辑）。
+> - **#2 判别用 virtual `is_page_cacheable()`**（pipe type 也是 Regular，禁 RTTI；默认 false，Ext2FileOps override true，源码兼容现有 mock）。
+> - **#3 read_bytes 切片按页对齐**，EOF 以 `inode->size` 截断（ext2 lookup 已填），partial-read 中途失败回已读量。
+> 不做：脏页写回 / MAP_SHARED 写一致性 / LRU 淘汰 / 跨进程 CoW（留后续/F3）。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | `PageCache::read_bytes`（按页切片经 get_page + EOF 截断）+ `InodeOps::is_page_cacheable()` virtual（默认 false）+ Ext2FileOps override true + test_page_cache 3 测（基本+EOF / 二读命中缓存 / 跨页裁剪） | ✅ | ca13352 | 733/0（+3） |
+| 批2 | `sys_read` 分流（is_page_cacheable 真→read_bytes，否则原 read；pipe/ramdisk 不变）+ test_syscall_ext2 端到端测（真 AHCI/ext2 读 /hello.txt 两遍 hit_count 升+字节一致） | ✅ | 3a24439 | 734/0（+1） |
+| 收尾 | 文档(本文+ROADMAP+todo) + 全量 run-kernel-test + host test_host + 实机冒烟 | ✅ | (本次) | 734/0 + host 49/0 + 实机不炸 |
+
+**完成总结**（730→734，F2-M6 +4）：read() 缓存路径落地——`PageCache::read_bytes(inode,off,buf,count)`（按页对齐切片复用 M4 `get_page`：命中免读盘 / 未命中填充+EOF 零填，EOF 以 `inode->size` 截断，partial-read 回已读量）+ `InodeOps::is_page_cacheable()` virtual（默认 false，Ext2FileOps override true；pipe type 也 Regular 故 type 不可靠，禁 RTTI 用 virtual 判别）+ `sys_read` 分流（cacheable→read_bytes，否则原 inode->ops->read，pipe/ramdisk 不变）。架构：A.6 ErrorOr；避免递归（read_bytes 新函数，Ext2FileOps::read 读盘原语不改）；翻译边界 errno 不变。验证：批1 单测（read_bytes 缓存机制）+ 批2 真机端到端（AHCI/ext2 读两遍 hit_count 升 = sys_read→read_bytes 接线铁证）+ host test_host 49/0（InodeOps virtual 源码兼容）+ 生产内核启动到 GUI 桌面不炸。遗留：脏页写回 / MAP_SHARED 写一致性 / LRU 淘汰 / 跨进程 CoW 留后续（F3）。

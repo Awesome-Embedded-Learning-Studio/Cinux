@@ -38,6 +38,10 @@ public:
                                        uint64_t count) override;
     cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st) override;
 
+    /// ext2 regular files are disk-backed: route sys_read through the PageCache
+    /// so repeated reads and demand paging share one copy of each page.
+    bool is_page_cacheable() const override;
+
 private:
     Ext2& ext2_;
 };

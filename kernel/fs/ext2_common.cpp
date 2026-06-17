@@ -21,6 +21,10 @@ namespace cinux::fs {
 
 Ext2FileOps::Ext2FileOps(Ext2& ext2) : ext2_(ext2) {}
 
+bool Ext2FileOps::is_page_cacheable() const {
+    return true;
+}
+
 cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offset, void* buf,
                                                uint64_t count) {
     if (inode == nullptr || inode->fs_private == nullptr || buf == nullptr) {

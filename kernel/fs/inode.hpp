@@ -62,6 +62,14 @@ public:
     virtual cinux::lib::ErrorOr<Inode*>  mkdir(Inode* dir, const char* name, uint32_t namelen);
     virtual cinux::lib::ErrorOr<void>    unlink(Inode* dir, const char* name, uint32_t namelen);
     virtual cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st);
+
+    /// Whether reads against this inode should be served through the file-backed
+    /// PageCache.  Disk-backed filesystems (ext2) override to true so that
+    /// sys_read and demand paging share one cache; transient inode-ops shims
+    /// such as pipes inherit the default false (their content is not on disk and
+    /// must never be cached).  Default false keeps every legacy/mock backend
+    /// unchanged.
+    virtual bool is_page_cacheable() const;
 };
 
 // ============================================================
