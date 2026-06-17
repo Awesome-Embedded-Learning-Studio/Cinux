@@ -13,6 +13,7 @@
 #include "kernel/syscall/sys_mmap.hpp"
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
+#include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/errno.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -145,6 +146,65 @@ int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t,
     auto r = task->addr_space->vmas().remove(addr, addr + aligned_len);
     if (!r.ok()) {
         return -to_errno(r.error());
+    }
+    return 0;
+}
+
+int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, uint64_t, uint64_t) {
+    if (length == 0 || !page_aligned(addr)) {
+        return -kEinval;
+    }
+    const uint64_t aligned_len = align_up(length);
+    if (addr + aligned_len < addr) {
+        return -kEinval;
+    }
+
+    auto* task = cinux::proc::Scheduler::current();
+    if (task == nullptr || task->addr_space == nullptr) {
+        return -kEinval;
+    }
+
+    // The start of the range must be currently mapped.
+    cinux::mm::VMA* existing = task->addr_space->vmas().find(addr);
+    if (existing == nullptr) {
+        return -kEnomem;  // POSIX: ENOMEM if any page of the range is unmapped
+    }
+
+    // Preserve the non-protection attributes; replace R/W/X from @p prot.
+    using cinux::mm::VmaFlags;
+    const VmaFlags base = existing->flags & (VmaFlags::Anonymous | VmaFlags::Shared |
+                                             VmaFlags::Stack | VmaFlags::Heap);
+    VmaFlags       vma  = base;
+    if ((prot & PROT_READ) != 0) {
+        vma |= VmaFlags::Read;
+    }
+    if ((prot & PROT_WRITE) != 0) {
+        vma |= VmaFlags::Write;
+    }
+    if ((prot & PROT_EXEC) != 0) {
+        vma |= VmaFlags::Exec;
+    }
+
+    // Re-record the range with the new flags (splits when partially covered).
+    (void)task->addr_space->vmas().remove(addr, addr + aligned_len);
+    auto ir = task->addr_space->vmas().insert(addr, addr + aligned_len, vma);
+    if (!ir.ok()) {
+        return -to_errno(ir.error());
+    }
+
+    // Re-issue PTE permissions for any already-mapped pages (map() overwrites).
+    uint64_t pte_flags = cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_USER;
+    if ((prot & PROT_WRITE) != 0) {
+        pte_flags |= cinux::arch::FLAG_WRITABLE;
+    }
+    if ((prot & PROT_EXEC) == 0) {
+        pte_flags |= cinux::arch::FLAG_NX;
+    }
+    for (uint64_t v = addr; v < addr + aligned_len; v += kPageSize) {
+        const uint64_t phys = task->addr_space->translate(v);
+        if (phys != 0) {
+            task->addr_space->map(v, phys, pte_flags);
+        }
     }
     return 0;
 }

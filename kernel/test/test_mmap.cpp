@@ -25,7 +25,10 @@ using cinux::syscall::MAP_FIXED;
 using cinux::syscall::MAP_PRIVATE;
 using cinux::syscall::PROT_READ;
 using cinux::syscall::PROT_WRITE;
+using cinux::mm::has_flag;
+using cinux::mm::VmaFlags;
 using cinux::syscall::sys_mmap;
+using cinux::syscall::sys_mprotect;
 using cinux::syscall::sys_munmap;
 
 namespace {
@@ -207,11 +210,58 @@ void test_munmap_unmapped_ok() {
 }  // namespace test_munmap_empty
 
 // ============================================================
+// Test 8: mprotect updates the VMA protection flags
+// ============================================================
+
+namespace test_mprotect_flags {
+
+void test_mprotect_changes_prot() {
+    cinux::mm::AddressSpace as;
+    cinux::proc::Task       tmp{};
+    tmp.addr_space = &as;
+    CurrentTaskGuard guard(&tmp);
+
+    int64_t r = sys_mmap(0, 4096, PROT_READ, kPrivAnon, 0, 0);
+    TEST_ASSERT_TRUE(r > 0);
+
+    cinux::mm::VMA* v = as.vmas().find(static_cast<uint64_t>(r));
+    TEST_ASSERT_TRUE(!has_flag(v->flags, VmaFlags::Write));  // initially read-only
+
+    // Upgrade to read-write.
+    int64_t mp = sys_mprotect(static_cast<uint64_t>(r), 4096, PROT_READ | PROT_WRITE, 0, 0, 0);
+    TEST_ASSERT_TRUE(mp == 0);
+
+    v = as.vmas().find(static_cast<uint64_t>(r));
+    TEST_ASSERT_TRUE(has_flag(v->flags, VmaFlags::Write));
+    TEST_ASSERT_TRUE(has_flag(v->flags, VmaFlags::Anonymous));  // base preserved
+}
+
+}  // namespace test_mprotect_flags
+
+// ============================================================
+// Test 9: mprotect of an unmapped region fails (ENOMEM)
+// ============================================================
+
+namespace test_mprotect_unmapped {
+
+void test_mprotect_unmapped_fails() {
+    cinux::mm::AddressSpace as;
+    cinux::proc::Task       tmp{};
+    tmp.addr_space = &as;
+    CurrentTaskGuard guard(&tmp);
+
+    int64_t mp = sys_mprotect(USER_MMAP_BASE, 4096, PROT_READ, 0, 0, 0);
+    TEST_ASSERT_TRUE(mp < 0);
+}
+
+}  // namespace test_mprotect_unmapped
+
+// ============================================================
 // Entry point
 // ============================================================
 
 extern "C" void run_mmap_tests() {
-    TEST_SECTION("mmap Tests (F2-M2-1/2)");
+    TEST_SECTION("mmap Tests (F2-M2-1/2/3)");
 
     RUN_TEST(test_mmap_anon::test_anon_mmap_registers_vma);
     RUN_TEST(test_mmap_distinct::test_two_mappings_distinct);
@@ -220,6 +270,8 @@ extern "C" void run_mmap_tests() {
     RUN_TEST(test_munmap_full::test_munmap_removes_mapping);
     RUN_TEST(test_munmap_split::test_munmap_splits_vma);
     RUN_TEST(test_munmap_empty::test_munmap_unmapped_ok);
+    RUN_TEST(test_mprotect_flags::test_mprotect_changes_prot);
+    RUN_TEST(test_mprotect_unmapped::test_mprotect_unmapped_fails);
 
     TEST_SUMMARY();
 }

@@ -58,4 +58,16 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
  */
 int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t, uint64_t);
 
+/**
+ * @brief Set protection on a region (Linux syscall 10)
+ *
+ * Updates the access flags (PROT_READ/WRITE/EXEC) of every VMA covering
+ * [addr, addr+length), splitting as needed, and re-issues the PTE permissions
+ * for any already-mapped pages.  Other VMA attributes (Anonymous/Shared) are
+ * preserved.
+ *
+ * @return 0 on success, or -errno on failure.
+ */
+int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, uint64_t, uint64_t);
+
 }  // namespace cinux::syscall

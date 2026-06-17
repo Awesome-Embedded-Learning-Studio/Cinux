@@ -63,6 +63,10 @@ constexpr VmaFlags operator|(VmaFlags a, VmaFlags b) noexcept {
     return static_cast<VmaFlags>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
 }
 
+constexpr VmaFlags operator&(VmaFlags a, VmaFlags b) noexcept {
+    return static_cast<VmaFlags>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+
 constexpr VmaFlags& operator|=(VmaFlags& a, VmaFlags b) noexcept {
     a = a | b;
     return a;
