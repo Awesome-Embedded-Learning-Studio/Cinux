@@ -18,7 +18,7 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 
-using cinux::arch::KERNEL_VMA;
+using cinux::arch::DIRECT_MAP_BASE;
 using cinux::drivers::dma::g_dma_pool;
 using cinux::lib::Error;
 using cinux::mm::g_pmm;
@@ -38,7 +38,7 @@ void test_alloc_mapped() {
     TEST_ASSERT_TRUE(buf.size() == 4096);
     TEST_ASSERT_TRUE(buf.phys() != 0);
     // virt must be phys in the higher-half direct-map window
-    TEST_ASSERT_EQ(reinterpret_cast<uint64_t>(buf.virt()), buf.phys() + KERNEL_VMA);
+    TEST_ASSERT_EQ(reinterpret_cast<uint64_t>(buf.virt()), buf.phys() + DIRECT_MAP_BASE);
     // mapping is live: translate agrees with phys
     TEST_ASSERT_EQ(g_vmm.translate(reinterpret_cast<uint64_t>(buf.virt())), buf.phys());
 }
@@ -56,8 +56,8 @@ void test_cpu_access() {
     TEST_ASSERT_TRUE(r.ok());
     auto              buf = std::move(r.value());
     volatile uint8_t* p   = reinterpret_cast<volatile uint8_t*>(buf.virt());
-    p[0]    = 0xAB;
-    p[4095] = 0xCD;
+    p[0]                  = 0xAB;
+    p[4095]               = 0xCD;
     TEST_ASSERT_EQ(p[0], 0xAB);
     TEST_ASSERT_EQ(p[4095], 0xCD);
 }
@@ -81,7 +81,7 @@ void test_free_restores_pages() {
         auto r = g_dma_pool.alloc(8192);  // 2 data pages
         TEST_ASSERT_TRUE(r.ok());
         auto buf = std::move(r.value());
-        mid = g_pmm.free_page_count();
+        mid      = g_pmm.free_page_count();
         TEST_ASSERT_TRUE(mid < before);  // alloc consumed pages
         g_dma_pool.free(buf);
         TEST_ASSERT_FALSE(buf.valid());
@@ -103,7 +103,7 @@ void test_destructor_releases() {
         auto r = g_dma_pool.alloc(4096);
         TEST_ASSERT_TRUE(r.ok());
         auto buf = std::move(r.value());
-        mid = g_pmm.free_page_count();
+        mid      = g_pmm.free_page_count();
     }  // ~DmaBuffer fires the release hook -> free_pages
     // Data page returned (direct-map PTE left in place by design).
     TEST_ASSERT_TRUE(g_pmm.free_page_count() > mid);

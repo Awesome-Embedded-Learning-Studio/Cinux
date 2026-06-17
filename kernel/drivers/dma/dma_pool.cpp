@@ -40,9 +40,9 @@ cinux::lib::ErrorOr<DmaBuffer> DmaPool::alloc(std::size_t size) {
         return cinux::lib::Error::OutOfMemory;
     }
 
-    // Map every page into the higher-half direct-map window.  virt = phys +
-    // KERNEL_VMA is unique per phys, so no virtual allocator is needed.
-    const uint64_t virt = phys + cinux::arch::KERNEL_VMA;
+    // Map every page into the direct-map window.  virt = phys + DIRECT_MAP_BASE
+    // is unique per phys, so no virtual allocator is needed.
+    const uint64_t virt = phys + cinux::arch::DIRECT_MAP_BASE;
     for (std::size_t i = 0; i < pages; i++) {
         const uint64_t v = virt + i * cinux::arch::PAGE_SIZE;
         const uint64_t p = phys + i * cinux::arch::PAGE_SIZE;
@@ -63,8 +63,8 @@ void DmaPool::return_pages(const DmaBuffer& buf) {
     if (!buf.valid()) {
         return;
     }
-    // Return the physical pages only.  The higher-half direct map
-    // (virt = phys + KERNEL_VMA) is a permanent phys<->virt correspondence
+    // Return the physical pages only.  The direct map
+    // (virt = phys + DIRECT_MAP_BASE) is a permanent phys<->virt correspondence
     // shared by the whole kernel -- unmapping a DMA buffer's window would
     // corrupt it and send later demand paging into an infinite remap loop (the
     // freed slot faults, the handler maps a *different* phys, faults again...).
