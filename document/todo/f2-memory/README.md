@@ -2,6 +2,8 @@
 
 > 为 Cinux 引入完整的虚拟内存管理：VMA 追踪、mmap、Page Cache、brk。
 > 解锁后续的共享内存(F8)、动态链接器(F10)、文件系统性能(F6)。
+>
+> **进度：M1-M6 ✅（2026-06-17）；下一 M7 Buddy（Slab 拆 M7b）。** 状态详见 `document/ai/PLAN.md`。
 
 ## 实现决策
 
