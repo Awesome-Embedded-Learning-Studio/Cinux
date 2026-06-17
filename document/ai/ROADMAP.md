@@ -11,7 +11,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F | 名称 | Milestones（状态） | 关键产出 |
 |---|------|--------------------|---------|
 | F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
-| F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging🔄 M6 ext2 Cache⏳ M7 Buddy+Slab⏳ | mmap/Page Cache/brk/分层分配器 |
+| F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache⏳ M7 Buddy+Slab⏳ | mmap/Page Cache/brk/分层分配器 |
 | F3 | 进程与线程 | M1 信号⏳ M2 clone/futex/TLS⏳ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
 | F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
@@ -25,7 +25,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
 
 ## 当前焦点
-**F2-M5 Demand Paging 重构 进行中**（2026-06-17 起：PF handler 加 VMA 硬门控——not-present user PF 无 VMA 命中→真 segfault 终止进程，兑现 M1 记账价值；命中合法 VMA→demand page 不变。决策：segfault 终止两方式批1 spike 后定（倾向直接 `exit_current`，`context_switch` 抛弃 prev 中断帧切 next）/ Stack VMA 扩 ~1MB 自动增长 / 只做无 VMA 门控（权限违规留后续，NX 因 NXE 未启用留 F9）；详见 `PLAN.md`）。F2 进度 4/7（M1-M4 ✅），M5 高风险（漏判→shell halt）。
+**F2-M5 Demand Paging 硬门控 ✅ 完成**（2026-06-17：PF handler not-present user PF 无 VMA 命中→`exit_current` 终止进程（user-mode `err&0x04` 判定，kernel-mode fault 容错不杀）；Stack VMA 扩 1MB 自动增长 + guard；730/0 回归 + GUI 实机启动到桌面不崩；详见 `PLAN.md`/`document/notes/2026-06-17-f2-m5-demand-paging.md`）。F2 进度 5/7（M1-M5 ✅）。下一焦点待定——F2-M6 ext2 Cache / F2-M7 Buddy+Slab / F4 SMP / F5-M2 VirtIO。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。

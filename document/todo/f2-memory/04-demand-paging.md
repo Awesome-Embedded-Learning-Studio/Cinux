@@ -1,5 +1,7 @@
 # M5: Demand Paging 增强
 
+> ✅ 已实现 2026-06-17（PF handler VMA 硬门控：not-present user PF 无 VMA→segfault(`exit_current`)；user-mode `err&0x04` 判定，kernel-mode fault 容错不杀；Stack VMA 扩 1MB 自动增长 + guard。3 批，730/0 回归 + GUI 实机启动到桌面不炸）。实际范围/决策以 `document/ai/PLAN.md` F2-M5 节 + `document/notes/2026-06-17-f2-m5-demand-paging.md` 为准；下为原始静态草案（SIGSEGV 信号(F3)/NX 强制(F9)/权限违规门控/segfault 进程资源清理等未做）。
+
 > 增强 page fault handler，支持 VMA 验证的按需分页。
 > 匿名映射零填充，文件映射从 Page Cache 填充。
 
