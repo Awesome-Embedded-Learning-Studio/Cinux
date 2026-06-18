@@ -416,6 +416,15 @@ int fork(PidAllocator& pid_alloc);
  */
 int clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t child_tid, uint64_t tls);
 
+/**
+ * @brief CLONE_CHILD_CLEARTID exit hook (F3-M2 batch 5)
+ *
+ * If @p task has a clear_child_tid set (CLONE_CHILD_CLEARTID), write 0 to that
+ * user address and futex_wake one waiter -- the pthread_join protocol.  Called
+ * from the exit path.  No-op when clear_child_tid == 0.
+ */
+void task_exit_cleartid(Task* task);
+
 // ============================================================
 // CoW page fault handling
 // ============================================================

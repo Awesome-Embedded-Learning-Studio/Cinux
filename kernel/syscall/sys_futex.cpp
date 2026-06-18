@@ -146,6 +146,11 @@ int64_t futex_wake(uint64_t uaddr, uint32_t max, uint32_t bitset) {
 
 }  // namespace
 
+int64_t futex_wake_addr(uint64_t uaddr, uint32_t max) {
+    // Kernel-internal wake (all bits); used by CLONE_CHILD_CLEARTID's exit path.
+    return futex_wake(uaddr, max, kFutexAllBits);
+}
+
 int64_t sys_futex(uint64_t uaddr, uint64_t op, uint64_t val, uint64_t /*timeout*/,
                   uint64_t /*uaddr2*/, uint64_t val3) {
     if (uaddr == 0) {

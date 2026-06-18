@@ -21,13 +21,20 @@
 
 #include "big_kernel_test.h"
 #include "kernel/fs/file.hpp"
+#include "kernel/proc/per_cpu.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"
 #include "kernel/proc/sync.hpp"
+#include "kernel/syscall/sys_futex.hpp"
 
 using cinux::proc::InterruptGuard;
 using cinux::proc::Scheduler;
+using cinux::proc::TaskBuilder;
+using cinux::proc::TaskState;
+using cinux::proc::g_per_cpu;
+using cinux::proc::task_exit_cleartid;
+using cinux::syscall::sys_futex;
 using cinux::proc::SharedCwd;
 using cinux::proc::SharedSigActions;
 using cinux::proc::Task;
@@ -45,6 +52,11 @@ constexpr uint64_t kCloneChildCleartid = 0x00200000;
 constexpr uint64_t kCloneChildSettid   = 0x01000000;
 
 constexpr uint64_t kSyscallFrameSize = 96;
+
+constexpr uint64_t FUTEX_WAIT = 0;
+
+// A do-nothing entry for built tasks (they never truly run).
+void dummy_entry() {}
 
 uint64_t child_user_rsp(const Task* child) {
     return *reinterpret_cast<const uint64_t*>(child->kernel_stack_top - kSyscallFrameSize);
@@ -218,6 +230,45 @@ void test_sighand_without_vm_is_einval() {
 
 }  // namespace test_clone_tid_tls
 
+// ============================================================
+// CLONE_CHILD_CLEARTID exit hook (batch 5)
+// ============================================================
+
+namespace test_clone_cleartid {
+
+void test_exit_cleartid_zeros_and_wakes() {
+    // The child_tid word lives in "user" memory; the exit hook must zero it
+    // and futex_wake any pthread_join waiter.
+    Scheduler::init();
+    static uint32_t ctid_word = 42;
+
+    // A waiter task blocks on FUTEX_WAIT(&ctid_word, 42).  The phantom-task
+    // pattern (g_per_cpu.current, not set_current) makes block() return at
+    // once with state == Blocked.
+    Task* waiter = TaskBuilder().set_entry(dummy_entry).set_name("clr_waiter").build();
+    TEST_ASSERT_NOT_NULL(waiter);
+    g_per_cpu.current = waiter;
+    int64_t w         = sys_futex(reinterpret_cast<uint64_t>(&ctid_word), FUTEX_WAIT, 42, 0, 0, 0);
+    TEST_ASSERT_EQ(w, 0);
+    TEST_ASSERT_EQ(static_cast<int>(waiter->state), static_cast<int>(TaskState::Blocked));
+
+    // The exiting thread has clear_child_tid pointing at the word.
+    Task exiter{};
+    exiter.clear_child_tid = reinterpret_cast<uint64_t>(&ctid_word);
+    task_exit_cleartid(&exiter);
+
+    TEST_ASSERT_EQ(ctid_word, 0u);  // zeroed
+    TEST_ASSERT_EQ(static_cast<int>(waiter->state),
+                   static_cast<int>(TaskState::Ready));  // joiner woken
+
+    // No-op when clear_child_tid == 0.
+    Task none{};
+    none.clear_child_tid = 0;
+    task_exit_cleartid(&none);  // must not crash
+}
+
+}  // namespace test_clone_cleartid
+
 extern "C" void run_clone_tests() {
     TEST_SECTION("Clone Tests (F3-M2-4)");
 
@@ -231,6 +282,8 @@ extern "C" void run_clone_tests() {
     RUN_TEST(test_clone_tid_tls::test_settls_sets_fs_base);
     RUN_TEST(test_clone_tid_tls::test_child_cleartid_settid_recorded);
     RUN_TEST(test_clone_tid_tls::test_sighand_without_vm_is_einval);
+
+    RUN_TEST(test_clone_cleartid::test_exit_cleartid_zeros_and_wakes);
 
     TEST_SUMMARY();
 }

@@ -39,4 +39,15 @@ namespace cinux::syscall {
 int64_t sys_futex(uint64_t uaddr, uint64_t op, uint64_t val, uint64_t timeout, uint64_t uaddr2,
                   uint64_t val3);
 
+/**
+ * @brief Wake up to @p max waiters on futex word @p uaddr (all bits).
+ *
+ * Kernel-internal wake used by CLONE_CHILD_CLEARTID's exit path (F3-M2 batch 5):
+ * when a thread exits it zeros its child_tid and wakes any pthread_join waiter.
+ * Same logic as FUTEX_WAKE without the syscall boundary.
+ *
+ * @return number of waiters woken.
+ */
+int64_t futex_wake_addr(uint64_t uaddr, uint32_t max);
+
 }  // namespace cinux::syscall
