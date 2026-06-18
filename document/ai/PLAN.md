@@ -7,6 +7,7 @@
 > **F2-M6 = ext2 Cache ✅ 完成（2026-06-17）**。
 > **F2-M7 Buddy PMM ✅ 完成（2026-06-18，fresh KVM 742/0 + GUI 冒烟）**：buddy 伙伴系统替换 PMM flat bitmap（per-order bitmap free-list，非侵入式）。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**详见下方「F2-M7 Buddy PMM」段 + `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**。solid 基线 = main（M6 #12，734）。F2 进度 7/7 + M7b（M1-M7 ✅，**M7b SLAB ✅ 完成 2026-06-18**：kmalloc 全替 Heap + 专用缓存 Task/VMA/CachedPage，见下方「F2-M7b」段）。
 > **FO 可观测性/调试基建 ✅ 完成（2026-06-18，763/0 + panic 冒烟）**：frame pointer + KALLSYMS lookup + 防御 backtrace + 统一 panic handler（收编 dump_registers/kpanic/fatal_halt + backtrace + memstats）+ dump_memory_stats。关键 GOTCHA：`CMAKE_BUILD_TYPE` 默认空(-O0)→ 首次 -O2 Release 验证全绿（建议 CI 加 -O2 门禁）；`VMM::translate()` 不支持 huge 页 → backtrace 改栈范围检查；kprintf 不支持 `%zu`。**M5 崩溃持久化推迟**（持久化层前提不满足）、**1b 真实符号注入 follow-up**（CMake 两阶段，裸地址+addr2line 降级）。详见 `document/notes/2026-06-18-fo-observability.md`。
+> **F3-M1 信号系统 ✅ 完成（2026-06-18，5 批，763→783）**：核心 POSIX 信号（Signal/SigSet/SigAction）+ 投递（send/pick/check_and_deliver）+ kill/sigaction/sigprocmask/sigreturn + Custom handler round-trip（中断路径 + int $0x80 trampoline）+ 集成（PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE）。详见下方「F3-M1 信号」段 + `document/notes/2026-06-18-f3-m1-signals.md`。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -175,6 +176,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 13. **direct-map 独立窗口 + KERNEL_VMA 重载区分**（F2-M7 direct-map 前置教训，2026-06）：`phys_to_virt` 用 `DIRECT_MAP_BASE=0xFFFF880000000000`（PML4[272]，loader 1GB/2MB 大页 identity 映全 RAM），**不是** KERNEL_VMA。KERNEL_VMA 窗口硬限 2GB 且 boot 只映 higher-half 0-1GB，phys>1GB 落未映射处 demand-page 非 identity（latent bug，buddy 侵入式链表写 high phys 触发 PF 重入踩烂 → 死循环）。`-cpu max` 仅 KVM 时设（qemu.cmake），无 KVM 落回 qemu64 不暴露 PDPE1GB → direct_map_up_to 必有 2MB 页 fallback。**迁移严判**：访问任意 PMM 页（页表/DMA/缓存页/GS）是 direct-map→DIRECT_MAP_BASE；kernel image 相对（pmm bitmap `__kernel_stack_top - KERNEL_VMA`、kernel 链接基址、boot higher-half PT）保留 KERNEL_VMA。direct-map PT 页放 [0x10000,0x20000)（<1MB 不过 PMM，持久）。**direct-map 区域（PML4[272]，`DIRECT_MAP_BASE+…`）严禁 `VMM.map/unmap/translate`**：direct-map 是 loader 建的 1GB/2MB huge 永久 identity 映射，全栈共享。`VMM::map` 内 `walk_level` 遇 huge entry（PS bit）会 **split**（拆成 4KB PT + 改写原 entry）；对 direct-map 的 1GB huge 触发即破坏全局 direct-map → 后续 `phys_to_virt` walk 错乱命中 phys 0 BIOS 数据当 PT → reserved-bit PF（err=0x9）。教训：M3 `DmaPool::alloc` 旧逻辑对 virt 调 `g_vmm.map`（M3 时 virt 在 KERNEL_VMA 窗口，map 无害），批2 迁 direct-map 后漏删 map → 首次 AHCI `g_dma_pool.alloc` 即崩（`test_cache_reads_real_file`，fresh build 才暴露）。修法：direct-map 复用 loader 永久映射——alloc 只取 phys（virt=phys+DIRECT_MAP_BASE 直接可用，**不 map**），free 只 free phys（**不 unmap**）。`VMM.translate` 对 huge 也不支持（walk_level huge+!alloc 返 nullptr），故 direct-map virt 不该经 translate 验证。
 14. **WSL2 nested KVM（AMD）EPT 对侵入式 free-list 写读不一致**（F2-M7 Bug2 教训，2026-06-18）：buddy 初版侵入式 free-list 把 `next` 指针写在 free 页头（经 direct-map `phys+DIRECT_MAP_BASE`），依赖 direct-map 写读严格一致。WSL2 nested KVM（AMD `-accel kvm -cpu max`，hypervisor flag=14）EPT 对「huge page 内 sub-page 写」做不到一致——同地址 `0xFFFF880040000000`（phys 1GB）main 单次读返 valid（260096）、buddy op 读返 poison（`0xCAFEBABEDEADC0DE`），振荡→`pop_free` 遍历 #GP（`test_wm_close_button_closes_terminal_pipes`）。**TCG（`CINUX_NO_KVM=1`，2MB path）742/0 全绿**证明 buddy wiring 本身正确（根因 nested KVM 物理层，非逻辑 bug）。**修 = buddy 改非侵入式 per-order bitmap free-list**（bitmap 存 metadata 区，不写 free 页，KVM nested safe；`find_first_set` 天然 low-first）。诊断教训：CHK（main 单次读）valid ↔ buddy op 读 poison 的**同地址振荡**→ nested KVM EPT 嫌疑；**TCG 对比（`CINUX_NO_KVM` env）是定位物理层 bug 的利器**（逻辑层错 TCG 也复现，物理层错 TCG 绿）。凡依赖 direct-map sub-page 写读一致的侵入式结构（free-list/对象头）在 nested KVM 都有此风险，优先用 metadata 数组。
 15. **slab 复用暴露按指针键控的缓存（F2-M7b 批2 教训，2026-06-18）**：page cache 原按 `Inode*` 指针做 hash/lookup 键。slab（正确）复用已释放 Inode 的内存地址给新 Inode → 新文件查 cache 时**命中陈旧页**（旧文件内容），`sys_read` 返回错字节（`test_shell_write` echo-redirect 读回 `"Hello from e"` 而非 `"hello world\n"`；Heap first-fit 侥幸不复用同地址故潜伏）。**根因非 slab**（复用是 slab 本职），是 page cache 用可复用指针当稳定键。修：cache 改按 `inode->ino`（稳定号）键控（hash/lookup/insert）。**通用铁律**：任何按对象指针/地址键控的在线结构（cache/table），当对象经 slab/heap 分配释放时都有同款陈旧命中风险，键须用稳定标识（id/number）而非指针。
+16. **sigreturn 栈注入 trampoline 依赖 NXE 关闭 + Custom 走中断路径（F3-M1 教训，2026-06-18）**：Custom handler 的 sigreturn trampoline 是栈上 `int $0x80`（cd 80）代码，handler 返回地址指向它 —— 依赖栈页可执行。NXE 未启用（GOTCHA#10）故可行。**F9 启用 NXE 后栈不可执行，trampoline 失效，须迁 vdso/独立可执行页**。另：`syscall.S` 只保存精简帧（user_rsp/rip/rflags + 6 参 + rbx/rbp，**无 R12-R15**），sigreturn 经 syscall 无法完整恢复用户上下文 —— 故 Custom signal 投递挂**中断/异常返回路径**（ISR 宏 `call handler` 后 `signal_check_deliver_isr`），sigreturn 经 **IDT vector 0x80 trap gate（DPL=3）** 收完整 InterruptFrame 恢复；syscall 路径（`signal_check_and_deliver`）只投递 Default/Ignore，Custom 留 pending 给下次 IRQ0（时钟，延迟可忽略）。`signal_check_deliver_isr` 严判 `frame->cs & 0x03`（只用户态投递）—— kernel-test 全 ring0 中断点 skip，保护测试设的 pending 栈 task 不被误投递（exit_current 切走栈 task 崩）。
 
 ## ✅ direct-map 独立窗口（F2-M7 前置）Bug1 已修 — 2026-06-17（fresh build 734/0）
 
@@ -250,3 +252,27 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 | 收尾 | 文档(本文+ROADMAP+todo) + 全量 run-kernel-test + host test_host + 实机冒烟 | ✅ | (本次) | 734/0 + host 49/0 + 实机不炸 |
 
 **完成总结**（730→734，F2-M6 +4）：read() 缓存路径落地——`PageCache::read_bytes(inode,off,buf,count)`（按页对齐切片复用 M4 `get_page`：命中免读盘 / 未命中填充+EOF 零填，EOF 以 `inode->size` 截断，partial-read 回已读量）+ `InodeOps::is_page_cacheable()` virtual（默认 false，Ext2FileOps override true；pipe type 也 Regular 故 type 不可靠，禁 RTTI 用 virtual 判别）+ `sys_read` 分流（cacheable→read_bytes，否则原 inode->ops->read，pipe/ramdisk 不变）。架构：A.6 ErrorOr；避免递归（read_bytes 新函数，Ext2FileOps::read 读盘原语不改）；翻译边界 errno 不变。验证：批1 单测（read_bytes 缓存机制）+ 批2 真机端到端（AHCI/ext2 读两遍 hit_count 升 = sys_read→read_bytes 接线铁证）+ host test_host 49/0（InodeOps virtual 源码兼容）+ 生产内核启动到 GUI 桌面不炸。遗留：脏页写回 / MAP_SHARED 写一致性 / LRU 淘汰 / 跨进程 CoW 留后续（F3）。
+
+## ✅ F3-M1（信号系统）已完成 — 2026-06-18（fresh 783/0 + 实机 GUI 冒烟）
+
+> 目标：从零构建 POSIX 信号（核心 22 个）：投递/处理/屏蔽 + Custom handler round-trip + kill/sigaction/sigprocmask/sigreturn + PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE 集成。解锁 TTY/shell（依赖瓶颈）。
+> 决策（propose 已确认）：
+> - **#1 Custom 走中断路径，不改 syscall.S**：syscall.S 精简帧（无 R12-R15）不能 sigreturn 完整恢复；Custom 在中断/异常返回路径投递（ISR 宏 `signal_check_deliver_isr`），sigreturn 经 IDT vector 0x80 trap gate（DPL=3）收完整 InterruptFrame。syscall 路径只 Default/Ignore。
+> - **#2 栈注入 trampoline**：handler 返回地址指向栈上 `int $0x80`（cd 80）。依赖 NXE 关闭（GOTCHA#10），F9 启用迁 vdso。
+> - **#3 MVP 范围**：核心 22 信号 + Default/Ignore/Custom；实时信号/sigaltstack/SA_RESTART/嵌套/STOP-CONT 真效果留后续。
+> - **#4 SIGCHLD + waitpid non-blocking**：exit 投 SIGCHLD（default Ignore），waitpid 轮询，阻塞唤醒留 TODO（wait_queue 同 F3-M2）。
+> 不做：实时信号、job-control 真调度、waitpid 阻塞、进程组 kill（F3-M3）、F9 NXE 后 trampoline 迁 vdso。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | signal.hpp（Signal enum 22 + SigSet ops + SigAction + default/uncatchable 查表）+ Task 信号字段 + fork 继承（清 pending）+ 单测 | ✅ | 860cf86 | 770/0（+7）|
+| 批2 | signal.cpp（send/pick/exec_default/check_and_deliver + pid→Task 注册表）+ kill/sigaction/sigprocmask + syscall_dispatch 挂载 + 单测 | ✅ | bd558c8 | 780/0（+10）|
+| 批3 | SignalFrame + signal_setup_frame + sigreturn_handler + 中断路径投递（ISR 宏 signal_check_deliver_isr）+ IDT vector 0x80 gate + int $0x80 trampoline + 单测 | ✅ | f9f0e9a | 782/0（+2）|
+| 批4 | 集成：PF→SIGSEGV（handle_pf）+ exit→SIGCHLD（sys_exit）+ write→SIGPIPE + registry 单测 | ✅ | c623fbb | 783/0（+1）|
+| 批5 | 收尾：libc signal wrapper（syscall.h/.cpp）+ 文档（PLAN/ROADMAP/todo/notes/GOTCHA）+ 实机冒烟 | ✅ | (本次) | 783/0 + GUI 启动到桌面 |
+
+**完成总结**（763→783，F3-M1 +20）：POSIX 信号落地——`Signal`（22 核心号）+ `SigSet`（64-bit bitmask）+ `SigAction`（Default/Ignore/Custom）+ Task 信号字段（sig_actions[23]/sig_pending/sig_blocked，fork 继承清 pending）+ 投递（`signal_send` 设 pending / `signal_pick_deliverable` 选信号 / `signal_exec_default` 默认动作 / `signal_check_and_deliver` syscall 路径 / `signal_check_deliver_isr` 中断路径）+ pid→Task 注册表（sys_kill 查找）+ signal frame（用户栈构造 + `int $0x80` trampoline）+ sigreturn（vector 0x80 gate 收 InterruptFrame 恢复）+ 集成（PF→SIGSEGV / exit→SIGCHLD / write→SIGPIPE）+ libc wrapper（sys_kill/sys_sigaction/sys_sigprocmask）。架构：A.6 边界（signal_send 返 -errno）；syscall handler 6 参；Custom 投递挂中断返回路径（避开 syscall.S 精简帧 sigreturn 限制）；栈注入 trampoline（NXE 关闭可行，F9 迁 vdso）。
+
+关键教训 **GOTCHA#16**（sigreturn 栈注入依赖 NXE 关闭 + Custom 走中断路径 + signal_check_deliver_isr 严判 cs&3）。
+
+验证：fresh run-kernel-test 763→**783/0**（+20 signal 单测）+ 实机 `make run` 生产内核启动到 GUI 桌面（Desktop icons / gui_worker），signal_check_deliver_isr 在每个中断（PIT/AHCI）后高频跑全程不炸，kernel_init exit→SIGCHLD 投递不炸。**Custom handler 真用户态 round-trip 留后续**（libc wrapper 已就绪，需用户程序触发）。下个焦点：F3-M2 clone + futex + TLS。
