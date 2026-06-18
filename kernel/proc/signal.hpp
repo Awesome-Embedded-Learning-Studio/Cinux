@@ -1,12 +1,17 @@
 /**
  * @file kernel/proc/signal.hpp
- * @brief POSIX signal vocabulary and per-task disposition (F3-M1)
+ * @brief POSIX signal vocabulary, disposition, and delivery (F3-M1)
  *
  * Defines the core signal numbers (Signal), the 64-bit signal set (SigSet),
- * the per-signal disposition (SigAction), and the lookup helpers for the
- * default disposition and the uncatchable predicate.  Delivery machinery
- * (signal_send / signal_check_and_deliver) and the syscall surface
- * (kill / sigaction / sigprocmask / sigreturn) arrive in later batches.
+ * the per-signal disposition (SigAction), the lookup helpers, the delivery
+ * machinery, and the signal-frame layout used to enter/return from custom
+ * user handlers.
+ *
+ *   Batch 1: vocabulary, dispositions, lookup helpers.
+ *   Batch 2: pid->Task registry, signal_send, deliverable selection,
+ *            default-action execution, syscall-path check-and-deliver.
+ *   Batch 3: signal frame + custom-handler delivery on the interrupt return
+ *            path, and sigreturn via an int $0x80 trampoline.
  *
  * Namespace: cinux::proc
  */
@@ -14,6 +19,10 @@
 #pragma once
 
 #include <stdint.h>
+
+namespace cinux::arch {
+struct InterruptFrame;  // full definition in idt.hpp
+}  // namespace cinux::arch
 
 namespace cinux::proc {
 
@@ -134,23 +143,60 @@ void signal_unregister_task(Task* task);
 Task* signal_find_task_by_pid(int pid);
 
 // ============================================================
-// Delivery (F3-M1 batch 2; custom-handler frames arrive in batch 3)
+// Delivery
 // ============================================================
 
 /// Queue @p sig on @p target's pending set.  Returns 0 / -errno.
 int signal_send(Task* target, Signal sig);
 
-/// Pick the next deliverable signal for @p task (Default/Ignore only; Custom
-/// is deferred to batch 3), clear its pending bit, return its number.
+/// Pick the next deliverable signal for @p task, clear its pending bit, and
+/// return its number.  When @p allow_custom is false (the syscall return
+/// path, which cannot build a signal frame) Custom dispositions are skipped;
+/// when true (the interrupt return path) they are returned for delivery.
 /// Returns 0 when nothing is deliverable.
-int signal_pick_deliverable(Task* task);
+int signal_pick_deliverable(Task* task, bool allow_custom = false);
 
 /// Apply the default disposition for @p sig on @p task.  May terminate the
 /// task (does not return in that case).
 void signal_exec_default(Task* task, Signal sig);
 
-/// Top-level delivery entry: pick and act on one pending signal for the
-/// current task.  Called on the return-to-user path.
+/// Top-level delivery entry for the syscall return path: pick and act on one
+/// pending signal for the current task (Default/Ignore only; Custom is left
+/// for the interrupt path which can build a frame).
 void signal_check_and_deliver();
+
+// ============================================================
+// Signal frame & custom-handler delivery (batch 3)
+// ============================================================
+
+/// Magic written into a SignalFrame so sigreturn can sanity-check the frame.
+constexpr uint64_t kSigFrameMagic = 0x5349474652414D45ULL;  // "SIGFRAME"
+
+/// Saved user context pushed onto the user stack when a custom handler is
+/// entered, and consumed by sigreturn to restore that context.  The layout
+/// mirrors the general-purpose register portion of InterruptFrame.
+struct SignalFrame {
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+    uint64_t rdi, rsi, rbp, rdx, rcx, rbx, rax;
+    uint64_t rip;     ///< Interrupted user RIP
+    uint64_t rflags;  ///< Interrupted user RFLAGS
+    uint64_t rsp;     ///< Interrupted user RSP (before the frame was pushed)
+    uint64_t sig;     ///< Signal number being delivered
+    uint64_t magic;   ///< kSigFrameMagic
+};
+
+/// Build a signal frame on the user stack (saved context + int $0x80
+/// trampoline + return address) and redirect @p frame to enter @p handler.
+void signal_setup_frame(cinux::arch::InterruptFrame* frame, Signal sig, uint64_t handler_addr,
+                        SigSet sa_mask);
+
+/// Interrupt-path delivery: pick and act on one pending signal when about to
+/// return to user mode.  Extern "C" -- called from the ISR stubs (interrupts.S).
+extern "C" void signal_check_deliver_isr(cinux::arch::InterruptFrame* frame);
+
+/// sigreturn: restore the user context saved by signal_setup_frame.  Entered
+/// via the int $0x80 trampoline each handler returns to.  Extern "C" --
+/// invoked through a dedicated IDT gate (vector 0x80).
+extern "C" void sigreturn_handler(cinux::arch::InterruptFrame* frame);
 
 }  // namespace cinux::proc

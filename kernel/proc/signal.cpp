@@ -1,21 +1,29 @@
 /**
  * @file kernel/proc/signal.cpp
- * @brief Signal disposition lookup, task registry, and delivery (F3-M1)
+ * @brief Signal disposition lookup, task registry, delivery, and frames (F3-M1)
  *
  * Batch 1: default-disposition table + uncatchable predicate.
  * Batch 2: pid->Task registry, signal_send, deliverable selection, default
- *          action execution, and the top-level check-and-deliver entry.
+ *          action execution, syscall-path check-and-deliver.
+ * Batch 3: custom-handler delivery on the interrupt return path (builds a
+ *          signal frame on the user stack + an int $0x80 trampoline) and
+ *          sigreturn to restore the saved context.
  *
  * Namespace: cinux::proc
  */
 
 #include "kernel/proc/signal.hpp"
 
+#include <stdint.h>
+
+#include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
 
 namespace cinux::proc {
+
+using cinux::arch::InterruptFrame;
 
 namespace {
 
@@ -26,6 +34,13 @@ namespace {
 // ============================================================
 
 Task* g_registry_head = nullptr;
+
+// int $0x80 (opcode cd 80) followed by nops to fill an 8-byte slot.  This is
+// the sigreturn trampoline written onto the user stack; the handler's return
+// address points here, so `ret` lands on `int $0x80` which traps into the
+// sigreturn IDT gate (vector 0x80).  Requires the user stack to be executable
+// (NXE is off until F9 -- see GOTCHA).
+constexpr uint8_t kSigreturnTrampoline[8] = {0xCD, 0x80, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
 
 }  // namespace
 
@@ -117,7 +132,7 @@ int signal_send(Task* target, Signal sig) {
     return 0;
 }
 
-int signal_pick_deliverable(Task* task) {
+int signal_pick_deliverable(Task* task, bool allow_custom) {
     if (task == nullptr) {
         return 0;
     }
@@ -126,9 +141,10 @@ int signal_pick_deliverable(Task* task) {
         if ((avail & (SigSet{1} << n)) == 0) {
             continue;
         }
-        // Batch 2 delivers only Default/Ignore dispositions.  Custom handlers
-        // need a signal frame (built in batch 3), so leave them pending.
-        if (task->sig_actions[n].type == HandlerType::kCustom) {
+        // Custom handlers need a signal frame.  The syscall return path
+        // (allow_custom=false) cannot build one, so it skips them; the
+        // interrupt path (allow_custom=true) delivers them.
+        if (!allow_custom && task->sig_actions[n].type == HandlerType::kCustom) {
             continue;
         }
         task->sig_pending &= ~(SigSet{1} << n);
@@ -163,7 +179,7 @@ void signal_check_and_deliver() {
     if (task == nullptr) {
         return;
     }
-    int n = signal_pick_deliverable(task);
+    int n = signal_pick_deliverable(task, /*allow_custom=*/false);
     if (n == 0) {
         return;
     }
@@ -176,10 +192,128 @@ void signal_check_and_deliver() {
     case HandlerType::kIgnore:
         break;
     case HandlerType::kCustom:
-        // Batch 3: build a signal frame on the user stack and redirect RIP to
-        // the user handler; sigreturn restores the saved context.
+        // Left pending; delivered on the interrupt return path (batch 3).
         break;
     }
+}
+
+// ============================================================
+// Custom-handler delivery + sigreturn (batch 3)
+// ============================================================
+
+void signal_setup_frame(InterruptFrame* frame, Signal sig, uint64_t handler_addr, SigSet sa_mask) {
+    (void)sa_mask;  // TODO: block sa_mask (+ sig) during the handler
+    const uint64_t user_rsp = frame->rsp;
+    // Align so the handler entry RSP satisfies the SysV AMD64 ABI (RSP%16==8).
+    const uint64_t pad      = user_rsp & 0x0F;  // 0 or 8
+
+    // Layout (low -> high address):
+    //   trampoline code (8B)        @ T
+    //   return-addr slot (= T)      @ R        <- handler RSP
+    //   SignalFrame                 @ R+8      <- sigreturn reads here
+    //   (alignment pad)             @ R+8+sizeof(SignalFrame)
+    //   original user RSP           @ U
+    const uint64_t R  = user_rsp - pad - 8 - sizeof(SignalFrame);
+    const uint64_t T  = R - 8;
+    auto*          sf = reinterpret_cast<SignalFrame*>(R + 8);
+
+    // Save the interrupted user context.
+    sf->r15    = frame->r15;
+    sf->r14    = frame->r14;
+    sf->r13    = frame->r13;
+    sf->r12    = frame->r12;
+    sf->r11    = frame->r11;
+    sf->r10    = frame->r10;
+    sf->r9     = frame->r9;
+    sf->r8     = frame->r8;
+    sf->rdi    = frame->rdi;
+    sf->rsi    = frame->rsi;
+    sf->rbp    = frame->rbp;
+    sf->rdx    = frame->rdx;
+    sf->rcx    = frame->rcx;
+    sf->rbx    = frame->rbx;
+    sf->rax    = frame->rax;
+    sf->rip    = frame->rip;
+    sf->rflags = frame->rflags;
+    sf->rsp    = user_rsp;
+    sf->sig    = static_cast<uint64_t>(sig);
+    sf->magic  = kSigFrameMagic;
+
+    // Trampoline code + return address pointing at it.
+    auto* tramp = reinterpret_cast<uint8_t*>(T);
+    for (int i = 0; i < 8; i++) {
+        tramp[i] = kSigreturnTrampoline[i];
+    }
+    *reinterpret_cast<uint64_t*>(R) = T;
+
+    // Redirect the interrupted frame to enter the handler with sig as %rdi.
+    frame->rip = handler_addr;
+    frame->rsp = R;
+    frame->rdi = static_cast<uint64_t>(sig);
+    frame->rax = 0;
+}
+
+extern "C" void signal_check_deliver_isr(InterruptFrame* frame) {
+    Task* task = Scheduler::current();
+    if (task == nullptr) {
+        return;
+    }
+    // Only deliver when returning to user mode; a signal that arrives while
+    // the kernel is running is deferred to the next user-mode return.
+    if ((frame->cs & 0x03) == 0) {
+        return;
+    }
+    int n = signal_pick_deliverable(task, /*allow_custom=*/true);
+    if (n == 0) {
+        return;
+    }
+    Signal           sig = static_cast<Signal>(n);
+    const SigAction& act = task->sig_actions[n];
+    switch (act.type) {
+    case HandlerType::kDefault:
+        signal_exec_default(task, sig);  // may not return (terminate)
+        break;
+    case HandlerType::kIgnore:
+        break;
+    case HandlerType::kCustom:
+        signal_setup_frame(frame, sig, act.handler_addr, act.sa_mask);
+        break;
+    }
+}
+
+extern "C" void sigreturn_handler(InterruptFrame* frame) {
+    // The handler returned into the int $0x80 trampoline.  user RSP points
+    // just past the return-address slot, i.e. at the saved SignalFrame.
+    auto* sf = reinterpret_cast<SignalFrame*>(frame->rsp);
+    if (sf->magic != kSigFrameMagic) {
+        cinux::lib::kprintf("[SIGNAL] sigreturn: bad frame magic %p -- killing task\n",
+                            reinterpret_cast<void*>(sf->magic));
+        if (Task* task = Scheduler::current(); task != nullptr) {
+            task->exit_status = static_cast<int>(Signal::kSigkill);
+            Scheduler::exit_current();  // does not return
+        }
+        return;
+    }
+    // Restore the interrupted user context into the frame; the ISR stub will
+    // pop the GPRs and IRETQ using these values.
+    frame->r15    = sf->r15;
+    frame->r14    = sf->r14;
+    frame->r13    = sf->r13;
+    frame->r12    = sf->r12;
+    frame->r11    = sf->r11;
+    frame->r10    = sf->r10;
+    frame->r9     = sf->r9;
+    frame->r8     = sf->r8;
+    frame->rdi    = sf->rdi;
+    frame->rsi    = sf->rsi;
+    frame->rbp    = sf->rbp;
+    frame->rdx    = sf->rdx;
+    frame->rcx    = sf->rcx;
+    frame->rbx    = sf->rbx;
+    frame->rax    = sf->rax;
+    frame->rip    = sf->rip;
+    frame->rflags = sf->rflags;
+    frame->rsp    = sf->rsp;
 }
 
 }  // namespace cinux::proc
