@@ -257,6 +257,22 @@ void test_kill_self_pends() {
     TEST_ASSERT_TRUE(sig_is_member(t.sig_pending, Signal::kSighup));
 }
 
+void test_kill_via_registry() {
+    // F3-M1 batch 4: sys_kill resolves a target pid through the global task
+    // registry rather than the current task.
+    Task             t1{};  // current (the killer)
+    Task             t2{};  // target (registered, distinct pid)
+    CurrentTaskGuard guard(&t1);
+    t1.pid   = 1;
+    t2.pid   = 100;
+    t2.state = TaskState::Running;
+    signal_register_task(&t2);
+    TEST_ASSERT_EQ(sys_kill(100, static_cast<uint64_t>(Signal::kSigusr1), 0, 0, 0, 0), 0);
+    TEST_ASSERT_TRUE(sig_is_member(t2.sig_pending, Signal::kSigusr1));   // target hit
+    TEST_ASSERT_FALSE(sig_is_member(t1.sig_pending, Signal::kSigusr1));  // killer untouched
+    signal_unregister_task(&t2);
+}
+
 }  // namespace test_sig_syscall
 
 // ============================================================
@@ -356,6 +372,7 @@ extern "C" void run_signal_tests() {
     RUN_TEST(test_sig_syscall::test_sigprocmask_block_unblock);
     RUN_TEST(test_sig_syscall::test_sigprocmask_cannot_block_sigkill);
     RUN_TEST(test_sig_syscall::test_kill_self_pends);
+    RUN_TEST(test_sig_syscall::test_kill_via_registry);
 
     RUN_TEST(test_sig_frame::test_setup_frame_redirects_to_handler);
     RUN_TEST(test_sig_frame::test_sigreturn_restores_context);
