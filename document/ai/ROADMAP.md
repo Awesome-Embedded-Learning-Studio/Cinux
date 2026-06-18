@@ -12,7 +12,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 |---|------|--------------------|---------|
 | F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
 | F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache✅ M7 Buddy✅ M7b Slab✅ | mmap/Page Cache/brk/分层分配器 |
-| F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS🔄 M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
+| F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS✅ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
 | F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
@@ -38,7 +38,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 
 下个焦点：F3-M2 clone + futex + TLS。
 
-**F3-M2 线程支持 🔄 NEXT（propose 已确认 2026-06-18）**：clone(56) + futex(202) + TLS(fs_base) + 线程组。**决策：共享资源 refcount 指针化（sig_actions/fd_table/cwd 引用计数共享对象，CLONE_SIGHAND/FILES/FS 真共享，POSIX 正确，非 MVP 拷贝）**；futex = WAIT/WAKE + BITSET。5 批：①TLS(fs_base) ②futex ③共享 refcount 基建+retrofit fork ④线程组+clone 核心 ⑤集成 cleartid+libc+闭环。**R1 风险：clone 子进程用户栈返回（syscall.S 帧 user_rsp 槽 patch）→ GOTCHA#17**。详见 PLAN「🔄 F3-M2」段。
+**F3-M2 线程支持 ✅ 完成（2026-06-18：clone(56) + futex(202) + TLS(fs_base) + 线程组 + cleartid。5 批 783→810/0。共享资源 refcount 指针化（sig_actions/fd_table/cwd 真共享）；clone 子进程用户栈返回（patch syscall.S 帧 user_rsp 槽，GOTCHA#18）；cleartid exit 集成 + libc wrapper。关键踩坑 GOTCHA#17-20。**真用户态线程 round-trip + 实机 GUI 冒烟 + AddressSpace refcount + futex timeout 留 follow-up**。详见 PLAN「✅ F3-M2」段 + `document/notes/2026-06-18-f3-m2-*.md`）。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
