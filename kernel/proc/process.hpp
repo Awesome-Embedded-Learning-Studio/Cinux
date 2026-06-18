@@ -67,7 +67,14 @@ enum class TaskState : uint8_t {
  * rip need to be saved/restored because the switch happens at known
  * call boundaries where caller-saved registers are already clobbered.
  *
+ * The FS/GS base MSRs are also saved here so each task keeps its own
+ * TLS (FS) and per-CPU swapgs (GS) state across switches.  fs_base is
+ * the per-thread TLS pointer (MSR_FS_BASE); gs_base/kgs_base carry the
+ * swapgs pair used for per-CPU kernel data.
+ *
  * Layout must match the offsets used in context_switch.S exactly.
+ * Note: alignas(16) pads the explicit 88-byte payload to 96 bytes;
+ * bytes 88..95 are unused alignment padding (never accessed by asm).
  */
 struct alignas(16) CpuContext {
     uint64_t r15;
@@ -80,6 +87,7 @@ struct alignas(16) CpuContext {
     uint64_t rip;
     uint64_t gs_base;
     uint64_t kgs_base;
+    uint64_t fs_base;  ///< Per-thread TLS base (MSR_FS_BASE 0xC0000100), F3-M2
 };
 
 static_assert(offsetof(CpuContext, r15) == 0, "r15 at offset 0");
@@ -92,7 +100,8 @@ static_assert(offsetof(CpuContext, rsp) == 48, "rsp at offset 48");
 static_assert(offsetof(CpuContext, rip) == 56, "rip at offset 56");
 static_assert(offsetof(CpuContext, gs_base) == 64, "gs_base at offset 64");
 static_assert(offsetof(CpuContext, kgs_base) == 72, "kgs_base at offset 72");
-static_assert(sizeof(CpuContext) == 80, "CpuContext must be 80 bytes");
+static_assert(offsetof(CpuContext, fs_base) == 80, "fs_base at offset 80");
+static_assert(sizeof(CpuContext) == 96, "CpuContext must be 96 bytes (alignas(16) pads 88->96)");
 
 // ============================================================
 // Task Control Block

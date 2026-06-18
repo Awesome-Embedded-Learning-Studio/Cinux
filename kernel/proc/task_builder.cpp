@@ -109,6 +109,7 @@ Task* TaskBuilder::build() {
     task->ctx.rbx      = 0;
     task->ctx.gs_base  = 0;
     task->ctx.kgs_base = g_per_cpu.gs_page_vaddr;
+    task->ctx.fs_base  = 0;  // F3-M2: no TLS until clone(CLONE_SETTLS)
 
     __asm__ volatile("fninit");
     __asm__ volatile("fxsave %0" : : "m"(task->fpu_state));

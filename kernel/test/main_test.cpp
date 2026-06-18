@@ -80,6 +80,7 @@ void run_vma_tests();
 void run_mmap_tests();
 void run_brk_tests();
 void run_signal_tests();
+void run_tls_tests();
 void run_page_cache_tests();
 void run_file_mmap_tests();
 void run_kallsyms_tests();
@@ -186,6 +187,7 @@ extern "C" void kernel_main() {
     run_mmap_tests();
     run_brk_tests();
     run_signal_tests();
+    run_tls_tests();
     run_page_cache_tests();
     run_file_mmap_tests();
 
