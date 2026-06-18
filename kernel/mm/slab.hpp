@@ -34,7 +34,7 @@
 
 namespace cinux::mm {
 
-class SlabCache;
+struct SlabCache;
 
 /// In-page header placed at the start of every slab page.  Doubly linked so a
 /// slab can move between its cache's partial/full lists in O(1).
@@ -119,5 +119,30 @@ private:
 
 /// Global SlabAllocator instance.
 extern SlabAllocator g_slab;
+
+// ============================================================
+// kmalloc / kfree -- the universal kernel allocator (F2-M7b batch 2)
+// ============================================================
+
+/**
+ * @brief Allocate @p size bytes aligned to at least @p align
+ *
+ * Small requests (effective size = max(size, align) <= kSlabMaxObj) are served
+ * from the slab caches.  Larger ones draw whole buddy pages via the permanent
+ * direct map -- no per-alloc map/unmap (GOTCHA #7/#13).  Either way the memory
+ * is zeroed (no stale-data leak).  Returns nullptr on OOM or size == 0.
+ *
+ * Free with kfree(); global operator new/delete forward here.
+ */
+void* kmalloc(size_t size, size_t align = 16);
+
+/**
+ * @brief Free memory returned by kmalloc() / operator new
+ *
+ * Routes by address: the slab window goes to the slab allocator, the direct-map
+ * window goes back to the buddy (count is immaterial -- the buddy records the
+ * order).  No-op for nullptr or pointers outside both windows.
+ */
+void kfree(void* ptr);
 
 }  // namespace cinux::mm

@@ -10,6 +10,7 @@
 
 #include <cinux/numeric.hpp>
 
+#include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -32,6 +33,11 @@ namespace {
 using cinux::lib::align_up;
 
 constexpr uint64_t kPageFlags = cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_WRITABLE;
+
+/// Sentinel written to a freed object's second word (the first word holds the
+/// intrusive freelist link).  Fresh slab pages and freshly allocated objects
+/// are zeroed, so encountering this value on free is a repeated free.
+constexpr uint64_t kSlabPoison = 0xFEEDC0DEFEEDC0DEULL;
 
 void memzero(void* start, size_t len) {
     auto* p = static_cast<uint8_t*>(start);
@@ -135,6 +141,9 @@ SlabHeader* SlabAllocator::grow_cache(SlabCache& cache) {
         g_pmm.free_page(phys);
         return nullptr;
     }
+    // Zero the whole page: a clean baseline for the double-free poison guard,
+    // and no stale physical data leaks to a freshly allocated object.
+    memzero(reinterpret_cast<void*>(virt), cinux::arch::PAGE_SIZE);
 
     slab_brk_ += cinux::arch::PAGE_SIZE;
     slab_pages_++;
@@ -219,10 +228,21 @@ void SlabAllocator::free_locked(void* ptr) {
     }
     SlabCache* c = s->cache;
 
+    // Double-free guard (O(1)): a freed object carries the poison sentinel in
+    // its second word (the first word holds the freelist link).  Fresh slab
+    // pages and freshly allocated objects are zeroed, so a poison hit here is a
+    // repeated free of the same slot.
+    uint64_t* words = reinterpret_cast<uint64_t*>(ptr);
+    if (words[1] == kSlabPoison) {
+        cinux::lib::kprintf("[SLAB] double-free at 0x%p\n", ptr);
+        return;
+    }
+
     bool was_full = (s->inuse == s->total);
-    // Push back onto the intrusive free list.
-    *reinterpret_cast<void**>(ptr) = s->freelist;
-    s->freelist                    = ptr;
+    // Push back onto the intrusive free list and mark the slot poisoned.
+    words[0]    = reinterpret_cast<uintptr_t>(s->freelist);
+    words[1]    = kSlabPoison;
+    s->freelist = ptr;
     s->inuse--;
 
     if (was_full) {
@@ -245,6 +265,62 @@ void SlabAllocator::free(void* ptr) {
     auto g = lock_.irq_guard();
     (void)g;
     free_locked(ptr);
+}
+
+// ============================================================
+// kmalloc / kfree -- universal allocator (slab for small, buddy+direct-map
+// for large).  See slab.hpp.
+// ============================================================
+
+void* kmalloc(size_t size, size_t align) {
+    if (size == 0) {
+        return nullptr;
+    }
+
+    // Effective class must honour both the requested size and alignment.
+    size_t eff = size > align ? size : align;
+    if (eff <= kSlabMaxObj) {
+        return g_slab.alloc(eff);
+    }
+
+    // Large allocation: whole buddy pages exposed through the direct map.
+    uint64_t npages =
+        (static_cast<uint64_t>(size) + cinux::arch::PAGE_SIZE - 1) / cinux::arch::PAGE_SIZE;
+    if (align > cinux::arch::PAGE_SIZE) {
+        uint64_t align_pages = align / cinux::arch::PAGE_SIZE;
+        if (align_pages > npages) {
+            npages = align_pages;
+        }
+    }
+    uint64_t phys = g_pmm.alloc_pages(npages);
+    if (phys == 0) {
+        return nullptr;
+    }
+    void* virt = reinterpret_cast<void*>(phys + cinux::arch::DIRECT_MAP_BASE);
+    memzero(virt, size);  // match the slab path: no stale-data leak
+    return virt;
+}
+
+void kfree(void* ptr) {
+    if (ptr == nullptr) {
+        return;
+    }
+    uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+
+    // Slab window -> small-object cache.
+    if (p >= cinux::arch::KMEM_SLAB_BASE &&
+        p < cinux::arch::KMEM_SLAB_BASE + cinux::arch::KMEM_SLAB_SIZE) {
+        g_slab.free(ptr);
+        return;
+    }
+
+    // Direct-map window -> buddy pages (count immaterial; buddy has the order).
+    if (p >= cinux::arch::DIRECT_MAP_BASE) {
+        g_pmm.free_pages(p - cinux::arch::DIRECT_MAP_BASE, 0);
+        return;
+    }
+
+    // Unknown pointer: ignore defensively.
 }
 
 }  // namespace cinux::mm

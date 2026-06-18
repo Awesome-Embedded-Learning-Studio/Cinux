@@ -44,7 +44,12 @@ namespace cinux::mm {
 
 /// A single cached file page.  Owned by the PageCache hash table.
 struct CachedPage {
-    cinux::fs::Inode* inode{nullptr};  ///< Backing inode (key, part 1)
+    /// Backing inode NUMBER -- the stable lookup key (part 1).  The inode
+    /// POINTER is deliberately NOT the key: the slab allocator reuses freed
+    /// Inode memory, so keying by pointer would alias a brand-new file onto a
+    /// stale cached page and serve wrong content (F2-M7b).
+    uint64_t          ino{0};
+    cinux::fs::Inode* inode{nullptr};  ///< Backing inode (transient; not a key)
     uint64_t          offset{0};       ///< File offset, page-aligned (key, part 2)
     uint64_t          phys{0};         ///< Physical page address
     uint64_t          virt{0};         ///< Kernel vaddr = phys + DIRECT_MAP_BASE (direct map)

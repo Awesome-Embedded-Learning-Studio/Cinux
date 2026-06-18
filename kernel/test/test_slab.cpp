@@ -13,7 +13,6 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
-#include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/mm/slab.hpp"
 
 using cinux::mm::g_slab;
@@ -205,6 +204,28 @@ void test_default_alignment() {
 }  // namespace test_slab_align
 
 // ============================================================
+// Test 9: double-free is detected without corrupting state
+// ============================================================
+
+namespace test_slab_doublefree {
+
+void test_double_free_detected() {
+    void* p = g_slab.alloc(32);
+    TEST_ASSERT_NOT_NULL(p);
+    g_slab.free(p);
+    g_slab.free(p);  // poison guard: detected and ignored
+
+    // The allocator must remain usable afterwards.
+    void* q = g_slab.alloc(32);
+    TEST_ASSERT_NOT_NULL(q);
+    fill(q, 32, 0x99);
+    TEST_ASSERT_TRUE(check(q, 32, 0x99));
+    g_slab.free(q);
+}
+
+}  // namespace test_slab_doublefree
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -219,6 +240,7 @@ extern "C" void run_slab_tests() {
     RUN_TEST(test_slab_mixed::test_mixed_alloc_free);
     RUN_TEST(test_slab_null::test_free_null_noop);
     RUN_TEST(test_slab_align::test_default_alignment);
+    RUN_TEST(test_slab_doublefree::test_double_free_detected);
 
     TEST_SUMMARY();
 }
