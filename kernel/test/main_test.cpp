@@ -81,6 +81,7 @@ void run_mmap_tests();
 void run_brk_tests();
 void run_page_cache_tests();
 void run_file_mmap_tests();
+void run_kallsyms_tests();
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -126,6 +127,11 @@ extern "C" void kernel_main() {
 
     // kprintf format tests run early — only need serial + kprintf
     run_kprintf_format_tests();
+
+    // FO observability (batch 1a): KALLSYMS address->symbol lookup logic.  The
+    // production kernel feeds a real nm-generated table at boot; the test
+    // suite injects a fixture inside run_kallsyms_tests().
+    run_kallsyms_tests();
 
     // Step 4: Run test suites (hardware only)
     run_gdt_idt_tests();
