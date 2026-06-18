@@ -82,6 +82,7 @@ void run_brk_tests();
 void run_page_cache_tests();
 void run_file_mmap_tests();
 void run_kallsyms_tests();
+void run_backtrace_tests();
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -147,6 +148,9 @@ extern "C" void kernel_main() {
     // VMM tests: initialise VMM after PMM, then run tests
     cinux::mm::g_vmm.init();
     run_vmm_tests();
+
+    // FO batch 2: backtrace (needs VMM for translate-based safe walk).
+    run_backtrace_tests();
 
     // Slab tests (F2-M7b): initialise after VMM (slab maps pages) and PMM.
     cinux::mm::g_slab.init(cinux::arch::KMEM_SLAB_BASE, cinux::arch::KMEM_SLAB_SIZE);

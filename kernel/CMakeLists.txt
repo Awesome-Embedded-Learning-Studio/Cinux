@@ -175,6 +175,7 @@ add_executable(big_kernel_test
     test/test_slab.cpp
     test/test_kmalloc.cpp
     test/test_kallsyms.cpp
+    test/test_backtrace.cpp
 )
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)
