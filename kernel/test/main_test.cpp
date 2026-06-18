@@ -83,6 +83,7 @@ void run_page_cache_tests();
 void run_file_mmap_tests();
 void run_kallsyms_tests();
 void run_backtrace_tests();
+void run_memory_stats_tests();
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -185,6 +186,9 @@ extern "C" void kernel_main() {
     run_brk_tests();
     run_page_cache_tests();
     run_file_mmap_tests();
+
+    // FO batch 4: memory diagnostics dump (all MM subsystems are up by here).
+    run_memory_stats_tests();
 
     run_scheduler_tests();
     run_sync_tests();

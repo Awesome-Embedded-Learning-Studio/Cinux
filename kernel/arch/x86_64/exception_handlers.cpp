@@ -25,6 +25,7 @@
 #include "kernel/lib/klog.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
+#include "kernel/mm/diagnostics.hpp"
 #include "kernel/mm/page_cache.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vma.hpp"
@@ -100,6 +101,7 @@ void dump_registers(const InterruptFrame* frame, const char* name, uint8_t vecto
         kprintf("Task: tid=%u pid=%d name='%s'\n", static_cast<unsigned>(t->tid),
                 t->pid, t->name ? t->name : "(null)");
     }
+    cinux::mm::dump_memory_stats();
     kprintf("==================================\n");
     fatal_halt();
 }
