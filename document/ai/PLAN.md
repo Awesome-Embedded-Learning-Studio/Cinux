@@ -4,7 +4,8 @@
 > **F1-M3 = DMA 基础设施 ✅ 完成（2026-06-16）**。
 > **F1-M4 = 块设备抽象 ✅ 完成（2026-06-16）**。
 > **F5-M1 = AHCI DMA 迁移 ✅ 完成（2026-06-16）**。
-> **F2-M6 = ext2 Cache ✅ 完成（2026-06-17）**。F2 进度 6/7（M1-M6 ✅），下一 **F2-M7 Buddy**（Slab → M7b）。
+> **F2-M6 = ext2 Cache ✅ 完成（2026-06-17）**。
+> **F2-M7 Buddy PMM ✅ 完成（2026-06-18，fresh KVM 742/0 + GUI 冒烟）**：buddy 伙伴系统替换 PMM flat bitmap（per-order bitmap free-list，非侵入式）。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**详见下方「F2-M7 Buddy PMM」段 + `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**。solid 基线 = main（M6 #12，734）。F2 进度 7/7（M1-M7 ✅）。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -170,6 +171,38 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 10. **EFER.NXE 未启用 → NX bit（bit63）是保留位**（F2-M4 批3 教训，2026-06）：F9 NX/SMEP/SMAP 未做，NXE 关闭。PTE 设 `FLAG_NX`（bit63）后访问该页触发 **reserved-bit #PF（err=0x8）循环**——`handle_pf` 文件路径初版给非 exec 页设 NX，致 Test B PF round-trip 无限循环。诊断：PF handler 临时打印 err/cr3/asPml4/translate，err=0x8(RSVD) + translate==phys 确认 PTE 设对、是保留位违例。修复：`handle_pf` 文件路径 + `sys_mprotect` 都**暂不设 NX**（非 exec 页不强 NX），留 F9 启用 NXE 后再开。另：单测验 `handle_pf` 文件 PF 需 `as.activate()` 切到进程 PML4 再访存（boot PML4 user 半空）；`get_page` 读文件在 cache 锁外、insert 在锁内（IF=0 防 IO-under-lock 重入死锁）；缓存页 virt 复用 direct-map（GOTCHA #7 同 DmaPool）。
 11. **PF handler 硬门控的 user-mode 判定 + 栈增长配套**（F2-M5 教训，2026-06）：`handle_pf` 杀进程（`exit_current`）必须判 `err & 0x04`（真实 user-mode fault）——kernel-test 是 ring0 访问用户地址（`err&0x04=0`），误杀会让测试 hang（test_file_mmap Test B 模式：`CurrentTaskGuard` 设 tmp task 但 ring0 访存）。`exit_current` 的 `context_switch` 抛弃 prev 中断帧切 next，不返回 PF handler（segfault 终止可行；"标记 Dead+延迟退出"反而要伪造中断帧，更复杂）。**栈 VMA 必须与硬门控配套**：门控上了但栈仍固定 16KB → 深调用栈用户程序栈 PF 落 VMA 外 → segfault（run-kernel-test 不跑真实用户深栈故绿，掩盖此依赖；init.cpp/gui_init.cpp 用 `USER_STACK_GROWTH=1MB` 扩 Stack VMA）。**execve `clear_user_mappings` 只清页表不清 VMA store**——Stack VMA 经 fork 继承 / execve 复用 AS 保留传播到所有用户程序。run-kernel-test 全 kernel-mode fault，不覆盖 user-mode segfault/demand 路径（靠 `make run` 实机 + `test_shell_*` 间接）。
 12. **read() 经 PageCache 的递归规避 + pipe 判别**（F2-M6 教训，2026-06）：`read_bytes` 是**新函数**（sys_read 对 `is_page_cacheable()` 真者调它），其内部 `get_page` 填充走 `inode->ops->read`（Ext2FileOps 读盘原语）——`Ext2FileOps::read` **不改不调 page_cache**，否则 read→get_page→read 死循环。判别"磁盘文件 vs pipe"不能用 `inode->type`（pipe 的 type 也是 `Regular`，[test_sys_pipe.cpp:105]），禁 RTTI 无法 dynamic_cast；用 `InodeOps::is_page_cacheable()` virtual（默认 false，Ext2FileOps override true）。`g_page_cache.hit_count()` 是 boot 全局跨测试累积，断言"二读命中"须在二读前捕获基线。
+13. **direct-map 独立窗口 + KERNEL_VMA 重载区分**（F2-M7 direct-map 前置教训，2026-06）：`phys_to_virt` 用 `DIRECT_MAP_BASE=0xFFFF880000000000`（PML4[272]，loader 1GB/2MB 大页 identity 映全 RAM），**不是** KERNEL_VMA。KERNEL_VMA 窗口硬限 2GB 且 boot 只映 higher-half 0-1GB，phys>1GB 落未映射处 demand-page 非 identity（latent bug，buddy 侵入式链表写 high phys 触发 PF 重入踩烂 → 死循环）。`-cpu max` 仅 KVM 时设（qemu.cmake），无 KVM 落回 qemu64 不暴露 PDPE1GB → direct_map_up_to 必有 2MB 页 fallback。**迁移严判**：访问任意 PMM 页（页表/DMA/缓存页/GS）是 direct-map→DIRECT_MAP_BASE；kernel image 相对（pmm bitmap `__kernel_stack_top - KERNEL_VMA`、kernel 链接基址、boot higher-half PT）保留 KERNEL_VMA。direct-map PT 页放 [0x10000,0x20000)（<1MB 不过 PMM，持久）。**direct-map 区域（PML4[272]，`DIRECT_MAP_BASE+…`）严禁 `VMM.map/unmap/translate`**：direct-map 是 loader 建的 1GB/2MB huge 永久 identity 映射，全栈共享。`VMM::map` 内 `walk_level` 遇 huge entry（PS bit）会 **split**（拆成 4KB PT + 改写原 entry）；对 direct-map 的 1GB huge 触发即破坏全局 direct-map → 后续 `phys_to_virt` walk 错乱命中 phys 0 BIOS 数据当 PT → reserved-bit PF（err=0x9）。教训：M3 `DmaPool::alloc` 旧逻辑对 virt 调 `g_vmm.map`（M3 时 virt 在 KERNEL_VMA 窗口，map 无害），批2 迁 direct-map 后漏删 map → 首次 AHCI `g_dma_pool.alloc` 即崩（`test_cache_reads_real_file`，fresh build 才暴露）。修法：direct-map 复用 loader 永久映射——alloc 只取 phys（virt=phys+DIRECT_MAP_BASE 直接可用，**不 map**），free 只 free phys（**不 unmap**）。`VMM.translate` 对 huge 也不支持（walk_level huge+!alloc 返 nullptr），故 direct-map virt 不该经 translate 验证。
+14. **WSL2 nested KVM（AMD）EPT 对侵入式 free-list 写读不一致**（F2-M7 Bug2 教训，2026-06-18）：buddy 初版侵入式 free-list 把 `next` 指针写在 free 页头（经 direct-map `phys+DIRECT_MAP_BASE`），依赖 direct-map 写读严格一致。WSL2 nested KVM（AMD `-accel kvm -cpu max`，hypervisor flag=14）EPT 对「huge page 内 sub-page 写」做不到一致——同地址 `0xFFFF880040000000`（phys 1GB）main 单次读返 valid（260096）、buddy op 读返 poison（`0xCAFEBABEDEADC0DE`），振荡→`pop_free` 遍历 #GP（`test_wm_close_button_closes_terminal_pipes`）。**TCG（`CINUX_NO_KVM=1`，2MB path）742/0 全绿**证明 buddy wiring 本身正确（根因 nested KVM 物理层，非逻辑 bug）。**修 = buddy 改非侵入式 per-order bitmap free-list**（bitmap 存 metadata 区，不写 free 页，KVM nested safe；`find_first_set` 天然 low-first）。诊断教训：CHK（main 单次读）valid ↔ buddy op 读 poison 的**同地址振荡**→ nested KVM EPT 嫌疑；**TCG 对比（`CINUX_NO_KVM` env）是定位物理层 bug 的利器**（逻辑层错 TCG 也复现，物理层错 TCG 绿）。凡依赖 direct-map sub-page 写读一致的侵入式结构（free-list/对象头）在 nested KVM 都有此风险，优先用 metadata 数组。
+
+## ✅ direct-map 独立窗口（F2-M7 前置）Bug1 已修 — 2026-06-17（fresh build 734/0）
+
+> 目标：修 `phys_to_virt` 的 latent >1GB direct-map bug（KERNEL_VMA 窗口只 1GB），为 buddy 接 PMM 铺路（buddy 侵入式链表写 high phys 需 identity direct-map）。
+> 决策：独立窗口 `DIRECT_MAP_BASE=0xFFFF8800…`（PML4[272]，512GB）+ loader `direct_map_up_to`（1GB/2MB 大页 identity，不依赖 PDPE1GB）+ centralize `phys_to_virt`（phys_virt.hpp）+ 迁移 direct-map 站点（保留 kernel-image 站点 KERNEL_VMA）。详见 `document/notes/2026-06-17-direct-map-window.md`。
+> **Bug1（批2 fresh build 暴露的 reserved-bits PF）已修（批3）**：根因 = `DmaPool::alloc` 对 direct-map 区域调 `g_vmm.map(virt=phys+DIRECT_MAP_BASE,…)` → `walk_level` 命中 direct-map 的 **1GB huge entry（PDPT[0]=0x83，PS bit）** → 触发 huge-split → 把 `pdpt[0]` 改成 4KB PT pointer → **破坏全局 direct-map** → 后续 `phys_to_virt` walk 错乱命中 phys 0 BIOS 数据当 PT → reserved PF（err=0x9，`test_cache_reads_real_file` 首次 AHCI init 触发）。诊断证实建后/load_elf 后页表正确（`PML4[272]=0x10003 PDPT[0]=0x83`），破坏在运行时。M3 时 DmaPool virt 在 KERNEL_VMA 窗口（2MB/4KB）map 无害，批2 迁 direct-map 后旧 map 变破坏源（迁移漏删）。修：删 `DmaPool::alloc` 的 `VMM.map`（direct-map 已被 loader 永久 identity 映射，不需 map，与 `return_pages` 只 free phys 不 unmap 对称，GOTCHA#7/#13）；`test_dma_pool` Test1 改 CPU round-trip（原 translate 断言依赖 split 副作用）。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | `DIRECT_MAP_BASE` 常量 + mini `direct_map_up_to`（2MB/1GB 大页 identity，PT@0x10000）+ loader 调用 + main_test identity 探针 | ✅ | f0b84ed | 734/0 + 探针 OK |
+| 批2 | centralize `phys_to_virt`→DIRECT_MAP_BASE（删 4 重复）+ 迁移 direct-map 站点（page_cache/dma_pool/execve/usermode/process_new）+ 保留 kernel-image KERNEL_VMA + 测试跟进 | ✅ | 93ac379 | 增量 734/0 + host 49/0 + 实机不炸（**注**：fresh build 暴露 Bug1，此为增量态）|
+| 批3 | **Bug1 修复**：删 `DmaPool::alloc` 的 `VMM.map`（walk_level split 1GB huge 破坏 direct-map）+ `test_dma_pool` Test1 translate→CPU round-trip + return_pages 注释订正 | ✅ | (本次) | **fresh build 734/0** |
+
+**完成总结**：direct-map 独立窗口落地——loader 用 1GB（PDPE1GB）/2MB 大页把全 RAM identity 映到 `DIRECT_MAP_BASE`（PML4[272]，PT@0x10000），`phys_to_virt` 切到新窗口，全栈 direct-map 站点迁移。修 latent >1GB bug（页表/page_cache/DMA/execve/GS 对 high phys 现正确 identity）。关键教训：`-cpu max` 仅 KVM 时设→qemu64 无 PDPE1GB，须 2MB fallback；迁移严判 direct-map vs kernel-image；**direct-map 区域勿 `VMM.map/unmap/translate`**（walk_level 遇 1GB huge 会 split 破坏全局 direct-map，DmaPool 迁移漏删 map 教训，见 GOTCHA#13）。buddy 接 PMM（F2-M7 兑现）见下「F2-M7 Buddy PMM」段（批4a/4b，2026-06-18 完成，fresh KVM 742/0 + GUI 冒烟）。direct-map 前置就绪。
+
+## ✅ F2-M7（Buddy PMM）已完成 — 2026-06-18（fresh KVM 742/0 + 实机 GUI 冒烟）
+
+> 目标：buddy 伙伴系统替换 PMM flat bitmap（power-of-two order free lists），兑现 M7。direct-map 前置（上段）就绪。
+> 决策：
+> - **批4a**：cherry-pick buddy 批1 + `page_to_block`/`pop_free` KERNEL_VMA→DIRECT_MAP_BASE + low-first（fresh 742/0）。
+> - **批4b**：PMM bitmap→buddy wiring（init/alloc/free/count + order_/bitmap_storage + `_locked` 锁契约）。
+> - **Bug2 修正（批4b 核心）**：初版侵入式 free-list（next 指针写 free 页头经 direct-map）在 **WSL2 nested KVM（AMD）EPT 写读不一致** → free-list 链路振荡（valid↔poison `0xCAFEBABEDEADC0DE`）→ pop_free 遍历 #GP（`test_wm_close_button_closes_terminal_pipes`）。**TCG 2MB path 742/0 全绿**证明 buddy wiring 本身正确，根因是 nested KVM 物理层。**修 = buddy 改非侵入式 per-order bitmap free-list**（bitmap 存 metadata 区，不写 free 页，KVM nested safe；`find_first_set` 天然 low-first）。GOTCHA#14。
+> 不做：SLAB（M7b 后续）/ CoW 共享内存（F3）/ 脏页写回。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批4a | cherry-pick buddy 批1 + `page_to_block`/`pop_free` 迁 DIRECT_MAP_BASE + low-first + test_buddy 适配 | ✅ | 2ad5442 | fresh 742/0（734+8 buddy 单测）|
+| 批4b | PMM bitmap→buddy wiring（init/alloc/free/count + order_/bitmap_storage + `_locked`）+ **Bug2 修**：侵入式→bitmap free-list（nested KVM safe）+ test_buddy 适配 + qemu.cmake `CINUX_NO_KVM` env（TCG 诊断） | ✅ | (本次) | **fresh KVM 742/0 + 实机 GUI 启动到桌面** |
+
+**完成总结**（F2-M7）：buddy 伙伴系统替换 PMM flat bitmap——`BuddyAllocator`（**per-order bitmap free-list**，1 bit/block，`find_first_set` 天然 low-first，非侵入式不写 free 页）+ PMM 接入（`init` 用 `buddy.init`+`mark_free_region` 排除 kernel/metadata 区；`alloc_page[_locked]`/`alloc_pages`/`free[_pages]`/count 调 buddy；`_locked` 保 IF=0 锁契约）+ order_ 数组（1B/页，head order 权威）+ bitmap_storage（per-order bitmap ~575KB @ order_storage 后）。关键教训 **GOTCHA#14**（nested KVM EPT 对 intrusive free-list 写读不一致 → 改 bitmap metadata 解；TCG 验证 buddy 逻辑正确）。验证：fresh KVM run-kernel-test 742/0 + 实机 `make run` GUI 启动到桌面不崩。遗留：SLAB（M7b）/ CoW（F3）。
 
 ## ✅ F2-M6（ext2 Cache）已完成 — 2026-06-17
 
