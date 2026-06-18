@@ -135,6 +135,7 @@ extern "C" void kernel_main() {
     // Step 12: Initialise the slab allocator (small objects) + kmalloc.  Large
     // allocations reuse the direct map, so only the slab window is reserved.
     cinux::mm::g_slab.init(cinux::arch::KMEM_SLAB_BASE, cinux::arch::KMEM_SLAB_SIZE);
+    cinux::mm::init_dedicated_caches();  // F2-M7b: task / vma / cached_page caches
 
     // Step 12b: Initialise the file-backed page cache (F2-M4).  Advisory 10%
     // ceiling; eviction is deferred.  Needs the slab for CachedPage nodes.

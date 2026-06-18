@@ -221,8 +221,8 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
 | 批1 | `slab.hpp/cpp`（SlabAllocator 8 通用缓存 16-2048B + 页内 header + 侵入式 freelist + 4K 页 on-demand grow + KMEM_SLAB 区 + irq_guard IF=0）+ memory_layout KMEM_SLAB + CMake + `test_slab.cpp` 单测 | ✅ | 563bb0f | fresh KVM 750/0（742+8）+ host 49/0 |
-| 批2 | `kmalloc/kfree`（小→Slab / 大→buddy+direct-map，free 按区路由）+ `crt_stub` 7 重载 + main/main_test init + `ram_block_device` 迁移 + **删 heap.{hpp,cpp}/test_heap(内核+host)** + slab 硬化（grow 页零化 + O(1) double-free 毒检）+ `test_kmalloc.cpp` 11 测 + `test_slab` +double-free 测 + **page_cache 按 `ino` 键控**（修 slab 复用 Inode 地址暴露的陈旧命中，GOTCHA#15） | ✅ | (本次) | **fresh KVM 751/0 + host 48/0 + 实机 GUI 到桌面** |
-| 批3 | 专用缓存（`create_cache`+ctor/dtor，Task/Inode/VMA/CachedPage）+ 热点接线 + test | ⏳ | — | +~3 |
+| 批2 | `kmalloc/kfree`（小→Slab / 大→buddy+direct-map，free 按区路由）+ `crt_stub` 7 重载 + main/main_test init + `ram_block_device` 迁移 + **删 heap.{hpp,cpp}/test_heap(内核+host)** + slab 硬化（grow 页零化 + O(1) double-free 毒检）+ `test_kmalloc.cpp` 11 测 + `test_slab` +double-free 测 + **page_cache 按 `ino` 键控**（修 slab 复用 Inode 地址暴露的陈旧命中，GOTCHA#15） | ✅ | 4e05892 | **fresh KVM 751/0 + host 48/0 + 实机 GUI 到桌面** |
+| 批3 | 专用缓存 API（`create_cache`/`cache_alloc`/`cache_free`，`kObjAlign`=16 支持非幂 obj_size）+ `dedicated_caches.cpp`（task/vma/cached_page，类专属 operator new/delete 自动路由，无调用点改动）+ `test_slab` +dedicated 测。**Inode 不入 slab**：ext2 用固定 `inode_cache_[]` 数组自管（非堆分配，N/A）。实测 Task=1008B→4/slab(原 1024 档 3)、VMA=56B→72/slab(原 64 档 63) 真省碎片；CachedPage=64B(2幂,接线为完整) | ✅ | (本次) | **fresh KVM 752/0 + host 48/0 + 实机 GUI 到桌面** |
 | 批4 | 收尾：ROADMAP/PLAN/todo/notes + GOTCHA#15/#16 + fresh KVM run-kernel-test + `test_host` + `make run` 冒烟 | ⏳ | — | 全绿 |
 
 ## ✅ F2-M6（ext2 Cache）已完成 — 2026-06-17

@@ -144,6 +144,7 @@ extern "C" void kernel_main() {
 
     // Slab tests (F2-M7b): initialise after VMM (slab maps pages) and PMM.
     cinux::mm::g_slab.init(cinux::arch::KMEM_SLAB_BASE, cinux::arch::KMEM_SLAB_SIZE);
+    cinux::mm::init_dedicated_caches();  // F2-M7b: task / vma / cached_page caches
     run_slab_tests();
     run_kmalloc_tests();
 

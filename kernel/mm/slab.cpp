@@ -39,6 +39,11 @@ constexpr uint64_t kPageFlags = cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_WR
 /// are zeroed, so encountering this value on free is a repeated free.
 constexpr uint64_t kSlabPoison = 0xFEEDC0DEFEEDC0DEULL;
 
+/// Object alignment for every cache (general and dedicated).  16 satisfies the
+/// default operator-new alignment; a fixed value lets dedicated caches use
+/// arbitrary (non-power-of-two) object sizes while keeping every object aligned.
+constexpr size_t kObjAlign = 16;
+
 void memzero(void* start, size_t len) {
     auto* p = static_cast<uint8_t*>(start);
     for (size_t i = 0; i < len; i++) {
@@ -61,7 +66,7 @@ void SlabAllocator::init(uint64_t virt_base, uint64_t region_size) {
     for (int i = 0; i < kNumCaches; i++) {
         SlabCache& c   = caches_[i];
         c.obj_size      = kSlabMinObj << i;
-        uint64_t hdr    = align_up(sizeof(SlabHeader), c.obj_size);
+        uint64_t hdr    = align_up(sizeof(SlabHeader), kObjAlign);
         c.objs_per_slab = static_cast<uint16_t>((cinux::arch::PAGE_SIZE - hdr) / c.obj_size);
         c.name          = "general";
         c.partial       = nullptr;
@@ -156,7 +161,7 @@ SlabHeader* SlabAllocator::grow_cache(SlabCache& cache) {
     s->prev  = nullptr;
 
     // Build the intrusive free list: object[i].link = &object[i+1].
-    uint64_t hdr_area = align_up(sizeof(SlabHeader), cache.obj_size);
+    uint64_t hdr_area = align_up(sizeof(SlabHeader), kObjAlign);
     uint64_t base     = virt + hdr_area;
     s->freelist       = reinterpret_cast<void*>(base);
     for (uint16_t i = 0; i < cache.objs_per_slab; i++) {
@@ -175,16 +180,7 @@ SlabHeader* SlabAllocator::grow_cache(SlabCache& cache) {
 // alloc_locked (caller holds the spinlock / interrupts disabled)
 // ============================================================
 
-void* SlabAllocator::alloc_locked(size_t size) {
-    if (size == 0) {
-        return nullptr;
-    }
-    int idx = size_to_index(size);
-    if (idx < 0) {
-        return nullptr;  // not slab-eligible
-    }
-
-    SlabCache&  c = caches_[idx];
+void* SlabAllocator::cache_alloc_locked(SlabCache& c) {
     SlabHeader* s = c.partial;
     if (s == nullptr) {
         s = grow_cache(c);
@@ -203,8 +199,19 @@ void* SlabAllocator::alloc_locked(size_t size) {
         list_push_front(&c.full, s);
     }
 
-    memzero(obj, c.obj_size);  // match Heap::alloc's zeroing; also clears the link word
+    memzero(obj, c.obj_size);  // zero + clears the link word + poison baseline
     return obj;
+}
+
+void* SlabAllocator::alloc_locked(size_t size) {
+    if (size == 0) {
+        return nullptr;
+    }
+    int idx = size_to_index(size);
+    if (idx < 0) {
+        return nullptr;  // not slab-eligible
+    }
+    return cache_alloc_locked(caches_[idx]);
 }
 
 // ============================================================
@@ -265,6 +272,60 @@ void SlabAllocator::free(void* ptr) {
     auto g = lock_.irq_guard();
     (void)g;
     free_locked(ptr);
+}
+
+// ============================================================
+// Dedicated caches (F2-M7b batch 3)
+// ============================================================
+
+SlabCache* SlabAllocator::create_cache(const char* name, size_t obj_size,
+                                       void (*ctor)(void*), void (*dtor)(void*)) {
+    // Round the object size up to the object alignment so every object in a
+    // slab stays 16-aligned (lets dedicated caches hold arbitrary sizes).
+    if (obj_size < kSlabMinObj) {
+        obj_size = kSlabMinObj;
+    }
+    obj_size = align_up(obj_size, kObjAlign);
+
+    auto* c = static_cast<SlabCache*>(kmalloc(sizeof(SlabCache)));
+    if (c == nullptr) {
+        return nullptr;
+    }
+    uint64_t hdr = align_up(sizeof(SlabHeader), kObjAlign);
+    c->obj_size      = obj_size;
+    c->objs_per_slab = static_cast<uint16_t>((cinux::arch::PAGE_SIZE - hdr) / obj_size);
+    c->name          = name;
+    c->partial       = nullptr;
+    c->full          = nullptr;
+    c->slab_count    = 0;
+    c->ctor          = ctor;
+    c->dtor          = dtor;
+    return c;
+}
+
+void* SlabAllocator::cache_alloc(SlabCache* cache) {
+    if (cache == nullptr) {
+        return nullptr;
+    }
+    auto g = lock_.irq_guard();
+    (void)g;
+    void* obj = cache_alloc_locked(*cache);
+    if (obj != nullptr && cache->ctor != nullptr) {
+        cache->ctor(obj);
+    }
+    return obj;
+}
+
+void SlabAllocator::cache_free(SlabCache* cache, void* obj) {
+    if (cache == nullptr || obj == nullptr) {
+        return;
+    }
+    if (cache->dtor != nullptr) {
+        cache->dtor(obj);
+    }
+    auto g = lock_.irq_guard();
+    (void)g;
+    free_locked(obj);  // the slab page header records the owning cache
 }
 
 // ============================================================

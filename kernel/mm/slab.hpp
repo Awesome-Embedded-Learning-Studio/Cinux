@@ -89,10 +89,23 @@ public:
     void free(void* ptr);
 
     // ---- dedicated caches (batch 3) ----
-    // SlabCache* create_cache(const char* name, size_t obj_size,
-    //                         void (*ctor)(void*), void (*dtor)(void*));
-    // void* cache_alloc(SlabCache* cache);
-    // void cache_free(SlabCache* cache, void* obj);
+
+    /// Create a dedicated cache for objects of @p obj_size bytes.  Unlike the
+    /// power-of-two general caches, obj_size may be any value, so odd-sized hot
+    /// types (e.g. a 600 B Task) avoid the internal fragmentation of rounding up
+    /// to the next power of two.  Optional @p ctor / @p dtor run per alloc/free
+    /// (C-style; C++ types normally use placement-new and pass nullptr).  The
+    /// SlabCache struct itself is drawn from the general caches.  Returns
+    /// nullptr on OOM.
+    SlabCache* create_cache(const char* name, size_t obj_size,
+                            void (*ctor)(void*) = nullptr, void (*dtor)(void*) = nullptr);
+
+    /// Allocate one object from a dedicated @p cache (nullptr cache -> nullptr).
+    void* cache_alloc(SlabCache* cache);
+
+    /// Return @p obj to its dedicated cache.  @p cache is accepted for API
+    /// symmetry; ownership is in fact read from the slab page header.
+    void cache_free(SlabCache* cache, void* obj);
 
     /// Number of slab pages currently mapped (diagnostics only).
     uint32_t total_slab_pages() const { return slab_pages_; }
@@ -100,6 +113,7 @@ public:
 private:
     void* alloc_locked(size_t size);
     void  free_locked(void* ptr);
+    void* cache_alloc_locked(SlabCache& cache);  ///< core of alloc + cache_alloc
 
     /// Map a fresh 4 KB slab page for @p cache and thread its objects onto the
     /// free list.  Returns nullptr on OOM (window exhausted or PMM dry).
@@ -144,5 +158,26 @@ void* kmalloc(size_t size, size_t align = 16);
  * order).  No-op for nullptr or pointers outside both windows.
  */
 void kfree(void* ptr);
+
+// ============================================================
+// Dedicated caches for hot kernel object types (F2-M7b batch 3)
+// ============================================================
+// Created by init_dedicated_caches() (dedicated_caches.cpp); NULL until then.
+// Each heap-allocated hot type routes its operator new/delete here, so callers
+// keep using plain `new`/`delete`.  NOTE: Inode is deliberately absent -- ext2
+// caches VFS inodes in a fixed inode_cache_[] array, so they are never
+// heap-allocated and need no slab cache.
+extern SlabCache* g_task_cache;
+extern SlabCache* g_vma_cache;
+extern SlabCache* g_cached_page_cache;
+
+/// Create the dedicated caches above.  Call once after g_slab.init, before any
+/// Task / VMA / CachedPage allocation.
+void init_dedicated_caches();
+
+/// Convenience wrappers over g_slab.cache_alloc / cache_free, for use by the
+/// class-specific operator new/delete on Task / VMA / CachedPage.
+inline void* cache_alloc(SlabCache* cache) { return g_slab.cache_alloc(cache); }
+inline void  cache_free(SlabCache* cache, void* obj) { g_slab.cache_free(cache, obj); }
 
 }  // namespace cinux::mm

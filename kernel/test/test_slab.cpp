@@ -226,6 +226,43 @@ void test_double_free_detected() {
 }  // namespace test_slab_doublefree
 
 // ============================================================
+// Test 10: dedicated cache (arbitrary object size, e.g. 600 B)
+// ============================================================
+
+namespace test_slab_dedicated {
+
+void test_dedicated_cache() {
+    // A dedicated cache for an odd 600 B size avoids the 1024 B general-class
+    // rounding.  (The cache struct itself is kmalloc'd and intentionally not
+    // destroyed -- it is a test fixture.)
+    auto* cache = g_slab.create_cache("test600", 600);
+    TEST_ASSERT_NOT_NULL(cache);
+
+    void* a = g_slab.cache_alloc(cache);
+    void* b = g_slab.cache_alloc(cache);
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+    TEST_ASSERT_NE(a, b);
+
+    TEST_ASSERT_TRUE(check(a, 600, 0));   // freshly allocated -> zeroed
+    fill(a, 600, 0x42);
+    fill(b, 600, 0x84);
+    TEST_ASSERT_TRUE(check(a, 600, 0x42));
+    TEST_ASSERT_TRUE(check(b, 600, 0x84));
+
+    g_slab.cache_free(cache, a);
+    void* c = g_slab.cache_alloc(cache);  // LIFO reuse of a's slot
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQ(c, a);
+    TEST_ASSERT_TRUE(check(c, 600, 0));   // re-alloc is zeroed (no stale leak)
+
+    g_slab.cache_free(cache, b);
+    g_slab.cache_free(cache, c);
+}
+
+}  // namespace test_slab_dedicated
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -241,6 +278,7 @@ extern "C" void run_slab_tests() {
     RUN_TEST(test_slab_null::test_free_null_noop);
     RUN_TEST(test_slab_align::test_default_alignment);
     RUN_TEST(test_slab_doublefree::test_double_free_detected);
+    RUN_TEST(test_slab_dedicated::test_dedicated_cache);
 
     TEST_SUMMARY();
 }
