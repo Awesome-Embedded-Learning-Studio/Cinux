@@ -170,6 +170,12 @@ struct Task {
     uint64_t  sig_altstack{0};              ///< sigaltstack base (0 = main stack)
     uint64_t  sig_altstack_size{0};         ///< sigaltstack size in bytes
 
+    // F3-M2: futex wait state.  Set in FUTEX_WAIT just before blocking, then
+    // matched (uaddr + bitset) and cleared by FUTEX_WAKE.  futex_uaddr==0
+    // means "this task is not waiting on a futex".
+    uint64_t futex_uaddr{0};   ///< uaddr waited on (0 = not waiting)
+    uint32_t futex_bitset{0};  ///< bitset mask (FUTEX_*_BITSET; 0xFFFFFFFF for plain)
+
     /** Per-process file descriptor table (nullptr = use global). */
     cinux::fs::FDTable* fd_table;
 

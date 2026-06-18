@@ -39,6 +39,7 @@ void run_vmm_tests();
 void run_address_space_tests();
 void run_scheduler_tests();
 void run_sync_tests();
+void run_futex_tests();
 void run_usermode_tests();
 void run_syscall_tests();
 void run_shell_tests();
@@ -196,6 +197,7 @@ extern "C" void kernel_main() {
 
     run_scheduler_tests();
     run_sync_tests();
+    run_futex_tests();
     run_sync_concurrent_tests();
     run_concurrent_ring_buffer_tests();
     run_klog_tests();
