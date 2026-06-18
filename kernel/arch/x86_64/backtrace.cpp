@@ -99,11 +99,11 @@ void backtrace_from(uint64_t rbp, size_t max_frames) {
     }
     uint64_t addrs[kBacktraceMaxFrames];
     size_t   n = backtrace_capture(rbp, addrs, max_frames);
-    kprintf("Backtrace (%zu frames):\n", n);
+    kprintf("Backtrace (%u frames):\n", (unsigned)n);
     char buf[96];
     for (size_t i = 0; i < n; i++) {
         cinux::lib::kallsyms_lookup(addrs[i], buf, sizeof(buf));
-        kprintf("  [%2zu] %p  %s\n", i, reinterpret_cast<void*>(addrs[i]), buf);
+        kprintf("  [%u] %p  %s\n", (unsigned)i, reinterpret_cast<void*>(addrs[i]), buf);
     }
 }
 
