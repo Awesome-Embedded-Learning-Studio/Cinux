@@ -251,6 +251,25 @@ struct Task {
     /** Process ID (assigned by PidAllocator; 0 = uninitialised). */
     int pid;
 
+    /**
+     * Thread-group ID (F3-M2 batch 4).  Equals the group leader's pid; getpid()
+     * reports tgid so all threads of a process share one identity.  A
+     * single-threaded process has tgid == pid.
+     */
+    int tgid{0};
+
+    /** Pointer to the thread-group leader task (self for a leader). */
+    Task* group_leader{nullptr};
+
+    /**
+     * CLONE_CHILD_CLEARTID address (F3-M2 batch 4/5).  On thread exit the
+     * kernel writes 0 here and futex_wakes any waiter.  0 = not set.
+     */
+    uint64_t clear_child_tid{0};
+
+    /** CLONE_CHILD_SETTID address (child writes its tid here on startup). */
+    uint64_t set_child_tid{0};
+
     /** Parent process ID (0 for the kernel init task). */
     int ppid;
 
@@ -369,6 +388,33 @@ private:
  * @return Child PID on success (parent perspective), or -1 on failure
  */
 int fork(PidAllocator& pid_alloc);
+
+// ============================================================
+// Clone (F3-M2 batch 4)
+// ============================================================
+
+/**
+ * @brief Create a new task sharing resources per Linux clone() flags
+ *
+ * Linux syscall 56: `clone(flags, stack, parent_tid, child_tid, tls)`.
+ * Unlike fork (full CoW copy), clone selectively SHARES resources:
+ *   CLONE_VM      -> share address space (threads)
+ *   CLONE_FILES   -> share fd table
+ *   CLONE_SIGHAND -> share signal dispositions (implies CLONE_VM)
+ *   CLONE_FS      -> share cwd
+ *   CLONE_THREAD  -> same thread group (tgid); sibling, not child
+ *   CLONE_SETTLS  -> set the child's FS base (TLS) to @p tls
+ *   CLONE_PARENT_SETTID / CLONE_CHILD_SETTID -> write the new tid
+ *   CLONE_CHILD_CLEARTID -> zero @p child_tid + futex_wake on exit
+ *
+ * The child returns to user space at the parent's syscall-return RIP with
+ * RAX=0 and (if @p stack != 0) RSP=@p stack -- achieved by copying the
+ * parent's kernel stack (whose syscall pt_regs frame sits at the top) and
+ * patching the child's user-RSP slot.
+ *
+ * @return child tid (>0) to the parent, or -errno on failure.
+ */
+int clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t child_tid, uint64_t tls);
 
 // ============================================================
 // CoW page fault handling

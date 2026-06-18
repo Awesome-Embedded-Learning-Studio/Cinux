@@ -125,6 +125,13 @@ Task* TaskBuilder::build() {
     task->sched_class             = sched_class_;
     task->name                    = name_;
 
+    // F3-M2 batch 4: kernel threads are their own (trivial) thread group.
+    task->pid             = 0;  // kernel threads have no PidAllocator id
+    task->tgid            = 0;
+    task->group_leader    = task;
+    task->clear_child_tid = 0;
+    task->set_child_tid   = 0;
+
     // F3-M2 batch 3: fresh tasks own their own refcounted shared resources.
     // (The stack-map error path above runs before this point and leaves these
     // nullptr, which release_resources handles safely.)
