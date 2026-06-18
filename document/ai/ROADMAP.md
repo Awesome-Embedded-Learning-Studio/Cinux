@@ -24,10 +24,17 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F12 | 开发者生态 | M1 GDB/KALLSYMS⏳ M2 Lua⏳ M3 TinyCC⏳ M4 编辑器+包管理⏳ | 自举开发环境 |
 | F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
 
+## 横切里程碑(非 Feature 域,服务于所有复杂特性)
+| 标识 | 名称 | 状态 |
+|------|------|------|
+| FO | 可观测性/调试基建 | ✅ M0-M4 完成(2026-06-18):frame pointer(`-fno-omit-frame-pointer`,对齐 `CONFIG_FRAME_POINTER`)/ KALLSYMS lookup 模块 / 防御 backtrace(栈范围检查)/ 统一 panic handler(收编 dump_registers+kpanic+fatal_halt,+backtrace+memstats)/ `dump_memory_stats`。冒烟触发 panic 验证端到端。**M5 崩溃持久化记录:推迟**——依赖持久化层/软重启,CinuxOS 当前无(QEMU `isa-debug-exit`/halt 不保留 RAM);panic 的 serial 输出(`-serial file:`)覆盖事后取证。**M6 1b 真实符号注入(nm 嵌入):follow-up**——CMake 两阶段链接重构(风险);当前 backtrace 显示裸地址,host `addr2line -e build/kernel/big/big_kernel <addr>` 降级符号化。详见 `document/notes/2026-06-18-fo-observability.md` |
+
 ## 当前焦点
 **F2-M7 Buddy PMM ✅ 完成**（2026-06-18：buddy 伙伴系统替换 PMM flat bitmap——per-order bitmap free-list 非侵入式。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**fresh KVM 742/0 + 实机 GUI 冒烟**。详见 PLAN「F2-M7 Buddy PMM」段）。
 
-**F2-M7b SLAB ✅ 完成**（2026-06-18：kmalloc 全替 Heap——小对象→Slab 通用缓存 / 大对象→buddy+direct-map 复用；删 heap.{hpp,cpp}（净 -1951）；专用缓存 Task/VMA/CachedPage（类专属 operator new/delete 自动路由）。修 page_cache 按 `ino` 键控（slab 复用暴露的陈旧命中，GOTCHA#15）。**fresh KVM 752/0 + host 48/0 + 实机 GUI 冒烟**。详见 PLAN「F2-M7b」段 + `document/notes/2026-06-18-f2-m7b-slab.md`）。F2 收官（M1-M7 + M7b）。下个焦点：F3 信号。
+**F2-M7b SLAB ✅ 完成**（2026-06-18：kmalloc 全替 Heap——小对象→Slab 通用缓存 / 大对象→buddy+direct-map 复用；删 heap.{hpp,cpp}（净 -1951）；专用缓存 Task/VMA/CachedPage（类专属 operator new/delete 自动路由）。修 page_cache 按 `ino` 键控（slab 复用暴露的陈旧命中，GOTCHA#15）。**fresh KVM 752/0 + host 48/0 + 实机 GUI 冒烟**。详见 PLAN「F2-M7b」段 + `document/notes/2026-06-18-f2-m7b-slab.md`）。F2 收官（M1-M7 + M7b）。**FO 可观测性/调试基建 ✅ 完成**（2026-06-18）：frame pointer + KALLSYMS lookup + 防御 backtrace + 统一 panic + dump_memory_stats；冒烟触发 panic 验证端到端（符号化栈结构 + 寄存器 + task + 内存概览）。M5 崩溃记录推迟（持久化层前提）、M6 1b 真实符号注入 follow-up（CMake 两阶段，裸地址+addr2line 降级）。详见上方「横切里程碑」+ `document/notes/2026-06-18-fo-observability.md`。
+
+下个焦点：F3 信号。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
