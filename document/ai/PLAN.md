@@ -5,7 +5,7 @@
 > **F1-M4 = 块设备抽象 ✅ 完成（2026-06-16）**。
 > **F5-M1 = AHCI DMA 迁移 ✅ 完成（2026-06-16）**。
 > **F2-M6 = ext2 Cache ✅ 完成（2026-06-17）**。
-> **F2-M7 Buddy PMM ✅ 完成（2026-06-18，fresh KVM 742/0 + GUI 冒烟）**：buddy 伙伴系统替换 PMM flat bitmap（per-order bitmap free-list，非侵入式）。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**详见下方「F2-M7 Buddy PMM」段 + `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**。solid 基线 = main（M6 #12，734）。F2 进度 7/7（M1-M7 ✅）；**M7b SLAB 🔄 进行中（全替 Heap,propose 已确认 2026-06-18,见下方「F2-M7b」段）**。
+> **F2-M7 Buddy PMM ✅ 完成（2026-06-18，fresh KVM 742/0 + GUI 冒烟）**：buddy 伙伴系统替换 PMM flat bitmap（per-order bitmap free-list，非侵入式）。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**详见下方「F2-M7 Buddy PMM」段 + `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**。solid 基线 = main（M6 #12，734）。F2 进度 7/7 + M7b（M1-M7 ✅，**M7b SLAB ✅ 完成 2026-06-18**：kmalloc 全替 Heap + 专用缓存 Task/VMA/CachedPage，见下方「F2-M7b」段）。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -205,7 +205,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 **完成总结**（F2-M7）：buddy 伙伴系统替换 PMM flat bitmap——`BuddyAllocator`（**per-order bitmap free-list**，1 bit/block，`find_first_set` 天然 low-first，非侵入式不写 free 页）+ PMM 接入（`init` 用 `buddy.init`+`mark_free_region` 排除 kernel/metadata 区；`alloc_page[_locked]`/`alloc_pages`/`free[_pages]`/count 调 buddy；`_locked` 保 IF=0 锁契约）+ order_ 数组（1B/页，head order 权威）+ bitmap_storage（per-order bitmap ~575KB @ order_storage 后）。关键教训 **GOTCHA#14**（nested KVM EPT 对 intrusive free-list 写读不一致 → 改 bitmap metadata 解；TCG 验证 buddy 逻辑正确）。验证：fresh KVM run-kernel-test 742/0 + 实机 `make run` GUI 启动到桌面不崩。遗留：SLAB（M7b）/ CoW（F3）。
 
-## 🔄 F2-M7b（SLAB 分配器）进行中 — 2026-06-18（propose 已确认）
+## ✅ F2-M7b（SLAB 分配器）已完成 — 2026-06-18（fresh KVM 752/0 + host 48/0 + GUI 冒烟）
 
 > 目标：buddy 之上分层小对象分配器 `SlabAllocator`，**全替 Heap**（不留 fallback「尾巴」），闭环 PMM(buddy)→Slab→kmalloc/kfree→operator new。小对象(≤2KB)走 Slab（9 通用缓存 + 专用缓存）；大对象(>2KB / 大对齐)走 **buddy + direct-map 复用**（DmaPool 同款 GOTCHA#7/#13，零 map/零元数据）。
 > 决策（propose 已确认，2026-06-18）：
@@ -222,8 +222,16 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 |----|------|------|--------|------|
 | 批1 | `slab.hpp/cpp`（SlabAllocator 8 通用缓存 16-2048B + 页内 header + 侵入式 freelist + 4K 页 on-demand grow + KMEM_SLAB 区 + irq_guard IF=0）+ memory_layout KMEM_SLAB + CMake + `test_slab.cpp` 单测 | ✅ | 563bb0f | fresh KVM 750/0（742+8）+ host 49/0 |
 | 批2 | `kmalloc/kfree`（小→Slab / 大→buddy+direct-map，free 按区路由）+ `crt_stub` 7 重载 + main/main_test init + `ram_block_device` 迁移 + **删 heap.{hpp,cpp}/test_heap(内核+host)** + slab 硬化（grow 页零化 + O(1) double-free 毒检）+ `test_kmalloc.cpp` 11 测 + `test_slab` +double-free 测 + **page_cache 按 `ino` 键控**（修 slab 复用 Inode 地址暴露的陈旧命中，GOTCHA#15） | ✅ | 4e05892 | **fresh KVM 751/0 + host 48/0 + 实机 GUI 到桌面** |
-| 批3 | 专用缓存 API（`create_cache`/`cache_alloc`/`cache_free`，`kObjAlign`=16 支持非幂 obj_size）+ `dedicated_caches.cpp`（task/vma/cached_page，类专属 operator new/delete 自动路由，无调用点改动）+ `test_slab` +dedicated 测。**Inode 不入 slab**：ext2 用固定 `inode_cache_[]` 数组自管（非堆分配，N/A）。实测 Task=1008B→4/slab(原 1024 档 3)、VMA=56B→72/slab(原 64 档 63) 真省碎片；CachedPage=64B(2幂,接线为完整) | ✅ | (本次) | **fresh KVM 752/0 + host 48/0 + 实机 GUI 到桌面** |
-| 批4 | 收尾：ROADMAP/PLAN/todo/notes + GOTCHA#15/#16 + fresh KVM run-kernel-test + `test_host` + `make run` 冒烟 | ⏳ | — | 全绿 |
+| 批3 | 专用缓存 API（`create_cache`/`cache_alloc`/`cache_free`，`kObjAlign`=16 支持非幂 obj_size）+ `dedicated_caches.cpp`（task/vma/cached_page，类专属 operator new/delete 自动路由，无调用点改动）+ `test_slab` +dedicated 测。**Inode 不入 slab**：ext2 用固定 `inode_cache_[]` 数组自管（非堆分配，N/A）。实测 Task=1008B→4/slab(原 1024 档 3)、VMA=56B→72/slab(原 64 档 63) 真省碎片；CachedPage=64B(2幂,接线为完整) | ✅ | 5d932e8 | **fresh KVM 752/0 + host 48/0 + 实机 GUI 到桌面** |
+| 批4 | 收尾：ROADMAP/PLAN/todo/notes + GOTCHA + fresh KVM run-kernel-test + `test_host` + `make run` 冒烟 | ✅ | (本次) | fresh KVM 752/0 + host 48/0 + GUI 到桌面 |
+
+**完成总结**（F2-M7b，4 批）：SLAB 分配器全替 Heap——批1 `SlabAllocator`（8 通用缓存 16-2048B + 页内 header + 侵入式 freelist + 4K 页 on-demand grow，KMEM_SLAB 独立 4K 区 PML4[256]，irq_guard IF=0 安全）；批2 `kmalloc/kfree`（小→Slab / 大→buddy+direct-map 复用，零 map/零元数据）+ crt_stub 7 重载 + ram_block_device 迁移 + **删 heap.{hpp,cpp}/test_heap（内核+host，净 -1951 行）** + slab 硬化（grow 页零化 + O(1) double-free 毒检）+ **修 page_cache 按 `ino` 键控**（slab 复用 Inode 地址暴露的陈旧命中 → sys_read 返错字节，GOTCHA#15）；批3 专用缓存 API（`create_cache`/`cache_alloc`/`cache_free`，`kObjAlign`=16 支持非幂 obj_size）+ dedicated_caches（task/vma/cached_page，**类专属 operator new/delete 自动路由**，无调用点改动）——实测 Task=1008B→4/slab(原 3)、VMA=56B→72/slab(原 63) 真省碎片；Inode 不入 slab（ext2 固定 `inode_cache_[]` 自管，N/A）。
+
+架构：A.6 边界（Slab/kmalloc 返 nullptr on OOM，非 ErrorOr）；A.7 不入 Cinux-Base（依赖 PMM/VMM/heap）；侵入式 freelist 写 4K 页（绝不 direct-map huge，GOTCHA#13/#14）；大对象复用 direct-map（DmaPool 同款 GOTCHA#7/#13）；类专属 operator new/delete 让专用缓存对调用点透明（错误路径自动覆盖）。
+
+关键教训 **GOTCHA#15**（slab 复用暴露按指针键控的缓存——page cache 按 `Inode*` 键控 → 新文件命中陈旧页 → `sys_read` 返错字节；Heap first-fit 侥幸不复用同地址故潜伏。改按 `inode->ino` 稳定号键控。**通用铁律**：按对象指针/地址键控的在线结构（cache/table），对象经分配器回收时必然陈旧命中，键须用稳定 id/number 非 pointer）。
+
+验证：fresh KVM run-kernel-test 742→**752/0**（+10 slab/kmalloc/dedicated 单测 - 旧 heap 测 + page_cache 修复回归）+ host test_host **48/0** + 实机 `make run` GUI 启动到桌面不崩。**F2 内存管理增强里程碑收官（M1-M7 + M7b）**。
 
 ## ✅ F2-M6（ext2 Cache）已完成 — 2026-06-17
 

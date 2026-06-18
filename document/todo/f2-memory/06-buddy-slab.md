@@ -3,7 +3,7 @@
 > 替换当前 PMM bitmap + Heap first-fit 为分层分配器。
 > 伙伴系统管理物理页，Slab 高效分配小对象。
 
-> **STATUS（2026-06-18）**：T1 Buddy ✅ 已完成（M7 合 main）。**T2-T5 = M7b SLAB，propose 已确认（全替 Heap，无 fallback）**，批级方案见 `document/ai/PLAN.md`「F2-M7b」段（批1 Slab 核心 / 批2 kmalloc 全替+删 Heap / 批3 专用缓存 / 批4 收尾）。下方为原始设计草稿（参考），权威以 PLAN 为准。
+> **STATUS（2026-06-18）**：T1 Buddy ✅（M7 合 main）。**T2-T5 = M7b SLAB ✅ 全完成**（批1 Slab 核心 / 批2 kmalloc 全替+删 Heap / 批3 专用缓存 Task·VMA·CachedPage / 批4 收尾；4 commit 在 `feat/f2-m7b-slab` 待 PR）。完成总结见 `document/ai/PLAN.md`「F2-M7b」段 + `document/notes/2026-06-18-f2-m7b-slab.md`。下方为原始设计草稿（参考），权威以 PLAN 为准。
 > 关键：小对象(≤2KB)→Slab(4K 页侵入式 freelist，KMEM_SLAB 区)；大对象(>2KB)→buddy+direct-map 复用（零 map/零元数据，GOTCHA#7/#13）。
 
 ## 目标
