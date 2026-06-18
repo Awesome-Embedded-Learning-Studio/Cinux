@@ -22,7 +22,7 @@
 - **L2 提交信息** `<type>(<scope>): <中文简述>`——纯描述变更（里程碑/批归属由 PLAN.md 的 commit 列跟踪，不入 commit msg），**不带 Co-Authored-By 或任何 AI 署名 trailer**。
 - **L3 propose-then-execute**：新里程碑/跨子系统大改，先出草案等确认；已确认的批内可自主推进。
 - **L4 改前查牵连**：改任何模块或文档前，grep 引用方与依赖；ROADMAP/PLAN/`document/todo`/git 状态变更需同步，降不一致。
-- **L5 验证**：内核改动用 `run-kernel-test`（QEMU 真内核 ~662 项，首选）；`run`/`make run`(GUI 无断言)非验证。**CI 对等盲区**：`run-kernel-test` 不编译 `test/unit/` host 单测（host mock，不跑真内核），而 CI 的 host-tests job 另跑 `make test_host` 当构建门禁——改公共接口/`InodeOps`/被 mock 的类后，push 前补 `cmake --build build -j$(nproc)`（全量，含 host 编译）或 `make test_host`，否则 host 单测破了本地 run-kernel-test 抓不到（批2b 教训，2026-06）。
+- **L5 验证**：内核改动用 `run-kernel-test`（QEMU 真内核 ~662 项，首选）；`run`/`make run`(GUI 无断言)非验证。**防挂死（务必）**：两者都启动 QEMU，崩在 panic 死循环 / 死锁会挂死终端不返回——一律用 `timeout 40` 包裹：`timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 与 `timeout 40 make run`。增量构建 + 跑完远不到 40s；挂死时 timeout 杀进程、暴露非零退出码便于诊断（编译步本身不挂死，可单独 `cmake --build build --target big_kernel_test -j$(nproc)` 先编后跑）。**CI 对等盲区**：`run-kernel-test` 不编译 `test/unit/` host 单测（host mock，不跑真内核），而 CI 的 host-tests job 另跑 `make test_host` 当构建门禁——改公共接口/`InodeOps`/被 mock 的类后，push 前补 `cmake --build build -j$(nproc)`（全量，含 host 编译）或 `make test_host`，否则 host 单测破了本地 run-kernel-test 抓不到（批2b 教训，2026-06）。
 - **L6 省 token**：命令与文档保持紧凑，不堆仪式；`CLAUDE.md` 常驻须薄，重内容按需读。
 - **L7 编译并行**：所有 `cmake --build` 都带 `-j$(nproc)`（本机 14 核）；验证即 `cmake --build build --target run-kernel-test -j$(nproc)`，大幅省编译时间。
 - **L8 工作记录**：每批 / 每个有意义的迭代，`/done` 写 `document/notes/<date>-<topic>.md`（正式发布质量：背景/目标/设计/决策/陷阱/验证，参考 `document/notes/` 既有风格）。2026-06-16 起取代旧 DEVLOG 编年日志（`DEVLOG.md` 已归档留壳，不再追加）。
