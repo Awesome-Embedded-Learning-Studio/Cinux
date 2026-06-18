@@ -1,4 +1,6 @@
-# M1: 核心 POSIX 信号系统
+# M1: 核心 POSIX 信号系统 ✅ 完成（2026-06-18）
+
+> ✅ 已实现（F3-M1，5 批，763→783）：核心 22 信号 + 投递 + kill/sigaction/sigprocmask/sigreturn + Custom handler（中断路径 + int $0x80 trampoline）+ PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE 集成。详见 PLAN「F3-M1」段 + `document/notes/2026-06-18-f3-m1-signals.md`。留后续：实时信号、sigaltstack、SA_RESTART、嵌套、STOP/CONT 真效果、waitpid 阻塞、进程组 kill（F3-M3）。
 
 > 从零构建信号系统。核心信号优先，抽象接口方便后续扩展实时信号。
 > 实现 kill/signal/sigaction/sigprocmask 等系统调用。

@@ -12,7 +12,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 |---|------|--------------------|---------|
 | F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
 | F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache✅ M7 Buddy✅ M7b Slab✅ | mmap/Page Cache/brk/分层分配器 |
-| F3 | 进程与线程 | M1 信号⏳ M2 clone/futex/TLS⏳ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
+| F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS⏳ M3 进程组⏳ M4 调度器⏳ | POSIX 信号/线程/futex |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
 | F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
@@ -34,10 +34,12 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 
 **F2-M7b SLAB ✅ 完成**（2026-06-18：kmalloc 全替 Heap——小对象→Slab 通用缓存 / 大对象→buddy+direct-map 复用；删 heap.{hpp,cpp}（净 -1951）；专用缓存 Task/VMA/CachedPage（类专属 operator new/delete 自动路由）。修 page_cache 按 `ino` 键控（slab 复用暴露的陈旧命中，GOTCHA#15）。**fresh KVM 752/0 + host 48/0 + 实机 GUI 冒烟**。详见 PLAN「F2-M7b」段 + `document/notes/2026-06-18-f2-m7b-slab.md`）。F2 收官（M1-M7 + M7b）。**FO 可观测性/调试基建 ✅ 完成**（2026-06-18）：frame pointer + KALLSYMS lookup + 防御 backtrace + 统一 panic + dump_memory_stats；冒烟触发 panic 验证端到端（符号化栈结构 + 寄存器 + task + 内存概览）。M5 崩溃记录推迟（持久化层前提）、M6 1b 真实符号注入 follow-up（CMake 两阶段，裸地址+addr2line 降级）。详见上方「横切里程碑」+ `document/notes/2026-06-18-fo-observability.md`。
 
-下个焦点：F3 信号。
+**F3-M1 信号系统 ✅ 完成**（2026-06-18：核心 22 POSIX 信号 + 投递 + kill/sigaction/sigprocmask/sigreturn + Custom handler（中断路径 + int $0x80 trampoline）+ PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE 集成。**fresh 783/0 + 实机 GUI 冒烟**。详见 PLAN「F3-M1 信号」段 + `document/notes/2026-06-18-f3-m1-signals.md`）。
+
+下个焦点：F3-M2 clone + futex + TLS。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。
 
 ## 基线统计
-Feature 13 / Milestone ~60 / syscall 21(目标 100+) / 驱动 8(目标 15+) / FS 2(目标 7+) / CPU 单核(目标 SMP)。
+Feature 13 / Milestone ~60 / syscall 24(目标 100+) / 驱动 8(目标 15+) / FS 2(目标 7+) / CPU 单核(目标 SMP)。
