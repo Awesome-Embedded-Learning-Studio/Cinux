@@ -8,7 +8,8 @@
 > **F2-M7 Buddy PMM ✅ 完成（2026-06-18，fresh KVM 742/0 + GUI 冒烟）**：buddy 伙伴系统替换 PMM flat bitmap（per-order bitmap free-list，非侵入式）。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**详见下方「F2-M7 Buddy PMM」段 + `document/notes/2026-06-17-f2-m7-direct-map-buddy-handoff.md`**。solid 基线 = main（M6 #12，734）。F2 进度 7/7 + M7b（M1-M7 ✅，**M7b SLAB ✅ 完成 2026-06-18**：kmalloc 全替 Heap + 专用缓存 Task/VMA/CachedPage，见下方「F2-M7b」段）。
 > **FO 可观测性/调试基建 ✅ 完成（2026-06-18，763/0 + panic 冒烟）**：frame pointer + KALLSYMS lookup + 防御 backtrace + 统一 panic handler（收编 dump_registers/kpanic/fatal_halt + backtrace + memstats）+ dump_memory_stats。关键 GOTCHA：`CMAKE_BUILD_TYPE` 默认空(-O0)→ 首次 -O2 Release 验证全绿（建议 CI 加 -O2 门禁）；`VMM::translate()` 不支持 huge 页 → backtrace 改栈范围检查；kprintf 不支持 `%zu`。**M5 崩溃持久化推迟**（持久化层前提不满足）、**1b 真实符号注入 follow-up**（CMake 两阶段，裸地址+addr2line 降级）。详见 `document/notes/2026-06-18-fo-observability.md`。
 > **F3-M1 信号系统 ✅ 完成（2026-06-18，5 批，763→783）**：核心 POSIX 信号（Signal/SigSet/SigAction）+ 投递（send/pick/check_and_deliver）+ kill/sigaction/sigprocmask/sigreturn + Custom handler round-trip（中断路径 + int $0x80 trampoline）+ 集成（PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE）。详见下方「F3-M1 信号」段 + `document/notes/2026-06-18-f3-m1-signals.md`。
-> **F3-M2 线程支持（clone + futex + TLS）✅ 完成（2026-06-18，5 批，783→810）**：为 musl/pthread 打内核地基。①TLS(fs_base) ②futex(WAIT/WAKE/BITSET) ③共享 refcount 指针化(sig_actions/fd_table/cwd)+retrofit fork ④线程组+clone 核心(子进程用户栈返回 patch 帧 user_rsp,GOTCHA#18) ⑤cleartid exit 集成+libc wrapper。**关键踩坑 GOTCHA#17-20**（FS_BASE 规范地址/clone 用户栈返回/改接口致测试早返回悬垂/栈拷贝 full_used 下溢）。**真用户态线程 round-trip + 实机 GUI 冒烟 + AddressSpace refcount + futex timeout 留 follow-up**。详见文末「✅ F3-M2」段 + 各批 notes。下个焦点待定（F3-M3 进程组 或 F4 SMP）。
+> **F3-M2 线程支持（clone + futex + TLS）✅ 完成（2026-06-18，5 批，783→810）**：为 musl/pthread 打内核地基。①TLS(fs_base) ②futex(WAIT/WAKE/BITSET) ③共享 refcount 指针化(sig_actions/fd_table/cwd)+retrofit fork ④线程组+clone 核心(子进程用户栈返回 patch 帧 user_rsp,GOTCHA#18) ⑤cleartid exit 集成+libc wrapper。**关键踩坑 GOTCHA#17-20**（FS_BASE 规范地址/clone 用户栈返回/改接口致测试早返回悬垂/栈拷贝 full_used 下溢）。**真用户态线程 round-trip + 实机 GUI 冒烟 + AddressSpace refcount + futex timeout 留 follow-up**。详见文末「✅ F3-M2」段 + 各批 notes。下个焦点：F3-M3 进程组/会话（已启动，见下）。
+> **F3-M3 进程组/会话 + waitpid 阻塞 🔄 进行中（2026-06-19 起）**：为 Job Control / TTY 打地基 —— pgid/sid/setpgid/setsid/killpg + 补 waitpid 阻塞（复用 futex 的 block/unblock + exit 唤醒父）。批1 ✅ Task 进程组字段 + fork/clone 继承（810→815）。详见文末「🔄 F3-M3」段。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -309,3 +310,28 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 - **R4 futex 无 timeout**：FUTEX_WAIT 无限等，waker 必须存在；测试用 2 task（一 wait 一 wake）配对。
 
 **GOTCHA（新增预留）**：#18 clone 子进程用户栈返回（帧 user_rsp 槽 patch）+ 共享 refcount 生命周期（线程 exit 不释放共享表，进程 exit 最后释放）。批1 已落 GOTCHA#17（wrmsr FS_BASE 须规范地址）。
+
+## 🔄 F3-M3（进程组/会话 + waitpid 阻塞）进行中 — 2026-06-19
+
+> 目标：为 Job Control / TTY 打地基 —— 进程组（pgid）+ 会话（sid）+ `setpgid`/`getpgid`/`getsid`/`setsid`/`killpg` + fork 继承，**顺带补 waitpid 阻塞**（闭环 F3 进程管理，shell/CFBox 不再忙等烧 CPU）。
+> 决策（propose 已确认）：
+> - **#1 范围 = 进程组 + waitpid 阻塞**（非纯 todo 原样，也非全包 STOP/CONT 真调度）。STOP/CONT 真调度留 M4 调度器。
+> - **#2 继承规则方案 A + 可测 helper**：`inherit_process_identity`（process_internal.hpp），root fork（`parent->pgid==0`）自成组，否则继承父。fork/clone memcpy 后显式调用。init(pid=1) 自动满足（kernel_init pid=0 fork 出 pid=1 自成组）。
+> - **#3 killpg 放 signal.cpp**（持 `g_registry_head` + `signal_send`，遍历按 pgid 广播）；process_group.cpp 只做纯字段 setpgid/getsid/setsid。
+> - **#4 waitpid 阻塞复用 `Scheduler::block/unblock` + exit 唤醒 parent**，不引入新 wait_queue。
+> - **#5 controlling_tty 只占位**（-1），真控制终端 attach 留 F10-M3 TTY。
+> 不做：SIGSTOP/CONT 真调度（M4）、实时信号组语义、权限检查（全 root）。
+> 复用现成基建：pid registry（`signal_find_task_by_pid` + `g_registry_head`）、Task children/parent、`Scheduler::block/unblock`（futex 同款）、`signal_send`。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | Task 加 `pgid`/`sid`/`session_leader`/`controlling_tty` + `inherit_process_identity`（root 自成组 / 否则继承父）+ fork/clone 调用 + 5 单测 | ✅ | 77be415 | 815/0（+5） |
+| 批2 | `process_group.{hpp,cpp}`：setpgid/getpgid/getsid/setsid（纯字段语义）+ killpg（放 signal.cpp，遍历 registry 按 pgid 广播）+ 单测 | ⏳ | | |
+| 批3 | 4 syscall（setpgid=109/getpgid=121/getsid=124/setsid=112）+ 注册 syscall 表 + libc wrapper + 单测 | ⏳ | | |
+| 批4 | **waitpid 阻塞**：默认 block、`WNOHANG` 不阻塞；exit 唤醒 waiting parent；先审计现有调用点防挂死 + 单测 | ⏳ | | |
+| 批5 | 收尾：文档（PLAN/ROADMAP/todo/notes/GOTCHA）+ 全量验证 + 实机冒烟 | ⏳ | | |
+
+**风险（propose 预判）**：
+- **R1（最高）批4 破现有 waitpid 测试**：默认行为从 non-blocking 变 blocking，现有 `test_fork_exec` 等若没传 `WNOHANG` 且无 zombie → 挂死。批4 第一步 grep 全部 waitpid 调用点审计（GOTCHA#19 同款家族 + futex 单测 block 挂死坑）。
+- **R2 exit 唤醒**：`sys_exit` 在 scheduler 路径，`unblock(parent)` 要在 block/unblock 锁契约内（IF=0 / irq_guard），参考 futex wake。
+- **R3 killpg 迭代安全**：遍历 registry 广播时 task 可能正退出 → 持锁或先收集 pid 再发。
