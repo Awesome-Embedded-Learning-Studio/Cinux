@@ -111,6 +111,18 @@ const char* RoundRobin::name() const {
     return "RoundRobin";
 }
 
+void RoundRobin::clear() {
+    auto g = lock_.irq_guard();
+    (void)g;
+    for (int i = 0; i < MAX_TASKS; i++) {
+        run_queue_[i] = nullptr;
+    }
+    head_              = 0;
+    tail_              = 0;
+    count_             = 0;
+    quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
+}
+
 bool RoundRobin::task_tick(Task* current) {
     auto g = lock_.irq_guard();
     (void)g;
@@ -166,6 +178,19 @@ RoundRobin       Scheduler::default_rr_;
 Task*            Scheduler::idle_task_   = nullptr;
 bool             Scheduler::initialized_ = false;
 lib::Atomic<int> Scheduler::tick_count_{0};
+int              Scheduler::no_reschedule_depth_ = 0;
+
+// ============================================================
+// NoRescheduleGuard (test-harness role-play)
+// ============================================================
+
+Scheduler::NoRescheduleGuard::NoRescheduleGuard() {
+    no_reschedule_depth_++;
+}
+
+Scheduler::NoRescheduleGuard::~NoRescheduleGuard() {
+    no_reschedule_depth_--;
+}
 
 // ============================================================
 // Scheduler implementation
@@ -183,6 +208,7 @@ void Scheduler::init() {
     idle_task_   = nullptr;
     tick_count_.store(0, lib::MemoryOrder::Relaxed);
     register_class(&default_rr_);
+    default_rr_.clear();  // pristine run queue -- no leakage across re-init (tests)
 
     idle_task_ = TaskBuilder().set_entry(idle_entry).set_name("idle").set_priority(255).build();
 
@@ -399,7 +425,11 @@ void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
     cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' blocked: %s\n", task->tid, task->name,
                         reason ? reason : "unknown");
 
-    if (task == current_) {
+    // Context-switch away only when the blocked task is the running one AND a
+    // real dispatch loop is active.  Inside a NoRescheduleGuard (in-kernel test
+    // harness role-play) we skip the switch so the harness thread can observe
+    // the task's state, as a second CPU would.
+    if (task == current_ && no_reschedule_depth_ == 0) {
         schedule();
     }
 }

@@ -78,6 +78,13 @@ public:
     Task*       pick_next() override;
     const char* name() const override;
 
+    // Drop every queued task and reset the ring-buffer pointers.  Used by
+    // Scheduler::init() so each (re)init starts from a pristine run queue --
+    // the in-kernel test suite calls init() before every test, and without this
+    // the tasks a previous test added would leak into the next one.  A no-op
+    // at boot, where the queue is already empty.
+    void clear();
+
     bool task_tick(Task* current) override;
     void task_fork(Task* parent, Task* child) override;
     // task_deadline is inherited unchanged (0 = not deadline-based).
@@ -111,6 +118,22 @@ public:
     static void  set_current(Task* task);  // nullable: tests clear current_ with nullptr
     static bool  is_initialized();
 
+    // In-kernel test-harness role-play guard.  While at least one
+    // NoRescheduleGuard is alive, block() still transitions the task to Blocked
+    // and removes it from the run queue, but does NOT context-switch away.  The
+    // test harness runs single-threaded with no real dispatch loop, role-playing
+    // tasks by installing them as current via set_current(); suppressing
+    // block()'s reschedule lets the harness thread keep observing wait-queue /
+    // task state -- exactly as a second CPU watching a blocked task would.
+    // Production never raises the depth (it stays 0), so this is inert in the
+    // real kernel.  Only block()'s internal schedule() is gated; tick()/yield()/
+    // exit_current() are untouched.
+    class NoRescheduleGuard {
+    public:
+        NoRescheduleGuard();
+        ~NoRescheduleGuard();
+    };
+
     static void tick();
     static void schedule();
     static void block(lib::NotNull<Task*> task, const char* reason);
@@ -133,6 +156,7 @@ private:
     static Task*            idle_task_;
     static bool             initialized_;
     static lib::Atomic<int> tick_count_;
+    static int              no_reschedule_depth_;  ///< >0 only inside the test harness
 };
 
 }  // namespace cinux::proc

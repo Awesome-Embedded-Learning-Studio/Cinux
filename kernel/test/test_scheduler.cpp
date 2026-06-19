@@ -230,7 +230,7 @@ static void task_a_func() {
     // Comes back here after B yields
     task_a_count = task_a_count + 1;
     // Done
-    done = true;
+    done         = true;
     // Switch back to boot
     context_switch(&task_a_ctx, &boot_ctx);
 }
@@ -373,6 +373,43 @@ void test_block_unblock() {
 
     Scheduler::unblock(task);
     TEST_ASSERT_EQ(static_cast<int>(task->state), static_cast<int>(TaskState::Ready));
+}
+
+// Verifies the real dispatch path that NoRescheduleGuard suppresses in the
+// phantom-task tests: block(current) must genuinely context-switch to a
+// runnable task and resume the caller once that task exits.  b runs, wakes a,
+// and returns into the exit_current trampoline (wired by TaskBuilder at
+// task_builder.cpp:100-103), which schedules back to a.
+static Task* g_block_dispatch_a     = nullptr;
+static bool  g_block_dispatch_b_ran = false;
+
+static void block_dispatch_b_entry() {
+    g_block_dispatch_b_ran = true;
+    Scheduler::unblock(g_block_dispatch_a);  // wake a so exit_current can pick it
+    // Returning falls into exit_current -> schedule -> a resumes.
+}
+
+void test_block_dispatches_to_runnable() {
+    Scheduler::init();
+    g_block_dispatch_a     = nullptr;
+    g_block_dispatch_b_ran = false;
+
+    Task* a = TaskBuilder().set_entry(test_task_builder::dummy_entry).set_name("blk_a").build();
+    Task* b = TaskBuilder().set_entry(block_dispatch_b_entry).set_name("blk_b").build();
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+
+    g_block_dispatch_a = a;     // b's entry unblocks this task before exiting
+    Scheduler::set_current(a);  // the harness thread role-plays task a
+    Scheduler::add_task(b);     // b waits, runnable, in the run queue
+
+    // No NoRescheduleGuard here: block(a) MUST really dispatch to b.  This
+    // proves the guard suppresses scheduling only when explicitly asked.
+    Scheduler::block(a, "dispatch test");
+    // a resumes here after b ran, exited, and scheduled back.
+
+    TEST_ASSERT_TRUE(g_block_dispatch_b_ran);  // b ran => a real dispatch happened
+    Scheduler::set_current(nullptr);
 }
 
 }  // namespace test_scheduler_new
@@ -677,6 +714,7 @@ extern "C" void run_scheduler_tests() {
     RUN_TEST(test_scheduler_new::test_is_initialized);
     RUN_TEST(test_scheduler_new::test_remove_task);
     RUN_TEST(test_scheduler_new::test_block_unblock);
+    RUN_TEST(test_scheduler_new::test_block_dispatches_to_runnable);
 
     RUN_TEST(test_round_robin_locked::test_locked_enqueue_dequeue);
     RUN_TEST(test_round_robin_locked::test_locked_dequeue_middle);
