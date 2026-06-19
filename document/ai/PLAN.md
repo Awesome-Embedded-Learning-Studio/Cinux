@@ -15,6 +15,55 @@
 
 > **F-INFRA 基建加固 ✅ 完成（2026-06-19，10 批 12 commit，基线 840/0 全程绿、零警告）**：F2/F3 后复杂度陡增前夯基——CI 粘合/静态门禁/警告收紧/format 属性/static_assert/KALLSYMS 真符号/64 位 gdbinit+decode-trace/NotNull 指针契约/clang-tidy/UBSAN/lockdep。详见下方「✅ F-INFRA」段 + `document/notes/2026-06-19-finfra-{1..10}-*.md` + summary。
 
+## ✅ F4-M1（ACPI 静态表解析）完成 — 2026-06-19
+
+> F4（SMP）M1：从 BIOS ACPI 表提取 APIC 基址 + CPU 列表 + IRQ override → `ACPIInfo`，为 M2（APIC init）铺路。不做 AML/FADT/HPET 深度（HPET 留 F5-M4）。基线 main 840/0 → 859/0 + production GUI 冒烟。
+
+| 批 | 范围 | Commit | 测试 |
+|----|------|--------|------|
+| M1-1 | RSDP 定位（EBDA+ROM + checksum）+ 单测 | faabce1 | 849/0 |
+| M1-2 | find_table（RSDT 32位主路径 + 每表 checksum）+ 单测 | d862b01 | 854/0 |
+| M1-3 | MADT→ACPIInfo（LAPIC/CPU/IOAPIC/IRQ override）+ 单测 | 5216839 | 859/0 |
+| M1-4 | g_acpi_info + init() + main 接线 + 真机探针 + 收尾 | (本次) | 859/0 + GUI 冒烟 |
+
+**总结**：RSDP 定位 → find_table（RSDT 32位 / XSDT byte-wise 读避 -Wcast-align）→ MADT 解析（packed struct + reinterpret 读变长 ICS → ACPIInfo）→ main.cpp 接线（PIT 后，direct-map 就绪）+ 启动探针。
+**关键 GOTCHA**：①QEMU pc 默认 **ACPI 1.0 RSDP（rev 0，仅 RSDT 32位，无 XSDT）** → M1-2 走 RSDT 主路径（修正 propose 阶段"ACPI 2.0"假设）。②测试 log 含 ANSI escape → grep 当二进制静默，查日志用 `grep -a`。③ACPI 表（RAM）经 direct-map cache-enabled 访问 OK，与 APIC MMIO（M2 需 `VMM.map + FLAG_PCD` 禁缓存）严格区分。
+**真机**：`[ACPI] 1 CPU(s), LAPIC 0xFEE00000, IOAPIC 0xFEC00000, 5 IRQ override(s), pcat=1`（QEMU pc 标准拓扑；5 override 含 IRQ0→GSI2，M2-3 消费）。详见 `document/notes/2026-06-19-f4-m1-{1,2,3,4}-*.md`。下个焦点：**F4-M2 LAPIC + IOAPIC**。
+
+## ✅ F4-M2（Local APIC + I/O APIC + PIC→APIC 切换）完成 — 2026-06-19
+
+> F4（SMP）M2：中断现代化——8259 PIC → LAPIC + IOAPIC。解锁现代中断（更多源 + 为 M3 多核 / xHCI INTx# 铺路）。基线 859/0 → 869/0 + production 真机（PIT 13 ticks under APIC）。
+
+| 批 | 范围 | Commit | 测试 |
+|----|------|--------|------|
+| M2-1 | LocalAPIC（xAPIC MMIO + FLAG_PCD）+ mock | 8fcd5fc | 865/0 |
+| M2-2 | IOAPIC（indirect + set_redirect + mask）+ mock | 58ed314 | 869/0 |
+| M2-3 | IrqBackend::eoi + PIC→APIC 切换 + 改 5 处 EOI + 真机冒烟 | fcf1151 | 869/0 + PIT 13 ticks |
+| M2-4 | 收尾（本文档 + ROADMAP；IPI/APIC timer 推迟 M3） | (本次) | — |
+
+**总结**：LAPIC（xAPIC MMIO，qemu64 无 x2APIC）+ IOAPIC（indirect IOREGSEL/IOWIN + set_redirect 64-bit）+ IrqBackend 抽象（EOI PIC/APIC 派发）+ switch_to_apic（mask PIC / LAPIC init+enable / IOAPIC redirect IRQ0,1,12→0x20,0x21,0x2C 照 ISA override 查 GSI / flip backend）+ 改 5 处 EOI（pit/keyboard×2/mouse/irq_handlers×2）。
+**关键 GOTCHA**：①APIC MMIO 必须 `VMM.map + FLAG_PCD`（禁缓存，**严禁 direct-map**）②freestanding `for(x:{...})` 需 `<initializer_list>`（改数组循环）③IOAPIC redirect 照 ISA override 查 GSI（QEMU IRQ0→GSI2，直映 IRQ0→GSI0 错→无 tick）④EOI 在 C handler 发（stub 不动，IrqBackend 一处切换）⑤qemu64 无 x2APIC（xAPIC MMIO 必选）。
+**真机**：`[APIC] switched to APIC (LAPIC id 0, IOAPIC @0xFEC00000)` + **PIT 13 ticks under APIC**（IRQ0→GSI2→LAPIC vector 0x20 路由通）+ GUI 启动不崩。
+**推迟 M3**：IPI（send_ipi/init/sipi）+ APIC timer（多核 AP 启动 / per-CPU timer 需要）；MSI/MSI-X → F4-M2b 或 F5-xHCI 前置。
+**F4-M1+M2 完成**（9 commit，840→869/0 + 真机）。详见 `document/notes/2026-06-19-f4-m2-*.md`。下个焦点：**M3 AP 启动**（IPI + per-CPU）或 F4 暂停 push/PR。
+
+## ✅ F4-M3 Phase 1（Per-CPU 架构,单核重构）完成 — 2026-06-19
+
+> **Phase 1(P1-1~4)完成,全程 869/0 行为不变 + 真机 GUI。** Phase 2(AP 启动)待议。分支 `feat/f4-m1-acpi`(15 commit 未 push:M1 4 + M2 4 + M3-P1 4 + docs 3)。
+> **设计文档(执行依据):[document/notes/2026-06-19-f4-m3-design.md](../notes/2026-06-19-f4-m3-design.md)** —— 调研结论、PerCpu GS 设计、9 批拆批、风险/GOTCHA。
+> 核心:PerCpu{kernel_stack@0(兼容 syscall %gs:0), current, cpu_id, apic_id} + percpu_blocks[kMaxCpus] + percpu() 读 MSR_GS_BASE;context_switch 去 per-task GS;每 CPU GDT/TSS;AP trampoline @0x8000 + INIT-SIPI-SIPI(Phase 2)。
+> 调研:SMP 就绪 ~20%,4 P0(current_ 静态/全局 runq/单 TSS/无 AP trampoline)+ 3 P1(futex/waitpid/mutex lost-wakeup,Phase 3 修)。**Phase 1 修了 P0#1(current→percpu)+ #3(单 TSS→gdt_blocks);#2 全局 runq / #4 AP trampoline 留 Phase 2/3。**
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| P1-1 | PerCpu 结构(kernel_stack@0)+ percpu_blocks[] + percpu() 静态返 [0];迁移 ~15 处 g_per_cpu;gs 页双镜像;测试改 percpu()->current;删 per_cpu.hpp/g_per_cpu | ✅ | eaccc57 | 869/0 + 真机 GUI |
+| P1-2 | GS 锚定 PerCpu[0] + 完整 swapgs 纪律:usermode_init 设 GS_BASE/KERNEL_GS_BASE、删 gs 页;jump_to_usermode 加 swapgs;ISR 宏条件 swapgs(按 CS 判 CPL);context_switch.S 删 GS 存取(fs_base 保留);CpuContext gs/kgs 留 reserved、删 3 处 kgs_base=;percpu() 读 MSR_GS_BASE;补 msr.hpp;usermode_init 提前到 IDT 后 | ✅ | c1a511e | 869/0 + 真机 GUI |
+| P1-3 | per-CPU GDT/TSS:g_gdt→gdt_blocks[kMaxCpus](不完整数组声明免耦合);tss_set_rsp0 内部读 percpu()->cpu_id(签名不变);main/main_test 用 [0] | ✅ | b9af79f | 869/0 + 真机 GUI |
+| P1-4 | 收尾:全量 cmake --build + test_host + 真机 + ROADMAP/PLAN + Phase 1 收尾笔记 | ✅ | (本次) | 869/0 + test_host 全绿 + 真机 GUI |
+
+> **P1-2 关键发现:原设计低估 swapgs 牵连**——ISR(interrupts.S)无 swapgs(仅 syscall.S 有),中断从用户态进入 GS_BASE=0 而 `schedule()→percpu()` 在中断上下文 → percpu() 读 MSR 会崩。改走**完整 swapgs 纪律**(Option A):ISR 宏按帧内 CS 判 CPL=3 条件 swapgs(entry RSP+144 / exit RSP+136,%rax scratch)。**usermode_init 提前到 IDT 后**(原在 sync 测试之后,P1-2 后会崩)。已知局限:NMI/#DB 在 syscall-exit swapgs 窗口(Linux paranoid 路径留 follow-up)。详见 `document/notes/2026-06-19-f4-m3-p1-2-swapgs-discipline.md`。
+> P1-1 GOTCHA:gs 页双镜像(P1-1 过渡,GS 未动 → syscall 仍读 gs 页 → update_syscall_stack 双写 percpu+gs 页;P1-2 才并入);测试 `percpu()->current = t` 忠实迁移(非 set_current)。详见 `document/notes/2026-06-19-f4-m3-p1-1-percpu-block.md`。
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
