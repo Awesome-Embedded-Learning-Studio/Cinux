@@ -21,7 +21,7 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
-#include "proc/per_cpu.hpp"
+#include "proc/percpu.hpp"
 
 namespace cinux::proc {
 
@@ -109,7 +109,7 @@ Task* TaskBuilder::build() {
     task->ctx.rbp      = 0;
     task->ctx.rbx      = 0;
     task->ctx.gs_base  = 0;
-    task->ctx.kgs_base = g_per_cpu.gs_page_vaddr;
+    task->ctx.kgs_base = gs_mirror_vaddr();
     task->ctx.fs_base  = 0;  // F3-M2: no TLS until clone(CLONE_SETTLS)
 
     __asm__ volatile("fninit");

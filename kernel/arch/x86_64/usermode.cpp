@@ -15,7 +15,7 @@
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
-#include "kernel/proc/per_cpu.hpp"
+#include "kernel/proc/percpu.hpp"
 
 namespace cinux::arch {
 
@@ -66,7 +66,7 @@ void usermode_init() {
 
     write_msr(MSR_KERNEL_GS_BASE, gs_phys + DIRECT_MAP_BASE);
 
-    cinux::proc::g_per_cpu.gs_page_vaddr = gs_phys + DIRECT_MAP_BASE;
+    cinux::proc::set_gs_mirror(gs_phys + DIRECT_MAP_BASE);
 
     kprintf("[USER] Per-CPU GS data page at %p (phys %p)\n",
             reinterpret_cast<void*>(gs_phys + DIRECT_MAP_BASE), reinterpret_cast<void*>(gs_phys));

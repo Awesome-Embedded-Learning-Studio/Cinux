@@ -27,7 +27,7 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
-#include "proc/per_cpu.hpp"
+#include "proc/percpu.hpp"
 
 namespace cinux::proc {
 
@@ -288,7 +288,7 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int fork(PidAllocat
     }
 
     child->ctx.gs_base  = 0;
-    child->ctx.kgs_base = g_per_cpu.gs_page_vaddr;
+    child->ctx.kgs_base = gs_mirror_vaddr();
 
     Scheduler::add_task(child);
 
