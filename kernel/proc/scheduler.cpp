@@ -173,7 +173,6 @@ void switch_addr_space(Task* prev, Task* next) {
 
 SchedulingClass* Scheduler::classes_[Scheduler::MAX_CLASSES];
 int              Scheduler::class_count_ = 0;
-Task*            Scheduler::current_     = nullptr;
 RoundRobin       Scheduler::default_rr_;
 Task*            Scheduler::idle_task_   = nullptr;
 bool             Scheduler::initialized_ = false;
@@ -203,9 +202,9 @@ void Scheduler::idle_entry() {
 }
 
 void Scheduler::init() {
-    class_count_ = 0;
-    current_     = nullptr;
-    idle_task_   = nullptr;
+    class_count_      = 0;
+    percpu()->current = nullptr;  // current() reads per-CPU (GS is anchored before init)
+    idle_task_        = nullptr;
     tick_count_.store(0, lib::MemoryOrder::Relaxed);
     register_class(&default_rr_);
     default_rr_.clear();  // pristine run queue -- no leakage across re-init (tests)
@@ -267,7 +266,7 @@ void Scheduler::remove_task(lib::NotNull<Task*> task) {
 }
 
 void Scheduler::yield() {
-    if (current_ == nullptr) {
+    if (current() == nullptr) {
         return;
     }
 
@@ -275,7 +274,7 @@ void Scheduler::yield() {
 }
 
 void Scheduler::exit_current() {
-    Task* prev = current_;
+    Task* prev = current();
     if (prev != nullptr) {
         prev->state = TaskState::Dead;
         prev->sched_class->dequeue(prev);
@@ -294,7 +293,6 @@ void Scheduler::exit_current() {
         }
     }
 
-    current_          = next;
     percpu()->current = next;
     if (next != idle_task_) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
@@ -303,11 +301,10 @@ void Scheduler::exit_current() {
     __asm__ volatile("fxsave %0" : : "m"(prev->fpu_state));
     switch_addr_space(prev, next);
     context_switch(&prev->ctx, &next->ctx);
-    __asm__ volatile("fxrstor %0" : : "m"(current_->fpu_state));
+    __asm__ volatile("fxrstor %0" : : "m"(current()->fpu_state));
 }
 
 void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
-    current_          = boot_task;
     percpu()->current = boot_task;
     cinux::arch::GDT::tss_set_rsp0(boot_task->kernel_stack_top);
 
@@ -316,22 +313,20 @@ void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
         return;
     }
 
-    current_          = next;
     percpu()->current = next;
     cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
     update_syscall_stack(next->kernel_stack_top);
     __asm__ volatile("fxsave %0" : : "m"(boot_task->fpu_state));
     switch_addr_space(boot_task, next);
     context_switch(&boot_task->ctx, &next->ctx);
-    __asm__ volatile("fxrstor %0" : : "m"(current_->fpu_state));
+    __asm__ volatile("fxrstor %0" : : "m"(current()->fpu_state));
 }
 
 Task* Scheduler::current() {
-    return current_;
+    return percpu()->current;
 }
 
 void Scheduler::set_current(Task* task) {
-    current_          = task;
     percpu()->current = task;
 }
 
@@ -340,7 +335,8 @@ bool Scheduler::is_initialized() {
 }
 
 void Scheduler::tick() {
-    if (!initialized_ || current_ == nullptr) {
+    Task* cur = current();
+    if (!initialized_ || cur == nullptr) {
         return;
     }
 
@@ -348,13 +344,13 @@ void Scheduler::tick() {
 
     // Preemption policy is owned by the task's scheduling class.  The class
     // returns true when the running task should yield its time slice.
-    if (current_->sched_class != nullptr && current_->sched_class->task_tick(current_)) {
+    if (cur->sched_class != nullptr && cur->sched_class->task_tick(cur)) {
         schedule();
     }
 }
 
 void Scheduler::schedule() {
-    if (current_ == nullptr) {
+    if (current() == nullptr) {
         return;
     }
 
@@ -372,7 +368,7 @@ void Scheduler::schedule() {
     }
 #endif
 
-    Task* prev = current_;
+    Task* prev = current();
 
     if (prev->state == TaskState::Running) {
         prev->state = TaskState::Ready;
@@ -398,7 +394,6 @@ void Scheduler::schedule() {
         }
     }
 
-    current_          = next;
     percpu()->current = next;
 
     if (next != idle_task_) {
@@ -409,7 +404,7 @@ void Scheduler::schedule() {
     __asm__ volatile("fxsave %0" : : "m"(prev->fpu_state));
     switch_addr_space(prev, next);
     context_switch(&prev->ctx, &next->ctx);
-    __asm__ volatile("fxrstor %0" : : "m"(current_->fpu_state));
+    __asm__ volatile("fxrstor %0" : : "m"(current()->fpu_state));
 }
 
 void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
@@ -429,7 +424,7 @@ void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
     // real dispatch loop is active.  Inside a NoRescheduleGuard (in-kernel test
     // harness role-play) we skip the switch so the harness thread can observe
     // the task's state, as a second CPU would.
-    if (task == current_ && no_reschedule_depth_ == 0) {
+    if (task == current() && no_reschedule_depth_ == 0) {
         schedule();
     }
 }

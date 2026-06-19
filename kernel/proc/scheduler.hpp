@@ -114,8 +114,8 @@ public:
     static void  yield();
     static void  exit_current();
     static void  run_first(lib::NotNull<Task*> boot_task);
-    static Task* current();
-    static void  set_current(Task* task);  // nullable: tests clear current_ with nullptr
+    static Task* current();                // reads this CPU's PerCpu::current (per-CPU since M4-1)
+    static void  set_current(Task* task);  // nullable: tests clear per-CPU current with nullptr
     static bool  is_initialized();
 
     // In-kernel test-harness role-play guard.  While at least one
@@ -151,7 +151,6 @@ private:
 
     static SchedulingClass* classes_[MAX_CLASSES];
     static int              class_count_;
-    static Task*            current_;
     static RoundRobin       default_rr_;
     static Task*            idle_task_;
     static bool             initialized_;
