@@ -252,6 +252,10 @@ struct Task {
     /** Pointer to the parent task (nullptr for the kernel init task). */
     Task* parent;
 
+    /** F3-M3 batch 4b: set while this task is blocked inside waitpid() so a
+     *  child's sys_exit can wake it (Scheduler::unblock).  Cleared on resume. */
+    bool waiting_for_child{false};
+
     /** Scheduling class this task belongs to. */
     SchedulingClass* sched_class;
 
@@ -435,6 +439,10 @@ enum class WaitpidResult : int {
     NotExited  = -1,   ///< Child exists but has not exited yet
 };
 
+/// waitpid() option: return immediately (NotExited) if no child has exited,
+/// instead of blocking.  Matches Linux WNOHANG.
+constexpr int kWaitNoHang = 1;
+
 /**
  * @brief Wait for a child process to change state
  *
@@ -452,10 +460,11 @@ enum class WaitpidResult : int {
  *
  * @param pid        PID of the child to wait for, or -1 for any child
  * @param status     Pointer to store the child's exit status (may be nullptr)
+ * @param options    Bitmask: kWaitNoHang => return NotExited instead of blocking
  * @param pid_alloc  Reference to the global PID allocator
  * @return WaitpidResult::Ok on success, or an error code
  */
-WaitpidResult waitpid(int pid, int* status, PidAllocator& pid_alloc);
+WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc);
 
 // ============================================================
 // Assembly entry point (C linkage)
