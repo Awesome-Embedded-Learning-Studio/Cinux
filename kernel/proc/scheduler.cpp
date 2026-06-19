@@ -349,8 +349,10 @@ void Scheduler::schedule() {
     if (next == nullptr || next == prev) {
         // F3-M3 batch 4a: a Zombie task (exited, awaiting reap) must never be
         // rescheduled -- pick_next() is state-blind, so guard here as well.
+        // F3-M4 batch 4: a Stopped task (job-control) likewise must not keep
+        // running.
         if (prev->state != TaskState::Blocked && prev->state != TaskState::Dead &&
-            prev->state != TaskState::Zombie) {
+            prev->state != TaskState::Zombie && prev->state != TaskState::Stopped) {
             prev->state = TaskState::Running;
             return;
         }
