@@ -224,7 +224,7 @@ Task* Scheduler::pick_next_task() {
     return pick_next_from(classes_, class_count_);
 }
 
-void Scheduler::add_task(Task* task) {
+void Scheduler::add_task(lib::NotNull<Task*> task) {
     if (task->sched_class == nullptr) {
         task->sched_class = &default_rr_;
     }
@@ -234,7 +234,7 @@ void Scheduler::add_task(Task* task) {
                         task->sched_class->name());
 }
 
-void Scheduler::remove_task(Task* task) {
+void Scheduler::remove_task(lib::NotNull<Task*> task) {
     if (task == nullptr) {
         return;
     }
@@ -286,7 +286,7 @@ void Scheduler::exit_current() {
     __asm__ volatile("fxrstor %0" : : "m"(current_->fpu_state));
 }
 
-void Scheduler::run_first(Task* boot_task) {
+void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
     current_          = boot_task;
     g_per_cpu.current = boot_task;
     cinux::arch::GDT::tss_set_rsp0(boot_task->kernel_stack_top);
@@ -378,7 +378,7 @@ void Scheduler::schedule() {
     __asm__ volatile("fxrstor %0" : : "m"(current_->fpu_state));
 }
 
-void Scheduler::block(Task* task, const char* reason) {
+void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
     if (task == nullptr) {
         return;
     }
@@ -396,7 +396,7 @@ void Scheduler::block(Task* task, const char* reason) {
     }
 }
 
-void Scheduler::unblock(Task* task) {
+void Scheduler::unblock(lib::NotNull<Task*> task) {
     if (task == nullptr) {
         return;
     }
