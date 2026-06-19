@@ -22,7 +22,9 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_group.hpp"
 #include "kernel/proc/process_internal.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"
+#include "kernel/syscall/sys_pgrp.hpp"
 
 using cinux::proc::Task;
 using cinux::proc::TaskState;
@@ -37,6 +39,11 @@ using cinux::proc::SharedSigActions;
 using cinux::proc::sig_is_member;
 using cinux::proc::signal_register_task;
 using cinux::proc::signal_unregister_task;
+using cinux::proc::Scheduler;
+using cinux::syscall::sys_setpgid;
+using cinux::syscall::sys_getpgid;
+using cinux::syscall::sys_getsid;
+using cinux::syscall::sys_setsid;
 
 // ============================================================
 // Path 1: root fork -- child founds its own group and session
@@ -280,6 +287,82 @@ void test_killpg_empty_group_returns_zero() {
 
 }  // namespace test_killpg
 
+// ============================================================
+// Batch 3: process-group / session syscalls (via the handlers, pid 0 => self)
+// ============================================================
+
+namespace test_pgrp_syscall {
+
+// The scheduler loop does not run during the suite, so each test installs its
+// task as current via Scheduler::set_current() -- which sets BOTH the static
+// current_ (what Scheduler::current() actually reads) AND g_per_cpu.current.
+// Setting only g_per_cpu.current leaves current_ null and makes the handlers
+// see no caller (ESRCH).  Cleared BEFORE asserting (TEST_ASSERT early-returns,
+// GOTCHA#19 family).
+
+void test_sys_setpgid_and_getpgid() {
+    Task t{};
+    t.pid          = 30;
+    t.pgid         = 1;  // not yet a leader
+    t.tgid         = 30;
+    t.group_leader = &t;
+    t.sig_actions  = SharedSigActions::create();
+    Scheduler::set_current(&t);
+
+    int64_t r_set  = sys_setpgid(0, 5, 0, 0, 0, 0);  // pid 0 => self
+    int64_t r_get  = sys_getpgid(0, 0, 0, 0, 0, 0);
+    int64_t p_pgid = t.pgid;
+
+    Scheduler::set_current(nullptr);  // cleanup BEFORE asserts
+    t.sig_actions->release();
+
+    TEST_ASSERT_EQ(r_set, 0);
+    TEST_ASSERT_EQ(p_pgid, 5);
+    TEST_ASSERT_EQ(r_get, 5);
+}
+
+void test_sys_setsid_and_getsid() {
+    Task t{};
+    t.pid          = 31;
+    t.pgid         = 1;  // not yet a leader
+    t.tgid         = 31;
+    t.group_leader = &t;
+    t.sig_actions  = SharedSigActions::create();
+    Scheduler::set_current(&t);
+
+    int64_t r_sid  = sys_setsid(0, 0, 0, 0, 0, 0);
+    int64_t r_get  = sys_getsid(0, 0, 0, 0, 0, 0);
+    int64_t p_pgid = t.pgid;
+    int64_t p_sid  = t.sid;
+
+    Scheduler::set_current(nullptr);
+    t.sig_actions->release();
+
+    TEST_ASSERT_EQ(r_sid, 31);  // new sid == pid
+    TEST_ASSERT_EQ(p_pgid, 31);
+    TEST_ASSERT_EQ(p_sid, 31);
+    TEST_ASSERT_EQ(r_get, 31);
+}
+
+void test_sys_getpgid_esrch_for_unknown_pid() {
+    Task t{};
+    t.pid          = 30;
+    t.tgid         = 30;
+    t.group_leader = &t;
+    t.sig_actions  = SharedSigActions::create();
+    Scheduler::set_current(&t);
+
+    // pid 999 is neither the caller (30) nor registered => ESRCH.
+    int64_t r = sys_getpgid(999, 0, 0, 0, 0, 0);
+
+    Scheduler::set_current(nullptr);
+    t.sig_actions->release();
+
+    TEST_ASSERT_EQ(r, -3);  // ESRCH
+}
+
+}  // namespace test_pgrp_syscall
+
 extern "C" void run_process_group_tests() {
     TEST_SECTION("Process Group Tests (F3-M3-1)");
 
@@ -302,6 +385,10 @@ extern "C" void run_process_group_tests() {
 
     RUN_TEST(test_killpg::test_killpg_broadcasts_only_to_group_members);
     RUN_TEST(test_killpg::test_killpg_empty_group_returns_zero);
+
+    RUN_TEST(test_pgrp_syscall::test_sys_setpgid_and_getpgid);
+    RUN_TEST(test_pgrp_syscall::test_sys_setsid_and_getsid);
+    RUN_TEST(test_pgrp_syscall::test_sys_getpgid_esrch_for_unknown_pid);
 
     TEST_SUMMARY();
 }
