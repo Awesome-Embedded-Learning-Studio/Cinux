@@ -407,6 +407,11 @@ void Scheduler::schedule() {
     __asm__ volatile("fxrstor %0" : : "m"(current()->fpu_state));
 }
 
+// Direct, unconditional block of @p task: mark it Blocked, drop it from the run
+// queue, and (if it is the running task) switch away.  Used for management /
+// test-driven blocks (test_block_unblock, test_block_dispatches).  Wait paths
+// that must be lost-wakeup-safe across CPUs use prepare_to_wait() +
+// schedule_blocked() instead (see scheduler.hpp).  (F4-M4: role clarified.)
 void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
     if (task == nullptr) {
         return;
@@ -434,6 +439,14 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
         return;
     }
 
+    // Idempotent (F4-M4 prepare-to-wait): only a still-Blocked task needs waking.
+    // A task that is already Ready/Running was never put to sleep, or already won
+    // a concurrent lost-wakeup race and is runnable -- re-enqueuing it would
+    // double-add it to the run queue.  No-op in that case.
+    if (task->state != TaskState::Blocked) {
+        return;
+    }
+
     task->state = TaskState::Ready;
     if (task->sched_class == nullptr) {
         task->sched_class = &default_rr_;
@@ -441,6 +454,26 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
     task->sched_class->enqueue(task);
 
     cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' unblocked\n", task->tid, task->name);
+}
+
+void Scheduler::prepare_to_wait(lib::NotNull<Task*> task) {
+    if (task == nullptr) {
+        return;
+    }
+    // Flip state to Blocked under the caller's waiter-lock so a concurrent waker
+    // on another CPU observes "sleeping" before it can miss the task.  current()
+    // is never on the run queue, so no dequeue is needed here; the caller follows
+    // with schedule_blocked().  See the prepare-to-wait contract in scheduler.hpp.
+    task->state = TaskState::Blocked;
+}
+
+void Scheduler::schedule_blocked() {
+    // Wait-path partner of prepare_to_wait(): switch out unless the in-kernel
+    // test harness is role-playing (NoRescheduleGuard).  Production (depth == 0)
+    // always switches.
+    if (no_reschedule_depth_ == 0) {
+        schedule();
+    }
 }
 
 }  // namespace cinux::proc

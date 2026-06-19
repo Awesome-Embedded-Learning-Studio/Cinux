@@ -126,8 +126,8 @@ public:
     // block()'s reschedule lets the harness thread keep observing wait-queue /
     // task state -- exactly as a second CPU watching a blocked task would.
     // Production never raises the depth (it stays 0), so this is inert in the
-    // real kernel.  Only block()'s internal schedule() is gated; tick()/yield()/
-    // exit_current() are untouched.
+    // real kernel.  Only block()'s and schedule_blocked()'s schedule() are gated;
+    // tick()/yield()/exit_current() are untouched.
     class NoRescheduleGuard {
     public:
         NoRescheduleGuard();
@@ -138,6 +138,35 @@ public:
     static void schedule();
     static void block(lib::NotNull<Task*> task, const char* reason);
     static void unblock(lib::NotNull<Task*> task);
+
+    // --- Prepare-to-wait (F4-M4): lost-wakeup-safe blocking for wait paths ---
+    //
+    // The classic wait pattern -- "drop the waiter-lock, THEN block()" -- has a
+    // lost-wakeup window once a second CPU can run the waker concurrently:
+    // between lock release and block(), a concurrent unblock() can flip the task
+    // Ready and enqueue it, only for this CPU's block() to flip it back Blocked
+    // and dequeue it -- the wakeup is lost and the task sleeps forever.
+    //
+    // prepare_to_wait() + schedule_blocked() close the window the way Linux's
+    // prepare_to_wait()/schedule() do:
+    //   1. Under the waiter-lock (and irq_guard, so no local tick preempts us):
+    //        enqueue onto the wait queue;
+    //        prepare_to_wait(self);   // self->state = Blocked  (atomic vs waker)
+    //   2. Release the waiter-lock (re-enable IRQs).
+    //   3. schedule_blocked();        // actually switch out
+    // If a concurrent unblock() raced through the window, self is already Ready
+    // and schedule()'s next==prev path keeps it running instead of sleeping --
+    // no lost wakeup.  schedule_blocked() is the NoRescheduleGuard-aware partner
+    // (the in-kernel test harness role-plays waits without a dispatch loop).
+
+    /// Mark @p task about to sleep (state -> Blocked) WITHOUT switching away.
+    /// Caller holds the waiter-lock under irq_guard; follow with schedule_blocked().
+    static void prepare_to_wait(lib::NotNull<Task*> task);
+
+    /// Switch away from the current task unless a NoRescheduleGuard is active.
+    /// The wait-path partner of prepare_to_wait(); production (depth == 0) always
+    /// switches.  Equivalent to block()'s tail for the prepare-to-wait pattern.
+    static void schedule_blocked();
 
     // Ask each class in `classes` (precedence = array order, index 0 first) for
     // its next runnable task; return the first non-null, or nullptr if every
