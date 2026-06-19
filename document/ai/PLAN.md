@@ -13,6 +13,32 @@
 > **F3-M4 调度器接口验证与增强 ✅ 完成（2026-06-19，5 批，827→840）**：①SchedulingClass 策略钩子(task_tick/task_fork/task_deadline,时间片抢占内聚到调度类,删 current_slice_) ②优先级感知 RoundRobin(pick_next 选 priority 最小者,同优先级 RR) ③多调度类实际查询(pick_next_from 数组原语,schedule/exit_current/run_first 不再绕过 classes_[]) ④SIGSTOP/SIGCONT 真调度(TaskState::Stopped 状态机 + signal_send 发送时恢复 + schedule 守卫排除 Stopped)。**向后兼容**(生产单类场景等价,827 回归全绿)。关键踩坑 GOTCHA#22(TaskBuilder 消耗全局 tid 计数器跨测污染)。**F3 进程与线程全里程碑收官(M1-M4)**。详见文末「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-{1,2,3,4}-*.md`。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
+> **F-INFRA 基建加固 ✅ 完成（2026-06-19，10 批 12 commit，基线 840/0 全程绿、零警告）**：F2/F3 后复杂度陡增前夯基——CI 粘合/静态门禁/警告收紧/format 属性/static_assert/KALLSYMS 真符号/64 位 gdbinit+decode-trace/NotNull 指针契约/clang-tidy/UBSAN/lockdep。详见下方「✅ F-INFRA」段 + `document/notes/2026-06-19-finfra-{1..10}-*.md` + summary。
+
+## ✅ F-INFRA（基建加固）完成 — 2026-06-19
+
+> 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
+> 来源：2026-06-19 一个 26-agent workflow（6 维代码审计 + 5 维联网调研 + 综合 + 对抗验证 + 完整性审查）的验证结论；记忆 `infra-hardening-investigation.md`。
+> 约束：C++17 freestanding/无异常/无 RTTI；Cinux-Base 零堆/零 OS 耦合；内核单核（并发真修复 R3 原子引用计数、R6-Part2 锁序图 DFS 划 **F4-M5**）。基线 840/0（F3-M4 收官，PR#19 合 main）。
+> 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；改公共接口/InodeOps/mirror 补 `cmake --build build -j$(nproc)` 全量（CI 盲区：run-kernel-test 不编 test/unit/）。
+
+| 批 | Tier | 范围 | 状态 | Commit | 测试 |
+|----|------|------|------|--------|------|
+| I-1 | 0 | CI 防挂死（timeout 包裹 run-kernel-test）+ 失败上传串口日志（G1/G8） | ✅ | (本次) | 840/0 |
+| I-2 | 0 | check_freestanding_headers.py + 修 icon_data.hpp `<array>` + CMake GCC 版本断言（G9/G2） | ✅ | (本次) | 840/0 |
+| I-3 | 0 | 警告标志收紧（-Wshadow/-Wold-style-cast/-Wnon-virtual-dtor/-Woverloaded-virtual/-Wformat=2 + -Werror=return-type）+ 清理（17 cast + 15 预存警告 + build-id）→ 零警告构建（R2） | ✅ | (本次) | 840/0 |
+| I-3b | 0 | kprintf/kvprintf/kpanic 加 `__attribute__((format))` + 清理 21 处真实格式不匹配（R2b） | ✅ | (本次) | 840/0 |
+| I-4 | 0 | static_assert 布局锁：SlabHeader(40)/SlabCache(64)/LogEntry(272)/VMA(56) + 两处 InterruptFrame offsetof 矩阵(168)（R11）+ mini 链接零警告 | ✅ | (本次) | 840/0 |
+| I-5 | 1 | KALLSYMS 真符号注入：nm POST_BUILD 生成表（big_kernel + big_kernel_test）+ boot 注册（R4） | ✅ | (本次) | 840/0 |
+| I-6 | 1 | .gdbinit 64 位长模式重写（无偏移 file big/big_kernel）+ decode-trace.sh addr2line demangle + 修 run-gdb 路径（R9/G5） | ✅ | (本次) | 840/0（无内核改动） |
+| I-7 | 2 | NotNull<T> 进 kernel/lib（精简 gsl，裸 assert，零开销）+ scheduler 5 永不为 null 静态入参采纳；set_current 抓出为 nullable 留 Task*（R5） | ✅ | (本次) | 840/0 |
+| I-8 | 2 | .clang-tidy 精选 allowlist（advisory 本地，不加 CI 门禁——版本偏移教训）；实测抓到 scheduler.cpp:152 null-deref（R8） | ✅ | (本次) | 配置/无内核改动 |
+| I-9 | 3 | UBSAN freestanding 桩：CINUX_UBSAN（opt-in OFF 默认），GCC void* builtin 签名（不抄 SerenityOS）+ invalid_builtin，桩调 kpanic，排除 Cinux-Base/诊断路径；默认 840/0、UBSAN 构建也 840/0 零命中、smoke fire+backtrace（R1） | ✅ | (本次) | 840/0 |
+| I-10 | 3 | lockdep-Part1：held_spinlock_depth + schedule() 入口断言（CINUX_LOCKDEP opt-in，默认 OFF）；双构建验证 OFF 840/0 + ON 840/0 无误报（R6） | ✅ | (本次) | 840/0 |
+
+划归 F4-M5（不在本里程碑）：R3 原子引用计数（SharedCwd/SharedSigActions）、R6-Part2 锁序图 DFS。
+follow-up（渐进，不拆批）：R7 BUG_ON/WARN_ON + CODING-TASTE 补 assert-vs-Error 判据、R10 mini-KASAN 红区、R12 next_tid 测试复位、R13 -O0 CI 矩阵、G3 确定性种子、G4 xfail 标记、G7 分层 include 检查、G10 启动阶段计时。
+
 ## ✅ M2（内核日志）已完成 — 2026-06-16
 
 | 批 | 范围 | 状态 | Commit | 测试 |

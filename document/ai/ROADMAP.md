@@ -28,6 +28,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | 标识 | 名称 | 状态 |
 |------|------|------|
 | FO | 可观测性/调试基建 | ✅ M0-M4 完成(2026-06-18):frame pointer(`-fno-omit-frame-pointer`,对齐 `CONFIG_FRAME_POINTER`)/ KALLSYMS lookup 模块 / 防御 backtrace(栈范围检查)/ 统一 panic handler(收编 dump_registers+kpanic+fatal_halt,+backtrace+memstats)/ `dump_memory_stats`。冒烟触发 panic 验证端到端。**M5 崩溃持久化记录:推迟**——依赖持久化层/软重启,CinuxOS 当前无(QEMU `isa-debug-exit`/halt 不保留 RAM);panic 的 serial 输出(`-serial file:`)覆盖事后取证。**M6 1b 真实符号注入(nm 嵌入):follow-up**——CMake 两阶段链接重构(风险);当前 backtrace 显示裸地址,host `addr2line -e build/kernel/big/big_kernel <addr>` 降级符号化。详见 `document/notes/2026-06-18-fo-observability.md` |
+| F-INFRA | 基建加固(静态检查/指针语义/CI 粘合) | ✅ 完成(2026-06-19,10 批):CI 防挂死+串口日志(G1/G8)/freestanding 头门禁+修 <array>+GCC 断言(G9/G2)/警告标志收紧至零警告(R2)/kprintf format 属性+修 21 处不匹配(R2b)/static_assert 锁 5 结构体布局(R11)/KALLSYMS nm 真符号注入(R4)/64 位 gdbinit+decode-trace demangle(R9/G5)/NotNull<T> 指针契约+scheduler 采纳(R5)/clang-tidy 精选 advisory(R8)/UBSAN freestanding 桩 GCC void* 签名(R1)/lockdep-Part1 持锁跨 schedule 检测(R6)。全程基线 840/0 绿+零警告;UBSAN 构建 840/0 零 UB 命中(F2/F3 UB-clean)。R3 原子引用计数+R6-Part2 锁序图划 F4-M5。详见 PLAN「✅ F-INFRA」段 + 各批 notes |
 
 ## 当前焦点
 **F2-M7 Buddy PMM ✅ 完成**（2026-06-18：buddy 伙伴系统替换 PMM flat bitmap——per-order bitmap free-list 非侵入式。Bug1（direct-map reserved PF，批3）+ Bug2（WSL2 nested KVM 对侵入式 free-list 写读不一致，改 bitmap 解，GOTCHA#14）均修。**fresh KVM 742/0 + 实机 GUI 冒烟**。详见 PLAN「F2-M7 Buddy PMM」段）。

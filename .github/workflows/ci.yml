@@ -43,6 +43,9 @@ jobs:
       - name: Check line-count limits
         run: python3 scripts/check_line_limits.py --hpp 500
 
+      - name: Check freestanding headers
+        run: python3 scripts/check_freestanding_headers.py
+
   kernel-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -62,8 +65,29 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -S .
 
       - name: Build
-        run: cmake --build build -j$(nproc)
+        # Build twice: the first pass seeds the KALLSYMS table stub and its
+        # POST_BUILD step regenerates the real table from nm; the second pass
+        # compiles the real table into the test kernel (F-INFRA I-5). Without
+        # the second pass the kernel runs with an empty symbol table.
+        run: |
+          cmake --build build -j$(nproc)
+          cmake --build build -j$(nproc)
 
       - name: Run kernel tests
         working-directory: build
-        run: make run-kernel-test
+        # timeout 180 fails fast on a panic-loop/deadlock hang (normal run is
+        # <60s); tee captures the full QEMU serial output to serial.log so the
+        # next step can upload it as an artifact for post-mortem (kprintf /
+        # panic / backtrace / memstats). pipefail propagates the test exit code
+        # through tee.
+        run: |
+          set -o pipefail
+          timeout 180 make run-kernel-test 2>&1 | tee serial.log
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-test-serial-log
+          path: build/serial.log
+          if-no-files-found: ignore
