@@ -1,5 +1,10 @@
 # M4: 调度器接口验证与增强
 
+> ✅ **完成（2026-06-19，5 批，827→840/0）**。分支 `feat/f3-m4-scheduler`。
+> 详见 PLAN「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-{1,2,3,4}-*.md`。
+> 范围扩展：除 T1-T4 外，兑现 F3-M3 留的「SIGSTOP/CONT 真调度效果（TASK_STOPPED 状态机）」。
+> 关键踩坑 GOTCHA#22（TaskBuilder 消耗全局 tid 计数器跨测污染 → 状态机测试改栈 Task）。
+
 > 现有 SchedulingClass 已支持插拔式调度算法。
 > 验证接口完备性，小幅增强优先级支持。
 

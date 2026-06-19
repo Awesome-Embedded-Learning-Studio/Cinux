@@ -9,6 +9,36 @@
 
 namespace cinux::proc {
 
+// ============================================================
+// Pluggable scheduling (F3-M4)
+// ============================================================
+//
+// The scheduler is policy-pluggable: a scheduling algorithm is just a
+// SchedulingClass subclass.  Adding one (e.g. a strict-priority class) is:
+//
+//   class PriorityScheduler : public SchedulingClass {
+//    public:
+//     void  enqueue(Task* t) override      { /* insert ordered by priority */ }
+//     void  dequeue(Task* t) override      { /* remove t from the queue */ }
+//     Task* pick_next() override           { /* return highest-priority task */ }
+//     const char* name() const override    { return "Priority"; }
+//     // Optional policy hooks (defaults are no-ops):
+//     bool task_tick(Task* cur) override   { /* true => request preemption */ }
+//     void task_fork(Task* p, Task* c) override { /* derive child params */ }
+//    private:
+//     /* run-queue state + a Spinlock */
+//   };
+//
+//   // At boot, after Scheduler::init() registers the default RoundRobin:
+//   Scheduler::register_class(&my_priority_class);
+//
+// Scheduler::pick_next_task() asks each registered class in registration order
+// (index 0 = highest precedence) for a task; the first non-empty class wins.
+// A task picks its class via Task::sched_class (default &default_rr_); see
+// TaskBuilder::set_sched_class().  RoundRobin itself is a worked example --
+// priority-aware selection (lower Task::priority runs first) plus a 2-tick
+// quantum driven by task_tick().
+
 class SchedulingClass {
 public:
     virtual ~SchedulingClass() = default;
