@@ -28,7 +28,7 @@
 | I-2 | 0 | check_freestanding_headers.py + 修 icon_data.hpp `<array>` + CMake GCC 版本断言（G9/G2） | ✅ | (本次) | 840/0 |
 | I-3 | 0 | 警告标志收紧（-Wshadow/-Wold-style-cast/-Wnon-virtual-dtor/-Woverloaded-virtual/-Wformat=2 + -Werror=return-type）+ 清理（17 cast + 15 预存警告 + build-id）→ 零警告构建（R2） | ✅ | (本次) | 840/0 |
 | I-3b | 0 | kprintf/kvprintf/kpanic 加 `__attribute__((format))` + 清理 21 处真实格式不匹配（R2b） | ✅ | (本次) | 840/0 |
-| I-4 | 0 | static_assert 布局锁：SlabHeader/SlabCache/LogEntry/VMA + 两处 InterruptFrame offsetof 矩阵（R11） | ⏳ | — | — |
+| I-4 | 0 | static_assert 布局锁：SlabHeader(40)/SlabCache(64)/LogEntry(272)/VMA(56) + 两处 InterruptFrame offsetof 矩阵(168)（R11）+ mini 链接零警告 | ✅ | (本次) | 840/0 |
 | I-5 | 1 | KALLSYMS 真符号注入：nm 两趟链接（big_kernel + big_kernel_test）+ main.cpp 注册（R4） | ⏳ | — | — |
 | I-6 | 1 | .gdbinit 64 位长模式重写（无偏移 file big/big_kernel）+ decode-trace.sh addr2line 一键（R9/G5） | ⏳ | — | — |
 | I-7 | 2 | not_null<T> 进 Cinux-Base（精简 gsl，裸 assert 不耦合 kpanic，仿 optional.hpp）+ scheduler 永不为 null 入参采纳（R5） | ⏳ | — | — |
