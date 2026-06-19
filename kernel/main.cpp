@@ -180,6 +180,12 @@ extern "C" void kernel_main() {
     static cinux::drivers::Canvas g_canvas;
     g_canvas.init(fb);
     cinux::gui::gui_init(g_canvas, font);
+
+    // The GUI now owns the framebuffer.  Detach the text console from kprintf
+    // so routine logs stop overlaying the desktop (they still go to serial +
+    // the klog ring, viewable via dmesg).  kpanic re-enables all sinks, so a
+    // crash still reaches the screen.
+    cinux::lib::kprintf_set_sink_enabled(Console::console_sink_adapter, &console, false);
 #endif
 
     // Step 16: Initialise the PS/2 keyboard controller
