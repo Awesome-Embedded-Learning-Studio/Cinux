@@ -312,7 +312,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 **GOTCHA（新增预留）**：#18 clone 子进程用户栈返回（帧 user_rsp 槽 patch）+ 共享 refcount 生命周期（线程 exit 不释放共享表，进程 exit 最后释放）。批1 已落 GOTCHA#17（wrmsr FS_BASE 须规范地址）。
 
-## 🔄 F3-M3（进程组/会话 + waitpid 阻塞）进行中 — 2026-06-19
+## ✅ F3-M3（进程组/会话 + waitpid 阻塞）完成 — 2026-06-19（5 批，810→827）
 
 > 目标：为 Job Control / TTY 打地基 —— 进程组（pgid）+ 会话（sid）+ `setpgid`/`getpgid`/`getsid`/`setsid`/`killpg` + fork 继承，**顺带补 waitpid 阻塞**（闭环 F3 进程管理，shell/CFBox 不再忙等烧 CPU）。
 > 决策（propose 已确认）：
@@ -331,7 +331,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 | 批3 | 4 syscall（setpgid=109/setsid=112/getpgid=121/getsid=124）+ 注册 + libc wrapper + 3 端到端单测 | ✅ | b228f67 | 827/0（+3） |
 | 批4a | **exit Dead→Zombie 契约修正**：sys_exit Zombie + dequeue（对齐 exit_current）+ schedule(275) 跳 Zombie（pick_next 不查 state，Zombie 留 queue 会崩） | ✅ | ee13cac | 827/0 回归 + 实机 GUI 到桌面 |
 | 批4b | **waitpid 阻塞**：默认 block、`WNOHANG` 非阻塞；exit 唤醒 waiting parent；terminal/test 全改 WNOHANG 防挂死 | ✅ | 734d6a1 | 827/0 + 实机 GUI 到桌面 |
-| 批5 | 收尾：文档（PLAN/ROADMAP/todo/notes/GOTCHA）+ 全量验证 + 实机冒烟 | 🔄 | | |
+| 批5 | 收尾：文档（PLAN/ROADMAP/todo/notes/GOTCHA）+ 全量验证 + 实机冒烟 | ✅ | (本次) | 827/0 + host + 实机 GUI 到桌面 |
 
 **风险（propose 预判）**：
 - **R1（最高）批4 破现有 waitpid 测试**：默认行为从 non-blocking 变 blocking，现有 `test_fork_exec` 等若没传 `WNOHANG` 且无 zombie → 挂死。批4 第一步 grep 全部 waitpid 调用点审计（GOTCHA#19 同款家族 + futex 单测 block 挂死坑）。
