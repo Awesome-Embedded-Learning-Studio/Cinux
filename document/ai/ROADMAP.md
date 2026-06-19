@@ -13,7 +13,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
 | F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache✅ M7 Buddy✅ M7b Slab✅ | mmap/Page Cache/brk/分层分配器 |
 | F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS✅ M3 进程组+waitpid阻塞✅ M4 调度器✅ | POSIX 信号/线程/futex/进程组/优先级调度 |
-| F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
+| F4 | SMP 多核 | M1 ACPI✅ M2 APIC🔄 M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | ACPI 静态表→ACPIInfo ✅；LAPIC/IOAPIC 进行中 |
 | F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
 | F7 | 网络协议栈 | M1 以太网⏳ M2 ARP⏳ M3 IPv4/ICMP⏳ M4 UDP⏳ M5 TCP⏳ M6 Socket⏳ | TCP/IP+Socket API |
@@ -45,7 +45,9 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 
 **F3-M4 调度器接口验证与增强 ✅ 完成**（2026-06-19，5 批 827→840/0）：①SchedulingClass 策略钩子（task_tick/task_fork/task_deadline，时间片内聚到类，删 current_slice_）②优先级感知 RoundRobin（小值优先，同优先级 RR）③多调度类实际查询（pick_next_from，schedule/exit/run_first 不再绕过 classes_[]）④SIGSTOP/SIGCONT 真调度（TaskState::Stopped 状态机 + 发送时恢复）。向后兼容（827 回归全绿）。GOTCHA#22（TaskBuilder 消耗全局 tid 计数器跨测污染）。**F3 进程与线程全里程碑收官（M1-M4）**。详见 PLAN「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-*.md`。
 
-下个焦点：待定 —— **F4 SMP**（多核，届时 waitpid/futex/调度器的单核 lost-wakeup 假设需重审）或 F3 follow-up（SIGKILL/SIGTERM 唤醒 Blocked 可中断睡眠、waitpid 报告 stopped/WUNTRACED、真 shell job-control 端到端验证）。
+**F4-M1 ACPI 静态表解析 ✅ 完成**（2026-06-19，4 批，840→859/0 + GUI 冒烟）：RSDP → find_table（RSDT 主路径）→ MADT→ACPIInfo → main 接线 + 启动探针。GOTCHA：QEMU pc 默认 ACPI 1.0（仅 RSDT，无 XSDT）/ log ANSI escape 用 `grep -a` / ACPI 表 direct-map vs APIC MMIO 需 PCD。真机 `[ACPI] 1 CPU, LAPIC 0xFEE00000, IOAPIC 0xFEC00000, 5 IRQ override, pcat=1`。详见 PLAN「✅ F4-M1」段。
+
+下个焦点：**F4-M2 LAPIC + IOAPIC**（xAPIC MMIO，qemu64 无 x2APIC）+ PIC→APIC 切换 —— USB/NVMe/网卡中断解锁；waitpid/futex/调度器单核 lost-wakeup 假设待 M4 多核重审。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。

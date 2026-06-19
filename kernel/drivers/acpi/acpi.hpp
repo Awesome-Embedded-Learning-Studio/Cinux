@@ -181,4 +181,14 @@ struct ACPIInfo {
 /// @return      Decoded info; cpu_count==0 if the table is absent/invalid.
 ACPIInfo parse_madt(const SDTHeader* madt);
 
+/// Decoded MADT information filled by init(); consumed by M2 (APIC).
+extern ACPIInfo g_acpi_info;
+
+/// Locate the RSDP, parse the MADT, and populate g_acpi_info.
+///
+/// Logs a one-line probe (CPU count, LAPIC/IOAPIC bases, IRQ overrides) so the
+/// M2 APIC bring-up has a visible starting point.  Only needs the direct map,
+/// so it can run early in boot.
+void init();
+
 }  // namespace cinux::drivers::acpi

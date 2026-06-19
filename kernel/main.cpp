@@ -45,6 +45,7 @@
 #include "kernel/arch/x86_64/pic.hpp"
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
+#include "kernel/drivers/acpi/acpi.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/keyboard/keyboard.hpp"
 #include "kernel/drivers/pci/pci.hpp"
@@ -120,6 +121,10 @@ extern "C" void kernel_main() {
 
     // Step 7: Initialise PIT channel 0 at 100 Hz (10 ms per tick)
     PIT::init(100);
+
+    // Step 7b: Parse ACPI (RSDP/MADT) for the APIC base addresses and CPU list
+    // that M2 consumes.  Only needs the loader's direct map, which is already up.
+    cinux::drivers::acpi::init();
 
     // Step 8: Trigger a software breakpoint to verify exception
     // handling still works after PIC/IRQ setup

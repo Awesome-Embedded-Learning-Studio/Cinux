@@ -15,6 +15,21 @@
 
 > **F-INFRA 基建加固 ✅ 完成（2026-06-19，10 批 12 commit，基线 840/0 全程绿、零警告）**：F2/F3 后复杂度陡增前夯基——CI 粘合/静态门禁/警告收紧/format 属性/static_assert/KALLSYMS 真符号/64 位 gdbinit+decode-trace/NotNull 指针契约/clang-tidy/UBSAN/lockdep。详见下方「✅ F-INFRA」段 + `document/notes/2026-06-19-finfra-{1..10}-*.md` + summary。
 
+## ✅ F4-M1（ACPI 静态表解析）完成 — 2026-06-19
+
+> F4（SMP）M1：从 BIOS ACPI 表提取 APIC 基址 + CPU 列表 + IRQ override → `ACPIInfo`，为 M2（APIC init）铺路。不做 AML/FADT/HPET 深度（HPET 留 F5-M4）。基线 main 840/0 → 859/0 + production GUI 冒烟。
+
+| 批 | 范围 | Commit | 测试 |
+|----|------|--------|------|
+| M1-1 | RSDP 定位（EBDA+ROM + checksum）+ 单测 | faabce1 | 849/0 |
+| M1-2 | find_table（RSDT 32位主路径 + 每表 checksum）+ 单测 | d862b01 | 854/0 |
+| M1-3 | MADT→ACPIInfo（LAPIC/CPU/IOAPIC/IRQ override）+ 单测 | 5216839 | 859/0 |
+| M1-4 | g_acpi_info + init() + main 接线 + 真机探针 + 收尾 | (本次) | 859/0 + GUI 冒烟 |
+
+**总结**：RSDP 定位 → find_table（RSDT 32位 / XSDT byte-wise 读避 -Wcast-align）→ MADT 解析（packed struct + reinterpret 读变长 ICS → ACPIInfo）→ main.cpp 接线（PIT 后，direct-map 就绪）+ 启动探针。
+**关键 GOTCHA**：①QEMU pc 默认 **ACPI 1.0 RSDP（rev 0，仅 RSDT 32位，无 XSDT）** → M1-2 走 RSDT 主路径（修正 propose 阶段"ACPI 2.0"假设）。②测试 log 含 ANSI escape → grep 当二进制静默，查日志用 `grep -a`。③ACPI 表（RAM）经 direct-map cache-enabled 访问 OK，与 APIC MMIO（M2 需 `VMM.map + FLAG_PCD` 禁缓存）严格区分。
+**真机**：`[ACPI] 1 CPU(s), LAPIC 0xFEE00000, IOAPIC 0xFEC00000, 5 IRQ override(s), pcat=1`（QEMU pc 标准拓扑；5 override 含 IRQ0→GSI2，M2-3 消费）。详见 `document/notes/2026-06-19-f4-m1-{1,2,3,4}-*.md`。下个焦点：**F4-M2 LAPIC + IOAPIC**。
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。

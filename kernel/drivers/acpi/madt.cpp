@@ -15,6 +15,9 @@
 #include <stdint.h>
 
 #include "acpi.hpp"
+#include "kernel/lib/kprintf.hpp"
+
+using cinux::lib::kprintf;
 
 namespace cinux::drivers::acpi {
 
@@ -81,6 +84,32 @@ ACPIInfo parse_madt(const SDTHeader* madt) {
     }
 
     return info;
+}
+
+ACPIInfo g_acpi_info{};
+
+void init() {
+    g_acpi_info = ACPIInfo{};
+
+    const RSDP* rsdp = find_rsdp();
+    if (rsdp == nullptr) {
+        kprintf("[ACPI] no RSDP; APIC bring-up will use defaults\n");
+        return;
+    }
+
+    const SDTHeader* madt = find_table("APIC");
+    if (madt == nullptr) {
+        kprintf("[ACPI] no MADT; APIC bring-up will use defaults\n");
+        return;
+    }
+
+    g_acpi_info = parse_madt(madt);
+    kprintf("[ACPI] %u CPU(s), LAPIC 0x%lX, IOAPIC 0x%lX, %u IRQ override(s), pcat=%d\n",
+            static_cast<unsigned>(g_acpi_info.cpu_count),
+            static_cast<unsigned long>(g_acpi_info.local_apic_address),
+            static_cast<unsigned long>(g_acpi_info.ioapic_address),
+            static_cast<unsigned>(g_acpi_info.irq_override_count),
+            static_cast<int>(g_acpi_info.has_pcat_compat));
 }
 
 }  // namespace cinux::drivers::acpi
