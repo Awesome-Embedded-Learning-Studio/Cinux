@@ -11,6 +11,12 @@ option(CINUX_GUI "Enable GUI mode" ON)
 # hunting: cmake -DCINUX_LOCKDEP=ON ...
 option(CINUX_LOCKDEP "Enable lockdep schedule-while-locked debug checks" OFF)
 
+# F-INFRA I-9: opt-in UBSan. -fsanitize=undefined instruments the kernel to call
+# freestanding __ubsan_handle_* stubs (kernel/lib/ubsan.cpp) that kpanic on UB.
+# Compile-only (no libubsan at link -- the stubs resolve the references). Off by
+# default; enable for UB hunting: cmake -DCINUX_UBSAN=ON ...
+option(CINUX_UBSAN "Enable -fsanitize=undefined with freestanding UBSan stubs" OFF)
+
 # Toolchain version gate (G2). CinuxOS is freestanding C++17 with -mcmodel=kernel
 # codegen, inline asm, and (F-INFRA) GCC-sensitive UBSAN (-fsanitize=undefined) and
 # strict warning flags whose behavior varies across major GCC releases. Fail fast at

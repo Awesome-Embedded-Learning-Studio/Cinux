@@ -90,6 +90,20 @@ if(CINUX_LOCKDEP)
     target_compile_definitions(big_kernel_common PUBLIC CINUX_LOCKDEP)
 endif()
 
+# F-INFRA I-9: opt-in UBSan. -fsanitize=undefined at COMPILE only (the freestanding
+# stubs in kernel/lib/ubsan.cpp resolve the __ubsan_handle_* refs -- no libubsan).
+# Exclude the stub + the diagnostic/panic path so a UB hit cannot recurse.
+if(CINUX_UBSAN)
+    target_compile_options(big_kernel_common PUBLIC -fsanitize=undefined -fno-sanitize=alignment)
+    set_source_files_properties(
+        ${CMAKE_SOURCE_DIR}/kernel/lib/ubsan.cpp
+        ${CMAKE_SOURCE_DIR}/kernel/lib/kprintf.cpp
+        ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/backtrace.cpp
+        ${CMAKE_SOURCE_DIR}/kernel/mm/diagnostics.cpp
+        ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/exception_handlers.cpp
+        PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined")
+endif()
+
 # ============================================================
 # Initrd (embedded ustar archive)
 # ============================================================
