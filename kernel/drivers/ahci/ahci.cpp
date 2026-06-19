@@ -53,7 +53,7 @@ HBAMem* AHCI::map_bar5(uint64_t bar5_phys) {
     // Map 2 pages to be safe (covers up to 8 ports).
     constexpr uint32_t BAR5_PAGES = 2;
 
-    cinux::lib::kprintf("[AHCI] Mapping BAR5 phys=0x%p to virt=0x%p (%u pages)\n", bar5_phys,
+    cinux::lib::kprintf("[AHCI] Mapping BAR5 phys=0x%lx to virt=0x%lx (%u pages)\n", bar5_phys,
                         MMIO_VIRT_BASE, BAR5_PAGES);
 
     // Map each page of BAR5 MMIO into the kernel page tables

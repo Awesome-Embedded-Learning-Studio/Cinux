@@ -194,7 +194,7 @@ void Scheduler::init() {
 
     if (idle_task_ != nullptr) {
         idle_task_->state = TaskState::Ready;
-        cinux::lib::kprintf("[SCHED] Idle task created tid=%u\n", idle_task_->tid);
+        cinux::lib::kprintf("[SCHED] Idle task created tid=%lu\n", idle_task_->tid);
     }
 
     initialized_ = true;
@@ -230,7 +230,7 @@ void Scheduler::add_task(Task* task) {
     }
     task->sched_class->enqueue(task);
     signal_register_task(task);
-    cinux::lib::kprintf("[SCHED] Task tid=%u '%s' added to %s\n", task->tid, task->name,
+    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' added to %s\n", task->tid, task->name,
                         task->sched_class->name());
 }
 
@@ -243,7 +243,7 @@ void Scheduler::remove_task(Task* task) {
     }
     signal_unregister_task(task);
     task->state = TaskState::Dead;
-    cinux::lib::kprintf("[SCHED] Task tid=%u '%s' removed\n", task->tid, task->name);
+    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' removed\n", task->tid, task->name);
 }
 
 void Scheduler::yield() {
@@ -260,7 +260,7 @@ void Scheduler::exit_current() {
         prev->state = TaskState::Dead;
         prev->sched_class->dequeue(prev);
         signal_unregister_task(prev);
-        cinux::lib::kprintf("[SCHED] Task tid=%u '%s' exited\n", prev->tid, prev->name);
+        cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' exited\n", prev->tid, prev->name);
     }
 
     Task* next = pick_next_task();
@@ -388,7 +388,7 @@ void Scheduler::block(Task* task, const char* reason) {
         task->sched_class->dequeue(task);
     }
 
-    cinux::lib::kprintf("[SCHED] Task tid=%u '%s' blocked: %s\n", task->tid, task->name,
+    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' blocked: %s\n", task->tid, task->name,
                         reason ? reason : "unknown");
 
     if (task == current_) {
@@ -407,7 +407,7 @@ void Scheduler::unblock(Task* task) {
     }
     task->sched_class->enqueue(task);
 
-    cinux::lib::kprintf("[SCHED] Task tid=%u '%s' unblocked\n", task->tid, task->name);
+    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' unblocked\n", task->tid, task->name);
 }
 
 }  // namespace cinux::proc
