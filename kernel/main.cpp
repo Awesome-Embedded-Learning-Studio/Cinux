@@ -40,6 +40,7 @@
 #include "boot/boot_info.h"
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
+#include "kernel/arch/x86_64/irq_backend.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/pic.hpp"
@@ -178,18 +179,12 @@ extern "C" void kernel_main() {
     // Step 16: Initialise the PS/2 keyboard controller
     Keyboard::init();
 
-    // Step 17: Unmask IRQ0 (PIT timer) and IRQ1 (Keyboard), enable interrupts
-    PIC::unmask(0);
-    PIC::unmask(1);
-    cinux::lib::kprintf("[BIG] IRQ0+IRQ1 unmasked, enabling interrupts...\n");
+    // Step 17: Switch from the 8259 PIC to the APIC (mask PIC, enable LAPIC,
+    // route ISA IRQ 0/1/12 onto vectors 0x20/0x21/0x2C via the I/O APIC), then
+    // enable interrupts.  Falls back to PIC if ACPI/APIC init fails.
+    cinux::arch::switch_to_apic();
     __asm__ volatile("sti");
     cinux::lib::kprintf("[BIG] Interrupts enabled.\n");
-
-#ifdef CINUX_GUI
-    // Step 17b: Unmask IRQ12 (PS/2 mouse) for GUI mode
-    PIC::unmask(12);
-    cinux::lib::kprintf("[BIG] IRQ12 unmasked for PS/2 mouse.\n");
-#endif
 
     // Step 18: Initialise user-mode support (STAR/EFER MSRs)
     cinux::arch::usermode_init();
