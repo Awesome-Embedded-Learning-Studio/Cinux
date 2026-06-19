@@ -6,6 +6,20 @@ project(cinux
 
 option(CINUX_GUI "Enable GUI mode" ON)
 
+# Toolchain version gate (G2). CinuxOS is freestanding C++17 with -mcmodel=kernel
+# codegen, inline asm, and (F-INFRA) GCC-sensitive UBSAN (-fsanitize=undefined) and
+# strict warning flags whose behavior varies across major GCC releases. Fail fast at
+# configure time if GCC predates the tested floor so a too-old toolchain does not
+# silently miscompile or mis-instrument. CI runs on a current GCC; this mainly
+# protects local/older setups. (Clang is not the configured toolchain; left ungated.)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
+        message(FATAL_ERROR
+            "CinuxOS requires GCC >= 11 (C++17 freestanding + strict warnings + UBSAN); "
+            "found GCC ${CMAKE_CXX_COMPILER_VERSION}.")
+    endif()
+endif()
+
 if(NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE
         "${CMAKE_SOURCE_DIR}/cmake/toolchain-x86_64.cmake"

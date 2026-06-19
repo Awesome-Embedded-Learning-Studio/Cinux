@@ -43,6 +43,9 @@ jobs:
       - name: Check line-count limits
         run: python3 scripts/check_line_limits.py --hpp 500
 
+      - name: Check freestanding headers
+        run: python3 scripts/check_freestanding_headers.py
+
   kernel-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
