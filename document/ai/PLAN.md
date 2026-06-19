@@ -47,6 +47,14 @@
 **推迟 M3**：IPI（send_ipi/init/sipi）+ APIC timer（多核 AP 启动 / per-CPU timer 需要）；MSI/MSI-X → F4-M2b 或 F5-xHCI 前置。
 **F4-M1+M2 完成**（9 commit，840→869/0 + 真机）。详见 `document/notes/2026-06-19-f4-m2-*.md`。下个焦点：**M3 AP 启动**（IPI + per-CPU）或 F4 暂停 push/PR。
 
+## 🔄 F4-M3（AP 启动 + Per-CPU）设计就绪 — 2026-06-19（待执行）
+
+> F4-M3 调研 + 设计完成,等新会话执行 Phase 1+2（9 批）。本会话已极长（M1+M2 9 commit + M3 深度调研）,Phase 1+2 是不可分破坏性 GS 重构 + AP trampoline（F4 最难）,需新会话专注。
+> **设计文档（执行依据）:[document/notes/2026-06-19-f4-m3-design.md](../notes/2026-06-19-f4-m3-design.md)** —— 含调研结论、PerCpu GS 设计、9 批拆批、风险/GOTCHA。
+> 核心:PerCpu{kernel_stack@0(兼容 syscall %gs:0), current, cpu_id, apic_id} + percpu_blocks[kMaxCpus] + percpu() 读 MSR_GS_BASE;context_switch 去 per-task GS;AP trampoline @0x8000(16→64 bit)+ INIT-SIPI-SIPI。
+> 调研:SMP 就绪 ~20%,4 P0(current_ 静态/全局 runq/单 TSS/无 AP trampoline)+ 3 P1(futex/waitpid/mutex lost-wakeup,Phase 3 修)。
+> Phase 1（per-CPU 单核重构,P1-1~4）→ Phase 2（AP 启动 -smp 2,P2-1~5）。
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
