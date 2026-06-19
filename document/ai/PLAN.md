@@ -34,7 +34,7 @@
 | I-7 | 2 | NotNull<T> 进 kernel/lib（精简 gsl，裸 assert，零开销）+ scheduler 5 永不为 null 静态入参采纳；set_current 抓出为 nullable 留 Task*（R5） | ✅ | (本次) | 840/0 |
 | I-8 | 2 | .clang-tidy 精选 allowlist（advisory 本地，不加 CI 门禁——版本偏移教训）；实测抓到 scheduler.cpp:152 null-deref（R8） | ✅ | (本次) | 配置/无内核改动 |
 | I-9 | 3 | UBSAN freestanding 桩：CINUX_UBSAN（Debug），GCC libubsan 规范签名（不抄 SerenityOS），桩调 kpanic，Cinux-Base/panic/kprintf/backtrace 排除插桩（R1） | ⏳ | — | — |
-| I-10 | 3 | lockdep-Part1：held_spinlock_depth 计数 + schedule/block 断言为 0 + panic 重入标志防自死锁（R6） | ⏳ | — | — |
+| I-10 | 3 | lockdep-Part1：held_spinlock_depth + schedule() 入口断言（CINUX_LOCKDEP opt-in，默认 OFF）；双构建验证 OFF 840/0 + ON 840/0 无误报（R6） | ✅ | (本次) | 840/0 |
 
 划归 F4-M5（不在本里程碑）：R3 原子引用计数（SharedCwd/SharedSigActions）、R6-Part2 锁序图 DFS。
 follow-up（渐进，不拆批）：R7 BUG_ON/WARN_ON + CODING-TASTE 补 assert-vs-Error 判据、R10 mini-KASAN 红区、R12 next_tid 测试复位、R13 -O0 CI 矩阵、G3 确定性种子、G4 xfail 标记、G7 分层 include 检查、G10 启动阶段计时。

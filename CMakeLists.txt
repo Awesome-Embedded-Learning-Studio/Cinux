@@ -6,6 +6,11 @@ project(cinux
 
 option(CINUX_GUI "Enable GUI mode" ON)
 
+# F-INFRA I-10: opt-in lockdep -- assert no spinlock is held across schedule()
+# (would deadlock single-core). Off by default (zero cost); enable for deadlock
+# hunting: cmake -DCINUX_LOCKDEP=ON ...
+option(CINUX_LOCKDEP "Enable lockdep schedule-while-locked debug checks" OFF)
+
 # Toolchain version gate (G2). CinuxOS is freestanding C++17 with -mcmodel=kernel
 # codegen, inline asm, and (F-INFRA) GCC-sensitive UBSAN (-fsanitize=undefined) and
 # strict warning flags whose behavior varies across major GCC releases. Fail fast at

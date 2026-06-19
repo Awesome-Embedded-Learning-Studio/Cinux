@@ -85,6 +85,11 @@ if(CINUX_GUI)
     add_subdirectory(gui)
 endif()
 
+# F-INFRA I-10: opt-in lockdep checks (assert no spinlock held across schedule()).
+if(CINUX_LOCKDEP)
+    target_compile_definitions(big_kernel_common PUBLIC CINUX_LOCKDEP)
+endif()
+
 # ============================================================
 # Initrd (embedded ustar archive)
 # ============================================================
