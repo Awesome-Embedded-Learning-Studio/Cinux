@@ -112,6 +112,12 @@ extern "C" void kernel_main() {
     cinux::arch::g_idt.init();
     cinux::lib::kprintf("[BIG] IDT loaded (#DF uses IST1).\n");
 
+    // F4-M3 P1-2 (early): anchor the BSP's GS base at its PerCpu block now, so
+    // percpu() (which reads MSR_GS_BASE) works before any interrupt fires or any
+    // code uses it.  Also configures STAR/EFER for SYSRET (formerly Step 18).
+    cinux::arch::usermode_init();
+    cinux::lib::kprintf("[BIG] PerCpu GS base anchored (BSP).\n");
+
     // Step 5: Initialise the PIC (remap IRQ0-7 -> 0x20-0x27,
     //         IRQ8-15 -> 0x28-0x2F, all masked)
     PIC::init();
@@ -186,8 +192,8 @@ extern "C" void kernel_main() {
     __asm__ volatile("sti");
     cinux::lib::kprintf("[BIG] Interrupts enabled.\n");
 
-    // Step 18: Initialise user-mode support (STAR/EFER MSRs)
-    cinux::arch::usermode_init();
+    // Step 18: user-mode STAR/EFER support was initialised early (right after
+    // the IDT) so the BSP's GS base is anchored before interrupts are enabled.
 
     // Step 19: Initialise syscall infrastructure (LSTAR, SFMASK, dispatch table)
     cinux::arch::syscall_init();

@@ -38,7 +38,6 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
-#include "proc/percpu.hpp"
 
 namespace cinux::proc {
 
@@ -305,9 +304,6 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int clone(
         child->wait_next = parent->children;
         parent->children = child;
     }
-
-    child->ctx.gs_base  = 0;
-    child->ctx.kgs_base = gs_mirror_vaddr();
 
     // ---- TID flags ----
     if ((flags & kCloneParentSettid) && parent_tid != 0) {

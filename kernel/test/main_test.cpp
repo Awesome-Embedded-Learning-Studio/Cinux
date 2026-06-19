@@ -115,6 +115,11 @@ extern "C" void kernel_main() {
     cinux::arch::g_idt.init();
     cinux::lib::kprintf("[TEST] IDT loaded.\n");
 
+    // F4-M3 P1-2: anchor the BSP's GS base at its PerCpu block BEFORE any test
+    // suite runs -- percpu() reads MSR_GS_BASE, so it must be set first.  This
+    // also configures STAR/EFER for SYSRET; run_usermode_tests still observes them.
+    cinux::arch::usermode_init();
+
     // F2-M7 direct-map identity probe (batch 1): the loader mapped all RAM into
     // the DIRECT_MAP_BASE window with 1 GB huge pages.  Verify it is identity by
     // comparing bytes seen through DIRECT_MAP_BASE + phys against the existing
@@ -224,7 +229,6 @@ extern "C" void kernel_main() {
     // Block device tests (M4): IBlockDevice interface + RAMBlockDevice stub (M4-1)
     run_block_device_tests();
 
-    cinux::arch::usermode_init();
     run_usermode_tests();
 
     cinux::arch::syscall_init();
