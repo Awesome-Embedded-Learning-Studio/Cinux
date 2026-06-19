@@ -83,6 +83,11 @@ Inode* dir = parent.value();
 - **Cinux-Base（子模块）头**：传统 `#ifndef/#define/#endif` 守卫（另一仓库，不改）。
 - 用前向声明（`struct InterruptFrame;`）削减编译依赖。
 
+## 7b. 文件行数（500 行软上限）
+- 源文件（`.cpp`/`.hpp`）**软上限 500 行**——PR review 会标红超限。一个文件一个聚焦职责。
+- 写/改完一个文件后 `wc -l` 看一眼；超 500 **及时按职责拆**（如 `fork.cpp` 拆出 `clone.cpp`、`process.hpp` 拆出 `shared_cwd.hpp` 或把 execve/waitpid 声明挪到独立头）。不要堆到 PR 被打回再拆。
+- 测试文件可适当放宽（聚合器性质），但亦尽量按子系统拆。
+
 ## 8. 断言 / panic
 - **编译期**：`static_assert`（结构体布局不变量，如 `static_assert(sizeof(CpuContext) == 80)`）。
 - **运行期**：`kprintf` 诊断 + `kpanic(fmt, ...)`（`cli; hlt` 死循环）。`__assert_fail`（`kernel/arch/x86_64/crt_stub.cpp`）转发到 `kpanic`，所以 `<cassert>` 的 `assert()` 在 freestanding 下也可用（经 crt_stub）。

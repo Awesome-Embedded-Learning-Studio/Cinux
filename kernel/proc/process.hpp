@@ -33,7 +33,9 @@
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/slab.hpp"
 #include "kernel/proc/elf_types.hpp"
+#include "kernel/proc/execve.hpp"
 #include "kernel/proc/pid.hpp"
+#include "kernel/proc/shared_cwd.hpp"
 #include "kernel/proc/signal.hpp"
 
 namespace cinux::fs {
@@ -103,54 +105,7 @@ static_assert(offsetof(CpuContext, kgs_base) == 72, "kgs_base at offset 72");
 static_assert(offsetof(CpuContext, fs_base) == 80, "fs_base at offset 80");
 static_assert(sizeof(CpuContext) == 96, "CpuContext must be 96 bytes (alignas(16) pads 88->96)");
 
-// ============================================================
-// Shared working directory (F3-M2 batch 3)
-// ============================================================
-
-/**
- * @brief Reference-counted current working directory
- *
- * CLONE_FS threads share one instance (acquire bumps the refcount); fork and
- * clone-without-FS get a private copy.  Heap-allocated (slab general cache) so
- * a Task holds a pointer and clone sharing is pointer + acquire().  The path
- * buffer is fixed at 256 bytes (matches the former inline cwd[256]).
- */
-struct SharedCwd {
-    static constexpr uint32_t kPathMax = 256;
-
-    uint32_t refcount;
-    char     path[kPathMax];
-
-    /// Allocate with @p init (defaults to "/"); refcount = 1.
-    static SharedCwd* create(const char* init = "/") {
-        auto* p = new SharedCwd;
-        if (p != nullptr) {
-            p->refcount  = 1;
-            uint32_t i   = 0;
-            char*    dst = p->path;
-            if (init != nullptr) {
-                for (; i + 1 < kPathMax && init[i] != '\0'; ++i) {
-                    dst[i] = init[i];
-                }
-            }
-            dst[i] = '\0';
-        }
-        return p;
-    }
-
-    /// Allocate a private copy of @p src; refcount = 1.
-    static SharedCwd* create_copy(const SharedCwd* src) {
-        return create(src != nullptr ? src->path : "/");
-    }
-
-    void acquire() { ++refcount; }
-
-    void release() {
-        if (refcount > 0 && --refcount == 0) {
-            delete this;
-        }
-    }
-};
+// SharedCwd (reference-counted cwd) lives in shared_cwd.hpp; included below.
 
 // ============================================================
 // Task Control Block
@@ -444,65 +399,8 @@ void task_exit_cleartid(Task* task);
  */
 bool handle_cow_fault(uint64_t fault_vaddr);
 
-// ============================================================
-// Execve
-// ============================================================
-
-namespace errno_values {
-constexpr int EPERM   = 1;   ///< Operation not permitted
-constexpr int ENOENT  = 2;   ///< No such file or directory
-constexpr int ESRCH   = 3;   ///< No such process
-constexpr int EIO     = 5;   ///< I/O error
-constexpr int ENOEXEC = 8;   ///< Exec format error
-constexpr int ENOMEM  = 12;  ///< Out of memory
-constexpr int EACCES  = 13;  ///< Permission denied
-constexpr int EFAULT  = 14;  ///< Bad address
-constexpr int ECHILD  = 10;  ///< No child processes
-constexpr int EISDIR  = 21;  ///< Is a directory
-constexpr int EINVAL  = 22;  ///< Invalid argument
-}  // namespace errno_values
-
-/**
- * @brief Result codes from execve() loading
- *
- * Values follow Linux errno conventions so that sys_execve can
- * return the negated value directly (e.g. -ENOENT, -ENOEXEC).
- */
-enum class ExecveResult : int {
-    Ok             = 0,    ///< Successfully loaded the new executable
-    BadPath        = -22,  ///< Path is null or empty (EINVAL)
-    FileNotFound   = -2,   ///< VFS could not resolve the path (ENOENT)
-    FileNotRegular = -21,  ///< Path resolves to a non-regular file (EISDIR)
-    ReadFailed     = -5,   ///< Failed to read the ELF data from the inode (EIO)
-    BadElfMagic    = -8,   ///< ELF magic number mismatch (ENOEXEC)
-    BadElfClass    = -8,   ///< Not a 64-bit ELF (ENOEXEC)
-    BadElfEndian   = -8,   ///< Not little-endian (ENOEXEC)
-    BadElfMachine  = -8,   ///< Not x86-64 (ENOEXEC)
-    BadElfType     = -8,   ///< Not an executable (ENOEXEC)
-    BadElfHeaders  = -8,   ///< Program header offset/size invalid (ENOEXEC)
-    NoLoadSegments = -8,   ///< No PT_LOAD segments found (ENOEXEC)
-    MapFailed      = -12,  ///< Address space map() failed for a segment (ENOMEM)
-    NoAddressSpace = -12,  ///< Task has no address space (ENOMEM)
-    NoCurrentTask  = -3,   ///< No current task in the scheduler (ESRCH)
-};
-
-/**
- * @brief Replace the current process image with a new ELF executable
- *
- * Reads the ELF binary from the VFS, validates the header, unmaps
- * existing user-space pages, loads PT_LOAD segments into the task's
- * address space, and sets the entry point.  The old process image is
- * destroyed but the PID, parent, and scheduler linkage are preserved.
- *
- * After a successful execve(), the caller is responsible for jumping
- * to the new entry point (typically via jump_to_usermode).
- *
- * @param path  Null-terminated path to the ELF executable
- * @param argv  Array of argument strings (may be nullptr)
- * @param envp  Array of environment strings (may be nullptr)
- * @return ExecveResult::Ok on success, or an error code
- */
-ExecveResult execve(const char* path, const char* const argv[], const char* const envp[]);
+// Execve (errno_values, ExecveResult, execve decl) lives in kernel/proc/execve.hpp;
+// included below.
 
 // ============================================================
 // Waitpid
