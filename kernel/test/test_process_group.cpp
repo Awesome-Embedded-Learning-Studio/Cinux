@@ -1,29 +1,42 @@
 /**
  * @file kernel/test/test_process_group.cpp
- * @brief QEMU in-kernel tests for process-group / session (F3-M3 batch 1)
+ * @brief QEMU in-kernel tests for process-group / session (F3-M3)
  *
- * Batch 1 only: verifies inherit_process_identity() -- the pure rule that
- * fork() and clone() use to derive a child's pgid / sid / session_leader /
- * controlling_tty.  Two paths are exercised:
- *   - root fork (parent->pgid == 0, i.e. a kernel/bootstrap task): the child
- *     founds a brand-new process group AND session and leads both
- *   - normal fork: the child inherits the parent's group, session, leader
- *     pointer, and controlling terminal
+ * Batch 1: inherit_process_identity() -- the rule fork()/clone() use to derive
+ * a child's pgid/sid/session_leader/controlling_tty.  Root fork (parent
+ * pgid==0) founds a new group+session; otherwise the parent's membership is
+ * inherited.
  *
- * setpgid / getsid / killpg and the syscalls land in batch 2/3.
+ * Batch 2: setpgid/getpgid/getsid/setsid identity operations, plus killpg
+ * (signal broadcast over the pid registry).  setpgid/setsid are pure field
+ * transforms; killpg registers throwaway tasks on the global registry and
+ * unregisters them BEFORE asserting (TEST_ASSERT early-returns, so cleanup
+ * first avoids leaking test tasks into later tests -- GOTCHA#19 family).
  *
- * The function is a pure transformation on Task fields, so these tests need
- * no scheduler loop and no installed current task.
+ * The 4 syscalls (setpgid/getpgid/getsid/setsid) land in batch 3.
  */
 
 #include <stdint.h>
 
 #include "big_kernel_test.h"
 #include "kernel/proc/process.hpp"
+#include "kernel/proc/process_group.hpp"
 #include "kernel/proc/process_internal.hpp"
+#include "kernel/proc/signal.hpp"
 
 using cinux::proc::Task;
+using cinux::proc::TaskState;
 using cinux::proc::inherit_process_identity;
+using cinux::proc::setpgid;
+using cinux::proc::getpgid;
+using cinux::proc::getsid;
+using cinux::proc::setsid;
+using cinux::proc::killpg;
+using cinux::proc::Signal;
+using cinux::proc::SharedSigActions;
+using cinux::proc::sig_is_member;
+using cinux::proc::signal_register_task;
+using cinux::proc::signal_unregister_task;
 
 // ============================================================
 // Path 1: root fork -- child founds its own group and session
@@ -135,6 +148,138 @@ void test_kernel_init_to_init_to_grandchild() {
 
 }  // namespace test_pgrp_chain
 
+// ============================================================
+// Batch 2: setpgid / getpgid / getsid identity operations
+// ============================================================
+
+namespace test_pgrp_setpgid {
+
+void test_setpgid_zero_means_own_pid() {
+    Task t{};
+    t.pid = 7;
+    TEST_ASSERT_EQ(setpgid(&t, 0), 0);
+    TEST_ASSERT_EQ(t.pgid, 7);  // leads a new group whose id is its own pid
+}
+
+void test_setpgid_explicit_group() {
+    Task t{};
+    t.pid = 7;
+    TEST_ASSERT_EQ(setpgid(&t, 5), 0);
+    TEST_ASSERT_EQ(t.pgid, 5);
+}
+
+void test_setpgid_rejects_null_and_negative() {
+    TEST_ASSERT_EQ(setpgid(nullptr, 0), -3);  // ESRCH
+    Task t{};
+    t.pid = 1;
+    TEST_ASSERT_EQ(setpgid(&t, -1), -22);  // EINVAL
+}
+
+void test_getpgid_getsid_read_back() {
+    Task t{};
+    t.pid  = 8;
+    t.pgid = 4;
+    t.sid  = 6;
+    TEST_ASSERT_EQ(getpgid(&t), 4);
+    TEST_ASSERT_EQ(getsid(&t), 6);
+    TEST_ASSERT_EQ(getpgid(nullptr), -3);  // ESRCH
+}
+
+}  // namespace test_pgrp_setpgid
+
+namespace test_pgrp_setsid {
+
+void test_setsid_creates_new_session() {
+    Task t{};
+    t.pid             = 9;
+    t.pgid            = 1;  // not yet a leader (pgid != pid)
+    t.sid             = 1;
+    t.controlling_tty = 3;
+
+    TEST_ASSERT_EQ(setsid(&t), 9);  // returns the new sid
+    TEST_ASSERT_EQ(t.pgid, 9);
+    TEST_ASSERT_EQ(t.sid, 9);
+    TEST_ASSERT_EQ(t.session_leader, &t);
+    TEST_ASSERT_EQ(t.controlling_tty, -1);  // tty cleared on new session
+}
+
+void test_setsid_eperm_if_already_leader() {
+    Task t{};
+    t.pid  = 5;
+    t.pgid = 5;                      // already leads a process group
+    TEST_ASSERT_EQ(setsid(&t), -1);  // EPERM
+    TEST_ASSERT_EQ(t.pgid, 5);       // unchanged
+}
+
+void test_setsid_esrch_on_null() {
+    TEST_ASSERT_EQ(setsid(nullptr), -3);
+}
+
+}  // namespace test_pgrp_setsid
+
+// ============================================================
+// Batch 2: killpg -- signal broadcast over the pid registry
+// ============================================================
+
+namespace test_killpg {
+
+// Tasks live on the test's stack and are explicitly unregistered BEFORE any
+// assert: TEST_ASSERT early-returns on failure, so cleanup-first avoids
+// leaking test tasks into the global registry for later tests.
+
+void test_killpg_broadcasts_only_to_group_members() {
+    Task a{}, b{}, c{};
+    a.pid         = 10;
+    a.pgid        = 1;
+    a.sig_actions = SharedSigActions::create();
+    b.pid         = 11;
+    b.pgid        = 1;
+    b.sig_actions = SharedSigActions::create();
+    c.pid         = 12;
+    c.pgid        = 2;
+    c.sig_actions = SharedSigActions::create();
+    a.state = b.state = c.state = TaskState::Ready;
+
+    signal_register_task(&a);
+    signal_register_task(&b);
+    signal_register_task(&c);
+
+    int  sent  = killpg(1, Signal::kSigusr1);
+    bool a_got = sig_is_member(a.sig_pending, Signal::kSigusr1);
+    bool b_got = sig_is_member(b.sig_pending, Signal::kSigusr1);
+    bool c_got = sig_is_member(c.sig_pending, Signal::kSigusr1);
+
+    signal_unregister_task(&a);
+    signal_unregister_task(&b);
+    signal_unregister_task(&c);
+    a.sig_actions->release();
+    b.sig_actions->release();
+    c.sig_actions->release();
+
+    TEST_ASSERT_EQ(sent, 2);  // only a and b are in group 1
+    TEST_ASSERT(a_got);
+    TEST_ASSERT(b_got);
+    TEST_ASSERT(!c_got);  // c is in group 2, untouched
+}
+
+void test_killpg_empty_group_returns_zero() {
+    Task a{};
+    a.pid         = 20;
+    a.pgid        = 1;
+    a.sig_actions = SharedSigActions::create();
+    a.state       = TaskState::Ready;
+    signal_register_task(&a);
+
+    int sent = killpg(999, Signal::kSigusr2);  // no such group
+
+    signal_unregister_task(&a);
+    a.sig_actions->release();
+
+    TEST_ASSERT_EQ(sent, 0);
+}
+
+}  // namespace test_killpg
+
 extern "C" void run_process_group_tests() {
     TEST_SECTION("Process Group Tests (F3-M3-1)");
 
@@ -145,6 +290,18 @@ extern "C" void run_process_group_tests() {
     RUN_TEST(test_pgrp_inherit::test_inherit_preserves_arbitrary_pgid_sid);
 
     RUN_TEST(test_pgrp_chain::test_kernel_init_to_init_to_grandchild);
+
+    RUN_TEST(test_pgrp_setpgid::test_setpgid_zero_means_own_pid);
+    RUN_TEST(test_pgrp_setpgid::test_setpgid_explicit_group);
+    RUN_TEST(test_pgrp_setpgid::test_setpgid_rejects_null_and_negative);
+    RUN_TEST(test_pgrp_setpgid::test_getpgid_getsid_read_back);
+
+    RUN_TEST(test_pgrp_setsid::test_setsid_creates_new_session);
+    RUN_TEST(test_pgrp_setsid::test_setsid_eperm_if_already_leader);
+    RUN_TEST(test_pgrp_setsid::test_setsid_esrch_on_null);
+
+    RUN_TEST(test_killpg::test_killpg_broadcasts_only_to_group_members);
+    RUN_TEST(test_killpg::test_killpg_empty_group_returns_zero);
 
     TEST_SUMMARY();
 }
