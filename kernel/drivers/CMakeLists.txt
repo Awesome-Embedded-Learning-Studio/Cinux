@@ -10,6 +10,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/acpi/rsdp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acpi/sdt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acpi/madt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/apic/local_apic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ahci/ahci.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dma/dma_pool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ahci/ahci_block_device.cpp
