@@ -201,4 +201,24 @@ WaitpidResult waitpid(int pid, int* status, PidAllocator& pid_alloc) {
     return WaitpidResult::Ok;
 }
 
+// ============================================================
+// Process group / session inheritance (F3-M3 batch 1)
+// ============================================================
+
+void inherit_process_identity(Task* child, const Task* parent, int child_pid) {
+    if (parent->pgid == 0) {
+        // Root fork: the parent is a kernel/bootstrap task with no group, so
+        // the child founds a brand-new process group and session and leads it.
+        child->pgid           = child_pid;
+        child->sid            = child_pid;
+        child->session_leader = child;
+    } else {
+        // Inherit the parent's group, session, leader, and controlling tty.
+        child->pgid           = parent->pgid;
+        child->sid            = parent->sid;
+        child->session_leader = parent->session_leader;
+    }
+    child->controlling_tty = parent->controlling_tty;
+}
+
 }  // namespace cinux::proc

@@ -216,6 +216,21 @@ struct Task {
     /** Pointer to the thread-group leader task (self for a leader). */
     Task* group_leader{nullptr};
 
+    // ---- Process group / session (F3-M3 batch 1) ----
+    // Distinct from tgid (thread group): pgid is the job-control group used
+    // for signal broadcast (killpg) and terminal foreground groups.  A task
+    // with pgid == pid leads its process group; setpgid()/setsid() manage it.
+    int pgid{0};  ///< Process-group ID (0 = uninitialised / kernel thread)
+
+    /** Session ID (0 = uninitialised; equals the session leader's pid). */
+    int sid{0};
+
+    /** Pointer to the session-leader task (self for a session leader). */
+    Task* session_leader{nullptr};
+
+    /** Controlling terminal index (-1 = none; real tty attach deferred to F10). */
+    int controlling_tty{-1};
+
     /**
      * CLONE_CHILD_CLEARTID address (F3-M2 batch 4/5).  On thread exit the
      * kernel writes 0 here and futex_wakes any waiter.  0 = not set.
