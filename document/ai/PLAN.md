@@ -30,6 +30,23 @@
 **关键 GOTCHA**：①QEMU pc 默认 **ACPI 1.0 RSDP（rev 0，仅 RSDT 32位，无 XSDT）** → M1-2 走 RSDT 主路径（修正 propose 阶段"ACPI 2.0"假设）。②测试 log 含 ANSI escape → grep 当二进制静默，查日志用 `grep -a`。③ACPI 表（RAM）经 direct-map cache-enabled 访问 OK，与 APIC MMIO（M2 需 `VMM.map + FLAG_PCD` 禁缓存）严格区分。
 **真机**：`[ACPI] 1 CPU(s), LAPIC 0xFEE00000, IOAPIC 0xFEC00000, 5 IRQ override(s), pcat=1`（QEMU pc 标准拓扑；5 override 含 IRQ0→GSI2，M2-3 消费）。详见 `document/notes/2026-06-19-f4-m1-{1,2,3,4}-*.md`。下个焦点：**F4-M2 LAPIC + IOAPIC**。
 
+## ✅ F4-M2（Local APIC + I/O APIC + PIC→APIC 切换）完成 — 2026-06-19
+
+> F4（SMP）M2：中断现代化——8259 PIC → LAPIC + IOAPIC。解锁现代中断（更多源 + 为 M3 多核 / xHCI INTx# 铺路）。基线 859/0 → 869/0 + production 真机（PIT 13 ticks under APIC）。
+
+| 批 | 范围 | Commit | 测试 |
+|----|------|--------|------|
+| M2-1 | LocalAPIC（xAPIC MMIO + FLAG_PCD）+ mock | 8fcd5fc | 865/0 |
+| M2-2 | IOAPIC（indirect + set_redirect + mask）+ mock | 58ed314 | 869/0 |
+| M2-3 | IrqBackend::eoi + PIC→APIC 切换 + 改 5 处 EOI + 真机冒烟 | fcf1151 | 869/0 + PIT 13 ticks |
+| M2-4 | 收尾（本文档 + ROADMAP；IPI/APIC timer 推迟 M3） | (本次) | — |
+
+**总结**：LAPIC（xAPIC MMIO，qemu64 无 x2APIC）+ IOAPIC（indirect IOREGSEL/IOWIN + set_redirect 64-bit）+ IrqBackend 抽象（EOI PIC/APIC 派发）+ switch_to_apic（mask PIC / LAPIC init+enable / IOAPIC redirect IRQ0,1,12→0x20,0x21,0x2C 照 ISA override 查 GSI / flip backend）+ 改 5 处 EOI（pit/keyboard×2/mouse/irq_handlers×2）。
+**关键 GOTCHA**：①APIC MMIO 必须 `VMM.map + FLAG_PCD`（禁缓存，**严禁 direct-map**）②freestanding `for(x:{...})` 需 `<initializer_list>`（改数组循环）③IOAPIC redirect 照 ISA override 查 GSI（QEMU IRQ0→GSI2，直映 IRQ0→GSI0 错→无 tick）④EOI 在 C handler 发（stub 不动，IrqBackend 一处切换）⑤qemu64 无 x2APIC（xAPIC MMIO 必选）。
+**真机**：`[APIC] switched to APIC (LAPIC id 0, IOAPIC @0xFEC00000)` + **PIT 13 ticks under APIC**（IRQ0→GSI2→LAPIC vector 0x20 路由通）+ GUI 启动不崩。
+**推迟 M3**：IPI（send_ipi/init/sipi）+ APIC timer（多核 AP 启动 / per-CPU timer 需要）；MSI/MSI-X → F4-M2b 或 F5-xHCI 前置。
+**F4-M1+M2 完成**（9 commit，840→869/0 + 真机）。详见 `document/notes/2026-06-19-f4-m2-*.md`。下个焦点：**M3 AP 启动**（IPI + per-CPU）或 F4 暂停 push/PR。
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
