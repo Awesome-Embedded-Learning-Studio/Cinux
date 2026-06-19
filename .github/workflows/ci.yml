@@ -66,4 +66,19 @@ jobs:
 
       - name: Run kernel tests
         working-directory: build
-        run: make run-kernel-test
+        # timeout 180 fails fast on a panic-loop/deadlock hang (normal run is
+        # <60s); tee captures the full QEMU serial output to serial.log so the
+        # next step can upload it as an artifact for post-mortem (kprintf /
+        # panic / backtrace / memstats). pipefail propagates the test exit code
+        # through tee.
+        run: |
+          set -o pipefail
+          timeout 180 make run-kernel-test 2>&1 | tee serial.log
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-test-serial-log
+          path: build/serial.log
+          if-no-files-found: ignore
