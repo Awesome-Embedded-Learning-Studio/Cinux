@@ -13,9 +13,9 @@
 > **F3-M4 调度器接口验证与增强 ✅ 完成（2026-06-19，5 批，827→840）**：①SchedulingClass 策略钩子(task_tick/task_fork/task_deadline,时间片抢占内聚到调度类,删 current_slice_) ②优先级感知 RoundRobin(pick_next 选 priority 最小者,同优先级 RR) ③多调度类实际查询(pick_next_from 数组原语,schedule/exit_current/run_first 不再绕过 classes_[]) ④SIGSTOP/SIGCONT 真调度(TaskState::Stopped 状态机 + signal_send 发送时恢复 + schedule 守卫排除 Stopped)。**向后兼容**(生产单类场景等价,827 回归全绿)。关键踩坑 GOTCHA#22(TaskBuilder 消耗全局 tid 计数器跨测污染)。**F3 进程与线程全里程碑收官(M1-M4)**。详见文末「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-{1,2,3,4}-*.md`。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
-> **F-INFRA 基建加固 🔄 进行中（2026-06-19 起）**：F2/F3 后复杂度陡增（F4 SMP + 网络）前夯基——静态检查/指针语义/调试基建/CI 粘合，10 批。详见下方「🔄 F-INFRA」段。
+> **F-INFRA 基建加固 ✅ 完成（2026-06-19，10 批 12 commit，基线 840/0 全程绿、零警告）**：F2/F3 后复杂度陡增前夯基——CI 粘合/静态门禁/警告收紧/format 属性/static_assert/KALLSYMS 真符号/64 位 gdbinit+decode-trace/NotNull 指针契约/clang-tidy/UBSAN/lockdep。详见下方「✅ F-INFRA」段 + `document/notes/2026-06-19-finfra-{1..10}-*.md` + summary。
 
-## 🔄 F-INFRA（基建加固）进行中 — 2026-06-19 起
+## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
 > 来源：2026-06-19 一个 26-agent workflow（6 维代码审计 + 5 维联网调研 + 综合 + 对抗验证 + 完整性审查）的验证结论；记忆 `infra-hardening-investigation.md`。
