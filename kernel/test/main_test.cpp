@@ -108,7 +108,7 @@ extern "C" void kernel_main() {
     cinux::lib::kallsyms_set_table(g_kallsyms_table, g_kallsyms_count);
 
     // Step 2: Initialise GDT (must come before IDT)
-    cinux::arch::g_gdt.init();
+    cinux::arch::gdt_blocks[0].init();
     cinux::lib::kprintf("[TEST] GDT loaded.\n");
 
     // Step 3: Initialise IDT (depends on GDT selectors)

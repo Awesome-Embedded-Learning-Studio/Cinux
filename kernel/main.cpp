@@ -105,7 +105,7 @@ extern "C" void kernel_main() {
     cinux::lib::kprintf("[BIG] Big kernel running @ 0x1000000\n");
 
     // Step 3: Initialise the GDT (must come before IDT)
-    cinux::arch::g_gdt.init();
+    cinux::arch::gdt_blocks[0].init();
     cinux::lib::kprintf("[BIG] GDT loaded (TSS with IST1 Double Fault stack).\n");
 
     // Step 4: Initialise the IDT (depends on GDT selectors)
