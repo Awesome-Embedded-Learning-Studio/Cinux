@@ -80,6 +80,21 @@
 > **P2-2 关键 GOTCHA(执行时踩/避)**:① **GAS 宏不内联展开**(`$TP()` 永远失败,`.altmacro` 也不行;本构建 GAS-direct `#`=注释非 cpp)→ 改**内联表达式 `(label-ap_trampoline_start+0x8000)`**(GAS 两遍解析同 section 符号差=常量)。② **CR3 切换不能在 0x8000**(切后内核 PML4 不映 0x8000)→ 在 higher-half `ap_entry_long`(两边都映)里切 + 设栈。③ AP `cli;hlt`(非 sti;hlt):`Scheduler::current_` 仍静态,AP 上跑中断 handler 有并发风险 → IF=0 永久 halt 归零(P2);M4 改可唤醒 + per-CPU 化。④ 双 SIPI 致 trampoline 跑两次(SIPI#1 后 AP init 慢,守卫发 SIPI#2 兜底,spec 行为,无害)。详见 `document/notes/2026-06-19-f4-m3-p2-ap-boot.md`。
 > **边界**:AP idle 不跑用户任务(M4 多核调度:per-CPU runq + `current_` per-CPU);lost-wakeup 未修(Phase 3)。**F4-M3 全里程碑(Phase 1+2)收官。**
 
+## 🔄 F4-M4（多核调度）— 批 0+1 完成,2/3 待做 — 2026-06-20
+
+> M4 让 AP 从 idle 变成能跑用户任务。**本会话做 M4-0(测试重构)+ M4-1(current_ per-CPU),M4-2/3 高风险留新会话。** 分支 `feat/f4-m3-trampoline`,commit `ac92bef`(M4-0)+ `7dba770`(M4-1)。详见 `document/notes/2026-06-20-f4-m4-0-1-test-refactor-percpu.md` + 交接 `2026-06-19-f4-m4-handoff.md`。
+> **上一轮试做 M4-1 回退教训**:phantom-task 测试(test_sync/futex/clone)靠 `current_`(静态)与 `percpu()->current` 的**未文档化分歧**让 block() 不 schedule;M4-1 改读 percpu 后必 hang。**真正 hack 是这条分歧,不是 role-play 本身。**
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| M4-0 | phantom 测试显式化:`NoRescheduleGuard`(gate block() schedule,生产 depth=0 无影响)+ `percpu()->current=X`→`set_current(X)`(GOTCHA#21)+ `RoundRobin::clear()`/`init()` 清 runq(test 隔离)+ `test_block_dispatches_to_runnable`(真 dispatch 路径覆盖) | ✅ | ac92bef | 873/0(+1) |
+| M4-1 | `current_` 静态全局→per-CPU:删成员,`current()`读`percpu()->current`,set_current/schedule/exit_current/run_first/tick/yield/block 全走 percpu,删双写;~35 调用点经 accessor 零改 | ✅ | 7dba770 | 873/0 + smp 873/0 + host 48/0 + run-smp AP1 online/GUI |
+| M4-2 | AP `cli;hlt`→`sti;hlt` + IPI 唤醒(add_task/unblock 后 send_ipi 到 idle AP)+ 共享 runq。AP 真跑任务,但暴露 lost-wakeup → 须配 M4-3 | ⏳ | — | — |
+| M4-3 | lost-wakeup prepare-to-wait:mutex/sem/futex/waitpid 的 check+enqueue 持锁原子;block() 改条件阻塞。最高风险,可用 M4-0 role-play 守卫做精确交错测试 | ⏳ | — | — |
+
+> **关键 GOTCHA(M4-1)**:`fxrstor current()->fpu_state` 在任务恢复点必须读 percpu(= 切到本任务那次 schedule 设的值),**绝不能用局部 `next->fpu_state`** —— context_switch 返回时跑在 next 上下文,但执行的是 prev 当初被切出时那条 fxrstor(prev 栈帧里 next 已过期),旧全局 `current_` 读对,M4-1 须用 `current()` 等价。详见 GOTCHA#23。
+> **不变量**:单核全程不变(percpu[0] 等价旧 current_);AP 仍 cli;hlt idle(IF=0 不碰 percpu current 调度),并发暴露在 M4-2 改 sti;hlt。**current_ per-CPU 化完成(Phase 1 P0#1 兑现)。**
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
@@ -277,6 +292,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 20. **fork/clone 栈拷贝 full_used 须 < 栈大小，否则下溢踩邻接（F3-M2 批4 教训，2026-06-18）**：`full_used = parent->kernel_stack_top - current_rsp`，子栈 `stack_size`=16KB。若 `full_used > stack_size`（测试用 `kernel_stack_top=rsp+16384` 即触发），`child_stack_start = child_stack_virt + stack_size - full_used` 下溢到栈映射前 → memcpy 踩邻接内存（latent，堆布局变即命中要害）。fork/clone 加 `if (full_stack_used > stack_size) full_stack_used = stack_size;` 上限防御（生产永不触发，栈远未满）。测试 `kernel_stack_top` 用小偏移（rsp+4096）让 full_used < 栈大小。
 21. **单测设 current 用 Scheduler::set_current，勿直接 g_per_cpu.current（F3-M3 批3 教训，2026-06-19）**：`Scheduler::current()`（scheduler.cpp:234）返静态 `current_`，**不是** PerCpu 的 `g_per_cpu.current`。两者只由 `Scheduler::set_current(task)`（scheduler.cpp:238）同步设置（current_ + g_per_cpu.current 都设）。单测装栈 task 作 current **必须用 `Scheduler::set_current(&t)`**，cleanup 用 `Scheduler::set_current(nullptr)`——只设 `g_per_cpu.current` 会让 `current_` 仍 nullptr，任何经 `Scheduler::current()` 的 handler（sys_setpgid/setsid/未来 waitpid 阻塞等）拿到 nullptr → ESRCH，测试 fail（F3-M3 批3 首验 825/2 fail 定位此）。test_clone 的 futex 侥幸（futex 内部不经 Scheduler::current()），掩盖了这层。**通用铁律**：单测设 current 一律用 Scheduler::set_current（两者都设），勿直接写 g_per_cpu.current。
 22. **TaskBuilder().build() 消耗全局 tid 计数器,跨测试文件污染（F3-M4 批4 教训，2026-06-19）**：`next_tid` 是全局单例,`TaskBuilder().build()` 每次分配递增。测试文件**共享**一个计数器,执行序固定（`run_signal_tests()` 在 `run_scheduler_tests()` 前）。新测试用 TaskBuilder 建 victim 分到 tid 1/2/3 → 后跑的 `test_build_basic_task` 断言首任务 `tid==1`（test_scheduler.cpp:62）失败（实际 4+）。**根因非逻辑**,是共享全局态 + 脆弱断言。**修**：纯状态机测试（只碰 state/sched_class/sig_actions/sig_pending）用**栈 `Task t{}`**（同 test_sig_state 范式）,零 tid/slab/核栈消耗 → 不污染计数器。**通用铁律**：跨测试文件共享全局计数器（tid/pid/next_*）,新测试用 TaskBuilder 建任务会位移他测的「首任务 tid==N」断言;能不分配就不分配（栈 Task 优先）。
+23. **context_switch 恢复点的 current 必须读 per-CPU,不能用局部 next(F4-M4 M4-1 教训,2026-06-20)**：`schedule()`/`exit_current()` 里 `context_switch(&prev->ctx,&next->ctx)` **返回时跑在 next 的上下文,但执行的是 prev 当初被切出时**那条 `fxrstor`(prev 的栈帧)。该栈帧里的局部 `next` 还是 prev 当年的 next(已过期),**不能用 `next->fpu_state`**(会恢复错任务的 FPU)。旧代码用全局静态 `current_`(被「切到本任务那次」schedule 设成本任务)读对;current_→percpu 改造后须用 `current()`(读 `percpu()->current`,语义等价旧全局)。**通用铁律**：context_switch 返回后任何对「现在跑谁」的引用,读 per-CPU current(`current()`/`percpu()->current`),勿用 switch 时的局部 next/prev(跨切出-切入已过期)。同批另一教训:`Scheduler::init()` 须清 runq(`RoundRobin::clear()`)——测试间 stale task 会泄漏到下一个测试,首个真跑 `block(current)→schedule→pick_next` 的测试会选中 stale task 去真跑它本不该跑的 entry → 崩;boot 时 runq 空 no-op,生产无影响。
 
 ## ✅ direct-map 独立窗口（F2-M7 前置）Bug1 已修 — 2026-06-17（fresh build 734/0）
 
