@@ -9,10 +9,30 @@
 namespace cinux::proc {
 
 // ============================================================
+// SchedulingClass default policy hooks
+// ============================================================
+
+// Defaults preserve the legacy contract: no per-tick preemption, no fork
+// derivation, no deadline.  A concrete class overrides only what its policy
+// needs (see RoundRobin below).
+bool SchedulingClass::task_tick(Task*) {
+    return false;
+}
+
+void SchedulingClass::task_fork(Task*, Task*) {
+    // No-op: the child keeps whatever parameters its creator gave it.
+}
+
+uint64_t SchedulingClass::task_deadline(Task*) {
+    return 0;
+}
+
+// ============================================================
 // RoundRobin implementation
 // ============================================================
 
-RoundRobin::RoundRobin() : head_(0), tail_(0), count_(0) {
+RoundRobin::RoundRobin()
+    : head_(0), tail_(0), count_(0), quantum_remaining_(Scheduler::DEFAULT_TIME_SLICE) {
     for (int i = 0; i < MAX_TASKS; i++) {
         run_queue_[i] = nullptr;
     }
@@ -60,7 +80,9 @@ Task* RoundRobin::pick_next() {
     head_      = (head_ + 1) % MAX_TASKS;
     count_--;
 
-    task->state = TaskState::Running;
+    task->state        = TaskState::Running;
+    // A freshly scheduled task starts with a full time quantum.
+    quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
 
     run_queue_[tail_] = task;
     tail_             = (tail_ + 1) % MAX_TASKS;
@@ -71,6 +93,31 @@ Task* RoundRobin::pick_next() {
 
 const char* RoundRobin::name() const {
     return "RoundRobin";
+}
+
+bool RoundRobin::task_tick(Task* current) {
+    auto g = lock_.irq_guard();
+    (void)g;
+    (void)current;
+    if (quantum_remaining_ > 0) {
+        quantum_remaining_--;
+    }
+    if (quantum_remaining_ == 0) {
+        // Quantum exhausted: request preemption and recharge so that, if no
+        // other task is runnable, the same task is not re-preempted every tick.
+        quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
+        return true;
+    }
+    return false;
+}
+
+void RoundRobin::task_fork(Task* parent, Task* child) {
+    // fork/clone already memcpy the whole TCB, so the child's priority is a
+    // copy of the parent's today.  Centralising the rule here lets a future
+    // scheduling class derive child parameters without touching fork/clone.
+    if (parent != nullptr && child != nullptr) {
+        child->priority = parent->priority;
+    }
 }
 
 // ============================================================
@@ -109,7 +156,6 @@ RoundRobin       Scheduler::default_rr_;
 Task*            Scheduler::idle_task_   = nullptr;
 bool             Scheduler::initialized_ = false;
 lib::Atomic<int> Scheduler::tick_count_{0};
-lib::Atomic<int> Scheduler::current_slice_{0};
 
 // ============================================================
 // Scheduler implementation
@@ -126,7 +172,6 @@ void Scheduler::init() {
     current_     = nullptr;
     idle_task_   = nullptr;
     tick_count_.store(0, lib::MemoryOrder::Relaxed);
-    current_slice_.store(0, lib::MemoryOrder::Relaxed);
     register_class(&default_rr_);
 
     idle_task_ = TaskBuilder().set_entry(idle_entry).set_name("idle").set_priority(255).build();
@@ -214,7 +259,6 @@ void Scheduler::run_first(Task* boot_task) {
     current_          = boot_task;
     g_per_cpu.current = boot_task;
     cinux::arch::GDT::tss_set_rsp0(boot_task->kernel_stack_top);
-    current_slice_.store(0, lib::MemoryOrder::Relaxed);
 
     Task* next = default_rr_.pick_next();
     if (next == nullptr) {
@@ -250,10 +294,10 @@ void Scheduler::tick() {
     }
 
     tick_count_.fetch_add(1, lib::MemoryOrder::Relaxed);
-    current_slice_.fetch_add(1, lib::MemoryOrder::Relaxed);
 
-    if (current_slice_.load(lib::MemoryOrder::Relaxed) >= DEFAULT_TIME_SLICE) {
-        current_slice_.store(0, lib::MemoryOrder::Relaxed);
+    // Preemption policy is owned by the task's scheduling class.  The class
+    // returns true when the running task should yield its time slice.
+    if (current_->sched_class != nullptr && current_->sched_class->task_tick(current_)) {
         schedule();
     }
 }
@@ -289,7 +333,6 @@ void Scheduler::schedule() {
 
     current_          = next;
     g_per_cpu.current = next;
-    current_slice_.store(0, lib::MemoryOrder::Relaxed);
 
     if (next != idle_task_) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);

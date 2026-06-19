@@ -13,10 +13,27 @@ class SchedulingClass {
 public:
     virtual ~SchedulingClass() = default;
 
+    // --- Run-queue management (required) ---
     virtual void        enqueue(Task* task) = 0;
     virtual void        dequeue(Task* task) = 0;
     virtual Task*       pick_next()         = 0;
     virtual const char* name() const        = 0;
+
+    // --- Policy hooks (optional; defaults preserve legacy behaviour) ---
+
+    // Called once per timer tick for the running task.  Return true to ask the
+    // scheduler to preempt (e.g. the time quantum is exhausted); false lets the
+    // task keep running.  Lets each class own its own preemption policy instead
+    // of hard-coding it in Scheduler::tick.
+    virtual bool task_tick(Task* current);
+
+    // Called when a task is forked/cloned so the class can derive the child's
+    // scheduling parameters from the parent (e.g. inherit priority).
+    virtual void task_fork(Task* parent, Task* child);
+
+    // Deadline tick for deadline-based (real-time) scheduling, or 0 when the
+    // class is not deadline-based.  Reserved for future RT scheduling classes.
+    virtual uint64_t task_deadline(Task* task);
 };
 
 class RoundRobin : public SchedulingClass {
@@ -30,11 +47,16 @@ public:
     Task*       pick_next() override;
     const char* name() const override;
 
+    bool task_tick(Task* current) override;
+    void task_fork(Task* parent, Task* child) override;
+    // task_deadline is inherited unchanged (0 = not deadline-based).
+
 private:
     Task*    run_queue_[MAX_TASKS];
     int      head_;
     int      tail_;
     int      count_;
+    int      quantum_remaining_;  // Ticks left for the currently running task
     Spinlock lock_;
 };
 
@@ -69,7 +91,6 @@ private:
     static Task*            idle_task_;
     static bool             initialized_;
     static lib::Atomic<int> tick_count_;
-    static lib::Atomic<int> current_slice_;
 };
 
 }  // namespace cinux::proc

@@ -452,6 +452,60 @@ void test_locked_fifo_order() {
 }  // namespace test_round_robin_locked
 
 // ============================================================
+// Test 11: SchedulingClass policy hooks (F3-M4 batch 1)
+// ============================================================
+
+namespace test_sched_class_hooks {
+
+void test_task_tick_quantum() {
+    RoundRobin rr;
+    Task* t = TaskBuilder().set_entry(test_task_builder::dummy_entry).set_name("tick_q").build();
+    TEST_ASSERT_NOT_NULL(t);
+
+    rr.enqueue(t);
+    rr.pick_next();  // select t, recharge its quantum to DEFAULT_TIME_SLICE
+
+    // The first (DEFAULT_TIME_SLICE - 1) ticks do not request preemption...
+    for (int i = 1; i < Scheduler::DEFAULT_TIME_SLICE; i++) {
+        TEST_ASSERT_FALSE(rr.task_tick(t));
+    }
+    // ...the DEFAULT_TIME_SLICE-th tick exhausts the quantum and recharges.
+    TEST_ASSERT_TRUE(rr.task_tick(t));
+    // After recharging the task again has a full slice.
+    TEST_ASSERT_FALSE(rr.task_tick(t));
+}
+
+void test_task_fork_inherits_priority() {
+    RoundRobin rr;
+    Task*      parent = TaskBuilder()
+                            .set_entry(test_task_builder::dummy_entry)
+                            .set_name("fork_p")
+                            .set_priority(7)
+                            .build();
+    Task*      child  = TaskBuilder()
+                            .set_entry(test_task_builder::dummy_entry)
+                            .set_name("fork_c")
+                            .set_priority(0)
+                            .build();
+    TEST_ASSERT_NOT_NULL(parent);
+    TEST_ASSERT_NOT_NULL(child);
+
+    rr.task_fork(parent, child);
+    TEST_ASSERT_EQ(child->priority, 7u);
+}
+
+void test_task_deadline_default_zero() {
+    // RoundRobin does not override task_deadline, so the base default (0,
+    // "not deadline-based") applies.
+    RoundRobin rr;
+    Task*      t = TaskBuilder().set_entry(test_task_builder::dummy_entry).set_name("dl").build();
+    TEST_ASSERT_NOT_NULL(t);
+    TEST_ASSERT_EQ(rr.task_deadline(t), 0u);
+}
+
+}  // namespace test_sched_class_hooks
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -477,6 +531,10 @@ extern "C" void run_scheduler_tests() {
     RUN_TEST(test_round_robin_locked::test_locked_enqueue_dequeue);
     RUN_TEST(test_round_robin_locked::test_locked_dequeue_middle);
     RUN_TEST(test_round_robin_locked::test_locked_fifo_order);
+
+    RUN_TEST(test_sched_class_hooks::test_task_tick_quantum);
+    RUN_TEST(test_sched_class_hooks::test_task_fork_inherits_priority);
+    RUN_TEST(test_sched_class_hooks::test_task_deadline_default_zero);
 
     TEST_SUMMARY();
 }
