@@ -30,7 +30,7 @@
 | I-3b | 0 | kprintf/kvprintf/kpanic 加 `__attribute__((format))` + 清理 21 处真实格式不匹配（R2b） | ✅ | (本次) | 840/0 |
 | I-4 | 0 | static_assert 布局锁：SlabHeader(40)/SlabCache(64)/LogEntry(272)/VMA(56) + 两处 InterruptFrame offsetof 矩阵(168)（R11）+ mini 链接零警告 | ✅ | (本次) | 840/0 |
 | I-5 | 1 | KALLSYMS 真符号注入：nm POST_BUILD 生成表（big_kernel + big_kernel_test）+ boot 注册（R4） | ✅ | (本次) | 840/0 |
-| I-6 | 1 | .gdbinit 64 位长模式重写（无偏移 file big/big_kernel）+ decode-trace.sh addr2line 一键（R9/G5） | ⏳ | — | — |
+| I-6 | 1 | .gdbinit 64 位长模式重写（无偏移 file big/big_kernel）+ decode-trace.sh addr2line demangle + 修 run-gdb 路径（R9/G5） | ✅ | (本次) | 840/0（无内核改动） |
 | I-7 | 2 | not_null<T> 进 Cinux-Base（精简 gsl，裸 assert 不耦合 kpanic，仿 optional.hpp）+ scheduler 永不为 null 入参采纳（R5） | ⏳ | — | — |
 | I-8 | 2 | .clang-tidy 精选 allowlist + advisory（非阻塞）CI job，版本锁定（R8） | ⏳ | — | — |
 | I-9 | 3 | UBSAN freestanding 桩：CINUX_UBSAN（Debug），GCC libubsan 规范签名（不抄 SerenityOS），桩调 kpanic，Cinux-Base/panic/kprintf/backtrace 排除插桩（R1） | ⏳ | — | — |
