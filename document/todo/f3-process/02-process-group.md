@@ -1,4 +1,6 @@
-# M3: 进程组/会话
+# M3: 进程组/会话 ✅ 完成 (2026-06-19, F3-M3)
+
+> **完成**：5 批 810→827/0。进程组/会话（pgid/sid/session_leader/controlling_tty）+ setpgid/setsid/getpgid/getsid/killpg + 4 syscall + libc wrapper + fork/clone 继承 + waitpid 阻塞（WNOHANG + exit 唤醒 parent）+ exit Dead→Zombie 契约修正。关键 GOTCHA：#21（Scheduler::current 读 static current_，测试设 current 用 set_current）。详见 PLAN「✅ F3-M3」段 + `document/notes/2026-06-19-f3-m3-*.md`。
 
 > 为 Job Control 和 TTY 子系统提供基础。
 > Task 增加 pgid/sid 字段，实现 setpgid/getsid 等系统调用。
@@ -30,8 +32,8 @@ struct Task {
 };
 ```
 
-- [ ] 添加 pgid / sid / session_leader / controlling_tty 字段
-- [ ] init 进程：pgid=0, sid=0
+- [x] 添加 pgid / sid / session_leader / controlling_tty 字段
+- [x] init 进程：pgid=0, sid=0
 
 ### T2: 进程组管理函数
 
@@ -58,10 +60,10 @@ int killpg(int pgid, Signal sig);
 } // namespace cinux::proc
 ```
 
-- [ ] setpgid() — 设置/创建进程组
-- [ ] getpgid() — 查询
-- [ ] getsid() — 查询会话
-- [ ] killpg() — 向整个进程组发送信号
+- [x] setpgid() — 设置/创建进程组
+- [x] getpgid() — 查询
+- [x] getsid() — 查询会话
+- [x] killpg() — 向整个进程组发送信号
 
 ### T3: 进程组相关 Syscall
 
@@ -74,30 +76,30 @@ int killpg(int pgid, Signal sig);
 | sys_getsid | 124 | 获取会话 ID |
 | sys_setsid | 112 | 创建新会话 |
 
-- [ ] sys_setpgid(pid, pgid)
-- [ ] sys_getpgid(pid)
-- [ ] sys_getsid(pid)
-- [ ] sys_setsid() — 创建新会话 + 新进程组，调用者成为 leader
-- [ ] 注册到 syscall 表
+- [x] sys_setpgid(pid, pgid)
+- [x] sys_getpgid(pid)
+- [x] sys_getsid(pid)
+- [x] sys_setsid() — 创建新会话 + 新进程组，调用者成为 leader
+- [x] 注册到 syscall 表
 
 ### T4: fork/clone 继承
 
 **文件**: `kernel/proc/process.cpp`
 
-- [ ] fork 继承父进程的 pgid 和 sid
-- [ ] clone(CLONE_THREAD) 不改变 pgid/sid
+- [x] fork 继承父进程的 pgid 和 sid
+- [x] clone(CLONE_THREAD) 不改变 pgid/sid
 
 ### T5: 单元测试
 
-- [ ] setpgid 创建新进程组
-- [ ] setsid 创建新会话
-- [ ] fork 继承 pgid/sid
-- [ ] killpg 向组内所有进程发信号
+- [x] setpgid 创建新进程组
+- [x] setsid 创建新会话
+- [x] fork 继承 pgid/sid
+- [x] killpg 向组内所有进程发信号
 
 ## 产出物
 
-- [ ] `kernel/proc/process_group.hpp` / `.cpp`
-- [ ] `kernel/syscall/sys_pgrp.cpp`
-- [ ] Task pgid/sid 字段
-- [ ] fork 继承
-- [ ] 单元测试
+- [x] `kernel/proc/process_group.hpp` / `.cpp`
+- [x] `kernel/syscall/sys_pgrp.cpp`
+- [x] Task pgid/sid 字段
+- [x] fork 继承
+- [x] 单元测试
