@@ -12,7 +12,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 |---|------|--------------------|---------|
 | F1 | 内核基础设施 | M0 ✅(类型 Cinux-Base 就绪 + ErrorOr 消费迁移: FS 层批1/2a/2b✅ + syscall→errno 批4✅); M1 RingBuffer消费迁移✅(pipe+keyboard复用Cinux-Base); M2 日志✅(KernelLog+dmesg+sys_dmesg); M3 DMA ✅; M4 块设备 ✅ | ErrorOr/StringView/Span/IBlockDevice/dmesg/DMA Pool |
 | F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache✅ M7 Buddy✅ M7b Slab✅ | mmap/Page Cache/brk/分层分配器 |
-| F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS✅ M3 进程组+waitpid阻塞✅ M4 调度器⏳ | POSIX 信号/线程/futex/进程组 |
+| F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS✅ M3 进程组+waitpid阻塞✅ M4 调度器✅ | POSIX 信号/线程/futex/进程组/优先级调度 |
 | F4 | SMP 多核 | M1 ACPI⏳ M2 APIC⏳ M3 AP启动⏳ M4 多核调度⏳ M5 同步原语⏳ | 多核启动/Per-CPU/ticket lock |
 | F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI⏳ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
@@ -39,6 +39,12 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 下个焦点：F3-M2 clone + futex + TLS。
 
 **F3-M2 线程支持 ✅ 完成（2026-06-18：clone(56) + futex(202) + TLS(fs_base) + 线程组 + cleartid。5 批 783→810/0。共享资源 refcount 指针化（sig_actions/fd_table/cwd 真共享）；clone 子进程用户栈返回（patch syscall.S 帧 user_rsp 槽，GOTCHA#18）；cleartid exit 集成 + libc wrapper。关键踩坑 GOTCHA#17-20。**真用户态线程 round-trip + 实机 GUI 冒烟 + AddressSpace refcount + futex timeout 留 follow-up**。详见 PLAN「✅ F3-M2」段 + `document/notes/2026-06-18-f3-m2-*.md`）。
+
+**F3-M3 进程组/会话 + waitpid 阻塞 ✅ 完成**（2026-06-19，5 批 810→827/0）：pgid/sid/setpgid/setsid/killpg + 4 syscall + waitpid 阻塞（block/unblock + exit 唤醒 parent + WNOHANG）+ exit Zombie 契约。GOTCHA#21（Scheduler::current 读静态 current_）。详见 PLAN「✅ F3-M3」段。
+
+**F3-M4 调度器接口验证与增强 ✅ 完成**（2026-06-19，5 批 827→840/0）：①SchedulingClass 策略钩子（task_tick/task_fork/task_deadline，时间片内聚到类，删 current_slice_）②优先级感知 RoundRobin（小值优先，同优先级 RR）③多调度类实际查询（pick_next_from，schedule/exit/run_first 不再绕过 classes_[]）④SIGSTOP/SIGCONT 真调度（TaskState::Stopped 状态机 + 发送时恢复）。向后兼容（827 回归全绿）。GOTCHA#22（TaskBuilder 消耗全局 tid 计数器跨测污染）。**F3 进程与线程全里程碑收官（M1-M4）**。详见 PLAN「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-*.md`。
+
+下个焦点：待定 —— **F4 SMP**（多核，届时 waitpid/futex/调度器的单核 lost-wakeup 假设需重审）或 F3 follow-up（SIGKILL/SIGTERM 唤醒 Blocked 可中断睡眠、waitpid 报告 stopped/WUNTRACED、真 shell job-control 端到端验证）。
 
 ## 依赖瓶颈（影响长弧排序）
 F1(IBlockDevice)→阻塞所有驱动/FS 升级；F2(mmap+PageCache)→阻塞 COW/共享内存/文件映射；F3(信号)→阻塞 TTY/shell；F4(SMP)→阻塞多核调度/APIC；F5(网卡)→阻塞整个网络栈；F10(libc+TTY)→阻塞 CFBox/Lua/TinyCC。

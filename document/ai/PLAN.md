@@ -9,7 +9,8 @@
 > **FO 可观测性/调试基建 ✅ 完成（2026-06-18，763/0 + panic 冒烟）**：frame pointer + KALLSYMS lookup + 防御 backtrace + 统一 panic handler（收编 dump_registers/kpanic/fatal_halt + backtrace + memstats）+ dump_memory_stats。关键 GOTCHA：`CMAKE_BUILD_TYPE` 默认空(-O0)→ 首次 -O2 Release 验证全绿（建议 CI 加 -O2 门禁）；`VMM::translate()` 不支持 huge 页 → backtrace 改栈范围检查；kprintf 不支持 `%zu`。**M5 崩溃持久化推迟**（持久化层前提不满足）、**1b 真实符号注入 follow-up**（CMake 两阶段，裸地址+addr2line 降级）。详见 `document/notes/2026-06-18-fo-observability.md`。
 > **F3-M1 信号系统 ✅ 完成（2026-06-18，5 批，763→783）**：核心 POSIX 信号（Signal/SigSet/SigAction）+ 投递（send/pick/check_and_deliver）+ kill/sigaction/sigprocmask/sigreturn + Custom handler round-trip（中断路径 + int $0x80 trampoline）+ 集成（PF→SIGSEGV/exit→SIGCHLD/write→SIGPIPE）。详见下方「F3-M1 信号」段 + `document/notes/2026-06-18-f3-m1-signals.md`。
 > **F3-M2 线程支持（clone + futex + TLS）✅ 完成（2026-06-18，5 批，783→810）**：为 musl/pthread 打内核地基。①TLS(fs_base) ②futex(WAIT/WAKE/BITSET) ③共享 refcount 指针化(sig_actions/fd_table/cwd)+retrofit fork ④线程组+clone 核心(子进程用户栈返回 patch 帧 user_rsp,GOTCHA#18) ⑤cleartid exit 集成+libc wrapper。**关键踩坑 GOTCHA#17-20**（FS_BASE 规范地址/clone 用户栈返回/改接口致测试早返回悬垂/栈拷贝 full_used 下溢）。**真用户态线程 round-trip + 实机 GUI 冒烟 + AddressSpace refcount + futex timeout 留 follow-up**。详见文末「✅ F3-M2」段 + 各批 notes。下个焦点：F3-M3 进程组/会话（已启动，见下）。
-> **F3-M3 进程组/会话 + waitpid 阻塞 🔄 进行中（2026-06-19 起）**：为 Job Control / TTY 打地基 —— pgid/sid/setpgid/setsid/killpg + 补 waitpid 阻塞（复用 futex 的 block/unblock + exit 唤醒父）。批1 ✅ Task 字段 + fork/clone 继承（810→815）；批2 ✅ setpgid/setsid/killpg + sys_kill pid<0 闭环（815→824）；批3 ✅ 4 syscall + libc wrapper（824→827）；批4a ✅ exit Dead→Zombie 契约修正；批4b ✅ waitpid 阻塞 + WNOHANG + exit 唤醒（827 回归 + 实机 GUI 到桌面）。详见文末「🔄 F3-M3」段。下剩批5 收尾。
+> **F3-M3 进程组/会话 + waitpid 阻塞 ✅ 完成（2026-06-19，5 批，810→827）**：为 Job Control / TTY 打地基 —— pgid/sid/setpgid/setsid/killpg + 补 waitpid 阻塞（复用 futex 的 block/unblock + exit 唤醒父）。详见文末「✅ F3-M3」段。
+> **F3-M4 调度器接口验证与增强 ✅ 完成（2026-06-19，5 批，827→840）**：①SchedulingClass 策略钩子(task_tick/task_fork/task_deadline,时间片抢占内聚到调度类,删 current_slice_) ②优先级感知 RoundRobin(pick_next 选 priority 最小者,同优先级 RR) ③多调度类实际查询(pick_next_from 数组原语,schedule/exit_current/run_first 不再绕过 classes_[]) ④SIGSTOP/SIGCONT 真调度(TaskState::Stopped 状态机 + signal_send 发送时恢复 + schedule 守卫排除 Stopped)。**向后兼容**(生产单类场景等价,827 回归全绿)。关键踩坑 GOTCHA#22(TaskBuilder 消耗全局 tid 计数器跨测污染)。**F3 进程与线程全里程碑收官(M1-M4)**。详见文末「✅ F3-M4」段 + `document/notes/2026-06-19-f3-m4-{1,2,3,4}-*.md`。
 > 状态：✅ DONE / 🔄 NEXT / ⏳ PENDING / ⛔ BLOCKED。每批≈一 commit，完成门 `run-kernel-test` 全绿。
 
 ## ✅ M2（内核日志）已完成 — 2026-06-16
@@ -184,6 +185,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 19. **改公共接口后，依赖它的测试断言由过变挂 → TEST_ASSERT 早 return 跳过清理 → 悬垂状态污染后续测试（F3-M2 批4 教训，2026-06-18）**：`TEST_ASSERT` 失败时 `return`（早返回）。若测试末尾有清理（如 `set_current(prev)` 还原 current），断言失败会跳过它 → `Scheduler::current_` 悬垂指向已销毁的栈 `Task tmp` → 后续测试读悬垂 current 崩。批4 改 `sys_getpid` 返 `tgid`（线程共享进程身份）使既有 `test_sys_getpid` 断言失败（设 `tmp.pid` 未设 `tmp.tgid`）→ 早返回 → current_ 悬垂 → 远处的 vfs `Spinlock::acquire` 崩（current_→垃圾 task→fd_table 垃圾），**表象远离真因，极具迷惑性**（像内存踩踏，实为悬垂指针）。诊断：二分（git stash 隔离批）+ 加 kprintf 打 current/task 地址。**通用铁律**：改公共接口（返回值/字段语义）后，grep 所有用到该值的测试断言同步改；测试用 `Task tmp` + `set_current` 的范式，断言失败早返回会留悬垂 current——危险，清理应放断言之前或用 RAII。
 20. **fork/clone 栈拷贝 full_used 须 < 栈大小，否则下溢踩邻接（F3-M2 批4 教训，2026-06-18）**：`full_used = parent->kernel_stack_top - current_rsp`，子栈 `stack_size`=16KB。若 `full_used > stack_size`（测试用 `kernel_stack_top=rsp+16384` 即触发），`child_stack_start = child_stack_virt + stack_size - full_used` 下溢到栈映射前 → memcpy 踩邻接内存（latent，堆布局变即命中要害）。fork/clone 加 `if (full_stack_used > stack_size) full_stack_used = stack_size;` 上限防御（生产永不触发，栈远未满）。测试 `kernel_stack_top` 用小偏移（rsp+4096）让 full_used < 栈大小。
 21. **单测设 current 用 Scheduler::set_current，勿直接 g_per_cpu.current（F3-M3 批3 教训，2026-06-19）**：`Scheduler::current()`（scheduler.cpp:234）返静态 `current_`，**不是** PerCpu 的 `g_per_cpu.current`。两者只由 `Scheduler::set_current(task)`（scheduler.cpp:238）同步设置（current_ + g_per_cpu.current 都设）。单测装栈 task 作 current **必须用 `Scheduler::set_current(&t)`**，cleanup 用 `Scheduler::set_current(nullptr)`——只设 `g_per_cpu.current` 会让 `current_` 仍 nullptr，任何经 `Scheduler::current()` 的 handler（sys_setpgid/setsid/未来 waitpid 阻塞等）拿到 nullptr → ESRCH，测试 fail（F3-M3 批3 首验 825/2 fail 定位此）。test_clone 的 futex 侥幸（futex 内部不经 Scheduler::current()），掩盖了这层。**通用铁律**：单测设 current 一律用 Scheduler::set_current（两者都设），勿直接写 g_per_cpu.current。
+22. **TaskBuilder().build() 消耗全局 tid 计数器,跨测试文件污染（F3-M4 批4 教训，2026-06-19）**：`next_tid` 是全局单例,`TaskBuilder().build()` 每次分配递增。测试文件**共享**一个计数器,执行序固定（`run_signal_tests()` 在 `run_scheduler_tests()` 前）。新测试用 TaskBuilder 建 victim 分到 tid 1/2/3 → 后跑的 `test_build_basic_task` 断言首任务 `tid==1`（test_scheduler.cpp:62）失败（实际 4+）。**根因非逻辑**,是共享全局态 + 脆弱断言。**修**：纯状态机测试（只碰 state/sched_class/sig_actions/sig_pending）用**栈 `Task t{}`**（同 test_sig_state 范式）,零 tid/slab/核栈消耗 → 不污染计数器。**通用铁律**：跨测试文件共享全局计数器（tid/pid/next_*）,新测试用 TaskBuilder 建任务会位移他测的「首任务 tid==N」断言;能不分配就不分配（栈 Task 优先）。
 
 ## ✅ direct-map 独立窗口（F2-M7 前置）Bug1 已修 — 2026-06-17（fresh build 734/0）
 
@@ -337,3 +339,39 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 - **R1（最高）批4 破现有 waitpid 测试**：默认行为从 non-blocking 变 blocking，现有 `test_fork_exec` 等若没传 `WNOHANG` 且无 zombie → 挂死。批4 第一步 grep 全部 waitpid 调用点审计（GOTCHA#19 同款家族 + futex 单测 block 挂死坑）。
 - **R2 exit 唤醒**：`sys_exit` 在 scheduler 路径，`unblock(parent)` 要在 block/unblock 锁契约内（IF=0 / irq_guard），参考 futex wake。
 - **R3 killpg 迭代安全**：遍历 registry 广播时 task 可能正退出 → 持锁或先收集 pid 再发。
+
+## ✅ F3-M4（调度器接口验证与增强）完成 — 2026-06-19（5 批，827→840）
+
+> 目标：验证 SchedulingClass 插拔接口完备性 + 小幅增强(优先级/多类),并兑现 M3 留的
+> "SIGSTOP/CONT 真调度效果(TASK_STOPPED 状态机)"。**不引入新调度器实现**(todo 铁律),
+> 向后兼容(生产单类场景行为不变)。
+> 决策（propose 已确认）：
+> - **#1 T1 接口钩子给默认实现**(非纯虚):task_tick/task_fork/task_deadline 基类默认
+>   no-op/false/0,现有子类零改动;时间片量子从 `Scheduler::current_slice_` 移入 RoundRobin
+>   (`quantum_remaining_`),`tick()` 委托给类——抢占策略内聚。
+> - **#2 T2 优先级小值优先**:pick_next 扫描选 `priority` 最小者,并列取最早入队(FIFO),
+>   故同优先级 RR;严格优先级(可饿死),对齐 todo「简单实现」。
+> - **#3 T3 pick_next_from(classes,count) 公开原语**:数组入参,脱离全局 `default_rr_` 残留态
+>   单测(传本地类数组);schedule/exit_current/run_first 三处 `default_rr_.pick_next()` 改走
+>   `pick_next_task()`(绑全局 classes_),让多类机制真正生效。注册序即优先级(不加 class-priority 参数)。
+> - **#4 STOP/CONT 发送时恢复(关键)**:Stopped 任务永不被调度无法自投递 SIGCONT/SIGKILL,
+>   故 `signal_send` 见 Stopped+(SIGCONT|SIGKILL) 立即 Ready+enqueue;SIGCONT 另清 pending stop。
+>   schedule() 守卫加排除 Stopped。
+> 不做:CFS/防饿死、task_fork 接 fork 路径(memcpy 已拷 priority,等价 noop)、
+> SIGKILL/SIGTERM 唤醒 Blocked(可中断睡眠,更大改动)、waitpid 报告 stopped(WUNTRACED)。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 批1 | **T1 接口钩子**:SchedulingClass 加 task_tick/task_fork/task_deadline(基类默认实现)+ RoundRobin 接管量子(task_tick 2-tick 抢占 + 重充,pick_next 重置,task_fork 继承 priority)+ tick() 委托 + 删 current_slice_ | ✅ | 8b6c46e | 830/0(+3) |
+| 批2 | **T2 优先级 RR**:pick_next 扫描选 priority 最小者(并列 FIFO→同级 RR)+ 抽 remove_at_locked 助手共享环形紧凑(dequeue/pick_next 复用) | ✅ | f3b0493 | 833/0(+3) |
+| 批3 | **T3 多类查询**:pick_next_from(classes,count) 公开原语 + pick_next_task() 私有包装;schedule/exit_current/run_first 改走它(不再绕过 classes_[]) | ✅ | d57bb41 | 836/0(+3) |
+| 批4 | **STOP/CONT 真调度(M3 follow-up)**:TaskState::Stopped + signal_exec_default kStop(Stopped+dequeue+maybe schedule)/kContinue(恢复) + signal_send 发送时恢复(SIGCONT/SIGKILL)+清 pending stop + schedule 守卫排除 Stopped | ✅ | e9b0dd4 | 840/0(+4) |
+| 批5 | 收尾:T4 头部伪代码(pluggable scheduling 示例)+ ROADMAP/PLAN/todo/notes + fresh run-kernel-test + `make run` 实机冒烟 | ✅ | (本次) | 840/0 + 实机 GUI 到桌面 |
+
+**架构契合**：A 翻译边界(signal_send 返 -errno,内核内直接改状态);A 禁 RTTI(SchedulingClass virtual 多态);A.7 不入 Cinux-Base(依赖 Task/Scheduler);对齐 Linux(priority 小值优先、SIGCONT 发送时恢复 + 清 pending stop、CONFIG 风格不重造轮子)。
+
+**完成总结**（827→840，F3-M4 +13）：调度器插拔接口完备化 + STOP/CONT 状态机落地——①SchedulingClass 三策略钩子(默认实现,时间片内聚到类,删 current_slice_ 单一事实源在 RoundRobin::quantum_remaining_);②优先级感知 RoundRobin(pick_next 选最小 priority,同优先级 FIFO 轮转,remove_at_locked 助手去重);③多调度类实际查询(pick_next_from 数组原语让遍历可单测,schedule/exit/run_first 不再绕过 classes_[],生产单类场景等价=向后兼容);④SIGSTOP/SIGCONT 真调度(TaskState::Stopped 状态机,signal_send 发送时恢复 Stopped 目标 + 清 pending stop,schedule 守卫排除 Stopped)。T4 头部伪代码示例(如何加新调度算法:继承 SchedulingClass + register_class)。
+
+关键教训 **GOTCHA#22**(TaskBuilder 消耗全局 tid 计数器跨测污染——批4 首版用 TaskBuilder 建 victim 分到 tid 1/2/3,致 test_build_basic_task 的 tid==1 断言失败;改栈 Task t{} 零消耗解。**通用铁律**:跨测试文件共享全局计数器,新测试用 TaskBuilder 建任务会位移他测「首任务 tid==N」断言;纯状态机测试用栈 Task)。
+
+验证：fresh run-kernel-test 827→**840/0**(+13 接口/优先级/多类/stop-cont 单测 - 0 删,827 回归全绿=向后兼容铁证)+ 实机 `make run` GUI 启动到桌面不崩(kernel_init/gui_worker 经新 pick_next 路径,无 panic/halt)。**诚实记录**:① schedule/exit/run_first 改写靠 827 回归覆盖(高危路径);② STOP/CONT「停止当前任务→schedule 切走」路径无法单测(context switch 同 block/futex 坑)+ 生产启动无 SIGSTOP 投递(实机也覆盖不到)→ 靠逻辑正确性(复用 block 范式)+ 留真 shell job-control 程序端到端验证。**F3(进程与线程)全里程碑收官(M1-M4 ✅)**。
