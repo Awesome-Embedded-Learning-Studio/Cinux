@@ -28,6 +28,19 @@ set(BIG_KERNEL_COMPILE_OPTIONS
     -mno-red-zone
     -Wall
     -Wextra
+    # F-INFRA I-3 (R2): bring the kernel body up to the Cinux-Base submodule's
+    # warning discipline (the submodule already enforces -Wshadow/-Wold-style-cast
+    #/-Wnon-virtual-dtor). -Wconversion/-Wpedantic stay OUT here (kernel uses GNU
+    # inline-asm extensions; -Wconversion is too noisy — see follow-up G6).
+    # -Werror=return-type is a near-zero-noise correctness check (already clean).
+    # (-Werror=implicit-int / implicit-function-declaration are C-only and emit
+    # "not valid for C++" noise in a C++ kernel, so omitted.)
+    -Wshadow
+    -Wold-style-cast
+    -Wnon-virtual-dtor
+    -Woverloaded-virtual
+    -Wformat=2
+    -Werror=return-type
 )
 
 set(BIG_KERNEL_LINK_OPTIONS
@@ -35,6 +48,11 @@ set(BIG_KERNEL_LINK_OPTIONS
     -nostdlib
     -static
     -no-pie
+    # The custom linker.ld discards .note.gnu.build-id, so GCC's default
+    # --build-id is ignored and ld warns. A build-id is meaningless for a kernel
+    # ELF loaded at a fixed physical address; disable it explicitly for a clean
+    # link (F-INFRA I-3: zero-warning build).
+    -Wl,--build-id=none
 )
 
 # Object library: shared sources between production and test kernels.

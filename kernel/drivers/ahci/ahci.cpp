@@ -183,7 +183,8 @@ void AHCI::setup_port(uint8_t port_index) {
     start_port(port);
 
     cinux::lib::kprintf("[AHCI] Port %u set up: cmdlist=0x%p fis=0x%p\n", port_index,
-                        (void*)cmd_list_phys, (void*)fis_buf_phys);
+                        reinterpret_cast<void*>(cmd_list_phys),
+                        reinterpret_cast<void*>(fis_buf_phys));
 }
 
 void AHCI::build_cfis(HBACommandTable* cmd_tbl, uint8_t command, uint64_t lba, uint16_t count) {

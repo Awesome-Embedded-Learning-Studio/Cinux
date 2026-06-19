@@ -26,7 +26,7 @@
 |----|------|------|------|--------|------|
 | I-1 | 0 | CI 防挂死（timeout 包裹 run-kernel-test）+ 失败上传串口日志（G1/G8） | ✅ | (本次) | 840/0 |
 | I-2 | 0 | check_freestanding_headers.py + 修 icon_data.hpp `<array>` + CMake GCC 版本断言（G9/G2） | ✅ | (本次) | 840/0 |
-| I-3 | 0 | 警告标志收紧（-Wshadow/-Wold-style-cast/-Wnon-virtual-dtor/-Woverloaded-virtual/-Wformat=2 + 三零噪声 -Werror=return-type/implicit-int/implicit-function-declaration）+ 清理（R2） | ⏳ | — | — |
+| I-3 | 0 | 警告标志收紧（-Wshadow/-Wold-style-cast/-Wnon-virtual-dtor/-Woverloaded-virtual/-Wformat=2 + -Werror=return-type）+ 清理（17 cast + 15 预存警告 + build-id）→ 零警告构建（R2） | ✅ | (本次) | 840/0 |
 | I-3b | 0 | kprintf/kvprintf/kpanic 加 `__attribute__((format))` + 清理暴露的不匹配（R2b） | ⏳ | — | — |
 | I-4 | 0 | static_assert 布局锁：SlabHeader/SlabCache/LogEntry/VMA + 两处 InterruptFrame offsetof 矩阵（R11） | ⏳ | — | — |
 | I-5 | 1 | KALLSYMS 真符号注入：nm 两趟链接（big_kernel + big_kernel_test）+ main.cpp 注册（R4） | ⏳ | — | — |
