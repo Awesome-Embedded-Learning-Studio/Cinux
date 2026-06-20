@@ -19,14 +19,16 @@ if [ ! -f "$LOG" ]; then
 fi
 
 # run-kernel-test prints: "=== Tests: <n> passed, <m> failed ==="
-LINE=$(grep -E 'Tests: [0-9]+ passed, [0-9]+ failed' "$LOG" | tail -n 1 || true)
+# serial.log carries QEMU ANSI escapes, so grep would otherwise treat it as a
+# binary file and only emit "binary file matches" (GOTCHA#2). -a forces text.
+LINE=$(grep -aE 'Tests: [0-9]+ passed, [0-9]+ failed' "$LOG" | tail -n 1 || true)
 if [ -z "$LINE" ]; then
     echo "[check_test_count] FAIL: could not find 'Tests: N passed, M failed' in $LOG" >&2
     exit 1
 fi
 
-PASSED=$(printf '%s' "$LINE" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | head -n 1)
-FAILED=$(printf '%s' "$LINE" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' | head -n 1)
+PASSED=$(printf '%s' "$LINE" | grep -aoE '[0-9]+ passed' | grep -aoE '[0-9]+' | head -n 1)
+FAILED=$(printf '%s' "$LINE" | grep -aoE '[0-9]+ failed' | grep -aoE '[0-9]+' | head -n 1)
 
 echo "[check_test_count] passed=$PASSED failed=$FAILED baseline=$BASELINE"
 
