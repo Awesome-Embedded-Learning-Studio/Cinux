@@ -9,6 +9,12 @@
 
 set(CINUX_HOST_TEST ON)
 
+# F-QA Q1-2: ErrorOr is [[nodiscard]] (Cinux-Base expected.hpp). Host test
+# fixtures ignore some setup ErrorOr returns (e.g. ext2->mount() / pipe write);
+# suppress -Wunused-result host-side. DEBT-016 tracks cleaning these (via a
+# non-void-safe ASSERT_OK macro) so this directory-level opt-out is removed.
+add_compile_options(-Wno-unused-result)
+
 # Host tests need standard library; override kernel toolchain linker flags
 set(CMAKE_EXE_LINKER_FLAGS "")
 

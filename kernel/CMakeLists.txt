@@ -262,6 +262,14 @@ set_target_properties(big_kernel_test PROPERTIES
 
 target_link_options(big_kernel_test PRIVATE ${BIG_KERNEL_LINK_OPTIONS})
 
+# F-QA Q1-2: ErrorOr is [[nodiscard]] (Cinux-Base expected.hpp), so ignoring an
+# ErrorOr return warns under -Wunused-result. Production kernel code is clean
+# (zero ignores); kernel/test/ fixtures deliberately ignore some setup returns
+# (e.g. ramdisk/ext2 mount()) inside non-void helpers where TEST_ASSERT_TRUE's
+# bare `return;` won't compile. Suppress in the test binary only — DEBT-016
+# tracks replacing these with a non-void-safe ASSERT_OK macro so this is removed.
+target_compile_options(big_kernel_test PRIVATE -Wno-unused-result)
+
 # Build test disk image: copy the test ELF to sectors where the big kernel lives
 set(BIG_KERNEL_TEST_BIN "${CMAKE_BINARY_DIR}/kernel/big/big_kernel_test_crc.bin")
 
