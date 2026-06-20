@@ -41,6 +41,29 @@ set(BIG_KERNEL_COMPILE_OPTIONS
     -Woverloaded-virtual
     -Wformat=2
     -Werror=return-type
+    # F-QA Q1-1: zero-cost warning gates. Enable the checks, then escalate the
+    # zero-noise ones to -Werror= so violations fail the build (zero-warning
+    # discipline, aligned with Linux's -Wimplicit-fallthrough / CONFIG_W* ethos).
+    # -Wnull-dereference stays a plain warning (GCC cross-function analysis
+    # occasionally false-positives). -Wframe-larger-than is DEFERRED: 9 syscall
+    # handlers currently put char[PATH_MAX] buffers on the 16 KB stack (4-8 KB
+    # frames, DEBT-015) — enabling it now would break the zero-warning build,
+    # so it lands in a dedicated stack-safety batch once those frames shrink.
+    -Wvla
+    -Wimplicit-fallthrough=3
+    -Wundef
+    -Wduplicated-branches
+    -Wduplicated-cond
+    -Wlogical-op
+    -Wnull-dereference
+    -Wformat-security
+    -Werror=vla
+    -Werror=implicit-fallthrough
+    -Werror=undef
+    -Werror=duplicated-branches
+    -Werror=duplicated-cond
+    -Werror=logical-op
+    -Werror=format-security
 )
 
 set(BIG_KERNEL_LINK_OPTIONS

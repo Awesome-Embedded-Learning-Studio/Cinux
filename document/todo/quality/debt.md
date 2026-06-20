@@ -100,6 +100,15 @@
 - **修复建议**: `PidAllocator` 内置 irq-safe `Spinlock`，alloc/free/is_allocated 持锁；或 atomic bitmap + CAS。
 - **关联 GOTCHA**: 无
 
+### DEBT-015 syscall handler 栈帧过大（char[PATH_MAX] 缓冲置栈，4-8KB/16KB 栈）
+- **维度**: 内存安全(栈)　**优先级**: P1　**状态**: 🆕 登记待办(F-QA Q1-1 触发)　**核验**: ✅ -Wframe-larger-than=1024 坐实
+- **位置**: `kernel/syscall/sys_creat.cpp:29,44`(8272B) / `sys_mkdir.cpp:74`(8256) / `sys_unlink.cpp:74`(8240) / `sys_rmdir.cpp:103`(8288) / `sys_open.cpp:72`(4144) / `sys_chdir.cpp:78`(4144) / `sys_stat.cpp:75`(4224) / `sys_dmesg.cpp:109`(4400) / `kernel/fs/path.cpp:88`(4096)
+- **现象**: 9 个 syscall/path handler 在 16KB 核栈上放 `char resolved[PATH_MAX]`(4096) + 常第二个 `char parent_buf[PATH_MAX]` → 单帧 4-8KB。`-Wframe-larger-than=1024` 全部命中。
+- **根因**: path 解析缓冲放栈上(对齐 POSIX PATH_MAX)；sys_creat 尤甚(两个 PATH_MAX=8KB)。16KB 栈下 syscall 上下文 + 中断嵌套 + 调用链(lookup/create)有溢出风险。Linux 用 `getname`/`struct filename` 堆分配 path。
+- **修复建议**: path 缓冲改堆(`kmalloc(PATH_MAX)` + RAII 释放,复用 F2-M7b slab)或专用 per-call path 缓冲设施;目标单帧 <1024B。修后启用 `-Wframe-larger-than=1024 -Werror=frame-larger-than` 入门禁。
+- **验证建议**: 修后 `-Wframe-larger-than=1024` 零命中 → 升 `-Werror=frame-larger-than`;`timeout 40 run-kernel-test` 绿(碰 syscall 路径)。
+- **关联 GOTCHA**: 无
+
 ---
 
 ## 🟡 Medium
