@@ -24,3 +24,15 @@
 
 ## /audit
 跑 git --no-pager diff --stat 与 git --no-pager diff。对照 DIRECTIVES 逐条查:命名/注释/无异常/ErrorOr用法/子模块边界/syscall翻译边界/提交格式(无Co-Auth)。列违规+定位+建议。只报告(除非要求改)。
+
+## /preflight [目标]
+读 document/ai/PLAN.md、DIRECTIVES.md、QUALITY-GATES.md。针对「目标」做改前预审:①范围/非范围 ②触及文件与调用方(`rg`) ③风险等级(R0-R5) ④命中的风险域 ⑤必须守住的不变量 ⑥验证矩阵 ⑦需同步文档。若属新里程碑/跨子系统大改,停下等确认;否则给可执行批计划。
+
+## /quality-review
+跑 git status --short、git --no-pager diff --stat、git --no-pager diff。读 QUALITY-GATES.md,按 G0-G8 输出 pass/fail/n/a;高危 findings 先列 file:line;给最小补救建议。只报告,除非明确要求修。
+
+## /infra-audit [维度]
+读 document/todo/quality/audit-guide.md 与 document/todo/quality/debt.md。按「维度,留空=下一待审维度」执行深度审计:①列搜索式 ②读真实代码取证 ③写 reports/<date>-<dimensions>-audit.md ④登记候选债务(含位置/根因/触发/修复/验证) ⑤更新 debt.md 与 quality/README.md 审计进度。默认只登记不修复。
+
+## /fix-debt [DEBT-NNN]
+读 document/todo/quality/debt.md、document/ai/QUALITY-GATES.md、document/todo/quality/audit-guide.md。对指定债务 propose 修复批:①根因复核 ②触及文件/调用方 ③设计与同步策略 ④测试计划 ⑤文档同步 ⑥commit 草案。停下等确认;确认后按一债一批执行,绿后更新 debt.md+notes。

@@ -63,6 +63,12 @@ Phase 0 [已完成] ─── CMake + 代码优化 + 注释
 | [F12](f12-developer/) | 开发者生态 | M1 GDB/KALLSYMS, M2 Lua, M3 TinyCC, M4 编辑器+包管理 | 自举开发环境 |
 | [F13](f13-gui/) | GUI 分离 | M1 ABI定义, M2 Adapter, M3 解耦 | 独立 GUI 仓库 |
 
+## 横切质量域
+
+| 域 | 名称 | 内容 |
+|----|------|------|
+| [Quality](quality/) | 基建质量与审计 | D1-D12 审计维度、`DEBT-NNN` 债务登记、每轮审计报告 |
+
 ## 关键依赖瓶颈
 
 1. **F1 (IBlockDevice)** → 阻塞所有驱动和文件系统升级

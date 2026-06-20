@@ -23,6 +23,11 @@ jobs:
         run: echo "GCC $(gcc --version | head -1)"
 
       - name: Configure
+        # F-QA Q1-5: CINUX_HOST_ASAN (ASAN+UBSAN+gcov) is wired in test/CMakeLists
+        # but NOT turned on here yet — first run surfaced a real global-buffer-
+        # overflow in ring_buffer.hpp::push_batch + leaks (DEBT-017). Flip to
+        # -DCINUX_HOST_ASAN=ON once DEBT-017 is fixed so this is a hard gate,
+        # not a known-broken one.
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -S .
 
       - name: Build
@@ -47,8 +52,18 @@ jobs:
         run: python3 scripts/check_freestanding_headers.py
 
   kernel-tests:
+    name: kernel-tests (${{ matrix.build_type }}, ${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # F-QA Q1-3: run the QEMU kernel suite across build-type × sanitizer
+        # so UBSAN/LOCKDEP (already opt-in locally) become CI-resident regress
+        # gates, and Debug (-O0) vs Release (-O2) both stay green (FO GOTCHA:
+        # CMAKE_BUILD_TYPE default-empty first -O2 run). Parallel jobs.
+        build_type: [Debug, Release]
+        sanitizer: [none, ubsan, lockdep]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,7 +77,11 @@ jobs:
         run: echo "GCC $(gcc --version | head -1)"
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -S .
+        run: |
+          ARGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCINUX_BUILD_TESTS=ON"
+          if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then ARGS="$ARGS -DCINUX_UBSAN=ON"; fi
+          if [ "${{ matrix.sanitizer }}" = "lockdep" ]; then ARGS="$ARGS -DCINUX_LOCKDEP=ON"; fi
+          cmake -B build $ARGS -S .
 
       - name: Build
         # Build twice: the first pass seeds the KALLSYMS table stub and its
@@ -84,10 +103,16 @@ jobs:
           set -o pipefail
           timeout 180 make run-kernel-test 2>&1 | tee serial.log
 
+      - name: Check test count did not regress (F-QA Q1-4)
+        # F-QA Q1-4: fail if fewer tests than baseline ran (silent test loss).
+        # Runs only when the QEMU suite itself succeeded.
+        working-directory: build
+        run: bash ${{ github.workspace }}/scripts/check_test_count.sh serial.log
+
       - name: Upload serial log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-test-serial-log
+          name: kernel-test-serial-log-${{ matrix.build_type }}-${{ matrix.sanitizer }}
           path: build/serial.log
           if-no-files-found: ignore

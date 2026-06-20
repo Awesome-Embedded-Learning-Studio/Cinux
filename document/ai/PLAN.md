@@ -108,6 +108,42 @@
 | M5-3 (R6-Part2) | **lockdep 锁序图**:`kernel/proc/lockdep.{hpp,cpp}` per-CPU 持锁栈(修 Part1 全局深度计数 SMP bug)+ 全局锁序邻接图 + DFS 检 AB-BA 环 + 递归锁检测;edge 表 irq-safe 原始自旋防 IRQ 重入。Spinlock::acquire/release + schedule() 断言接入。opt-in `CINUX_LOCKDEP`(默认 OFF 零开销) | ✅ | (本批) | CINUX_LOCKDEP=ON 875/0 零误报 + AB-BA spike 检出(panic)+ 默认 OFF 875/0 + 全量 host 零警告 |
 
 
+## 🔄 F-QA（质量收敛与加固）— 2026-06-20 立项
+
+> 横切里程碑（接 F-INFRA，插 F5 前）。来源：2026-06-20 一个 6-agent workflow（Linux 全谱 / 现代 C++ 工具链 / 维度 gap / 仓库实证 / 综合 / 对抗 critic）+ 用户四决策。两条腿——**防新债**（门禁 + deterministic 方法论 + 类型不变量）+ **抓存量**（系统审计坐实潜在问题）+ **修头号高危债**。基线 main 875/0（F4 SMP 收官 #24）。分支 `feat/f-qa`（从干净 main）。
+> 用户决策：①强检查只要真抓问题的（仪式性废）；②禁异常铁律优先，属性尽力而为；③新维度加；④全包 Q1-Q4 + RefCount/UserPtr 都入本 F。
+> 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；改公共接口/InodeOps/mock 补全量 `cmake --build build`；Q4 高风险加 `-smp 2` + UBSAN/LOCKDEP。
+
+### ✅ Q1 完成（2026-06-20，6 commit，875/0 全程绿 + 零警告）
+
+| 批 | 范围 | Commit | 产出 |
+|----|------|--------|------|
+| 批0 | 质量文档分层 + F-QA 立项 | 8bdfaa2 | DIRECTIVES L9 / QUALITY-GATES / prompts / todo/quality + ROADMAP/PLAN |
+| Q1-1 | 零成本警告门禁(7 个 -Werror=) | 3f31a3e | vla/fallthrough/undef/duplicated/logical/format-security + DEBT-015(9 处栈帧) |
+| Q1-2 | ErrorOr class `[[nodiscard]]`(子模块) + test -Wno | 7825710 | expected.hpp(子模块 af80a68) + DEBT-016(32 处 test 忽略) |
+| Q1-3 | CI kernel-tests 6-config matrix | 20b624b | {Debug,Release}×{none,ubsan,lockdep} 并行 |
+| Q1-4 | 测试项数单调不降门禁 | d582a72 | check_test_count.sh(baseline 875) |
+| Q1-5 | host ASAN/UBSAN/gcov 基建 | f938335 | CINUX_HOST_ASAN option + **首跑抓到 DEBT-017 ring_buffer OOB** |
+
+**Q1 收官**：防新债基座落地——编译门禁 + ErrorOr 铁律强化(`[[nodiscard]]`) + CI 多 config 常驻 + 测试项数门禁 + host ASAN 基建。ASAN 首跑即抓 `ring_buffer::push_batch` global-buffer-overflow(DEBT-017，P1，production pipe/keyboard 在用，单核串行潜伏)。3 新债(DEBT-015/016/017)登记。ci.yml host ASAN 待 DEBT-017 修后 flip 启用。下个：Q2 deterministic 审计方法论。
+
+### 里程碑骨架
+
+| M | 名称 | 批概要 | 风险 |
+|---|------|--------|------|
+| Q1 | 零成本门禁+CI 矩阵 | 编译器警告门禁包(`-Wframe-larger-than=1024`/`-Wvla`/`-Wimplicit-fallthrough=3`/`-Wundef`/`-Wduplicated-branches`/`-Wduplicated-cond`/`-Wlogical-op`/`-Wnull-dereference`/`-Wformat-security` + `-Werror` 子项); `[[nodiscard]]` 系统化于返回 `ErrorOr` 的 public 函数; CI 多 config 矩阵(`{Debug,Release}×{default,UBSAN,LOCKDEP}`); 测试项数单调不降门禁; host ASAN/TSAN/gcov | 低(纯 CMake/CI/属性) |
+| Q2 | deterministic 审计方法论 | audit-guide 改造 per-维度 deterministic checklist(D4 样板 + D5/D8 "先读码后定锚点"例外); D13 资源配额/D14 整数溢出 新增(**先 rg 校准真实符号**); QUALITY-GATES↔audit-guide 范式统一; 工作树质量文档 commit | 极低(文档) |
+| Q3 | 系统审计抓潜在问题 | 新方法论审 D4/D5/D6/D7/D11 + D13/D14; `reports/`+DEBT-015+; D2/D3 的 9 条 ⚠️ 坐实或降级 | 零(只读) |
+| Q4 | 头号高危债收敛 | `RefCount`(Cinux-Base)/`UserPtr`(kernel/lib) 类型; DEBT-003 CoW mapcount(RefCount 首个消费者); DEBT-001 registry 锁 + DEBT-004 waiting_for_child; DEBT-005 PidAllocator 锁; DEBT-002 exit cleanup + DEBT-006 AddressSpace refcount(联动,Q4e 最险) | 高(fork/execve/PF + 子模块) |
+
+**执行序**：Q1（低风险快赢）→ Q2（方法论）→ Q3（审计坐实,喂 Q4）→ Q4a(RefCount/UserPtr 类型) → Q4b/c/d(修坐实债) → Q4e(exit cleanup,最险,做到时单独 propose)。
+
+### 风险重点
+- Q4 碰 fork/execve/PF 核心路径 + Cinux-Base 子模块(`RefCount` 跨仓库,走子模块 PR)。
+- `[[nodiscard]]` 加在 `ErrorOr` class 上最强但跨子模块; Q1 先 kernel/ public 函数级, `ErrorOr` class 级留 Q4a 碰子模块时顺带。
+- Q4e(exit cleanup)体量最大, 做到时单独 propose 评估是否拆独立 F。
+- 核栈 16KB(linker.ld), `-Wframe-larger-than` 阈值定 1024(留中断嵌套余量)。
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
