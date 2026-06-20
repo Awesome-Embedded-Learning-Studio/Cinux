@@ -162,14 +162,18 @@
 - **验证建议**: 清完后去 `-Wno-unused-result`,编译零警告,`run-kernel-test` + `make test_host` 绿。
 - **关联 GOTCHA**: 无
 
-### DEBT-017 `RingBuffer::push_batch` global-buffer-overflow + host test 泄漏（ASAN 发现）
-- **维度**: 内存安全(D2) + 测试(D8)　**优先级**: P1　**状态**: 🆕 登记待办(F-QA Q1-5 ASAN 触发)　**核验**: ✅ ASAN 坐实（global-buffer-overflow + leak SUMMARY）
-- **位置**: `third_party/Cinux-Base/include/cinux/ring_buffer.hpp:73`(`RingBuffer<char,4096>::push_batch` global-buffer-overflow) + host test 泄漏(24104B/1 alloc + 18624B/776 alloc；multi_terminal/fd_table/pipe 3 个 host test 失败)
-- **现象**: F-QA Q1-5 给 host 单测开 ASAN(`CINUX_HOST_ASAN=ON`)后，3 个 host test 失败。ASAN 报 `global-buffer-overflow on ... ring_buffer.hpp:73 in push_batch` + 两处 leak SUMMARY。
-- **根因**: 待诊断。`RingBuffer<char,4096>::push_batch` 写 `storage_` 越界（head/tail 回绕或 size 上限边界 bug，F1-M1 迁移引入）。RingBuffer 是 production（pipe/keyboard 用），OOB 影响生产 pipe 写大数据；单核严格串行没踩关键数据故潜伏。
-- **修复建议**: 诊断 push_batch:73 边界（回绕 + 容量上限检查）；修后 host ASAN 全绿 → ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON`（Q1-5 留的开关，注释已标）。泄漏查 host test cleanup（RAII 或显式释放）。碰 Cinux-Base 子模块。
-- **验证建议**: 修后 `make test_host`（`CINUX_HOST_ASAN=ON`）零 ASAN 发现；production pipe 写大数据压测。
-- **关联 GOTCHA**: 无（F1-M1 RingBuffer 迁移未记 OOB）
+### DEBT-017 ✅ host ASAN findings（OOB + 泄漏 + double-free）— 已修（F-QA Q2，2026-06-20，feat/f-qa-q2）
+- **维度**: 内存安全(D2) + 测试(D8)　**优先级**: P1　**状态**: ✅ 已修（F-QA Q2）　**核验**: ✅ ASAN 坐实 + 修复后全绿
+- **误诊订正**: 原登记「`RingBuffer::push_batch` 边界 bug」**错误**。push_batch 对 `buffer_` 自身安全（`tail_%N` 保 [0,N)，`!full()` 保不溢）；越界是**调用方传错 count**。**真因不在 push_batch，不在 Cinux-Base 子模块**——4 处、3 类独立问题，全在主仓库 test/ + 一处 kernel 防御。
+- **真根因（4 处，3 类）**:
+  1. **OOB**（`test/unit/test_pipe.cpp:458`）`try_write("BBBB", 200)` 把 5 字节字面量当 200B buffer → push_batch 读越界（global-buffer-overflow @ ring_buffer.hpp:73 的 `items[]` 侧，非 `buffer_`）。修：真实 200B buffer。
+  2. **泄漏 776**（`test/unit/test_fd_table.cpp`，18624B/776 alloc）栈构造 `FDTable table;` 不调 `release()`（栈上调会 `delete this` 崩），旧设计无析构 → alloc 的 File 不释放。修：**`kernel/fs/file.cpp` 加 `~FDTable()` 兜底释放**（对 release 路径幂等：close 已设 nullptr，析构 delete nullptr no-op；同时强化 production 资源安全不变量）。
+  3. **泄漏 1**（`test/unit/test_multi_terminal.cpp:745`，24104B）`add_window(new Terminal)` 满返 0（wm 不接管所有权）+ test 未 delete。修：overflow 后 `delete`。
+  4. **double-free 9 处**（`test/unit/test_sys_pipe.cpp`）FDTable 析构暴露的 test ownership bug：`set()` 接管 File 所有权（docstring「ownership transferred to FDTable」），但 test 误以为「caller owns, delete manually」手动 delete FDTable 持有的 File → 加析构后 double-free。修：删 9 处手动 delete（归 FDTable 析构），保留被 replace 出表的旧 File（caller 负责，docstring「previous File released」）。
+- **production 影响**: 零。`RingBuffer::push_batch` production 调用（pipe/keyboard）chunk 守护 `min(remain,space)` 安全；FDTable production 经 `release()/close()` 释放（析构幂等 no-op）；sys_pipe production File 归 `current_fd_table()` 不手动 delete。
+- **验证**: host ASAN 全绿（Debug + Release(-O2)+ASAN+UBSAN+FORTIFY CI 对等，全量 `make test_host` 100%）+ `run-kernel-test` 875/0（FDTable 析构无回归）+ 编译零警告。ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON` 硬门禁。
+- **残留异味**（登记，非本债）: `test/unit/test_shell_redirect.cpp` `~PipeRedirect` 的 `delete stdin_file` 侥幸安全——构造函数局部变量 shadow 同名私有成员（成员恒 nullptr），析构 delete nullptr no-op；消除 shadow 即 double-free。备查。
+- **关联 GOTCHA**: 无
 
 ---
 

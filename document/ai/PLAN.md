@@ -127,6 +127,20 @@
 
 **Q1 收官**：防新债基座落地——编译门禁 + ErrorOr 铁律强化(`[[nodiscard]]`) + CI 多 config 常驻 + 测试项数门禁 + host ASAN 基建。ASAN 首跑即抓 `ring_buffer::push_batch` global-buffer-overflow(DEBT-017，P1，production pipe/keyboard 在用，单核串行潜伏)。3 新债(DEBT-015/016/017)登记。ci.yml host ASAN 待 DEBT-017 修后 flip 启用。下个：Q2 deterministic 审计方法论。
 
+### ✅ DEBT-017 闭环（host ASAN findings）— 2026-06-20，feat/f-qa-q2
+
+> 交接文档建议 Q2 主线前优先修的 production-adjacent bug。**诊断订正**：DEBT-017 原登记「`RingBuffer::push_batch` 边界 bug」**误诊**——push_batch 对 `buffer_` 自身安全(`tail_%N` + `!full()`)，越界是调用方传错 count；真因**不在 push_batch、不在 Cinux-Base 子模块**。复现 ASAN 拿 ground truth 后定位 4 处 3 类，全在主仓库：
+
+| # | 位置 | 类型 | 修 |
+|---|------|------|----|
+| 1 | `test/unit/test_pipe.cpp:458` | OOB（`try_write("BBBB",200)` 读 5B 字面量越界） | 真实 200B buffer |
+| 2 | `test/unit/test_fd_table.cpp`（776 处） | 泄漏（栈 FDTable 不 release → File 不释放） | **`kernel/fs/file.cpp` 加 `~FDTable()` 兜底释放**（release 路径幂等 + production 防御） |
+| 3 | `test/unit/test_multi_terminal.cpp:745` | 泄漏（`add_window` 失败不接管 + 未 delete） | overflow 后 delete |
+| 4 | `test/unit/test_sys_pipe.cpp`（9 处） | double-free（析构暴露：`set()` 接管所有权，test 误手动 delete） | 删 9 处手动 delete（归析构），保留被 replace 旧 File |
+
+> **production 零影响**：push_batch production chunk 守护安全；FDTable production 经 release/close 释放（析构幂等 no-op）；sys_pipe File 归 fd_table 不手动 delete。**残留异味**（登记非修）：`test_shell_redirect` `~PipeRedirect` 的 `delete stdin_file` 侥幸安全（构造局部变量 shadow 同名私有成员，成员恒 nullptr，delete nullptr no-op；消除 shadow 即 double-free）。
+> **验证**：host ASAN 全绿（Debug + Release+ASAN+UBSAN+FORTIFY CI 对等，全量 `make test_host` 100%）+ `run-kernel-test` 875/0 + 零警告。**ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON` 硬门禁**（Q1-5 留的开关兑现）。详见 `document/notes/2026-06-20-f-qa-debt017-host-asan-fix.md`。下个：**Q2 deterministic 审计方法论**。
+
 ### 里程碑骨架
 
 | M | 名称 | 批概要 | 风险 |
