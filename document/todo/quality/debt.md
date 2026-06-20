@@ -162,6 +162,15 @@
 - **验证建议**: 清完后去 `-Wno-unused-result`,编译零警告,`run-kernel-test` + `make test_host` 绿。
 - **关联 GOTCHA**: 无
 
+### DEBT-017 `RingBuffer::push_batch` global-buffer-overflow + host test 泄漏（ASAN 发现）
+- **维度**: 内存安全(D2) + 测试(D8)　**优先级**: P1　**状态**: 🆕 登记待办(F-QA Q1-5 ASAN 触发)　**核验**: ✅ ASAN 坐实（global-buffer-overflow + leak SUMMARY）
+- **位置**: `third_party/Cinux-Base/include/cinux/ring_buffer.hpp:73`(`RingBuffer<char,4096>::push_batch` global-buffer-overflow) + host test 泄漏(24104B/1 alloc + 18624B/776 alloc；multi_terminal/fd_table/pipe 3 个 host test 失败)
+- **现象**: F-QA Q1-5 给 host 单测开 ASAN(`CINUX_HOST_ASAN=ON`)后，3 个 host test 失败。ASAN 报 `global-buffer-overflow on ... ring_buffer.hpp:73 in push_batch` + 两处 leak SUMMARY。
+- **根因**: 待诊断。`RingBuffer<char,4096>::push_batch` 写 `storage_` 越界（head/tail 回绕或 size 上限边界 bug，F1-M1 迁移引入）。RingBuffer 是 production（pipe/keyboard 用），OOB 影响生产 pipe 写大数据；单核严格串行没踩关键数据故潜伏。
+- **修复建议**: 诊断 push_batch:73 边界（回绕 + 容量上限检查）；修后 host ASAN 全绿 → ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON`（Q1-5 留的开关，注释已标）。泄漏查 host test cleanup（RAII 或显式释放）。碰 Cinux-Base 子模块。
+- **验证建议**: 修后 `make test_host`（`CINUX_HOST_ASAN=ON`）零 ASAN 发现；production pipe 写大数据压测。
+- **关联 GOTCHA**: 无（F1-M1 RingBuffer 迁移未记 OOB）
+
 ---
 
 ## 🟢 Low

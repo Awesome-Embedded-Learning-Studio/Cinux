@@ -15,6 +15,17 @@ set(CINUX_HOST_TEST ON)
 # non-void-safe ASSERT_OK macro) so this directory-level opt-out is removed.
 add_compile_options(-Wno-unused-result)
 
+# F-QA Q1-5: opt-in AddressSanitizer + UBSan + gcov coverage for host unit
+# tests. Zero kernel changes — only host test targets. Catches UAF/OOB/UB at
+# the InodeOps/mock layer; --coverage gives gcov compile+link in one flag.
+# TSan is mutually exclusive with ASan, so it is a separate follow-up
+# (-DCINUX_HOST_TSAN build) rather than combined here.
+option(CINUX_HOST_ASAN "Host unit tests: AddressSanitizer + UBSan + gcov coverage" OFF)
+if(CINUX_HOST_ASAN)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g --coverage)
+    add_link_options(-fsanitize=address,undefined --coverage)
+endif()
+
 # Host tests need standard library; override kernel toolchain linker flags
 set(CMAKE_EXE_LINKER_FLAGS "")
 
