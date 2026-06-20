@@ -80,16 +80,17 @@
 > **P2-2 关键 GOTCHA(执行时踩/避)**:① **GAS 宏不内联展开**(`$TP()` 永远失败,`.altmacro` 也不行;本构建 GAS-direct `#`=注释非 cpp)→ 改**内联表达式 `(label-ap_trampoline_start+0x8000)`**(GAS 两遍解析同 section 符号差=常量)。② **CR3 切换不能在 0x8000**(切后内核 PML4 不映 0x8000)→ 在 higher-half `ap_entry_long`(两边都映)里切 + 设栈。③ AP `cli;hlt`(非 sti;hlt):`Scheduler::current_` 仍静态,AP 上跑中断 handler 有并发风险 → IF=0 永久 halt 归零(P2);M4 改可唤醒 + per-CPU 化。④ 双 SIPI 致 trampoline 跑两次(SIPI#1 后 AP init 慢,守卫发 SIPI#2 兜底,spec 行为,无害)。详见 `document/notes/2026-06-19-f4-m3-p2-ap-boot.md`。
 > **边界**:AP idle 不跑用户任务(M4 多核调度:per-CPU runq + `current_` per-CPU);lost-wakeup 未修(Phase 3)。**F4-M3 全里程碑(Phase 1+2)收官。**
 
-## 🔄 F4-M4（多核调度）— 批 0+1+3 完成,M4-2 待做 — 2026-06-20
+## 🔄 F4-M4（多核调度）— 批 0+1+3 + M4-2-1 完成,M4-2-2 待做 — 2026-06-20
 
-> M4 让 AP 从 idle 变成能跑用户任务。顺序 A(用户决策:先 M4-3 后 M4-2 + 不做 timer 抢占)。已完成 M4-0/M4-1(批0+1)+ **M4-3(prepare-to-wait,批3,`b33264b`,875/0)**,剩 M4-2(IPI 唤醒 + AP idle loop)。分支 `feat/f4-m3-trampoline`。详见 notes:`2026-06-20-f4-m4-0-1-test-refactor-percpu.md`、`2026-06-20-f4-m4-3-prepare-to-wait.md` + 交接 `2026-06-19-f4-m4-handoff.md`。
+> M4 让 AP 从 idle 变成能跑用户任务。顺序 A(用户决策:先 M4-3 后 M4-2 + 不做 timer 抢占)。已完成 M4-0/M4-1(批0+1)+ **M4-3(prepare-to-wait,批3,`b33264b`,875/0)** + **M4-2-1(reschedule IPI 基础设施,`e8f0136`,875/0 单核 no-op)**,剩 **M4-2-2**(AP idle loop `sti;hlt` + 首次切换 + `-smp 2` 真机,高风险)。分支 `feat/f4-m3-trampoline`。详见 notes:`2026-06-20-f4-m4-0-1-test-refactor-percpu.md`、`2026-06-20-f4-m4-3-prepare-to-wait.md`、`2026-06-20-f4-m4-2-1-reschedule-ipi.md` + 交接 `2026-06-20-f4-m4-2-handoff.md`。
 > **上一轮试做 M4-1 回退教训**:phantom-task 测试(test_sync/futex/clone)靠 `current_`(静态)与 `percpu()->current` 的**未文档化分歧**让 block() 不 schedule;M4-1 改读 percpu 后必 hang。**真正 hack 是这条分歧,不是 role-play 本身。**
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
 | M4-0 | phantom 测试显式化:`NoRescheduleGuard`(gate block() schedule,生产 depth=0 无影响)+ `percpu()->current=X`→`set_current(X)`(GOTCHA#21)+ `RoundRobin::clear()`/`init()` 清 runq(test 隔离)+ `test_block_dispatches_to_runnable`(真 dispatch 路径覆盖) | ✅ | ac92bef | 873/0(+1) |
 | M4-1 | `current_` 静态全局→per-CPU:删成员,`current()`读`percpu()->current`,set_current/schedule/exit_current/run_first/tick/yield/block 全走 percpu,删双写;~35 调用点经 accessor 零改 | ✅ | 7dba770 | 873/0 + smp 873/0 + host 48/0 + run-smp AP1 online/GUI |
-| M4-2 | AP `cli;hlt`→`sti;hlt` + IPI 唤醒(add_task/unblock 后 send_ipi 到 idle AP)+ 共享 runq。AP 真跑任务,但暴露 lost-wakeup → 须配 M4-3 | ⏳ | — | — |
+| M4-2-1 | reschedule IPI 基础设施:vector 0xE0 + stub + handler(纯 `g_lapic.eoi()`)+ irq_init 注册 + `wake_idle_ap()`(多发 IPI 给在线 AP,免精确 idle 跟踪)+ `add_task`/`unblock` 唤醒点。单核 no-op(无在线 AP) | ✅ | e8f0136 | 875/0(单核 no-op,TCG) |
+| M4-2-2 | AP idle loop `cli;hlt`→`sti;hlt` + 首次切换 prev(AP idle task)+ `sti;hlt` 原子性/hlt 前重检 runq + `-smp 2` 真机 AP1 真跑任务 / 多线程不挂(M4-3 prepare-to-wait 实战验证,高风险) | ⏳ | — | — |
 | M4-3 | lost-wakeup prepare-to-wait:`prepare_to_wait`(irq_guard 下原子设 Blocked)+ `schedule_blocked`(NoRescheduleGuard 感知)+ unblock 幂等(仅 Blocked 才入队);Mutex/Sem/futex/waitpid 四处改用 prepare+schedule_blocked,block() 保留原样(测试/管理) | ✅ | b33264b | 875/0(+2 精确交错单测) |
 
 > **关键 GOTCHA(M4-1)**:`fxrstor current()->fpu_state` 在任务恢复点必须读 percpu(= 切到本任务那次 schedule 设的值),**绝不能用局部 `next->fpu_state`** —— context_switch 返回时跑在 next 上下文,但执行的是 prev 当初被切出时那条 fxrstor(prev 栈帧里 next 已过期),旧全局 `current_` 读对,M4-1 须用 `current()` 等价。详见 GOTCHA#23。
