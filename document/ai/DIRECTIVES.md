@@ -26,3 +26,4 @@
 - **L6 省 token**：命令与文档保持紧凑，不堆仪式；`CLAUDE.md` 常驻须薄，重内容按需读。
 - **L7 编译并行**：所有 `cmake --build` 都带 `-j$(nproc)`（本机 14 核）；验证即 `cmake --build build --target run-kernel-test -j$(nproc)`，大幅省编译时间。
 - **L8 工作记录**：**每完成一批立即写一篇 `document/notes/<date>-<milestone>-<batch>.md`**（不堆到里程碑末尾合并；完成一批补一批笔记——参考 `2026-06-16-f1-m3-dma-{buffer,pool,prdt-builder}.md` 各一批一篇的范式）。正式发布质量：背景/目标/设计/决策/陷阱/验证，参考 `document/notes/` 既有风格。2026-06-16 起取代旧 DEVLOG 编年日志（`DEVLOG.md` 已归档留壳，不再追加）。
+- **L9 质量门禁**：改代码前按 `QUALITY-GATES.md` 做预审（风险等级/风险域/验证矩阵）；提交前按 G0-G8 审查。系统性审计按 `document/todo/quality/audit-guide.md`，每轮产出 `document/todo/quality/reports/` 报告，发现登记到 `document/todo/quality/debt.md`，修复一债一批闭环。
