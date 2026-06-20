@@ -97,6 +97,17 @@
 > **关键 GOTCHA(M4-1)**:`fxrstor current()->fpu_state` 在任务恢复点必须读 percpu(= 切到本任务那次 schedule 设的值),**绝不能用局部 `next->fpu_state`** —— context_switch 返回时跑在 next 上下文,但执行的是 prev 当初被切出时那条 fxrstor(prev 栈帧里 next 已过期),旧全局 `current_` 读对,M4-1 须用 `current()` 等价。详见 GOTCHA#23。
 > **不变量**:单核全程不变(percpu[0] 等价旧 current_);AP1 现真跑 user task(M4-2-3 迁移 GP 已根治:GDT::load 移除 %fs/%gs 重载)。**F4-M4 收官:per-CPU idle + runqueue 多核安全(pick 移除)+ reschedule IPI + lost-wakeup prepare-to-wait + 真 user-task 迁移。**
 
+## 🔄 F4-M5（同步原语）— Batch 1 R3 完成,Batch 2/3 待做 — 2026-06-20
+
+> F4-M4 让 AP 真跑线程后,把 F3-M2「共享 refcount 指针化」对象 + waitpid children 链表做成真 SMP 安全,补 lockdep 锁序图。F-INFRA 划归(R3 原子引用计数 / R6-Part2 锁序图)+ M4 follow-up(waitpid SMP)。分支 `feat/f4-m4-2-3-migration`(叠 M4-2-3,前置未 push)。计划 `.claude/plans/temporal-jumping-hartmanis.md`。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| M5-1 (R3) | **原子引用计数**:SharedCwd + SharedSigActions acquire/release → `__atomic_add/sub_fetch`(ACQ_REL,去 racy `>0` 守卫)。**FDTable 核对已 `lock_.guard()` 保护,跳过**(范围修订)。F4-M4 实多核后真并发的 use-after-free/leak 根治 | ✅ | (本批) | 875/0 + 全量 host + -smp 2 冒烟干净 |
+| M5-2 (waitpid) | waitpid children 链表 lock-free → per-parent Spinlock + 锁内 double-check(M4-3 prepare-to-wait 只缩小窗口,本批根治) | ⏳ | — | — |
+| M5-3 (R6-Part2) | lockdep 锁序图:per-CPU 持锁栈 + 锁序邻接图 + DFS 检 AB-BA(opt-in `CINUX_LOCKDEP`,默认 OFF)。调试基建,可延后 | ⏳ | — | — |
+
+
 ## ✅ F-INFRA（基建加固）完成 — 2026-06-19
 
 > 横切里程碑（像 FO，插 F4 SMP 前）。目标：把调试/静态检查/指针语义/CI 粘合从"靠自觉"升级为"机器可见 + CI 强制"，让 UB/悬垂指针/并发死锁/隐式窄化在非确定性到来前被抓住。对齐用户铁律"可调试优先于性能"。
