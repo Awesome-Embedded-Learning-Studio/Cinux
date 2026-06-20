@@ -5,6 +5,7 @@
 
 #include "kernel/lib/atomic.hpp"
 #include "kernel/lib/not_null.hpp"
+#include "kernel/proc/percpu.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/sync.hpp"
 
@@ -65,6 +66,12 @@ public:
     // Deadline tick for deadline-based (real-time) scheduling, or 0 when the
     // class is not deadline-based.  Reserved for future RT scheduling classes.
     virtual uint64_t task_deadline(Task* task);
+
+    // Is the run queue empty?  Pure peek (no dequeue).  Used by the AP idle loop
+    // (F4-M4 M4-2-2) to re-check for runnable work under cli before sti;hlt,
+    // closing the lost-wakeup window.  Conservative default: a class that does
+    // not override this reports "non-empty" so the idle loop re-runs schedule().
+    virtual bool is_empty() const { return false; }
 };
 
 class RoundRobin : public SchedulingClass {
@@ -77,6 +84,7 @@ public:
     void        dequeue(Task* task) override;
     Task*       pick_next() override;
     const char* name() const override;
+    bool        is_empty() const override;  ///< peek count_==0 under lock_ (F4-M4 M4-2-2)
 
     // Drop every queued task and reset the ring-buffer pointers.  Used by
     // Scheduler::init() so each (re)init starts from a pristine run queue --
@@ -94,12 +102,12 @@ private:
     // ring buffer around it.  Caller must hold lock_.
     void remove_at_locked(int i);
 
-    Task*    run_queue_[MAX_TASKS];
-    int      head_;
-    int      tail_;
-    int      count_;
-    int      quantum_remaining_;  // Ticks left for the currently running task
-    Spinlock lock_;
+    Task*            run_queue_[MAX_TASKS];
+    int              head_;
+    int              tail_;
+    int              count_;
+    int              quantum_remaining_;  // Ticks left for the currently running task
+    mutable Spinlock lock_;  ///< mutable: is_empty() peeks count_ under lock (F4-M4 M4-2-2)
 };
 
 class Scheduler {
@@ -107,13 +115,34 @@ public:
     static constexpr int MAX_CLASSES        = 4;
     static constexpr int DEFAULT_TIME_SLICE = 2;
 
-    static void  init();
-    static void  register_class(SchedulingClass* sched_class);
-    static void  add_task(lib::NotNull<Task*> task);
-    static void  remove_task(lib::NotNull<Task*> task);
-    static void  yield();
-    static void  exit_current();
-    static void  run_first(lib::NotNull<Task*> boot_task);
+    static void init();
+    static void register_class(SchedulingClass* sched_class);
+    static void add_task(lib::NotNull<Task*> task);
+    static void remove_task(lib::NotNull<Task*> task);
+    static void yield();
+    static void exit_current();
+    static void run_first(lib::NotNull<Task*> boot_task);
+
+    // --- Per-CPU idle tasks (F4-M4 M4-2-2) ---
+    //
+    // Each CPU has its own idle task (idle_tasks_[cpu_id]).  Sharing a single
+    // idle task across CPUs is fatal: two CPUs context-switching through it
+    // would share one ctx and one 16 KB stack.  The BSP's idle (idle_tasks_[0])
+    // keeps the legacy idle_entry() (while-hlt, driven by PIT ticks); each AP
+    // builds its own via setup_ap_idle() with ap_idle_entry().  M4-2-2 ships
+    // ap_idle_entry() as a pure sti;hlt (woken by the reschedule IPI) -- APs do
+    // NOT yet run user tasks, because migrating one to an AP GP-faults (M4-3).
+    // The schedule()+sti;hlt runq-pulling loop re-enables there once migration
+    // is safe; has_runnable_task()/is_empty() already back its lost-wakeup check.
+
+    /// This CPU's idle task.  BSP returns idle_tasks_[0].
+    static Task* idle();
+
+    /// Build idle_tasks_[cpu_id] (AP idle, entry=ap_idle_entry) if absent and
+    /// return it.  Idempotent: no-op for cpu 0 (BSP idle is built in init()) and
+    /// if already built.  Called by each AP after Scheduler::init() has run.
+    static Task* setup_ap_idle(uint32_t cpu_id);
+
     static Task* current();                // reads this CPU's PerCpu::current (per-CPU since M4-1)
     static void  set_current(Task* task);  // nullable: tests clear per-CPU current with nullptr
     static bool  is_initialized();
@@ -175,13 +204,18 @@ public:
     static Task* pick_next_from(SchedulingClass** classes, int count);
 
 private:
-    static void  idle_entry();
+    static void  idle_entry();      // BSP idle: while-hlt (PIT-tick driven)
+    static void  ap_idle_entry();   // AP idle: schedule()+sti;hlt loop (IPI driven), F4-M4 M4-2-2
     static Task* pick_next_task();  // pick_next_from(classes_, class_count_)
+
+    /// Best-effort peek: any runnable task on the shared run queue?  Pure state
+    /// check (no dequeue).  Used by ap_idle_entry's lost-wakeup recheck under cli.
+    static bool has_runnable_task();
 
     static SchedulingClass* classes_[MAX_CLASSES];
     static int              class_count_;
     static RoundRobin       default_rr_;
-    static Task*            idle_task_;
+    static Task*            idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
     static bool             initialized_;
     static lib::Atomic<int> tick_count_;
     static int              no_reschedule_depth_;  ///< >0 only inside the test harness

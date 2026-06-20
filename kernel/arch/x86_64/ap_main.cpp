@@ -23,6 +23,8 @@
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/proc/percpu.hpp"
+#include "kernel/proc/process.hpp"
+#include "kernel/proc/scheduler.hpp"
 
 // Trampoline blob + injected-param symbols (ap_trampoline.S).
 extern "C" uint8_t ap_trampoline_start[];
@@ -129,11 +131,33 @@ extern "C" void ap_main(uint64_t cpu_id) {
     // 4. Signal the BSP that this AP is up.
     __atomic_add_fetch(&g_aps_online, 1, __ATOMIC_SEQ_CST);
 
-    // 5. Halt forever with interrupts off.  P2 APs do not run tasks and must
-    //    not touch the (still single-queue) scheduler, so they stay inert after
-    //    signalling.  M4 will switch this to a wakeable sti;hlt idle so APs can
-    //    take IPIs / work.
+    // 5. (F4-M4 M4-2-2) This AP now participates in scheduling.  boot_aps()
+    //    runs on the BSP BEFORE Scheduler::init() (main.cpp boot_aps ~:205 vs
+    //    Scheduler::init ~:249), so the scheduler is not ready yet.  Spin until
+    //    it is -- cli;pause, NOT sti;hlt: init() sends no IPI, so hlt would
+    //    sleep forever.  init() finishes in microseconds, so the spin is brief.
     __asm__ volatile("cli");
+    while (!proc::Scheduler::is_initialized()) {
+        __asm__ volatile("pause");
+    }
+
+    // 6. Build this AP's idle task (entry = ap_idle_entry) and become it.
+    //    current() must be the idle task before the first context_switch so that
+    //    schedule()'s `current()==nullptr` early-out does not fire and prev
+    //    resolves to idle.  setup_ap_idle() is idempotent.
+    proc::Task* ap_idle = proc::Scheduler::setup_ap_idle(static_cast<uint32_t>(cpu_id));
+    pcpu->current       = ap_idle;
+
+    // 7. First context switch into ap_idle_entry.  `dummy` is write-only
+    //    (context_switch saves callee-saved regs + .restore rip + fs_base into
+    //    it, never reads it), so leaving it uninitialised is safe.  The AP never
+    //    returns here: context_switch jumps to ap_idle_entry on the idle task's
+    //    own stack, abandoning ap_main's stack (allocated by boot_aps, 16 KB,
+    //    never freed or reused -- harmless).  See GOTCHA#23: after the switch
+    //    back, ap_idle_entry reads current() (per-CPU), never this local.
+    proc::CpuContext dummy;
+    context_switch(&dummy, &ap_idle->ctx);
+    // unreachable -- ap_idle_entry loops forever; guard just in case.
     while (true) {
         __asm__ volatile("hlt");
     }

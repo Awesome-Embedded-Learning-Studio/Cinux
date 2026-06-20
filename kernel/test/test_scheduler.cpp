@@ -142,18 +142,25 @@ void test_enqueue_dequeue() {
     rr.enqueue(t2);
     rr.enqueue(t3);
 
-    // pick_next should rotate through t1, t2, t3
+    // pick_next REMOVES the winner from the queue (F4-M4 M4-2-2 runqueue
+    // multi-core safety: a running task must not sit in the shared queue, or a
+    // second CPU could double-pick it).  Round-robin cycling is driven by
+    // re-enqueueing the picked task -- exactly what schedule() does when a
+    // running task yields -- so this test mirrors that here.
     Task* n1 = rr.pick_next();
     TEST_ASSERT_EQ(n1, t1);
     TEST_ASSERT_EQ(static_cast<int>(n1->state), static_cast<int>(TaskState::Running));
+    rr.enqueue(n1);  // simulate schedule() re-enqueuing the yielding task
 
     Task* n2 = rr.pick_next();
     TEST_ASSERT_EQ(n2, t2);
+    rr.enqueue(n2);
 
     Task* n3 = rr.pick_next();
     TEST_ASSERT_EQ(n3, t3);
+    rr.enqueue(n3);
 
-    // Wrap around
+    // Wrap around: t1 is back at the head (t2, t3 were enqueued after it).
     Task* n4 = rr.pick_next();
     TEST_ASSERT_EQ(n4, t1);
 }
@@ -435,15 +442,20 @@ void test_locked_enqueue_dequeue() {
     rr.enqueue(t2);
     rr.enqueue(t3);
 
+    // pick_next removes the winner (F4-M4 M4-2-2); re-enqueue after each pick
+    // (as schedule() does on yield) to drive the round-robin cycling.
     Task* n1 = rr.pick_next();
     TEST_ASSERT_EQ(n1, t1);
     TEST_ASSERT_EQ(static_cast<int>(n1->state), static_cast<int>(TaskState::Running));
+    rr.enqueue(n1);
 
     Task* n2 = rr.pick_next();
     TEST_ASSERT_EQ(n2, t2);
+    rr.enqueue(n2);
 
     Task* n3 = rr.pick_next();
     TEST_ASSERT_EQ(n3, t3);
+    rr.enqueue(n3);
 
     Task* n4 = rr.pick_next();
     TEST_ASSERT_EQ(n4, t1);
@@ -566,10 +578,14 @@ void test_priority_picks_lowest_value() {
     rr.enqueue(hi);  // priority 0
     rr.enqueue(lo);  // priority 10
 
-    // Lower value = higher priority: hi is always selected while ready.
-    TEST_ASSERT_EQ(rr.pick_next(), hi);
-    // hi is re-enqueued and is still the lowest value, so it is picked again
-    // (strict priority -- lo is starved while a higher-priority task is ready).
+    // Lower value = higher priority: hi is always selected while ready.  pick_next
+    // removes hi (F4-M4 M4-2-2); re-enqueue it (as schedule() does on yield) so
+    // the strict-priority check below sees it ready again.
+    Task* p1 = rr.pick_next();
+    TEST_ASSERT_EQ(p1, hi);
+    rr.enqueue(p1);
+    // hi is still the lowest value, so it is picked again (strict priority --
+    // lo is starved while a higher-priority task is ready).
     TEST_ASSERT_EQ(rr.pick_next(), hi);
 }
 
@@ -599,9 +615,17 @@ void test_priority_round_robin_within_level() {
     rr.enqueue(c);
 
     // Equal-priority tasks (a, b) round-robin; c (lower priority) is starved.
-    TEST_ASSERT_EQ(rr.pick_next(), a);
-    TEST_ASSERT_EQ(rr.pick_next(), b);
-    TEST_ASSERT_EQ(rr.pick_next(), a);
+    // pick_next removes the winner (F4-M4 M4-2-2); re-enqueue after each pick
+    // (as schedule() does on yield) to drive the round-robin cycling.
+    Task* pa = rr.pick_next();
+    TEST_ASSERT_EQ(pa, a);
+    rr.enqueue(pa);
+    Task* pb = rr.pick_next();
+    TEST_ASSERT_EQ(pb, b);
+    rr.enqueue(pb);
+    Task* pa2 = rr.pick_next();
+    TEST_ASSERT_EQ(pa2, a);
+    rr.enqueue(pa2);
     TEST_ASSERT_EQ(rr.pick_next(), b);
 }
 

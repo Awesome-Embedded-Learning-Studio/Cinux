@@ -95,21 +95,32 @@ Task* RoundRobin::pick_next() {
     Task* task = run_queue_[(head_ + best) % MAX_TASKS];
     remove_at_locked(best);
 
+    // F4-M4 M4-2-2 (runqueue multi-core safety): the picked task is REMOVED from
+    // the run queue (remove_at_locked above), NOT re-enqueued.  A running task
+    // must not sit in the shared queue -- otherwise a second CPU's pick_next()
+    // could select the same (now-Running) task and both would context-switch onto
+    // one stack/ctx.  The task re-enters the queue only when it yields or blocks
+    // (schedule() re-enqueues the yielding prev; unblock() re-enqueues a woken
+    // task).  Single-core round-robin is preserved: schedule() re-enqueues the
+    // yielding prev before picking, so a lone task picks itself and continues.
     task->state        = TaskState::Running;
     // A freshly scheduled task starts with a full time quantum.
     quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
-
-    // Re-enqueue at the tail so the task keeps cycling (round-robin within its
-    // own priority level) rather than being dropped after one run.
-    run_queue_[tail_] = task;
-    tail_             = (tail_ + 1) % MAX_TASKS;
-    count_++;
 
     return task;
 }
 
 const char* RoundRobin::name() const {
     return "RoundRobin";
+}
+
+bool RoundRobin::is_empty() const {
+    // lock_ is mutable so this const peek can take it.  count_ is the queue
+    // length; ==0 means no runnable task.  Used by ap_idle_entry()'s lost-wakeup
+    // recheck (has_runnable_task) under cli.
+    auto g = lock_.irq_guard();
+    (void)g;
+    return count_ == 0;
 }
 
 void RoundRobin::clear() {
@@ -175,8 +186,8 @@ void switch_addr_space(Task* prev, Task* next) {
 SchedulingClass* Scheduler::classes_[Scheduler::MAX_CLASSES];
 int              Scheduler::class_count_ = 0;
 RoundRobin       Scheduler::default_rr_;
-Task*            Scheduler::idle_task_   = nullptr;
-bool             Scheduler::initialized_ = false;
+Task*            Scheduler::idle_tasks_[kMaxCpus] = {};  // per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
+bool             Scheduler::initialized_          = false;
 lib::Atomic<int> Scheduler::tick_count_{0};
 int              Scheduler::no_reschedule_depth_ = 0;
 
@@ -202,19 +213,83 @@ void Scheduler::idle_entry() {
     }
 }
 
+Task* Scheduler::idle() {
+    uint32_t cpu = percpu()->cpu_id;
+    if (cpu >= kMaxCpus) {
+        cpu = 0;  // defensive: GS is anchored before any schedule() runs
+    }
+    return idle_tasks_[cpu];
+}
+
+Task* Scheduler::setup_ap_idle(uint32_t cpu_id) {
+    if (cpu_id == 0 || cpu_id >= kMaxCpus) {
+        return idle_tasks_[0];  // BSP idle lives in init(); out-of-range falls back to BSP's
+    }
+    if (idle_tasks_[cpu_id] != nullptr) {
+        return idle_tasks_[cpu_id];  // idempotent: AP re-entry guard
+    }
+    idle_tasks_[cpu_id] =
+        TaskBuilder().set_entry(ap_idle_entry).set_name("ap_idle").set_priority(255).build();
+    if (idle_tasks_[cpu_id] != nullptr) {
+        idle_tasks_[cpu_id]->state = TaskState::Running;  // this AP's current()
+        cinux::lib::kprintf("[SCHED] AP%u idle task created tid=%lu\n", cpu_id,
+                            idle_tasks_[cpu_id]->tid);
+    }
+    return idle_tasks_[cpu_id];
+}
+
+bool Scheduler::has_runnable_task() {
+    // Pure peek (no dequeue): used by ap_idle_entry() under cli to re-check for
+    // runnable work before sti;hlt, closing the lost-wakeup window.  Each class's
+    // is_empty() takes its own lock, so this is safe under cli (irq_guard restores
+    // the saved IF on destruction -- never sti-s early when already cli).
+    for (int i = 0; i < class_count_; i++) {
+        if (!classes_[i]->is_empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Scheduler::ap_idle_entry() {
+    // M4-2-2: APs idle with interrupts on (sti;hlt), woken by the reschedule IPI
+    // (vector 0xE0) from wake_idle_ap().  They do NOT yet pick up user tasks:
+    // migrating a user task to an AP deterministically GP-faults (GS / address
+    // corruption somewhere in the migration path; the swapgs discipline in
+    // ISR/syscall/jump_to_usermode reads correct, so the root cause needs GDB
+    // -smp 2).  Making user-task migration safe is M4-3.
+    //
+    // The foundation landed in THIS batch and stays regardless:
+    //   - per-CPU idle tasks (idle_tasks_[cpu]) -- shared idle would share one
+    //     ctx/stack across CPUs and crash;
+    //   - multi-core-safe run queue: pick_next() REMOVES the winner (a running
+    //     task never sits in the shared queue, so two CPUs can't double-pick it).
+    // The schedule()+sti;hlt loop that pulls tasks off the shared runq (and the
+    // has_runnable_task() lost-wakeup recheck) re-enables here once M4-3 makes
+    // migration safe; both are already implemented above and unit-tested.
+    while (true) {
+        __asm__ volatile("sti; hlt");
+        __asm__ volatile("cli");
+    }
+}
+
 void Scheduler::init() {
     class_count_      = 0;
     percpu()->current = nullptr;  // current() reads per-CPU (GS is anchored before init)
-    idle_task_        = nullptr;
+    for (uint32_t i = 0; i < kMaxCpus; i++) {
+        idle_tasks_[i] = nullptr;  // pristine per-CPU idle table (re-init isolation)
+    }
     tick_count_.store(0, lib::MemoryOrder::Relaxed);
     register_class(&default_rr_);
     default_rr_.clear();  // pristine run queue -- no leakage across re-init (tests)
 
-    idle_task_ = TaskBuilder().set_entry(idle_entry).set_name("idle").set_priority(255).build();
-
-    if (idle_task_ != nullptr) {
-        idle_task_->state = TaskState::Ready;
-        cinux::lib::kprintf("[SCHED] Idle task created tid=%lu\n", idle_task_->tid);
+    // BSP idle (cpu 0).  Keeps the legacy idle_entry() (while-hlt, driven by PIT
+    // ticks).  AP idles are built lazily by setup_ap_idle() as each AP comes up.
+    idle_tasks_[0] =
+        TaskBuilder().set_entry(idle_entry).set_name("idle0").set_priority(255).build();
+    if (idle_tasks_[0] != nullptr) {
+        idle_tasks_[0]->state = TaskState::Ready;
+        cinux::lib::kprintf("[SCHED] BSP idle task created tid=%lu\n", idle_tasks_[0]->tid);
     }
 
     initialized_ = true;
@@ -278,7 +353,8 @@ void Scheduler::yield() {
 }
 
 void Scheduler::exit_current() {
-    Task* prev = current();
+    Task* const my_idle = idle();
+    Task*       prev    = current();
     if (prev != nullptr) {
         prev->state = TaskState::Dead;
         prev->sched_class->dequeue(prev);
@@ -288,8 +364,8 @@ void Scheduler::exit_current() {
 
     Task* next = pick_next_task();
     if (next == nullptr) {
-        if (idle_task_ != nullptr) {
-            next = idle_task_;
+        if (my_idle != nullptr) {
+            next = my_idle;
         } else {
             cinux::lib::kprintf("[SCHED] No more tasks, halting.\n");
             while (1)
@@ -298,7 +374,7 @@ void Scheduler::exit_current() {
     }
 
     percpu()->current = next;
-    if (next != idle_task_) {
+    if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
         update_syscall_stack(next->kernel_stack_top);
     }
@@ -372,27 +448,49 @@ void Scheduler::schedule() {
     }
 #endif
 
-    Task* prev = current();
+    Task* const my_idle = idle();  // cache this CPU's idle (avoids repeated MSR reads)
+    Task*       prev    = current();
 
     if (prev->state == TaskState::Running) {
         prev->state = TaskState::Ready;
     }
 
-    Task* next = pick_next_task();
+    // F4-M4 M4-2-2 (runqueue multi-core safety): the running task is NOT in the
+    // shared run queue.  A still-runnable prev (e.g. yielding) must re-enter the
+    // queue so it -- or a higher-priority peer -- can be picked; pick_next() then
+    // REMOVES the winner, so a running task is never double-picked across CPUs
+    // (two CPUs context-switching onto one stack/ctx).  A prev that is
+    // Blocked/Dead/Zombie/Stopped is not runnable and is not enqueued.
+    if (prev->state == TaskState::Ready && prev->sched_class != nullptr) {
+        prev->sched_class->enqueue(prev);
+    }
 
-    if (next == nullptr || next == prev) {
-        // F3-M3 batch 4a: a Zombie task (exited, awaiting reap) must never be
-        // rescheduled -- pick_next() is state-blind, so guard here as well.
-        // F3-M4 batch 4: a Stopped task (job-control) likewise must not keep
-        // running.
+    Task* next = pick_next_task();  // selects + removes the winner
+
+    if (next == prev) {
+        // Picked ourselves back (prev was the only runnable task).  pick_next()
+        // already set prev->state = Running and removed it from the queue;
+        // current() is unchanged, so keep running.  Equivalent to the legacy
+        // round-robin self-pick.
+        return;
+    }
+
+    if (next == nullptr) {
+        // Queue empty: prev was not runnable (Blocked/Dead/Zombie/Stopped -- not
+        // enqueued above).  Switch to this CPU's idle task.  (A Ready prev would
+        // have been enqueued and thus picked, so we never reach here for it.)
+        // F3-M3 batch 4a / F3-M4 batch 4: Zombie (exited, awaiting reap) and
+        // Stopped (job-control) tasks must never keep running; they are never
+        // enqueued, so they fall through to the idle switch here.
         if (prev->state != TaskState::Blocked && prev->state != TaskState::Dead &&
             prev->state != TaskState::Zombie && prev->state != TaskState::Stopped) {
+            // Safety net: prev looks runnable but the queue was empty (e.g. full).
+            // Keep running prev rather than deadlock.  Should not happen in practice.
             prev->state = TaskState::Running;
             return;
         }
-
-        if (idle_task_ != nullptr && idle_task_ != prev) {
-            next = idle_task_;
+        if (my_idle != nullptr && my_idle != prev) {
+            next = my_idle;
         } else {
             return;
         }
@@ -400,7 +498,7 @@ void Scheduler::schedule() {
 
     percpu()->current = next;
 
-    if (next != idle_task_) {
+    if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
         update_syscall_stack(next->kernel_stack_top);
     }
