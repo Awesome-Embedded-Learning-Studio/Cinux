@@ -98,6 +98,12 @@ jobs:
           set -o pipefail
           timeout 180 make run-kernel-test 2>&1 | tee serial.log
 
+      - name: Check test count did not regress (F-QA Q1-4)
+        # F-QA Q1-4: fail if fewer tests than baseline ran (silent test loss).
+        # Runs only when the QEMU suite itself succeeded.
+        working-directory: build
+        run: bash ${{ github.workspace }}/scripts/check_test_count.sh serial.log
+
       - name: Upload serial log on failure
         if: failure()
         uses: actions/upload-artifact@v4
