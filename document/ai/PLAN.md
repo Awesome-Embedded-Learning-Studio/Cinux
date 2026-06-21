@@ -127,6 +127,51 @@
 
 **Q1 收官**：防新债基座落地——编译门禁 + ErrorOr 铁律强化(`[[nodiscard]]`) + CI 多 config 常驻 + 测试项数门禁 + host ASAN 基建。ASAN 首跑即抓 `ring_buffer::push_batch` global-buffer-overflow(DEBT-017，P1，production pipe/keyboard 在用，单核串行潜伏)。3 新债(DEBT-015/016/017)登记。ci.yml host ASAN 待 DEBT-017 修后 flip 启用。下个：Q2 deterministic 审计方法论。
 
+### ✅ DEBT-017 闭环（host ASAN findings）— 2026-06-20，feat/f-qa-q2
+
+> 交接文档建议 Q2 主线前优先修的 production-adjacent bug。**诊断订正**：DEBT-017 原登记「`RingBuffer::push_batch` 边界 bug」**误诊**——push_batch 对 `buffer_` 自身安全(`tail_%N` + `!full()`)，越界是调用方传错 count；真因**不在 push_batch、不在 Cinux-Base 子模块**。复现 ASAN 拿 ground truth 后定位 4 处 3 类，全在主仓库：
+
+| # | 位置 | 类型 | 修 |
+|---|------|------|----|
+| 1 | `test/unit/test_pipe.cpp:458` | OOB（`try_write("BBBB",200)` 读 5B 字面量越界） | 真实 200B buffer |
+| 2 | `test/unit/test_fd_table.cpp`（776 处） | 泄漏（栈 FDTable 不 release → File 不释放） | **`kernel/fs/file.cpp` 加 `~FDTable()` 兜底释放**（release 路径幂等 + production 防御） |
+| 3 | `test/unit/test_multi_terminal.cpp:745` | 泄漏（`add_window` 失败不接管 + 未 delete） | overflow 后 delete |
+| 4 | `test/unit/test_sys_pipe.cpp`（9 处） | double-free（析构暴露：`set()` 接管所有权，test 误手动 delete） | 删 9 处手动 delete（归析构），保留被 replace 旧 File |
+
+> **production 零影响**：push_batch production chunk 守护安全；FDTable production 经 release/close 释放（析构幂等 no-op）；sys_pipe File 归 fd_table 不手动 delete。**残留异味**（登记非修）：`test_shell_redirect` `~PipeRedirect` 的 `delete stdin_file` 侥幸安全（构造局部变量 shadow 同名私有成员，成员恒 nullptr，delete nullptr no-op；消除 shadow 即 double-free）。
+> **验证**：host ASAN 全绿（Debug + Release+ASAN+UBSAN+FORTIFY CI 对等，全量 `make test_host` 100%）+ `run-kernel-test` 875/0 + 零警告。**ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON` 硬门禁**（Q1-5 留的开关兑现）。详见 `document/notes/2026-06-20-f-qa-debt017-host-asan-fix.md`。下个：**Q2 deterministic 审计方法论**。
+
+### ✅ Q2 完成（deterministic 审计方法论）— 2026-06-21，feat/f-qa-q2
+
+> 把 `audit-guide.md` 从叙述式「看什么/搜索/红线」改造为 per-维度 **deterministic 四段式**（A 锚点 / B 不变点 / C 门槛 / D 闭环），让任意两轮审计可比较（根治发散）。2 批：
+
+| 批 | 范围 | Commit |
+|----|------|--------|
+| Q2-1 | 范式骨架(§0/§1+§1.1 模板) + D4 完整样板 + D13/D14 新增(真实符号) | 37a1332 |
+| Q2-2 | D1-D3/D5-D12 四段式(D5/D8 标「先读码后锚点」例外) | (本次) |
+
+> **范式**:rg 命令放 `sh` 代码块(避免表格 `|` 冲突),命中表只记锚点+命中数(机器数,非 yes/no);不变点逐条 pass/fail/n/a + file:line;非债须反例;DEBT 去重(已登记只补未覆盖不变点);锚点可回归(下轮 diff>0 须说明)。D5/D8 例外(有效 rg 需先读调用链,GOTCHA#25/26)。
+> **关键校正**:D13/D14 锚点先 rg 校准真实符号(`FDTable::alloc`/`PidAllocator::alloc`/`g_pmm.alloc_page`/`e_phnum`/`static_cast<size_t>`),非前轮虚构的 `alloc_fd`/`request_irq`(零命中)。D4 样板 5 锚点 + D13/D14 全部 rg 可跑命中>0。顺手坐实 `kMaxCpus` 不一致(acpi `size_t=16` vs percpu `uint32_t=8`,类型也不同)→ D13 Q3 首审线索。
+> **验证**:文档-only(R0);14 维度齐全(D1-D14)+ 叙述式残留 0 + 抽样锚点全可跑。debt.md 审计计划 12→14 维度。详见 `document/notes/2026-06-21-f-qa-q2-deterministic-audit.md`。下个:**Q3 系统审计**(用 Q2 方法论审 D4/D5/D6/D7/D11 + D13/D14)。
+
+### ✅ Q3 完成（系统审计，14/14 全审）— 2026-06-21，feat/f-qa-q2
+
+> 用 Q2 deterministic 方法论审全 14 维度（5 批：Q3-1 D4+D13 / Q3-2 D5+D6 / Q3-3 D7+D11 / Q3-4 D14+D9 / 收尾 D1+D8+D10+D12）。零风险只读。报告 `document/todo/quality/reports/2026-06-21-d*.md`（5 份）。
+
+| 维度 | 结论 | 债 |
+|------|------|----|
+| D4 进程生命周期 | **fail** | **DEBT-002 精确坐实（P1 头号）**：production Task 退出无 `delete`/`release_resources`（`remove_task` 仅 test 调用）→ Task+sig_actions/fd_table/cwd+核栈+addr_space 泄漏 |
+| D5 调度/迁移 | pass | F4 SMP 清洁（GOTCHA#23/25/26） |
+| D6 用户边界 | warn | DEBT-019（P3 用户指针非 copy，PF 兜底）+ DEBT-012 关联 |
+| D7 错误韧性 | pass | FO 清洁（panic 仅不变量） |
+| D9 静态工具 | pass | F-INFRA/F4-M5/Q1 清洁（host-ASAN 硬门禁） |
+| D11 模块组织 | pass | 源全 <500 + check_line_limits 排除 test/ |
+| D13 资源配额 | fail | **DEBT-018（P2 kMaxCpus 不一致）** |
+| D14 整数溢出 | fail | **DEBT-020（P3 ELF 字段算术）**+ DEBT-012 关联 |
+| D1/D8/D10/D12 | pass/warn | 架构铁律/commit 规范清洁；D8 warn=已知 GOTCHA#11 盲区 |
+
+> **Q3 总结**：新增 3 债（DEBT-018/019/020）+ DEBT-002 精确坐实（P1，Q4 头号目标）。6 维度 pass（F4/FO/F-INFRA/架构清洁）证实前期里程碑扎实。deterministic 方法论首次全量实战（锚点 rg → 读码 → pass/fail 证据 → 登记），可复现。**喂 Q4**：修 DEBT-002 exit cleanup + DEBT-006 AddressSpace refcount（最险，单独 propose）→ DEBT-001/003/004/005。
+
 ### 里程碑骨架
 
 | M | 名称 | 批概要 | 风险 |

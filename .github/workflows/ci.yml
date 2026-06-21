@@ -23,12 +23,13 @@ jobs:
         run: echo "GCC $(gcc --version | head -1)"
 
       - name: Configure
-        # F-QA Q1-5: CINUX_HOST_ASAN (ASAN+UBSAN+gcov) is wired in test/CMakeLists
-        # but NOT turned on here yet — first run surfaced a real global-buffer-
-        # overflow in ring_buffer.hpp::push_batch + leaks (DEBT-017). Flip to
-        # -DCINUX_HOST_ASAN=ON once DEBT-017 is fixed so this is a hard gate,
-        # not a known-broken one.
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -S .
+        # F-QA: CINUX_HOST_ASAN (ASAN+UBSAN+gcov) is a hard CI gate. DEBT-017
+        # (the host ASAN findings Q1-5 first surfaced — test_pipe OOB,
+        # FDTable File leaks, test_sys_pipe/test_multi_terminal ownership) is
+        # fixed, so host tests now run sanitized: any UAF/OOB/leak in the
+        # InodeOps/mock-layer code fails CI. Verified Release(-O2)+FORTIFY+ASAN
+        # parity locally (F-QA Q2).
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_HOST_ASAN=ON -S .
 
       - name: Build
         run: cmake --build build -j$(nproc)
