@@ -93,6 +93,7 @@ void run_file_mmap_tests();
 void run_kallsyms_tests();
 void run_backtrace_tests();
 void run_memory_stats_tests();
+void run_user_ptr_tests();
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -220,6 +221,7 @@ extern "C" void kernel_main() {
     run_concurrent_ring_buffer_tests();
     run_klog_tests();
     run_sys_dmesg_tests();
+    run_user_ptr_tests();
 
     // DMA tests (M3): DmaBuffer value type (M3-1) + DmaPool allocator (M3-2)
     run_dma_buffer_tests();
