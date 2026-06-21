@@ -28,9 +28,9 @@ namespace cinux::proc {
 namespace {
 
 void gui_worker_thread() {
-    cinux::lib::kprintf("[GUI] Worker thread started\n");
+    cinux::lib::kprintf("[GUI] Worker thread started (drives gui_pump refresh loop)\n");
     while (true) {
-        cinux::gui::gui_process_pending();
+        cinux::gui::gui_pump();
         Scheduler::yield();
     }
 }

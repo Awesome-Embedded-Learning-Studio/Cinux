@@ -9,12 +9,8 @@
 
 #include "gui_init.hpp"
 
-#include "kernel/arch/x86_64/paging.hpp"
-#include "kernel/arch/x86_64/paging_config.hpp"
-#include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/drivers/canvas.hpp"
 #include "kernel/drivers/mouse.hpp"
-#include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/video/font.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/inode.hpp"
@@ -26,11 +22,9 @@
 #include "kernel/gui/window_manager.hpp"
 #include "kernel/ipc/pipe.hpp"
 #include "kernel/ipc/pipe_ops.hpp"
-#include "kernel/lib/atomic.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 #include "kernel/mm/address_space.hpp"
-#include "kernel/mm/pmm.hpp"
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/pid.hpp"
 #include "kernel/proc/process.hpp"
@@ -50,9 +44,6 @@ cinux::drivers::PSFFont* g_font   = nullptr;
 /// Counter for generating unique terminal titles
 uint32_t g_terminal_counter = 0;
 
-/// Deferred work queue: ISR enqueues, gui_worker thread drains.
-cinux::lib::Atomic<IconAction> g_pending_action{IconAction::None};
-
 }  // anonymous namespace
 
 // ============================================================
@@ -67,13 +58,12 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font) {
     g_font   = &font;
 
     // Initialise the window manager. The desktop itself is NOT drawn here --
-    // gui_tick_callback composites it (WindowManager::composite) on the first
-    // PIT tick, so the framebuffer stays untouched until the real desktop
-    // (dark teal background + Shell/Calculator icons) is ready.
+    // gui_start() composites it once after icons are registered, and ongoing
+    // refresh is driven by the gui_worker thread calling gui_pump() (see
+    // init.cpp), not by a PIT IRQ callback.
     WindowManager::instance().init(&screen, &font);
 
-    cinux::lib::kprintf(
-        "[GUI] GUI subsystem initialised (desktop composited on first PIT tick).\n");
+    cinux::lib::kprintf("[GUI] GUI subsystem initialised (refresh via gui_worker pump).\n");
 }
 
 // ============================================================
@@ -202,70 +192,7 @@ void create_shell_terminal() {
 }  // anonymous namespace
 
 // ============================================================
-// PIT tick callback: process events + composite
-// ============================================================
-
-namespace {
-
-/**
- * @brief Called on every PIT tick to drain input and refresh the screen
- *
- * @param ctx  Unused context pointer
- */
-void gui_tick_callback(void* /*ctx*/) {
-    static bool first = true;
-    if (first) {
-        first = false;
-        cinux::lib::kprintf("[GUI] first composite tick (PIT->gui_tick_callback OK)\n");
-    }
-    using cinux::drivers::Mouse;
-    using cinux::gui::Event;
-    using cinux::gui::EventType;
-
-    auto& wm = WindowManager::instance();
-    auto& eq = Mouse::event_queue();
-
-    // Drain all pending events from the queue
-    Event ev;
-    while (eq.dequeue(ev)) {
-        switch (ev.type_) {
-        case EventType::MouseMove:
-        case EventType::MouseDown:
-        case EventType::MouseUp:
-            wm.handle_mouse(ev);
-            break;
-        case EventType::KeyDown:
-        case EventType::KeyUp:
-            wm.handle_key(ev);
-            break;
-        }
-    }
-
-    // Check if a desktop icon was clicked -- enqueue for deferred processing
-    IconAction action = wm.consume_pending_icon_action();
-    if (action != IconAction::None) {
-        g_pending_action.store(action, cinux::lib::MemoryOrder::Release);
-    }
-
-    // Poll all terminal windows for shell output (not just the focused one)
-    // so that multiple concurrent shell sessions all update their displays.
-    for (uint32_t i = 0; i < wm.window_count(); i++) {
-        auto* win = wm.window_at(i);
-        if (win != nullptr && win->is_terminal()) {
-            auto* term = static_cast<Terminal*>(win);
-            term->poll_output();
-            term->render_to_canvas();
-        }
-    }
-
-    // Composite all windows onto the screen
-    wm.composite();
-}
-
-}  // anonymous namespace
-
-// ============================================================
-// gui_start() -- activate the WM tick loop from kernel_init_thread
+// gui_start() -- activate the WM (refresh driven by gui_worker pump)
 // ============================================================
 
 void gui_start() {
@@ -306,28 +233,64 @@ void gui_start() {
 
     cinux::lib::kprintf("[GUI] Desktop icons registered: Shell, Calculator.\n");
 
-    // Composite the desktop once now (icons registered) so it shows without
-    // waiting for the first PIT tick. APIC routing only delivers 1 PIT tick on
-    // the production GUI path (pre-existing F4 issue, masked by the old demo);
-    // this workaround paints the desktop immediately while the tick problem is
-    // diagnosed. The tick callback keeps it live once PIT ticks resume.
+    // Composite the desktop once now (icons registered) so it shows immediately.
+    // Ongoing refresh is driven by the gui_worker thread calling gui_pump() in a
+    // loop (see init.cpp), NOT by a PIT IRQ callback. This removes the GUI's
+    // dependency on PIT tick delivery, which only fires once under APIC routing
+    // on the production path (pre-existing F4 issue) -- the worker pump keeps
+    // the screen live regardless of whether PIT ticks arrive.
     wm.composite();
-
-    // Register the GUI tick callback for event processing + compositing
-    cinux::drivers::PIT::set_tick_callback(gui_tick_callback, nullptr);
-    cinux::lib::kprintf("[GUI] GUI tick callback registered on PIT.\n");
+    cinux::lib::kprintf("[GUI] desktop composited; refresh driven by gui_worker pump loop.\n");
 }
 
 // ============================================================
-// gui_process_pending() -- drain deferred work from ISR
+// gui_pump() -- one GUI iteration (drain input + dispatch + composite)
 // ============================================================
 
-void gui_process_pending() {
-    IconAction action =
-        g_pending_action.exchange(IconAction::None, cinux::lib::MemoryOrder::AcqRel);
+void gui_pump() {
+    using cinux::drivers::Mouse;
+    using cinux::gui::Event;
+    using cinux::gui::EventType;
+
+    auto& wm = WindowManager::instance();
+    auto& eq = Mouse::event_queue();
+
+    // Drain all pending input events and dispatch to the window manager.
+    Event ev;
+    while (eq.dequeue(ev)) {
+        switch (ev.type_) {
+        case EventType::MouseMove:
+        case EventType::MouseDown:
+        case EventType::MouseUp:
+            wm.handle_mouse(ev);
+            break;
+        case EventType::KeyDown:
+        case EventType::KeyUp:
+            wm.handle_key(ev);
+            break;
+        }
+    }
+
+    // Deferred icon action: processed here on the worker thread (no ISR handoff
+    // needed -- gui_pump runs on gui_worker, not in a PIT IRQ callback).
+    IconAction action = wm.consume_pending_icon_action();
     if (action == IconAction::OpenShell) {
         create_shell_terminal();
     }
+
+    // Poll all terminal windows for shell output (not just the focused one) so
+    // that multiple concurrent shell sessions all update their displays.
+    for (uint32_t i = 0; i < wm.window_count(); i++) {
+        auto* win = wm.window_at(i);
+        if (win != nullptr && win->is_terminal()) {
+            auto* term = static_cast<Terminal*>(win);
+            term->poll_output();
+            term->render_to_canvas();
+        }
+    }
+
+    // Composite all windows onto the screen.
+    wm.composite();
 }
 
 }  // namespace cinux::gui

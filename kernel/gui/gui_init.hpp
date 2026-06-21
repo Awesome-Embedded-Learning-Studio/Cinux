@@ -43,13 +43,14 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font);
 void gui_start();
 
 /**
- * @brief Process deferred GUI work enqueued by the PIT tick callback
+ * @brief Run one GUI pump iteration (call from the gui_worker thread loop)
  *
- * Drains the pending action queue and executes any heavy operations
- * (e.g. creating a new terminal window via fork/execve) that cannot
- * safely run in interrupt context.  Should be called in a loop by a
- * dedicated kernel worker thread.
+ * Drains the input EventQueue and dispatches to the window manager, handles
+ * deferred icon actions (e.g. spawning a terminal), polls terminal output,
+ * and composites the frame.  Runs entirely on the worker thread -- NOT in a
+ * PIT IRQ callback -- so GUI refresh no longer depends on PIT tick delivery
+ * (which only fires once under APIC routing on the production path).
  */
-void gui_process_pending();
+void gui_pump();
 
 }  // namespace cinux::gui
