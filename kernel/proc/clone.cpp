@@ -266,7 +266,9 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int clone(
     // ---- Address space: CLONE_VM shares, else CoW copy ----
     if (flags & kCloneVm) {
         child->addr_space = parent->addr_space;  // shared
-        child->addr_space->acquire();            // Q4e-1 (DEBT-006): bump refcount
+        if (child->addr_space != nullptr) {      // Q4e-1 (DEBT-006): bump refcount
+            child->addr_space->acquire();        // (defensive: kernel-thread / mock
+        }  // parents may have no addr_space)
     } else {
         cow_clone_address_space(parent, child);
     }
