@@ -1,6 +1,19 @@
 # CinuxOS — 当前焦点（批级进度）
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
+
+## 🔄 F13 visor 跨平台 GUI 库（立项调研 / DRAFT，2026-06-21）
+
+> ⚠️ **DRAFT**。方向可能调整。来源:11-agent workflow（5 维调研 + 综合 + 3-lens 对抗 + 完整性）+ 用户 4 决策。
+>
+> **方向转变**:GUI 从「Cinux 内联」抽成独立跨平台库 **visor**——同一份 core 跑 Cinux 桌面（现内核态/未来用户态）、单片机 LCD/OLED（小到 STM32F103）、未来显卡。内核只提供最小能力,不感知 GUI 风格。核心机制 = **Host ABI 函数指针表（visor_host.h）唯一硬边界**,换宿主只换 5 张表填充（=「不感知是否用户态」）。
+>
+> **用户 4 决策**:① 完整控件工具箱 ② Cinux 桌面先 ③ MCU 全规模含 STM32F1 ④ GPU 可插拔先软件。
+> **诚实预期**:STM32F1 与桌面控件库是两个 profile ceiling（LVGL/u8g2 亦然）,visor 短期承诺「比现在好看的 Cinux 桌面 + MCU 仪表盘」,完整 macOS/Windows 级是 L4b 长弧。
+>
+> **文档**（全 DRAFT）:[todo/f13-gui/README.md](../todo/f13-gui/README.md) + [visor-01-presets.md](../todo/f13-gui/visor-01-presets.md)（profile/宏/约束/ABI 骨架）+ [visor-02-refactor-and-separation.md](../todo/f13-gui/visor-02-refactor-and-separation.md)（重构执行计划）+ notes [research](../notes/2026-06-21-f13-visor-research.md) / [architecture](../notes/2026-06-21-f13-visor-architecture.md) / [roadmap](../notes/2026-06-21-f13-visor-roadmap.md)。
+>
+> **第一步**（不依赖 visor 仓库,Cinux 仓库内,独立 PR）:**spawn 公共化前置重构**——合并 `init.cpp` / `gui_init.cpp` shell 启动成单条 fork→execve 公共路径（两者已重复）+ 处理 GOTCHA#22 tid 污染 + F2-M5 Stack VMA 三处合一。这是 visor 一切的前提,单独成批 + `timeout 40` QEMU 验证。visor 仓库主体（M0-M9）由用户在独立仓库开发,F13 在 Cinux 侧收窄为「L7 host adapter + 三个前置重构」。**待用户确认方向后正式标 🔄 启动**。
 > **F1-M3 = DMA 基础设施 ✅ 完成（2026-06-16）**。
 > **F1-M4 = 块设备抽象 ✅ 完成（2026-06-16）**。
 > **F5-M1 = AHCI DMA 迁移 ✅ 完成（2026-06-16）**。

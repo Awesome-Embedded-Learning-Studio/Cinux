@@ -1,66 +1,33 @@
-# F13: GUI 分离 — Kernel-GUI ABI 定义
+# F13: GUI 分离 → visor 跨平台 GUI 库（DRAFT）
 
-> 定义内核侧必须为 GUI 提供的接口契约（ABI）。
-> 目标：独立 GUI 仓库基于此 ABI 开发，内核提供 thin adapter。
+> ⚠️ **DRAFT / 草稿（2026-06-21）**。方向可能调整。来源:11-agent workflow 调研 + 3-lens 对抗验证 + 用户 4 决策。
 
-## 核心思路
+## 方向转变（取代 2026-05 旧草案）
 
-GUI 仓库不知道内核内部实现，只通过稳定 ABI 访问：
+visor 不是「Cinux 的 GUI」,而是一个**跨平台 GUI 库**:同一份 core 跑 Cinux 桌面（现内核态 / 未来用户态 server）、单片机 LCD/OLED（小到 STM32F103）、未来显卡。内核只提供最小能力,**完全不感知 GUI 风格/主题/控件**。
 
-```
-GUI 独立仓库
-    │  只依赖 gui_abi.h
-    ↓
-Kernel-GUI ABI 层（gui_abi.hpp）  ← 稳定接口，不暴露内核内部
-    ↓
-内核 thin adapter（gui_adapter.cpp）← 实现转发到内核服务
-```
+用户 4 决策:① 完整控件工具箱（Windows/macOS 级）② Cinux 桌面先 ③ MCU 全规模含 STM32F1 ④ GPU 可插拔先软件。
 
-## GUI 对内核的依赖分类
+核心机制:**Host ABI 函数指针表（visor_host.h）是唯一硬边界**——换宿主（内核态/用户态/MCU/host）只换 5 张表的填充。这就是「甚至不感知是否用户态」。
 
-| 类别 | 需要的接口 | 当前直接调用 |
-|------|-----------|-------------|
-| **渲染** | Framebuffer 访问、Canvas 分配 | `Framebuffer::data()`, `Canvas::init()` |
-| **输入** | 键盘/鼠标事件流 | `Keyboard::irq1_handler` → `EventQueue` |
-| **进程** | Shell 启动、进程管理 | `fork()`, `execve()`, `waitpid()` |
-| **IPC** | Pipe 创建、数据传输 | `Pipe::try_read/write`, `PipeOps` |
-| **VFS** | 文件描述符管理 | `Inode`, `File`, `FDTable` |
-| **内存** | Canvas 缓冲区分配 | `PMM::alloc_page`, `VMM::map` |
-| **定时** | 周期刷新回调 | `PIT::set_tick_callback` |
-| **日志** | 调试输出 | `kprintf` |
+诚实预期:STM32F1 与桌面控件库是两个 profile ceiling,visor 短期承诺「比现在好看的 Cinux 桌面 + MCU 仪表盘」,完整 macOS/Windows 级是 L4b 长弧。
 
-## 文件清单
+## 文档清单（新方案）
 
-| 文件 | 说明 |
+| 文档 | 内容 |
 |------|------|
-| [00-gui-abi.md](00-gui-abi.md) | M1: Kernel-GUI ABI 接口定义 |
-| [02-gui-adapter.md](02-gui-adapter.md) | M2: 内核侧 thin adapter 实现 |
-| [03-gui-decouple.md](03-gui-decouple.md) | M3: 解耦现有 GUI 代码 |
+| [visor-01-presets.md](visor-01-presets.md) | **预设**:4 profile + VISOR_* 宏 + core 约束 + ABI 契约骨架 |
+| [visor-02-refactor-and-separation.md](visor-02-refactor-and-separation.md) | 重构与代码分离执行计划 |
+| [../../notes/2026-06-21-f13-visor-research.md](../../notes/2026-06-21-f13-visor-research.md) | 调研结论（先例借鉴 + STM32F1 可行性 + 对抗裂缝） |
+| [../../notes/2026-06-21-f13-visor-architecture.md](../../notes/2026-06-21-f13-visor-architecture.md) | 七层架构 + Host ABI 边界 + 现状映射 |
+| [../../notes/2026-06-21-f13-visor-roadmap.md](../../notes/2026-06-21-f13-visor-roadmap.md) | M0-M9 开发清单 + 起步 |
 
-## Milestone 依赖
+## 旧草案（已 superseded,保留历史）
 
-```
-M1 ABI 定义 ──→ M2 内核 adapter ──→ M3 解耦现有 GUI
-```
+- [00-gui-abi.md](00-gui-abi.md) — 旧 gui_abi.hpp C ABI 方向（被 visor-01 presets 取代）
+- [02-gui-adapter.md](02-gui-adapter.md) — 旧 thin adapter（被 visor-02 refactor 取代）
+- [03-gui-decouple.md](03-gui-decouple.md) — 旧解耦（被新七层架构取代）
 
-## 关键代码位置
+## 起步
 
-| 模块 | 文件 |
-|------|------|
-| GUI 初始化 | `kernel/gui/gui_init.hpp` / `.cpp` — 最复杂的耦合点 |
-| 事件系统 | `kernel/gui/event.hpp` — SPSC ring buffer |
-| 窗口管理 | `kernel/gui/window_manager.hpp` / `.cpp` |
-| 终端 | `kernel/gui/terminal.hpp` / `.cpp` — Shell 集成 |
-| 窗口 | `kernel/gui/window.hpp` / `.cpp` |
-| Canvas | `kernel/drivers/canvas.hpp` — 双缓冲渲染 |
-| Framebuffer | `kernel/drivers/video/framebuffer.hpp` |
-| 字体 | `kernel/drivers/video/font.hpp` — PSF2 |
-| Mouse | `kernel/drivers/mouse.hpp` — PS/2 事件推送 |
-| Keyboard | `kernel/drivers/keyboard/keyboard.hpp` — 按键事件 |
-
-## 验收标准
-
-1. ABI 头文件定义完整（gui_abi.hpp），无内核内部头文件依赖
-2. 独立仓库可以 `#include "gui_abi.hpp"` 编译通过
-3. 现有 GUI 功能不回归
-4. 每个 ABI 函数有文档说明（语义、线程安全、生命周期）
+第一步（不依赖 visor 仓库,现在就能做）:**spawn 公共化前置重构**（合并 [init.cpp](../../../kernel/proc/init.cpp) / [gui_init.cpp](../../../kernel/gui/gui_init.cpp) shell 启动）。详见 [visor-02 §1](visor-02-refactor-and-separation.md)。

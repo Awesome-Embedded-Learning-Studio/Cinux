@@ -22,7 +22,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F10 | 用户态运行时 | M1 libc扩展⏳ M2 ELF动态链接⏳ M3 TTY⏳ M4 CFBox+init⏳ M5 musl+glibc⏳ | 80+ syscall/ld.so/CFBox/musl |
 | F11 | 启动与平台 | M1 FAT32⏳ M2 UEFI启动⏳ | BIOS+UEFI 双启动 |
 | F12 | 开发者生态 | M1 GDB/KALLSYMS⏳ M2 Lua⏳ M3 TinyCC⏳ M4 编辑器+包管理⏳ | 自举开发环境 |
-| F13 | GUI 分离 | M1 ABI定义⏳ M2 Adapter⏳ M3 解耦⏳ | 独立 GUI 仓库 |
+| F13 | GUI 分离 → **visor 跨平台库** | 立项调研✅(DRAFT 2026-06-21):visor 七层架构 + profile ceiling;M0-M9 待确认启动 | 独立 visor 仓库(submodule)+ Cinux host adapter;详见 `document/todo/f13-gui/` + `document/notes/2026-06-21-f13-visor-*.md` |
 
 ## 横切里程碑(非 Feature 域,服务于所有复杂特性)
 | 标识 | 名称 | 状态 |
