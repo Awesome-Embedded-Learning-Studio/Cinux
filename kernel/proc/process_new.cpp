@@ -138,7 +138,7 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
 // Safe ONLY when the task is not running on this stack -- the caller is the
 // reaper (waitpid on the parent). exit_current() cannot use this directly
 // (it runs on its own stack); that path uses deferred free (Q4e-3).
-static void free_kernel_stack(Task* task) {
+void free_kernel_stack(Task* task) {
     if (task->kernel_stack == 0) {
         return;
     }

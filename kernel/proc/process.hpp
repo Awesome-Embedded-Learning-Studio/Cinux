@@ -271,6 +271,12 @@ struct Task {
 
     /** Intrusive link for the global pid->Task registry (sys_kill lookup). */
     Task* registry_next{nullptr};
+
+    /** F-QA Q4e-3 (DEBT-002): link for the deferred-free list. A task that
+     *  exits via exit_current() (kernel-thread return / panic / signal kill)
+     *  cannot free its own kernel stack (it runs on it); it is enqueued here
+     *  and freed by the next task's schedule() entry (reap_deferred). */
+    Task* deferred_next{nullptr};
 };
 
 // ============================================================
