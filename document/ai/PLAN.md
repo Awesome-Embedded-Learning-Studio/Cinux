@@ -172,6 +172,20 @@
 
 > **Q3 总结**：新增 3 债（DEBT-018/019/020）+ DEBT-002 精确坐实（P1，Q4 头号目标）。6 维度 pass（F4/FO/F-INFRA/架构清洁）证实前期里程碑扎实。deterministic 方法论首次全量实战（锚点 rg → 读码 → pass/fail 证据 → 登记），可复现。**喂 Q4**：修 DEBT-002 exit cleanup + DEBT-006 AddressSpace refcount（最险，单独 propose）→ DEBT-001/003/004/005。
 
+### ✅ Q4a 完成（RefCount + UserPtr 类型先行）— 2026-06-21，feat/f-qa-q4
+
+> Q4 头号高危债收敛里程碑第一批。类型不变量为 Q4b-e 消费者（SharedCwd/FDTable/AddressSpace/Task）铺路，**纯铺路不碰 fork/execve/PF/validate_user_ptr**。propose 走三重验证后动手（spike + 联网核验 Linux refcount_t + 7-lens 对抗审查）。分支 `feat/f-qa-q4`（从干净 main `d708e95`）。详见 `document/notes/2026-06-21-f-qa-q4a-types.md`。
+
+| 批 | 范围 | Commit |
+|----|------|--------|
+| 批1 | `refcount.hpp`（Cinux-Base 子模块，`__atomic_*` 饱和语义对齐 Linux refcount_t）+ 主仓 bump + `test/unit/test_refcount.cpp`（10 单测） | 子模块 `e5f6e10` + 主仓 `f8ce80c` |
+| 批2 | `user_ptr.hpp`（kernel/lib，zero-overhead 标记对齐 sparse `__user`）+ `kernel/test/test_user_ptr.cpp`（7 单测） | 主仓 `50c83bb` |
+
+**关键决策**：① RefCount 用 `__atomic_*` 内建（**spike 否决 std::atomic**——编译过但拖 libstdc++ `__glibcxx_assert_fail` 符号，kernel `-nostdlib` 链接失败）；② 饱和 `kRefcountSaturated=INT_MIN/2 (0xC0000000)`（**联网核验订正**：离 0/INT_MAX 等距防 race 漂移，非 INT_MIN；inc RELAXED fetch-then-clamp，dec RELEASE old==1→true+acquire fence）；③ UserPtr 不内置 validate（避免 kernel/lib→syscall 反向依赖，validate 行为不变留 DEBT-019）；④ RefCount 单测放主仓库 `test/unit/`（**BLOCK 纠正**：子模块 `test/` 主仓 CI 不构建——`third_party/CMakeLists.txt` 不 add_subdirectory(Cinux-Base)）。
+**边界（refcount.hpp @file）**：服务堆对象生命周期（非物理页 mapcount DEBT-003 独立 int16）；acquire(RELAXED) 不提供字段可见性；简单生命周期无 on-zero 清理 hook（FDTable 迁移外移）。
+**验证**：test_host 全绿（refcount 10/10）+ run-kernel-test 875→**882/0**（UserPtr 7/7，ALL PASSED）+ make run GUI 桌面（[APIC]+[GUI] Desktop，无 panic）+ 全量编译零警告。
+**下一步**：Q4b DEBT-003 CoW mapcount（独立 per-page int16，**不用 RefCount**）/ Q4c DEBT-001+004 / Q4d DEBT-005 / Q4e DEBT-002+006（RefCount 首个真消费者 + 最险，碰 fork/execve/PF，单独 propose）。
+
 ### 里程碑骨架
 
 | M | 名称 | 批概要 | 风险 |

@@ -40,6 +40,7 @@
 | D14 | 整数溢出 / 边界 | ✅ 已审 2026-06-21 | DEBT-020(ELF 字段算术)+ DEBT-012(phnum)；见 `reports/2026-06-21-d14-d9-audit.md` |
 
 **进度**：**14/14 全审完成**（D1-D14，F-QA Q3 收官 2026-06-21）。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪 + 全量实战（F-QA Q2），见 `document/todo/quality/audit-guide.md`。新债 DEBT-018/019/020 + DEBT-002 精确坐实 → 喂 Q4。
+**修债进展**：**Q4a✅（2026-06-21）类型先行** —— `RefCount`（Cinux-Base，`__atomic_*` 饱和对齐 Linux refcount_t）+ `UserPtr`（kernel/lib，sparse `__user` 标记）就绪，为 Q4b-e 消费者铺路（纯铺路，债尚未修）。详见 `document/notes/2026-06-21-f-qa-q4a-types.md`。
 
 ---
 
