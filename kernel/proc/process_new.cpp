@@ -16,6 +16,7 @@
 #include "kernel/arch/x86_64/phys_virt.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
+#include "kernel/mm/vmm.hpp"  // Q4e-2: free_kernel_stack translate/unmap
 #include "kernel/proc/pid.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_internal.hpp"
@@ -125,6 +126,34 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
 }
 
 // ============================================================
+// F-QA Q4e-2 (DEBT-002): free a reaped task's kernel stack
+// ============================================================
+
+// The stack was mapped (g_vmm.map, NOT direct-map) at [kernel_stack,
+// kernel_stack_top) with a guard page below. Recover phys via translate
+// (4K pages -- GOTCHA#13: translate cannot handle huge, but stacks are 4K),
+// unmap each page, then free the physical block. The guard+stack vaddr range
+// is not recycled (the vaddr allocator is linear; address space is large).
+//
+// Safe ONLY when the task is not running on this stack -- the caller is the
+// reaper (waitpid on the parent). exit_current() cannot use this directly
+// (it runs on its own stack); that path uses deferred free (Q4e-3).
+static void free_kernel_stack(Task* task) {
+    if (task->kernel_stack == 0) {
+        return;
+    }
+    uint64_t stack_phys = cinux::mm::g_vmm.translate(task->kernel_stack);
+    for (uint64_t v = task->kernel_stack; v < task->kernel_stack_top; v += cinux::arch::PAGE_SIZE) {
+        cinux::mm::g_vmm.unmap(v);
+    }
+    if (stack_phys != 0) {
+        uint64_t count = (task->kernel_stack_top - task->kernel_stack) / cinux::arch::PAGE_SIZE;
+        cinux::mm::g_pmm.free_pages(stack_phys, count);
+    }
+    task->kernel_stack = 0;
+}
+
+// ============================================================
 // waitpid implementation
 // ============================================================
 
@@ -176,6 +205,11 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
             target->parent = nullptr;
             cinux::lib::kprintf("[WAITPID] reaped child pid=%d exit_status=%d by parent pid=%d\n",
                                 target->pid, target->exit_status, parent->pid);
+            // Q4e-2 (DEBT-002): the child is Zombie (not running), so freeing
+            // its kernel stack from the parent's context is safe. delete ->
+            // release_resources drops sig_actions/cwd/fd_table + the AS ref.
+            free_kernel_stack(target);
+            delete target;
             return WaitpidResult::Ok;
         }
 
