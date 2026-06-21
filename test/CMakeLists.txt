@@ -112,6 +112,13 @@ target_include_directories(test_cinux_base_types PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/Cinux-Base/include
 )
 
+# F-QA Q4a-1: RefCount (saturating atomic refcount, Linux refcount_t semantics).
+# Header-only Cinux-Base type. The submodule's own test/ is never built by the
+# main repo (third_party/CMakeLists.txt does not add_subdirectory(Cinux-Base)),
+# so coverage must live here; add_cinux_test already adds the Cinux-Base include
+# path via TEST_INCLUDE_DIRS.
+add_cinux_test(refcount)
+
 # ============================================================
 # Tests with threading support
 # ============================================================
@@ -210,6 +217,7 @@ set(ALL_HOST_TESTS
     test_window_manager test_desktop test_terminal test_pipe test_sys_pipe
     test_shell_redirect test_fork_exec test_multi_terminal
     test_cinux_base_types
+    test_refcount
 )
 
 add_custom_target(test_host
