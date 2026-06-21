@@ -65,34 +65,14 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font) {
     g_screen = &screen;
     g_font   = &font;
 
-    // Initialise the window manager with the screen canvas and font
+    // Initialise the window manager. The desktop itself is NOT drawn here --
+    // gui_tick_callback composites it (WindowManager::composite) on the first
+    // PIT tick, so the framebuffer stays untouched until the real desktop
+    // (dark teal background + Shell/Calculator icons) is ready.
     WindowManager::instance().init(&screen, &font);
 
-    // Draw the GUI demo: dark background + random-coloured rectangles + title
-    screen.clear(0x001A1A2E);
-    uint32_t rng_state = 12345;
-    auto     lcg_next  = [&rng_state]() {
-        rng_state = rng_state * 1103515245u + 12345u;
-        return (rng_state >> 16) & 0x7FFF;
-    };
-    for (int i = 0; i < 10; i++) {
-        uint32_t x     = lcg_next() % (screen.width() - 100);
-        uint32_t y     = lcg_next() % (screen.height() - 60);
-        uint32_t w     = 40 + (lcg_next() % 120);
-        uint32_t h     = 30 + (lcg_next() % 80);
-        uint32_t r     = 0x40 + (lcg_next() % 0xC0);
-        uint32_t g     = 0x40 + (lcg_next() % 0xC0);
-        uint32_t b     = 0x40 + (lcg_next() % 0xC0);
-        uint32_t color = (r << 16) | (g << 8) | b;
-        screen.draw_rect(x, y, w, h, color);
-    }
-    const char* title  = "Cinux GUI";
-    uint32_t    text_w = 9 * font.width();
-    uint32_t    text_x = (screen.width() - text_w) / 2;
-    screen.draw_text(text_x, 10, title, 0x00FFFFFF, font);
-    screen.flip();
-
-    cinux::lib::kprintf("[GUI] Demo rendered to framebuffer.\n");
+    cinux::lib::kprintf(
+        "[GUI] GUI subsystem initialised (desktop composited on first PIT tick).\n");
 }
 
 // ============================================================
@@ -278,6 +258,11 @@ namespace {
  * @param ctx  Unused context pointer
  */
 void gui_tick_callback(void* /*ctx*/) {
+    static bool first = true;
+    if (first) {
+        first = false;
+        cinux::lib::kprintf("[GUI] first composite tick (PIT->gui_tick_callback OK)\n");
+    }
     using cinux::drivers::Mouse;
     using cinux::gui::Event;
     using cinux::gui::EventType;
@@ -365,6 +350,13 @@ void gui_start() {
     wm.add_desktop_icon(calc_icon);
 
     cinux::lib::kprintf("[GUI] Desktop icons registered: Shell, Calculator.\n");
+
+    // Composite the desktop once now (icons registered) so it shows without
+    // waiting for the first PIT tick. APIC routing only delivers 1 PIT tick on
+    // the production GUI path (pre-existing F4 issue, masked by the old demo);
+    // this workaround paints the desktop immediately while the tick problem is
+    // diagnosed. The tick callback keeps it live once PIT ticks resume.
+    wm.composite();
 
     // Register the GUI tick callback for event processing + compositing
     cinux::drivers::PIT::set_tick_callback(gui_tick_callback, nullptr);
