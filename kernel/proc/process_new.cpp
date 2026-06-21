@@ -21,6 +21,7 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signal.hpp"  // Q4e-2: signal_unregister_task on reap
 
 namespace cinux::proc {
 
@@ -208,6 +209,11 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
             // Q4e-2 (DEBT-002): the child is Zombie (not running), so freeing
             // its kernel stack from the parent's context is safe. delete ->
             // release_resources drops sig_actions/cwd/fd_table + the AS ref.
+            // Q4e-2: detach from the pid registry before freeing (sys_exit left
+            // the Zombie registered for sys_kill lookup; reap deletes it).
+            // exit_current already unregisters; this mirrors it for the
+            // Zombie->reap path so the registry never holds a freed Task*.
+            signal_unregister_task(target);
             free_kernel_stack(target);
             delete target;
             return WaitpidResult::Ok;
