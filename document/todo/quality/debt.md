@@ -32,14 +32,14 @@
 | D6 | 用户 / 内核边界 | ✅ 已审 2026-06-21 | DEBT-019(用户指针非 copy)+ DEBT-012(phnum)；见 `reports/2026-06-21-d5-d6-audit.md` |
 | D7 | 错误处理 / 崩溃韧性 | ✅ 已审 2026-06-21 | FO 清洁(panic 仅不变量/backtrace/memstats 全 pass)；见 `reports/2026-06-21-d7-d11-audit.md` |
 | D8 | 测试覆盖盲区 | ⏳ 待审 | user-mode PF / SMP 迁移 / 设备路径 |
-| D9 | 静态 / 动态检查工具 | ⏳ 待审 | clang-tidy/UBSAN/lockdep/mini-KASAN/kmemleak |
+| D9 | 静态 / 动态检查工具 | ✅ 已审 2026-06-21 | F-INFRA/F4-M5/Q1 清洁(UBSAN/lockdep/host-ASAN/static_assert 全 pass)；见 `reports/2026-06-21-d14-d9-audit.md` |
 | D10 | 文档 / 可追溯性 | ⏳ 待审 | TODO/workaround/GOTCHA/notes/PLAN 同步 |
 | D11 | 模块组织 / 可维护性 | ✅ 已审 2026-06-21 | 源全 <500(max 496)+ check_line_limits 排除 test/；见 `reports/2026-06-21-d7-d11-audit.md` |
 | D12 | 发布 / 回归 / 变更管理 | ⏳ 待审 | 一批一 commit 一验证/回滚点/残余风险 |
 | D13 | 资源配额 / 非堆边界 | ✅ 已审 2026-06-21 | DEBT-018(kMaxCpus 不一致)；见 `reports/2026-06-21-d4-d13-audit.md` |
-| D14 | 整数溢出 / 边界 | ⏳ 待审 | size 算术/用户可控长度溢出/数组索引（F-QA Q2 新增） |
+| D14 | 整数溢出 / 边界 | ✅ 已审 2026-06-21 | DEBT-020(ELF 字段算术)+ DEBT-012(phnum)；见 `reports/2026-06-21-d14-d9-audit.md` |
 
-**进度**：8/14 已审（D2/D3/D4/D5/D6/D7/D11/D13）。剩余 6 维度（D1/D8/D9/D10/D12/D14）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
+**进度**：10/14 已审（D2/D3/D4/D5/D6/D7/D9/D11/D13/D14）。**交接重点完成**（D4/D5/D6/D7/D11+D13/D14）。剩余 4 维度（D1/D8/D10/D12，非交接重点）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
 
 ---
 
@@ -196,6 +196,14 @@
 - **根因**: (1) validate 不查映射存在/权限/长度(多字节结构跨页未映射→PF,kernel-mode 解引用容错零页);(2) 多核 TOCTOU(user 另核改映射 + kernel 解引用 race);(3) 不对齐 Linux copy 模型。当前单核 + 用户态串行不触发;多核用户态 + SMP 理论风险。
 - **修复建议**: 未来多核用户态时引入 copy_to_from_user(access_ok + 长度 + 页 copy),或至少 validate 查 VMA + 长度。当前 PF 兜底可接受(单核)。
 - **关联 GOTCHA**: #11(PF 硬门控 user-mode 判定)
+
+### DEBT-020 execve ELF 字段算术无溢出检查（恶意/损坏 ELF → VMA 映射错乱）
+- **维度**: 整数溢出/边界(D14)　**优先级**: P3　**状态**: 🆕 登记待办（F-QA Q3-4 审计）　**核验**: ✅ 读码坐实
+- **位置**: `kernel/proc/execve.cpp:218`(seg_end = p_vaddr + p_memsz + PAGE_SIZE-1) / `:256`(p_offset + seg_offset) / `:189`(phnum * sizeof,DEBT-012)
+- **现象**: ELF phdr 字段(p_vaddr/p_memsz/p_offset/p_filesz)参与算术无溢出检查。`validate_elf_header`(L181)只校验 ehdr,不校验 phdr 算术。p_vaddr + p_memsz 若 wrap(UINT64_MAX 附近)→ seg_end 错乱 → VMA/页表映射错乱(L267 map)。
+- **根因**: ELF 字段用户可控(损坏/恶意 ELF)。当前 init/shell 是仓库编译 ELF(字段合法,不触发);未来 execve 用户自定义 ELF + 恶意构造触发。read 兜底部分(ReadFailed)但 seg_end 用于 VMA 映射(L267 map)。
+- **修复建议**: validate 扩展 phdr:p_vaddr + p_memsz 不溢出 + 在用户地址空间范围(USER_BRK_MAX 等)+ p_offset + p_filesz ≤ inode->size。拒绝越界/wrap phdr。
+- **关联**: DEBT-012(phnum 无上限,同 validate 漏)
 
 ### DEBT-011 slab 双重释放检测为启发式（word[1]==poison），可伪造
 - **维度**: 内存安全　**优先级**: P3　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
