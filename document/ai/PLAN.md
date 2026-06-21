@@ -141,6 +141,19 @@
 > **production 零影响**：push_batch production chunk 守护安全；FDTable production 经 release/close 释放（析构幂等 no-op）；sys_pipe File 归 fd_table 不手动 delete。**残留异味**（登记非修）：`test_shell_redirect` `~PipeRedirect` 的 `delete stdin_file` 侥幸安全（构造局部变量 shadow 同名私有成员，成员恒 nullptr，delete nullptr no-op；消除 shadow 即 double-free）。
 > **验证**：host ASAN 全绿（Debug + Release+ASAN+UBSAN+FORTIFY CI 对等，全量 `make test_host` 100%）+ `run-kernel-test` 875/0 + 零警告。**ci.yml host-tests flip `-DCINUX_HOST_ASAN=ON` 硬门禁**（Q1-5 留的开关兑现）。详见 `document/notes/2026-06-20-f-qa-debt017-host-asan-fix.md`。下个：**Q2 deterministic 审计方法论**。
 
+### ✅ Q2 完成（deterministic 审计方法论）— 2026-06-21，feat/f-qa-q2
+
+> 把 `audit-guide.md` 从叙述式「看什么/搜索/红线」改造为 per-维度 **deterministic 四段式**（A 锚点 / B 不变点 / C 门槛 / D 闭环），让任意两轮审计可比较（根治发散）。2 批：
+
+| 批 | 范围 | Commit |
+|----|------|--------|
+| Q2-1 | 范式骨架(§0/§1+§1.1 模板) + D4 完整样板 + D13/D14 新增(真实符号) | 37a1332 |
+| Q2-2 | D1-D3/D5-D12 四段式(D5/D8 标「先读码后锚点」例外) | (本次) |
+
+> **范式**:rg 命令放 `sh` 代码块(避免表格 `|` 冲突),命中表只记锚点+命中数(机器数,非 yes/no);不变点逐条 pass/fail/n/a + file:line;非债须反例;DEBT 去重(已登记只补未覆盖不变点);锚点可回归(下轮 diff>0 须说明)。D5/D8 例外(有效 rg 需先读调用链,GOTCHA#25/26)。
+> **关键校正**:D13/D14 锚点先 rg 校准真实符号(`FDTable::alloc`/`PidAllocator::alloc`/`g_pmm.alloc_page`/`e_phnum`/`static_cast<size_t>`),非前轮虚构的 `alloc_fd`/`request_irq`(零命中)。D4 样板 5 锚点 + D13/D14 全部 rg 可跑命中>0。顺手坐实 `kMaxCpus` 不一致(acpi `size_t=16` vs percpu `uint32_t=8`,类型也不同)→ D13 Q3 首审线索。
+> **验证**:文档-only(R0);14 维度齐全(D1-D14)+ 叙述式残留 0 + 抽样锚点全可跑。debt.md 审计计划 12→14 维度。详见 `document/notes/2026-06-21-f-qa-q2-deterministic-audit.md`。下个:**Q3 系统审计**(用 Q2 方法论审 D4/D5/D6/D7/D11 + D13/D14)。
+
 ### 里程碑骨架
 
 | M | 名称 | 批概要 | 风险 |
