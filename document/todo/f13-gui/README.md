@@ -1,6 +1,6 @@
 # F13: GUI 分离 → visor 跨平台 GUI 库（DRAFT）
 
-> ⚠️ **DRAFT / 草稿（2026-06-21）**。方向可能调整。来源:11-agent workflow 调研 + 3-lens 对抗验证 + 用户 4 决策。
+> ⚠️ **DRAFT v2 / 草稿（2026-06-21）**。方向可能调整。来源:11-agent workflow 调研 + 3-lens 对抗验证 + 用户 4 决策 + **外部 AI 审查(`review.md`)v2 采纳**。
 
 ## 方向转变（取代 2026-05 旧草案）
 
@@ -8,7 +8,7 @@ visor 不是「Cinux 的 GUI」,而是一个**跨平台 GUI 库**:同一份 core
 
 用户 4 决策:① 完整控件工具箱（Windows/macOS 级）② Cinux 桌面先 ③ MCU 全规模含 STM32F1 ④ GPU 可插拔先软件。
 
-核心机制:**Host ABI 函数指针表（visor_host.h）是唯一硬边界**——换宿主（内核态/用户态/MCU/host）只换 5 张表的填充。这就是「甚至不感知是否用户态」。
+核心机制:**Host ABI 函数指针表（visor_host.h）是唯一硬边界**——**核心表**(Display/Input/Time/Memory)+ **Desktop extension**(spawn/rpc,MCU 永远 NULL),换宿主只换表填充。这就是「甚至不感知是否用户态」。**v2(审查)关键调整**:Display 改 `flush` 模型(非 begin_frame→pointer)、GPU 改 texture compositor 优先、**PIT-IRQ-composite 反转提前**到绘制抽象前。
 
 诚实预期:STM32F1 与桌面控件库是两个 profile ceiling,visor 短期承诺「比现在好看的 Cinux 桌面 + MCU 仪表盘」,完整 macOS/Windows 级是 L4b 长弧。
 
@@ -30,4 +30,4 @@ visor 不是「Cinux 的 GUI」,而是一个**跨平台 GUI 库**:同一份 core
 
 ## 起步
 
-第一步（不依赖 visor 仓库,现在就能做）:**spawn 公共化前置重构**（合并 [init.cpp](../../../kernel/proc/init.cpp) / [gui_init.cpp](../../../kernel/gui/gui_init.cpp) shell 启动）。详见 [visor-02 §1](visor-02-refactor-and-separation.md)。
+**spawn 公共化前置** ✅ 已完成(commit `82e9023`)。**下一步(不依赖 visor 仓库):PIT-IRQ-composite 反转**(worker 线程 pump 接管,行为不变去 IRQ composite——最危险可靠性债,先于绘制抽象)。详见 [visor-02 §2](visor-02-refactor-and-separation.md)。

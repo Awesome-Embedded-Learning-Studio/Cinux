@@ -13,7 +13,7 @@
 >
 > **文档**（全 DRAFT）:[todo/f13-gui/README.md](../todo/f13-gui/README.md) + [visor-01-presets.md](../todo/f13-gui/visor-01-presets.md)（profile/宏/约束/ABI 骨架）+ [visor-02-refactor-and-separation.md](../todo/f13-gui/visor-02-refactor-and-separation.md)（重构执行计划）+ notes [research](../notes/2026-06-21-f13-visor-research.md) / [architecture](../notes/2026-06-21-f13-visor-architecture.md) / [roadmap](../notes/2026-06-21-f13-visor-roadmap.md)。
 >
-> **第一步**（不依赖 visor 仓库,Cinux 仓库内,独立 PR）:**spawn 公共化前置重构**——合并 `init.cpp` / `gui_init.cpp` shell 启动成单条 fork→execve 公共路径（两者已重复）+ 处理 GOTCHA#22 tid 污染 + F2-M5 Stack VMA 三处合一。这是 visor 一切的前提,单独成批 + `timeout 40` QEMU 验证。visor 仓库主体（M0-M9）由用户在独立仓库开发,F13 在 Cinux 侧收窄为「L7 host adapter + 三个前置重构」。**待用户确认方向后正式标 🔄 启动**。
+> **第一步 spawn 公共化前置** ✅ 已完成(commit `82e9023`,提取 `launch_user_program`,887/0 + 冒烟)。**下一步(不依赖 visor 仓库):PIT-IRQ-composite 反转**(worker 线程 pump 接管,行为不变去 IRQ composite;顺修「APIC 只送 1 tick」可靠性债)——最危险可靠性债,先于绘制抽象。**v2(2026-06-21)**:吸收外部审查 `review.md`——L0 Host ABI 收缩(核心表+Desktop extension)、Display 改 flush 模型、GPU 改 texture compositor 优先、PIT 反转提前、Region 一等 + dirty lowering。visor 仓库主体(M0-M9)用户独立开发,F13 在 Cinux 侧收窄为「L7 host adapter + 前置重构」。
 > **F1-M3 = DMA 基础设施 ✅ 完成（2026-06-16）**。
 > **F1-M4 = 块设备抽象 ✅ 完成（2026-06-16）**。
 > **F5-M1 = AHCI DMA 迁移 ✅ 完成（2026-06-16）**。
