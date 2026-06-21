@@ -30,16 +30,16 @@
 | D4 | 进程 / 线程生命周期 | ✅ 已审 2026-06-21 | DEBT-002 坐实(exit 无 cleanup)；见 `reports/2026-06-21-d4-d13-audit.md` |
 | D5 | 调度 / 迁移 / CPU 上下文 | ✅ 已审 2026-06-21 | F4 SMP 清洁(GOTCHA#23/25/26 全 pass)；见 `reports/2026-06-21-d5-d6-audit.md` |
 | D6 | 用户 / 内核边界 | ✅ 已审 2026-06-21 | DEBT-019(用户指针非 copy)+ DEBT-012(phnum)；见 `reports/2026-06-21-d5-d6-audit.md` |
-| D7 | 错误处理 / 崩溃韧性 | ⏳ 待审 | panic/OOM/栈/递归/诊断 |
+| D7 | 错误处理 / 崩溃韧性 | ✅ 已审 2026-06-21 | FO 清洁(panic 仅不变量/backtrace/memstats 全 pass)；见 `reports/2026-06-21-d7-d11-audit.md` |
 | D8 | 测试覆盖盲区 | ⏳ 待审 | user-mode PF / SMP 迁移 / 设备路径 |
 | D9 | 静态 / 动态检查工具 | ⏳ 待审 | clang-tidy/UBSAN/lockdep/mini-KASAN/kmemleak |
 | D10 | 文档 / 可追溯性 | ⏳ 待审 | TODO/workaround/GOTCHA/notes/PLAN 同步 |
-| D11 | 模块组织 / 可维护性 | ⏳ 待审 | 500 行软上限/重复实现/头依赖 |
+| D11 | 模块组织 / 可维护性 | ✅ 已审 2026-06-21 | 源全 <500(max 496)+ check_line_limits 排除 test/；见 `reports/2026-06-21-d7-d11-audit.md` |
 | D12 | 发布 / 回归 / 变更管理 | ⏳ 待审 | 一批一 commit 一验证/回滚点/残余风险 |
 | D13 | 资源配额 / 非堆边界 | ✅ 已审 2026-06-21 | DEBT-018(kMaxCpus 不一致)；见 `reports/2026-06-21-d4-d13-audit.md` |
 | D14 | 整数溢出 / 边界 | ⏳ 待审 | size 算术/用户可控长度溢出/数组索引（F-QA Q2 新增） |
 
-**进度**：6/14 已审（D2/D3/D4/D5/D6/D13）。剩余 8 维度（D1/D7-D12/D14）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
+**进度**：8/14 已审（D2/D3/D4/D5/D6/D7/D11/D13）。剩余 6 维度（D1/D8/D9/D10/D12/D14）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
 
 ---
 
