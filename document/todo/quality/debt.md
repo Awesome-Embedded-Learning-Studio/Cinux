@@ -28,8 +28,8 @@
 | D2 | 内存生命周期（悬垂/UAF/buffer/所有权） | ✅ 已审 2026-06-20 | 见 `reports/2026-06-20-memory-smp-audit.md` |
 | D3 | SMP / 并发安全（F4 多核后） | ✅ 已审 2026-06-20 | 见 `reports/2026-06-20-memory-smp-audit.md` |
 | D4 | 进程 / 线程生命周期 | ✅ 已审 2026-06-21 | DEBT-002 坐实(exit 无 cleanup)；见 `reports/2026-06-21-d4-d13-audit.md` |
-| D5 | 调度 / 迁移 / CPU 上下文 | ⏳ 待审 | ctx switch / GS / TLS / FPU / runqueue |
-| D6 | 用户 / 内核边界 | ⏳ 待审 | user pointer / VMA 权限 / syscall ABI / signal frame |
+| D5 | 调度 / 迁移 / CPU 上下文 | ✅ 已审 2026-06-21 | F4 SMP 清洁(GOTCHA#23/25/26 全 pass)；见 `reports/2026-06-21-d5-d6-audit.md` |
+| D6 | 用户 / 内核边界 | ✅ 已审 2026-06-21 | DEBT-019(用户指针非 copy)+ DEBT-012(phnum)；见 `reports/2026-06-21-d5-d6-audit.md` |
 | D7 | 错误处理 / 崩溃韧性 | ⏳ 待审 | panic/OOM/栈/递归/诊断 |
 | D8 | 测试覆盖盲区 | ⏳ 待审 | user-mode PF / SMP 迁移 / 设备路径 |
 | D9 | 静态 / 动态检查工具 | ⏳ 待审 | clang-tidy/UBSAN/lockdep/mini-KASAN/kmemleak |
@@ -39,7 +39,7 @@
 | D13 | 资源配额 / 非堆边界 | ✅ 已审 2026-06-21 | DEBT-018(kMaxCpus 不一致)；见 `reports/2026-06-21-d4-d13-audit.md` |
 | D14 | 整数溢出 / 边界 | ⏳ 待审 | size 算术/用户可控长度溢出/数组索引（F-QA Q2 新增） |
 
-**进度**：4/14 已审（D2/D3/D4/D13）。剩余 10 维度（D1/D5-D12/D14）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
+**进度**：6/14 已审（D2/D3/D4/D5/D6/D13）。剩余 8 维度（D1/D7-D12/D14）按用户「每批 2 个、慢慢来」节奏推进。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪（F-QA Q2），见 `document/todo/quality/audit-guide.md`。
 
 ---
 
@@ -188,6 +188,14 @@
 ---
 
 ## 🟢 Low
+
+### DEBT-019 用户指针 validate 后直接解引用（非 copy_to_from_user，PF 兜底）
+- **维度**: 用户/内核边界(D6)　**优先级**: P3　**状态**: 🆕 登记待办（F-QA Q3-2 审计）　**核验**: ✅ grep 坐实（零 copy_from_user/copy_to_user）
+- **位置**: `kernel/syscall/path_util.hpp:26`(`validate_user_ptr` 只查 canonical address) / 各 syscall(sys_stat/sys_pipe/sys_creat 等)validate 后直接解引用用户指针
+- **现象**: CinuxOS 用户边界用 `validate_user_ptr`(canonical address 检查)+ 直接解引用,PF handler(F2-M5 硬门控:user PF 无 VMA→segfault)兜底。**非 Linux copy_to_from_user + access_ok 模型**。
+- **根因**: (1) validate 不查映射存在/权限/长度(多字节结构跨页未映射→PF,kernel-mode 解引用容错零页);(2) 多核 TOCTOU(user 另核改映射 + kernel 解引用 race);(3) 不对齐 Linux copy 模型。当前单核 + 用户态串行不触发;多核用户态 + SMP 理论风险。
+- **修复建议**: 未来多核用户态时引入 copy_to_from_user(access_ok + 长度 + 页 copy),或至少 validate 查 VMA + 长度。当前 PF 兜底可接受(单核)。
+- **关联 GOTCHA**: #11(PF 硬门控 user-mode 判定)
 
 ### DEBT-011 slab 双重释放检测为启发式（word[1]==poison），可伪造
 - **维度**: 内存安全　**优先级**: P3　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
