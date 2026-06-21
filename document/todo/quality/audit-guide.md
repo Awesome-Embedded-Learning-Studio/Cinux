@@ -10,23 +10,37 @@
 - **每条债务保留轨迹**：闭环后在 `debt.md` 标 ✅，不删除。
 - **每轮审计一篇报告**：报告放 `reports/<date>-<dimensions>-audit.md`，记录范围、方法、发现和非债确认；`debt.md` 只保留可排期 backlog。
 - **按风险域读代码**：不要只搜 TODO。很多致命问题没有 TODO。
+- **deterministic 锚点优先（F-QA Q2）**：每个维度先跑固定 rg 锚点表、命中数进表，**跑完才读码**；不变点逐条 pass/fail/n/a 带 file:line，非「≥5 非债」凑数。例外：D5/D8 先读码后锚点（有效 rg 需先读调用链）。
+- **去重机械化**：DEBT 已在某维度登记的，新维度只允许新增该 DEBT 未覆盖的不变点，不重复登记主因。
+- **锚点可回归**：下一轮重跑锚点命中数与上轮 diff>0 必须在报告显式说明（防「代码已变锚点表未变」的伪可复现）。
 
-## 1. 标准审计流程
+## 1. 标准审计流程（deterministic，F-QA Q2）
 
-1. 选一个维度，读本指南对应章节。
-2. 用 `rg` 建索引：owner、全局状态、锁、用户边界、error path。
-3. 读真实代码，不只看声明。
+1. 选一个维度，读本指南对应章节（四段式：A 锚点 / B 不变点 / C 门槛 / D 闭环）。
+2. **A 锚点表**：跑该维度固定 rg 命令，命中数进表（机器数）。**跑完才读码**。
+3. 读真实代码（不只看声明），按 **B 不变点** 逐条判定 pass/fail/n/a，带 file:line 证据。
 4. 写临时证据：位置、路径、触发条件、为什么测试没覆盖。
-5. 写 `reports/<date>-<dimensions>-audit.md`。
-6. 登记 `DEBT-NNN`：维度、优先级、状态、核验级别、修复建议、关联 GOTCHA。
-7. 更新 `debt.md` 与 `README.md` 的审计维度计划进度。
+5. **C 证据门槛**：锚点全跑、不变点逐条判定、非债确认有反例、与已审维度去重。
+6. 写 `reports/<date>-<dimensions>-audit.md`（含锚点命中表 + 上轮 diff 说明）。
+7. **D 闭环**：登记 `DEBT-NNN`；更新 `debt.md` 审计维度计划进度。
+
+### 1.1 维度模板（每维度四段，D4 为完整样板）
+
+每维度四段，**rg 命令放 `sh` 代码块、命中表只记锚点描述 + 命中数**（避免表格列被 rg 的 `|` 破坏）：
+
+- **A. 锚点（先 rg，跑完才读码）**：一段 `sh` 代码块列编号锚点 `a1, a2, …`，每条一行 `rg …`；紧跟命中表（列：`#` / 锚点 / 本轮命中 / 上轮 diff）。命中数是机器数，进表才算跑过。
+- **B. 必查不变点**：逐条 `- [ ] I1: … — 证据: path:line`，每条判定 pass / fail / n/a。
+- **C. 证据门槛**（done 判据）：锚点全跑命中进表；不变点逐条判定（n/a 须说明）；非债确认须 ≥1 反例不变点；与已审维度去重。
+- **D. 闭环动作**：新发现 → `DEBT-NNN`；写 `reports/<date>-<dims>-audit.md`（含命中表 + 上轮 diff）；下轮重跑 A，diff>0 须说明。
+
+> 例外：D5（调度/迁移）、D8（测试覆盖）保留「先读码后锚点」——有效 rg 需先读调用链（GOTCHA#25/26 迁移路径），A 段标注「先读码」。
 
 核验级别：
 - ✅ 坐实：读代码 + grep/调用链足以证明。
 - ⚠️ 待压测：代码可疑，但需要构造并发/压力复现。
 - ❓ 假设：仅作为调查线索，不能排修复优先级。
 
-## 2. 12 个审计维度
+## 2. 14 个审计维度
 
 ### D1 架构不变量
 
@@ -87,24 +101,46 @@ rg -n "cli|sti|interrupt|irq|eoi|IPI|smp"
 - wait flag 普通 bool 决定是否唤醒。
 - 持锁进入 `schedule()`。
 
-### D4 进程 / 线程生命周期
+### D4 进程 / 线程生命周期（deterministic 范式样板）
 
-看什么：
-- fork/clone/exec/exit/wait/signal 是否形成完整状态机。
-- Zombie/Dead 谁设置，谁回收。
-- 线程组共享对象是否最后引用释放。
-- parent/children/sibling 链表是否只被 owner 访问。
+**A. 锚点（先 rg，跑完才读码）**
 
-常用搜索：
 ```sh
-rg -n "TaskState|Zombie|Dead|exit|waitpid|children|parent|thread_group|tgid|clone|fork|execve"
-rg -n "sig_actions|fd_table|cwd|addr_space|kernel_stack"
+# a1 状态机
+rg -n 'TaskState::' kernel -g '!*test*'
+# a2 退出/释放
+rg -n 'exit_current|release_resources|sys_exit' kernel -g '!*test*'
+# a3 reap/Zombie
+rg -n 'waitpid|Zombie|reparent' kernel -g '!*test*'
+# a4 共享对象 refcount
+rg -n 'sig_actions|fd_table|SharedCwd|acquire\(|release\(' kernel -g '!*test*'
+# a5 tid/pid 分配
+rg -n 'next_tid|PidAllocator|g_pid_alloc' kernel -g '!*test*'
 ```
 
-红线：
-- “暂时不释放”掩盖缺少 refcount。
-- exit 与 signal/killpg 并发访问 Task。
-- waitpid 判断依赖跨 CPU stale 状态。
+| # | 锚点 | 本轮命中 | 上轮 diff |
+|---|------|---------|-----------|
+| a1 | 状态机 | _ | _ |
+| a2 | 退出/释放 | _ | _ |
+| a3 | reap/Zombie | _ | _ |
+| a4 | 共享对象 refcount | _ | _ |
+| a5 | tid/pid 分配 | _ | _ |
+
+**B. 必查不变点（逐条 pass/fail/n/a + file:line）**
+
+- [ ] I1: 每个 Task 有明确 owner 或 refcount；exit 路径释放 sig_actions/fd_table/cwd/addr_space/核栈。
+- [ ] I2: Zombie→reap：exit 设 Zombie，waitpid/parent 回收，无 Task 泄漏。
+- [ ] I3: 线程组共享对象（CLONE_SIGHAND/FILES/FS）最后引用（group_leader exit）才释放。
+- [ ] I4: children/parent/sibling 链表只被 owner task 访问（跨核裸遍历归 D3）。
+- [ ] I5: next_tid/PidAllocator 跨测试复位、跨核无污染（GOTCHA#22 同类）。
+
+**C. 证据门槛**
+
+- 5 锚点全跑命中进表；5 不变点逐条判定；非债须反例；与 D2（内存）/D3（并发）去重（状态机/线程组/reap 是 D4 特有）。
+
+**D. 闭环**
+
+- 新发现 → DEBT-NNN（D4）。报告 `reports/<date>-d4-audit.md`。下轮 a1-a5 diff>0 说明。
 
 ### D5 调度 / 迁移 / CPU 上下文
 
@@ -257,6 +293,74 @@ git --no-pager diff --stat
 - 红测试提交。
 - 一个 commit 混入多个无关风险域。
 - 文档声称完成但 commit/测试为空。
+
+### D13 资源配额 / 非堆边界
+
+**A. 锚点（先 rg，跑完才读码）**
+
+```sh
+# a1 上限常量
+rg -n 'PID_MAX|FD_TABLE_SIZE|MAX_WINDOWS|kMaxCpus|PIPE_BUFFER_SIZE|PATH_MAX|USER_BRK_MAX|MOUNT_PATH_MAX' kernel -g '*.hpp'
+# a2 分配点
+rg -n 'g_pmm\.alloc_page|kmalloc|cache_alloc|FDTable::alloc|PidAllocator::alloc' kernel -g '!*test*'
+# a3 上限检查
+rg -n 'full\(\)|>= .*MAX|< .*MAX|>= .*_SIZE' kernel -g '!*test*'
+```
+
+| # | 锚点 | 本轮命中 | 上轮 diff |
+|---|------|---------|-----------|
+| a1 | 上限常量 | _ | _ |
+| a2 | 分配点 | _ | _ |
+| a3 | 上限检查 | _ | _ |
+
+**B. 必查不变点（逐条 pass/fail/n/a + file:line）**
+
+- [ ] I1: 每个分配点（fd/pid/window/page）有上限检查（满则拒，非无界）。
+- [ ] I2: 上限常量全局一致（同名不同值即债，如 `kMaxCpus`）。
+- [ ] I3: 大对象/缓冲不上内核栈（16KB 栈，参考 DEBT-015）。
+- [ ] I4: 用户资源配额（fd/内存/进程数）有封顶，防 DoS。
+
+**C. 证据门槛**
+
+- 3 锚点全跑；上限常量逐个列值进表（查不一致）；分配点逐个确认有上限。
+
+**D. 闭环**
+
+- DEBT-NNN（D13）。⚠️ 已知线索：`kMaxCpus` percpu.hpp=8 vs acpi.hpp=16（Q3 首审候选）。
+
+### D14 整数溢出 / 边界
+
+**A. 锚点（先 rg，跑完才读码）**
+
+```sh
+# a1 size 算术
+rg -n 'static_cast<size_t>|static_cast<uint64_t>|count - |offset \+ |size \*' kernel -g '!*test*'
+# a2 用户可控长度（ELF 段）
+rg -n 'e_phnum|p_memsz|p_filesz' kernel -g '!*test*'
+# a3 数组索引
+rg -n '\[[a-z_]+\]' kernel -g '!*test*'
+```
+
+| # | 锚点 | 本轮命中 | 上轮 diff |
+|---|------|---------|-----------|
+| a1 | size 算术 | _ | _ |
+| a2 | 用户可控长度 | _ | _ |
+| a3 | 数组索引 | _ | _ |
+
+**B. 必查不变点（逐条 pass/fail/n/a + file:line）**
+
+- [ ] I1: 用户可控 count 参与乘法有溢出检查（如 `count * size` 上限）。
+- [ ] I2: 长度/偏移/段数有上限（DEBT-012 `e_phnum` 无上限 → 3.6MB 分配）。
+- [ ] I3: size_t/uint64 转换无损（无窄化溢出）。
+- [ ] I4: 数组索引有界检查（用户/计算值不裸索引）。
+
+**C. 证据门槛**
+
+- 3 锚点全跑；用户可控整数逐个确认上限/溢出检查；窄化转换逐个确认安全。
+
+**D. 闭环**
+
+- DEBT-NNN（D14）。已知：DEBT-012（e_phnum 无上限）归此维度。
 
 ## 3. 债务优先级判定
 
