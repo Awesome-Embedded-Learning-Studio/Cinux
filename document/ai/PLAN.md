@@ -172,6 +172,41 @@
 
 > **Q3 总结**：新增 3 债（DEBT-018/019/020）+ DEBT-002 精确坐实（P1，Q4 头号目标）。6 维度 pass（F4/FO/F-INFRA/架构清洁）证实前期里程碑扎实。deterministic 方法论首次全量实战（锚点 rg → 读码 → pass/fail 证据 → 登记），可复现。**喂 Q4**：修 DEBT-002 exit cleanup + DEBT-006 AddressSpace refcount（最险，单独 propose）→ DEBT-001/003/004/005。
 
+### ✅ Q4a 完成（RefCount + UserPtr 类型先行）— 2026-06-21，feat/f-qa-q4
+
+> Q4 头号高危债收敛里程碑第一批。类型不变量为 Q4b-e 消费者（SharedCwd/FDTable/AddressSpace/Task）铺路，**纯铺路不碰 fork/execve/PF/validate_user_ptr**。propose 走三重验证后动手（spike + 联网核验 Linux refcount_t + 7-lens 对抗审查）。分支 `feat/f-qa-q4`（从干净 main `d708e95`）。详见 `document/notes/2026-06-21-f-qa-q4a-types.md`。
+
+| 批 | 范围 | Commit |
+|----|------|--------|
+| 批1 | `refcount.hpp`（Cinux-Base 子模块，`__atomic_*` 饱和语义对齐 Linux refcount_t）+ 主仓 bump + `test/unit/test_refcount.cpp`（10 单测） | 子模块 `e5f6e10` + 主仓 `f8ce80c` |
+| 批2 | `user_ptr.hpp`（kernel/lib，zero-overhead 标记对齐 sparse `__user`）+ `kernel/test/test_user_ptr.cpp`（7 单测） | 主仓 `50c83bb` |
+
+**关键决策**：① RefCount 用 `__atomic_*` 内建（**spike 否决 std::atomic**——编译过但拖 libstdc++ `__glibcxx_assert_fail` 符号，kernel `-nostdlib` 链接失败）；② 饱和 `kRefcountSaturated=INT_MIN/2 (0xC0000000)`（**联网核验订正**：离 0/INT_MAX 等距防 race 漂移，非 INT_MIN；inc RELAXED fetch-then-clamp，dec RELEASE old==1→true+acquire fence）；③ UserPtr 不内置 validate（避免 kernel/lib→syscall 反向依赖，validate 行为不变留 DEBT-019）；④ RefCount 单测放主仓库 `test/unit/`（**BLOCK 纠正**：子模块 `test/` 主仓 CI 不构建——`third_party/CMakeLists.txt` 不 add_subdirectory(Cinux-Base)）。
+**边界（refcount.hpp @file）**：服务堆对象生命周期（非物理页 mapcount DEBT-003 独立 int16）；acquire(RELAXED) 不提供字段可见性；简单生命周期无 on-zero 清理 hook（FDTable 迁移外移）。
+**验证**：test_host 全绿（refcount 10/10）+ run-kernel-test 875→**882/0**（UserPtr 7/7，ALL PASSED）+ make run GUI 桌面（[APIC]+[GUI] Desktop，无 panic）+ 全量编译零警告。
+**下一步**：Q4b DEBT-003 CoW mapcount（独立 per-page int16，**不用 RefCount**）/ Q4c DEBT-001+004 / Q4d DEBT-005 / Q4e DEBT-002+006（RefCount 首个真消费者 + 最险，碰 fork/execve/PF，单独 propose）。
+
+### ✅ Q4b-e 完成（头号高危债收敛,DEBT-001/002/003/004/005/006 全修）— 2026-06-21，feat/f-qa-q4
+
+> Q4a 类型先行后,Q4b-e 修 6 债（4-agent workflow 调研 + 用户「全连做」）。9 批 + 1 收尾 fix。详见 `document/notes/2026-06-21-f-qa-q4-debt-convergence.md`。
+
+| 批 | 债 | commit |
+|----|----|--------|
+| Q4d | DEBT-005 PidAllocator 锁 | 389987c |
+| Q4c-1 | DEBT-004 sys_exit 无条件 unblock | 7b72659 |
+| Q4c-2 | DEBT-001 registry 锁 + killpg 释锁后 send | 928b645 |
+| Q4b-1/2/3 | DEBT-003 CoW mapcount（PMM 元数据+fork/execve+cow fault+单测） | 0a4ba1c/34a4595/037a08d |
+| Q4e-1 | DEBT-006 AS RefCount（CLONEVM acquire） | 7ddda74 |
+| Q4e-2 | DEBT-002 waitpid reap delete Task+核栈+AS release | 3983fe6 |
+| Q4e-3 | DEBT-002 exit_current deferred-free（scheduler reap） | 4bb6ca4 |
+| Q4e-2 fix | reap 补 signal_unregister（防 registry 悬垂） | e6ce2f4 |
+
+**验证矩阵全绿**：run-kernel-test 887/0（+5 mapcount）+ **-smp 2** 887/0（SMP 债）+ **LOCKDEP** 887/0（锁序无误报）+ host ASAN test_host 绿 + 实机 GUI（kernel_init exit→reap 不崩）。
+**关键设计**：核栈自释放 deferred-free（Q4e-3,exit_current 在自己核栈）+ CLONE_VM AS refcount 到 0 才 delete（Q4e-1/2）+ killpg 释锁后 send（Q4c-2,防 lockdep）+ CoW mapcount 防 fork+exec UAF（Q4b）。
+**残留 follow-up**：SMP 跨核 TLB shootdown（cow free old）/ registry find TOCTOU（Q4e 修 delete 后）/ 孤儿 reparent —— 当前 -smp 2 AP idle 不触发,登记。
+
+**F-QA 里程碑收官**（Q1 防新债门禁 + Q2 审计方法论 + Q3 系统审计 + Q4 头号债收敛）。用户痛点「内存偶现挂死/四处崩溃」头号燃料（进程生命周期引用计数洼地）收敛。
+
 ### 里程碑骨架
 
 | M | 名称 | 批概要 | 风险 |
