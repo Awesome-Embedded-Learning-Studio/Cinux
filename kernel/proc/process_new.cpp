@@ -106,6 +106,17 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
 
     cinux::arch::flush_tlb(fault_vaddr & ~(cinux::arch::PAGE_SIZE - 1));
 
+    // Q4b-3 (DEBT-003): this PTE no longer maps old_phys (TLB flushed above).
+    // Drop the old page's reference; free it if it was the last mapping.
+    // Without this, any CoW-shared page leaks once one mapping writes (it
+    // would stay at mapcount >= 1 forever, never reclaimed).
+    // NOTE (SMP): correct single-core and when threads do not migrate across
+    // cores mid-CoW. Cross-core TLB shootdown before freeing is a deeper
+    // follow-up; CinuxOS APs are mostly idle today.
+    if (cinux::mm::g_pmm.mapcount_dec_and_test(old_phys)) {
+        cinux::mm::g_pmm.free_page(old_phys);
+    }
+
     cinux::lib::kprintf("[COW] resolved fault at vaddr=%p old_phys=%p new_phys=%p\n",
                         reinterpret_cast<void*>(fault_vaddr), reinterpret_cast<void*>(old_phys),
                         reinterpret_cast<void*>(new_phys));
