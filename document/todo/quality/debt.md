@@ -40,7 +40,7 @@
 | D14 | 整数溢出 / 边界 | ✅ 已审 2026-06-21 | DEBT-020(ELF 字段算术)+ DEBT-012(phnum)；见 `reports/2026-06-21-d14-d9-audit.md` |
 
 **进度**：**14/14 全审完成**（D1-D14，F-QA Q3 收官 2026-06-21）。deterministic 四段式方法论（A 锚点 / B 不变点 / C 门槛 / D 闭环）已就绪 + 全量实战（F-QA Q2），见 `document/todo/quality/audit-guide.md`。新债 DEBT-018/019/020 + DEBT-002 精确坐实 → 喂 Q4。
-**修债进展**：**Q4a✅（2026-06-21）类型先行** —— `RefCount`（Cinux-Base，`__atomic_*` 饱和对齐 Linux refcount_t）+ `UserPtr`（kernel/lib，sparse `__user` 标记）就绪，为 Q4b-e 消费者铺路（纯铺路，债尚未修）。详见 `document/notes/2026-06-21-f-qa-q4a-types.md`。
+**修债进展**：**Q4✅ 收官（2026-06-21）** —— Q4a 类型先行（RefCount/UserPtr）+ Q4b-e 修 6 债（DEBT-001/002/003/004/005/006 全 ✅,见各条）。9 批 + 1 fix（feat/f-qa-q4）。验证 run-kernel-test 887/0 + -smp 2 + LOCKDEP + host-ASAN 全绿。详见 `document/notes/2026-06-21-f-qa-q4-debt-convergence.md`。
 
 ---
 
@@ -59,8 +59,8 @@
 
 ## 🔴 Critical
 
-### DEBT-001 `g_registry_head` 全局任务注册表完全无锁 → 跨核并发崩溃
-- **维度**: 并发/SMP　**优先级**: P0　**状态**: 🆕 登记待办　**核验**: ✅ grep 坐实
+### DEBT-001 `g_registry_head` 全局任务注册表完全无锁 → 跨核并发崩溃 ✅
+- **维度**: 并发/SMP　**优先级**: P0　**状态**: ✅ 已修（F-QA Q4c-2,`928b645`）　**核验**: ✅ grep 坐实
 - **位置**: `kernel/proc/signal.cpp:36,47-77,153-175`
 - **现象**: 裸全局单链表 `Task* g_registry_head`，`signal_register_task`(add_task 调) / `signal_unregister_task`(exit 调) / `signal_find_task_by_pid`(sys_kill 调) / `killpg`(sys_kill pid<0 调) 全部直接操作链表，**周围零锁匹配**。killpg 注释自称「no extra locking is needed」——该判断在多核下错误。
 - **根因**: F4 未触碰 signal.cpp 注册表；单核严格串行永不触发，多核 fork/exec/kill 交织 → 头插写与遍历读并发 → 读半链接指针 / 悬垂 `registry_next` → 跳飞或 UAF（Task 被 slab 复用后 signal_send 读别对象数据）。
@@ -71,32 +71,32 @@
 
 ## 🟠 High
 
-### DEBT-002 退出任务的 TCB / 核栈 / 地址空间永不释放（系统性泄漏）
-- **维度**: 内存安全(D4)　**优先级**: P1　**状态**: 🆕 登记待办（GOTCHA#11 已登记但**等级被低估**）　**核验**: ✅ **Q3-1 坐实**：`remove_task`(scheduler.cpp:190)仅 test/ 调用，production(sys_exit/waitpid/exit_current)从不调 → release_resources 永不触发，Task+资源彻底泄漏。见 `reports/2026-06-21-d4-d13-audit.md`
+### DEBT-002 退出任务的 TCB / 核栈 / 地址空间永不释放（系统性泄漏）✅
+- **维度**: 内存安全(D4)　**优先级**: P1　**状态**: ✅ 已修（F-QA Q4e-2 正常路径 `3983fe6` + Q4e-3 异常 deferred-free `4bb6ca4` + reap unregister `e6ce2f4`）　**核验**: ✅ **Q3-1 坐实**：`remove_task`(scheduler.cpp:190)仅 test/ 调用，production(sys_exit/waitpid/exit_current)从不调 → release_resources 永不触发，Task+资源彻底泄漏。见 `reports/2026-06-21-d4-d13-audit.md`
 - **位置**: `kernel/syscall/sys_exit.cpp:34-74` / `kernel/proc/scheduler.cpp:210-240`(exit_current) / `kernel/proc/process_new.cpp:120-221`(waitpid reap)
 - **现象**: `sys_exit` 只置 Zombie + dequeue + yield；`exit_current` 标 Dead + context_switch 切走；waitpid reap 标 Dead + free pid + 解链 —— **三者都不 delete Task / free 核栈 / delete addr_space**。`release_resources` 只在 operator delete 内调，而 operator delete 只在 fork/clone error-path 触发，正常退出从不跑。
 - **根因**: 缺 task exit cleanup。每个退出进程泄漏 Task(1008B slab)+4 页核栈+整棵 PML4 子树页表。长时间跑 shell 逐步耗尽 KMEM_SLAB 与物理页。更是 DEBT-003/006 的放大器（不做它，引用计数无从谈起）。
 - **修复建议**: waitpid reap 中 `delete target`（→release_resources 释放 sig_actions/cwd/fd_table）+ 释放核栈（`g_vmm.unmap`+`g_pmm.free_pages`，注意 direct-map 不 unmap，GOTCHA#7）+ `delete addr_space`（析构 free_subtree）。CLONE_THREAD 共享 addr_space 需 refcount，最后线程才释放（联动 DEBT-006）。
 - **关联 GOTCHA**: #11（exit_current leak，待 task exit cleanup）
 
-### DEBT-003 CoW 物理页无引用计数 → fork+exec use-after-free
-- **维度**: 内存安全　**优先级**: P0　**状态**: 🆕 登记待办　**核验**: ✅ grep 坐实（`grep mapcount` 零结果）
+### DEBT-003 CoW 物理页无引用计数 → fork+exec use-after-free ✅
+- **维度**: 内存安全　**优先级**: P0　**状态**: ✅ 已修（F-QA Q4b-1 元数据 `0a4ba1c` + Q4b-2 fork/execve `34a4595` + Q4b-3 cow fault `037a08d`）　**核验**: ✅ grep 坐实（`grep mapcount` 零结果）
 - **位置**: `kernel/proc/fork.cpp:49-93` / `kernel/proc/process_new.cpp:70-114`(handle_cow_fault) / `kernel/proc/execve.cpp:62-111`(clear_user_mappings)
 - **现象**: fork `copy_page_table_level` 把可写 PTE 标 `FLAG_COW` 并共享**同一物理页**（`dst_table[i].raw = src_table[i].raw`，物理地址不变），**物理页无任何 refcount**。`clear_user_mappings`(execve) 叶子层**无条件** `free_page` 不检查 FLAG_COW/共享。
 - **根因**: 经典 fork+exec：子 execve → free 掉与父 CoW 共享的物理页 → 父进程 PTE 仍指向已释放页 → PMM 重分配 → 父读垃圾/踩坏别人。**确凿的「正常用法触发 UAF」**。根因 = CoW 缺物理页引用计数（Linux `_mapcount`）。
 - **修复建议**: 引入物理页 `_mapcount`（buddy order_ 数组旁加 int16）。fork CoW 共享页 `_mapcount++`；clear_user_mappings free 前每页 `_mapcount--`，归 0 才真 free；CoW fault 复制后旧页 `--`、新页 `=1`。F3 CoW 共享内存里程碑核心前置。
 - **关联 GOTCHA**: 无（PLAN 列 CoW 未做但未标 UAF 风险）
 
-### DEBT-004 `waiting_for_child` 普通 bool 跨核非原子 → lost-wakeup 偶现挂死
-- **维度**: 并发/SMP　**优先级**: P0　**状态**: 🆕 登记待办　**核验**: ✅ grep 坐实
+### DEBT-004 `waiting_for_child` 普通 bool 跨核非原子 → lost-wakeup 偶现挂死 ✅
+- **维度**: 并发/SMP　**优先级**: P0　**状态**: ✅ 已修（F-QA Q4c-1,`7b72659`）　**核验**: ✅ grep 坐实
 - **位置**: `kernel/proc/process.hpp:259`(`bool waiting_for_child`) / `kernel/proc/process_new.cpp:215,218`(父 CPU 写) / `kernel/syscall/sys_exit.cpp:57`(子 CPU 读)
 - **现象**: `waiting_for_child` 普通 bool。父 CPU waitpid 写 true/false，子 CPU exit 读 `task->parent->waiting_for_child` 决定是否 `unblock(parent)` —— 跨 CPU 无 atomic/无内存屏障。
 - **根因**: 子 CPU 读到 stale 值（父刚置 true 但子还见 false）→ 不唤醒 → 父永睡。**头号偶现挂死嫌疑**。F4-M4 prepare-to-wait 修了 waitpid 自身 check-block 窗口，但漏了子 exit 侧对 parent 标志的非原子读。
 - **修复建议**: 最干净 —— sys_exit **无条件** `unblock(parent)`（unblock 已幂等，仅 Blocked 态入队），去掉 `waiting_for_child` 门控，彻底消除 stale 读窗口。或改 `lib::Atomic<bool>` + Acquire/Release。
 - **关联 GOTCHA**: 无（F4-M5 注释自称已分析 children 无需锁，但漏了此标志位的跨核可见性）
 
-### DEBT-005 `PidAllocator` 无锁 → 双核分配相同 pid
-- **维度**: 并发/SMP　**优先级**: P1　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验（agent 报告，未亲验）
+### DEBT-005 `PidAllocator` 无锁 → 双核分配相同 pid ✅
+- **维度**: 并发/SMP　**优先级**: P1　**状态**: ✅ 已修（F-QA Q4d,`389987c`）　**核验**: ⚠️ 待核验（agent 报告，未亲验）
 - **位置**: `kernel/proc/pid.cpp:14,20-59`；调用点 `sys_waitpid`(process_new.cpp:163) / fork/clone
 - **现象**: 全局单例 `g_pid_alloc` 无内嵌锁，`alloc` 的 check-then-set（`if(!in_use_[candidate]) in_use_[candidate]=true`）非原子。
 - **根因**: 两核同时 fork → 同一 candidate 都见 `!in_use_` → 都置 true → **两 task 拿相同 pid** → 注册表键冲突 / find_task_by_pid 返错 / waitpid 认错子。
@@ -124,8 +124,8 @@
 - **修复建议**: 统一单一 kMaxCpus（建议 percpu=8 为权威，acpi 改用之；或显式 `ACPI_MAX_LAPIC=16` 区分 ACPI 表容量 vs 运行 CPU 上限）。加 static_assert 两处相等或删其一。
 - **关联 GOTCHA**: 无
 
-### DEBT-006 CLONE_VM 共享地址空间无引用计数 → 线程退出损坏共享页表
-- **维度**: 内存安全　**优先级**: P2　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
+### DEBT-006 CLONE_VM 共享地址空间无引用计数 → 线程退出损坏共享页表 ✅
+- **维度**: 内存安全　**优先级**: P2　**状态**: ✅ 已修（F-QA Q4e-1 RefCount `7ddda74` + Q4e-2 release `3983fe6`）　**核验**: ⚠️ 待核验
 - **位置**: `kernel/proc/clone.cpp:266-271`（注释自承 `// shared (no refcount yet)`）/ `kernel/proc/process.hpp:176`
 - **现象**: clone CLONE_VM 时 `child->addr_space = parent->addr_space` 无 refcount。配合 DEBT-002（退出不 delete）目前侥幸不出事。
 - **根因**: 一旦加 exit cleanup，共享 addr_space 的线程退出若 `delete addr_space` → 兄弟线程 PML4 整棵 free → 全员崩；反之不释放则最后线程退出时永久泄漏。多线程程序「偶现崩溃」高度可疑于此。
