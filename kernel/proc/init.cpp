@@ -20,6 +20,8 @@
 
 #ifdef CINUX_GUI
 #    include "kernel/gui/gui_init.hpp"
+#    include "kernel/gui/visor_core/visor_host_cinux.hpp"
+#    include "kernel/gui/visor_core/visor_pump.hpp"
 #endif
 
 namespace cinux::proc {
@@ -28,9 +30,12 @@ namespace cinux::proc {
 namespace {
 
 void gui_worker_thread() {
-    cinux::lib::kprintf("[GUI] Worker thread started (drives gui_pump refresh loop)\n");
+    cinux::lib::kprintf("[GUI] Worker thread started\n");
     while (true) {
-        cinux::gui::gui_pump();
+        // Drive the desktop through the visor Host ABI table (F13 §3b): input,
+        // time and spawn all go via host->core.* / host->desktop->*. The same
+        // visor_pump body runs unchanged on a different host fill.
+        cinux::gui::visor_pump(&cinux::gui::cinux_visor_host());
         Scheduler::yield();
     }
 }

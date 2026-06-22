@@ -37,3 +37,11 @@ target_sources(big_kernel_common PRIVATE
 target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_abi_check.cpp
 )
+
+# F13 visor §3b: visor core pump + Cinux host adapter (table-driven GUI path).
+# The gui_worker drives the desktop through visor_pump() via the host table;
+# the legacy gui_pump() is removed (single path).
+target_sources(big_kernel_common PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_pump.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_host_cinux.cpp
+)

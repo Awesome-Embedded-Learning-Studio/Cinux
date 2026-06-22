@@ -30,8 +30,10 @@ typedef enum {
     VISOR_EVENT_TOUCH   = 4, /* multi-slot touch */
 } visor_event_type;
 
-/* flags bits in visor_event_header.flags */
-#define VISOR_EVENT_FLAG_PRESSED       (1u << 0) /* key/button down vs up */
+/* flags bits in visor_event_header.flags.
+ * PRESSED is KEYCODE-only (press vs release); POINTER press semantics live
+ * in visor_pointer_payload.kind. */
+#define VISOR_EVENT_FLAG_PRESSED       (1u << 0)
 #define VISOR_EVENT_FLAG_CONTINUE_READ (1u << 1) /* more data buffered; call poll again */
 
 /**

@@ -43,14 +43,12 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font);
 void gui_start();
 
 /**
- * @brief Run one GUI pump iteration (call from the gui_worker thread loop)
+ * @brief Spawn a shell terminal window (Desktop icon action)
  *
- * Drains the input EventQueue and dispatches to the window manager, handles
- * deferred icon actions (e.g. spawning a terminal), polls terminal output,
- * and composites the frame.  Runs entirely on the worker thread -- NOT in a
- * PIT IRQ callback -- so GUI refresh no longer depends on PIT tick delivery
- * (which only fires once under APIC routing on the production path).
+ * Creates a centred Terminal window, wires per-terminal stdin/stdout pipes,
+ * forks a shell child task running /bin/sh, and adds the window to the WM.
+ * Used by the visor host desktop->spawn callback (visor §3b adapter).
  */
-void gui_pump();
+void create_shell_terminal();
 
 }  // namespace cinux::gui

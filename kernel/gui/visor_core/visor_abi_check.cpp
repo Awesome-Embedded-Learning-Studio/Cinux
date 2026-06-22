@@ -15,6 +15,7 @@
  */
 #include "visor_conf.h"
 #include "visor_event.h"
+#include "visor_event_payload.h"
 #include "visor_host.h"
 
 #ifdef CINUX_GUI
@@ -31,6 +32,13 @@ static_assert(sizeof(visor_host_desktop) > 0, "visor_host_desktop must be non-em
  * must be strictly larger than just the core table. */
 static_assert(sizeof(visor_host) > sizeof(visor_host_core),
               "visor_host must carry core + desktop pointer + opaque ctx");
+
+/* Typed payloads that follow the header (§3b). Cross-privilege layout
+ * contract: a drift in size or packed-ness is caught at compile time. */
+static_assert(sizeof(visor_pointer_payload) == 18,
+              "visor_pointer_payload must be 18 bytes (kind + 4*int32 + buttons, packed)");
+static_assert(sizeof(visor_keycode_payload) == 3,
+              "visor_keycode_payload must be 3 bytes (ascii + scancode + modifiers, packed)");
 
 /* A profile name must have been selected by visor_conf.h. */
 #    ifdef VISOR_PROFILE_NAME

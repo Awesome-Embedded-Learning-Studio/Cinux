@@ -16,9 +16,9 @@
 #include "kernel/fs/inode.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/gui/desktop_icon.hpp"
-#include "kernel/gui/event.hpp"
 #include "kernel/gui/icon.hpp"
 #include "kernel/gui/terminal.hpp"
+#include "kernel/gui/visor_core/visor_host_cinux.hpp"
 #include "kernel/gui/window_manager.hpp"
 #include "kernel/ipc/pipe.hpp"
 #include "kernel/ipc/pipe_ops.hpp"
@@ -59,7 +59,7 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font) {
 
     // Initialise the window manager. The desktop itself is NOT drawn here --
     // gui_start() composites it once after icons are registered, and ongoing
-    // refresh is driven by the gui_worker thread calling gui_pump() (see
+    // refresh is driven by the gui_worker thread calling visor_pump() (see
     // init.cpp), not by a PIT IRQ callback.
     WindowManager::instance().init(&screen, &font);
 
@@ -102,6 +102,8 @@ static void shell_child_entry() {
     // launch_user_program(); never returns (jumps to user mode or exits).
     cinux::proc::launch_user_program(info->path, argv, envp);
 }
+
+}  // anonymous namespace
 
 void create_shell_terminal() {
     auto& wm = WindowManager::instance();
@@ -189,8 +191,6 @@ void create_shell_terminal() {
                         reinterpret_cast<void*>(stdin_pipe), reinterpret_cast<void*>(stdout_pipe));
 }
 
-}  // anonymous namespace
-
 // ============================================================
 // gui_start() -- activate the WM (refresh driven by gui_worker pump)
 // ============================================================
@@ -234,63 +234,18 @@ void gui_start() {
     cinux::lib::kprintf("[GUI] Desktop icons registered: Shell, Calculator.\n");
 
     // Composite the desktop once now (icons registered) so it shows immediately.
-    // Ongoing refresh is driven by the gui_worker thread calling gui_pump() in a
+    // Ongoing refresh is driven by the gui_worker thread calling visor_pump() in a
     // loop (see init.cpp), NOT by a PIT IRQ callback. This removes the GUI's
     // dependency on PIT tick delivery, which only fires once under APIC routing
     // on the production path (pre-existing F4 issue) -- the worker pump keeps
     // the screen live regardless of whether PIT ticks arrive.
     wm.composite();
     cinux::lib::kprintf("[GUI] desktop composited; refresh driven by gui_worker pump loop.\n");
-}
 
-// ============================================================
-// gui_pump() -- one GUI iteration (drain input + dispatch + composite)
-// ============================================================
-
-void gui_pump() {
-    using cinux::drivers::Mouse;
-    using cinux::gui::Event;
-    using cinux::gui::EventType;
-
-    auto& wm = WindowManager::instance();
-    auto& eq = Mouse::event_queue();
-
-    // Drain all pending input events and dispatch to the window manager.
-    Event ev;
-    while (eq.dequeue(ev)) {
-        switch (ev.type_) {
-        case EventType::MouseMove:
-        case EventType::MouseDown:
-        case EventType::MouseUp:
-            wm.handle_mouse(ev);
-            break;
-        case EventType::KeyDown:
-        case EventType::KeyUp:
-            wm.handle_key(ev);
-            break;
-        }
-    }
-
-    // Deferred icon action: processed here on the worker thread (no ISR handoff
-    // needed -- gui_pump runs on gui_worker, not in a PIT IRQ callback).
-    IconAction action = wm.consume_pending_icon_action();
-    if (action == IconAction::OpenShell) {
-        create_shell_terminal();
-    }
-
-    // Poll all terminal windows for shell output (not just the focused one) so
-    // that multiple concurrent shell sessions all update their displays.
-    for (uint32_t i = 0; i < wm.window_count(); i++) {
-        auto* win = wm.window_at(i);
-        if (win != nullptr && win->is_terminal()) {
-            auto* term = static_cast<Terminal*>(win);
-            term->poll_output();
-            term->render_to_canvas();
-        }
-    }
-
-    // Composite all windows onto the screen.
-    wm.composite();
+    // Initialise the visor Host ABI adapter (F13 §3b): fills the host table that
+    // the gui_worker's visor_pump() drives. The callbacks just forward to the
+    // facilities wired above, so behaviour is unchanged.
+    cinux_visor_host_init();
 }
 
 }  // namespace cinux::gui
