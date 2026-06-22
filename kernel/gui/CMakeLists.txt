@@ -19,6 +19,7 @@ target_sources(big_kernel_common PRIVATE
 # Window manager (Z-ordering, compositing, drag)
 target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/window_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/window_manager_input.cpp
 )
 
 # GUI initialisation (mouse driver, WM setup, PIT tick callback)
