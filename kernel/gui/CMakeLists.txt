@@ -30,3 +30,10 @@ target_sources(big_kernel_common PRIVATE
 target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/terminal.cpp
 )
+
+# visor Host ABI skeleton (F13 §3a): ABI headers + compile-time self-check.
+# visor core does not take over yet; this only pins the ABI boundary
+# (machine-verifies header sizes / packed-ness across kernel/user/MCU builds).
+target_sources(big_kernel_common PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_abi_check.cpp
+)
