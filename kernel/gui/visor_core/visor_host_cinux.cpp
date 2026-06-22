@@ -20,12 +20,15 @@
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/video/framebuffer.hpp"  // Framebuffer (flush target)
 #include "kernel/gui/event.hpp"
-#include "kernel/gui/gui_init.hpp"  // create_shell_terminal
-#include "kernel/lib/kprintf.hpp"   // kvprintf / kprintf
-#include "kernel/lib/string.hpp"    // memcpy
-#include "kernel/mm/slab.hpp"       // kmalloc / kfree
+#include "kernel/gui/gui_init.hpp"        // create_shell_terminal
+#include "kernel/gui/terminal.hpp"        // Terminal (render_frame polls it)
+#include "kernel/gui/window_manager.hpp"  // WindowManager (dispatch + render)
+#include "kernel/lib/kprintf.hpp"         // kvprintf / kprintf
+#include "kernel/lib/string.hpp"          // memcpy
+#include "kernel/mm/slab.hpp"             // kmalloc / kfree
 #include "visor_event.h"
 #include "visor_event_payload.h"
+#include "visor_region.hpp"  // visor::Region (dirty rects -> visor_rect)
 
 namespace cinux::gui {
 namespace {
@@ -100,15 +103,158 @@ bool cinux_poll_event(void* ctx, visor_event_header* out, uint16_t out_cap) {
     default:
         /* An EventType with no serialiser case is dropped here. Adding a new
          * EventType in event.hpp requires updating BOTH this serialiser and
-         * visor_event_to_cinux's deserialiser switch. */
+         * cinux_dispatch_event's deserialiser switch. */
         return false;
     }
     return true;
 }
 
 /* ============================================================
- * L2 Time: PIT uptime in ms (truncated to uint32_t -- ~49 day wrap).
+ * L4 Frame work: the host side of the host-neutral pump.
+ *
+ * dispatch_event: deserialise a visor event (the pump drained it via
+ * poll_event) back into a cinux::gui::Event and apply it to the window
+ * manager. This is the other half of the poll_event serialiser -- together
+ * they exercise the visor_event ABI so the same pump body is host-neutral.
+ * render_frame: do all per-frame cinux work (deferred icon spawn, terminal
+ * poll, cursor footprint, composite) and report the dirty rects + the staging
+ * back buffer. count==0 = idle (nothing changed, the pump flushes nothing).
  * ============================================================ */
+void cinux_dispatch_event(void* ctx, const visor_event_header* ev, const void* payload) {
+    (void)ctx;
+    if (ev == nullptr || payload == nullptr || ev->magic != VISOR_EVENT_MAGIC ||
+        ev->version != VISOR_ABI_VERSION) {
+        return;
+    }
+
+    auto&             wm   = WindowManager::instance();
+    const uint8_t*    tail = static_cast<const uint8_t*>(payload);
+    cinux::gui::Event out;
+
+    switch (ev->type) {
+    case VISOR_EVENT_POINTER: {
+        if (ev->payload_len < sizeof(visor_pointer_payload)) {
+            return;
+        }
+        visor_pointer_payload p;
+        memcpy(&p, tail, sizeof(p));
+        switch (p.kind) {
+        case VISOR_POINTER_KIND_MOVE:
+            out.type_ = EventType::MouseMove;
+            break;
+        case VISOR_POINTER_KIND_DOWN:
+            out.type_ = EventType::MouseDown;
+            break;
+        case VISOR_POINTER_KIND_UP:
+            out.type_ = EventType::MouseUp;
+            break;
+        default:
+            return; /* corrupt kind */
+        }
+        out.mouse.x       = p.x;
+        out.mouse.y       = p.y;
+        out.mouse.dx      = p.dx;
+        out.mouse.dy      = p.dy;
+        out.mouse.buttons = p.buttons;
+        out.mouse.left    = (p.buttons & 0x1u) != 0;
+        out.mouse.right   = (p.buttons & 0x2u) != 0;
+        out.mouse.middle  = (p.buttons & 0x4u) != 0;
+        wm.handle_mouse(out);
+        return;
+    }
+    case VISOR_EVENT_KEYCODE: {
+        if (ev->payload_len < sizeof(visor_keycode_payload)) {
+            return;
+        }
+        visor_keycode_payload k;
+        memcpy(&k, tail, sizeof(k));
+        const bool pressed = (ev->flags & VISOR_EVENT_FLAG_PRESSED) != 0;
+        out.type_          = pressed ? EventType::KeyDown : EventType::KeyUp;
+        out.key.ascii      = k.ascii;
+        out.key.scancode   = k.scancode;
+        out.key.pressed    = pressed;
+        out.key.shift      = (k.modifiers & VISOR_KEYMOD_SHIFT) != 0;
+        out.key.ctrl       = (k.modifiers & VISOR_KEYMOD_CTRL) != 0;
+        out.key.alt        = (k.modifiers & VISOR_KEYMOD_ALT) != 0;
+        wm.handle_key(out);
+        return;
+    }
+    default:
+        return; /* event type with no deserialiser -- drop */
+    }
+}
+
+void cinux_render_frame(void* ctx, visor_frame* frame) {
+    (void)ctx;
+    if (frame == nullptr) {
+        return;
+    }
+    frame->count = 0;
+
+    auto& wm = WindowManager::instance();
+
+    /* 1. Deferred desktop-icon click -> spawn a shell (structural change). */
+    if (wm.consume_pending_icon_action() == IconAction::OpenShell) {
+        create_shell_terminal();
+        wm.invalidate_all();
+    }
+
+    /* 2. Poll terminal output + refresh each terminal's own canvas. */
+    for (uint32_t i = 0; i < wm.window_count(); i++) {
+        Window* win = wm.window_at(i);
+        if (win != nullptr && win->is_terminal()) {
+            auto* term = static_cast<Terminal*>(win);
+            if (term->poll_output()) {
+                wm.invalidate_all();
+            }
+            if (term->consume_content_dirty()) {
+                wm.invalidate_all(); /* pipe-less terminal direct key echo (§4c) */
+            }
+            term->render_to_canvas();
+        }
+    }
+
+    /* 3. Cursor footprint (mark old + new rects if the mouse moved). */
+    wm.invalidate_cursor_move();
+
+    /* 4. Idle: nothing changed -> skip composite, report no dirty rects. */
+    if (wm.dirty().empty()) {
+        return;
+    }
+
+    /* 5. Render the frame into the staging back buffer. */
+    wm.composite();
+
+    cinux::drivers::Canvas* screen = wm.screen();
+    if (screen == nullptr || screen->back_buffer() == nullptr) {
+        return;
+    }
+
+    /* 6. Report dirty rects + staging layout. If the region has more rects than
+     *    the core's buffer, collapse to the bounding box (over-cover, never
+     *    under-cover). The region already self-collapses at kMaxRects, so this
+     *    is just defense. */
+    const visor::Region& dirty = wm.dirty();
+    uint32_t             n     = dirty.count();
+    if (n > frame->max_rects) {
+        const visor::Rect b = dirty.bounds();
+        frame->rects[0]     = visor_rect{b.x0, b.y0, b.x1, b.y1};
+        n                   = 1;
+    } else {
+        for (uint32_t i = 0; i < n; i++) {
+            const visor::Rect& r = dirty.rects()[i];
+            frame->rects[i]      = visor_rect{r.x0, r.y0, r.x1, r.y1};
+        }
+    }
+    frame->count  = n;
+    frame->pixels = screen->back_buffer();
+    frame->stride = screen->pitch();
+    frame->width  = screen->width();
+    frame->height = screen->height();
+    frame->format = VISOR_PIX_XRGB8888;
+
+    wm.clear_dirty();
+}
 uint32_t cinux_now_ms(void* ctx) {
     (void)ctx;
     return static_cast<uint32_t>(cinux::drivers::PIT::get_uptime_ms());
@@ -225,6 +371,8 @@ visor_host& cinux_visor_host() {
 void cinux_visor_host_init(cinux::drivers::Framebuffer* fb) {
     g_fb                               = fb;
     g_cinux_host.core.poll_event       = cinux_poll_event;
+    g_cinux_host.core.dispatch_event   = cinux_dispatch_event;
+    g_cinux_host.core.render_frame     = cinux_render_frame;
     g_cinux_host.core.flush            = cinux_flush;
     g_cinux_host.core.flush_complete   = nullptr; /* Desktop uses sync flush */
     g_cinux_host.core.enter_sleep      = nullptr; /* MCU-only (display off) */

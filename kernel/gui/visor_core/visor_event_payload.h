@@ -19,8 +19,7 @@
  *
  * Compile condition: part of visor core (CINUX_GUI tree).
  */
-#ifndef VISOR_EVENT_PAYLOAD_H
-#define VISOR_EVENT_PAYLOAD_H
+#pragma once
 
 #include <stdint.h>
 
@@ -50,27 +49,25 @@ extern "C" {
  * POINTER payload: follows the header when type == VISOR_EVENT_POINTER.
  * Packed, no padding (cross-privilege layout).
  * ============================================================ */
-typedef struct __attribute__((packed)) {
-    uint8_t kind;        /* VISOR_POINTER_KIND_* */
-    int32_t x;           /* absolute cursor X (pixels) */
-    int32_t y;           /* absolute cursor Y (pixels) */
-    int32_t dx;          /* relative X since last pointer event */
-    int32_t dy;          /* relative Y since last pointer event (positive = down) */
-    uint8_t buttons;     /* bitmask: bit0=left, bit1=right, bit2=middle */
-} visor_pointer_payload; /* 1 + 4*4 + 1 = 18 bytes */
+struct __attribute__((packed)) visor_pointer_payload {
+    uint8_t kind;    /* VISOR_POINTER_KIND_* */
+    int32_t x;       /* absolute cursor X (pixels) */
+    int32_t y;       /* absolute cursor Y (pixels) */
+    int32_t dx;      /* relative X since last pointer event */
+    int32_t dy;      /* relative Y since last pointer event (positive = down) */
+    uint8_t buttons; /* bitmask: bit0=left, bit1=right, bit2=middle */
+}; /* 1 + 4*4 + 1 = 18 bytes */
 
 /* ============================================================
  * KEYCODE payload: follows the header when type == VISOR_EVENT_KEYCODE.
  * Packed, no padding (cross-privilege layout).
  * ============================================================ */
-typedef struct __attribute__((packed)) {
-    char    ascii;       /* 0 if non-printable */
-    uint8_t scancode;    /* raw scan code set 1 */
-    uint8_t modifiers;   /* VISOR_KEYMOD_* bitmask */
-} visor_keycode_payload; /* 3 bytes */
+struct __attribute__((packed)) visor_keycode_payload {
+    char    ascii;     /* 0 if non-printable */
+    uint8_t scancode;  /* raw scan code set 1 */
+    uint8_t modifiers; /* VISOR_KEYMOD_* bitmask */
+}; /* 3 bytes */
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#endif /* VISOR_EVENT_PAYLOAD_H */

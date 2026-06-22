@@ -20,8 +20,7 @@
  *
  * Namespace: cinux::gui
  */
-#ifndef VISOR_HOST_CINUX_HPP
-#define VISOR_HOST_CINUX_HPP
+#pragma once
 
 #include "visor_host.h"
 
@@ -59,5 +58,3 @@ void cinux_visor_host_init(cinux::drivers::Framebuffer* fb = nullptr);
 }  // namespace cinux::gui
 
 #endif /* __cplusplus */
-
-#endif /* VISOR_HOST_CINUX_HPP */

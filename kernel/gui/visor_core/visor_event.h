@@ -11,8 +11,7 @@
  *
  * Compile condition: part of visor core (CINUX_GUI tree).
  */
-#ifndef VISOR_EVENT_H
-#define VISOR_EVENT_H
+#pragma once
 
 #include <stdint.h>
 
@@ -23,12 +22,12 @@
 extern "C" {
 #endif
 
-typedef enum {
+enum visor_event_type {
     VISOR_EVENT_POINTER = 1, /* mouse / touch: abs + delta + buttons */
     VISOR_EVENT_KEYCODE = 2, /* keyboard: scancode + ascii + modifiers */
     VISOR_EVENT_ENCODER = 3, /* rotary encoder: axis diff */
     VISOR_EVENT_TOUCH   = 4, /* multi-slot touch */
-} visor_event_type;
+};
 
 /* flags bits in visor_event_header.flags.
  * PRESSED is KEYCODE-only (press vs release); POINTER press semantics live
@@ -42,17 +41,15 @@ typedef enum {
  * tail by (type, version, payload_len) -- a version mismatch never reads past
  * payload_len bytes.
  */
-typedef struct __attribute__((packed)) {
+struct __attribute__((packed)) visor_event_header {
     uint16_t magic;       /* VISOR_EVENT_MAGIC */
     uint16_t version;     /* VISOR_ABI_VERSION */
     uint8_t  type;        /* visor_event_type */
     uint8_t  flags;       /* VISOR_EVENT_FLAG_* bitmask */
     uint16_t payload_len; /* tail byte count */
     /* variable-length payload follows */
-} visor_event_header;
+};
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#endif /* VISOR_EVENT_H */

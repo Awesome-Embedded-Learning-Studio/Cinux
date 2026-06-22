@@ -24,8 +24,7 @@
  *
  * Namespace: visor
  */
-#ifndef VISOR_REGION_HPP
-#define VISOR_REGION_HPP
+#pragma once
 
 #include <stdint.h>
 
@@ -165,5 +164,3 @@ private:
 };
 
 }  // namespace visor
-
-#endif  // VISOR_REGION_HPP

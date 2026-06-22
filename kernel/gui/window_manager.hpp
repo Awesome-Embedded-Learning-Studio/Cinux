@@ -235,19 +235,6 @@ public:
     /** Reset the dirty region (called by the pump after flushing). */
     void clear_dirty() { dirty_.clear(); }
 
-    /**
-     * @brief Reset cursor-footprint tracking so the next frame is treated as the
-     *        first (full-screen invalidation)
-     *
-     * Test helper: the singleton WM retains last_cursor_ across calls, so a test
-     * that wants to observe the first-frame full-screen flush restores the
-     * sentinel. Production never needs this (the default sentinel covers boot).
-     */
-    void reset_cursor_tracking() {
-        last_cursor_x_ = kCursorInvalid;
-        last_cursor_y_ = kCursorInvalid;
-    }
-
     /** The screen canvas used for compositing (nullptr until init()). */
     cinux::drivers::Canvas* screen() const { return screen_; }
 

@@ -20,8 +20,7 @@
  *
  * Freestanding C header.
  */
-#ifndef VISOR_HOST_H
-#define VISOR_HOST_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -36,17 +35,49 @@ extern "C" {
  * Pixel format (v2 hard contract: stride / endianness / premultiplied alpha
  * / byte-bit order -- aligned to Wayland shm rigour; see presets §4).
  * ============================================================ */
-typedef enum {
+enum visor_pixel_format {
     VISOR_PIX_XRGB8888 = 1, /* Desktop, 32bpp (no alpha) */
     VISOR_PIX_ARGB8888 = 2, /* 32bpp, premultiplied alpha */
     VISOR_PIX_RGB565   = 3, /* MCU-Color, 16bpp */
     VISOR_PIX_1BPP     = 4, /* MCU-F1 mono OLED, alpha-mask (NOT colorkey) */
-} visor_pixel_format;
+};
+
+/* ============================================================
+ * Frame transfer types (host reports what changed; core flushes it).
+ * ============================================================ */
+
+/* Half-open dirty rect [x0,x1) x [y0,y1) in display coordinates. */
+struct visor_rect {
+    int32_t x0;
+    int32_t y0;
+    int32_t x1;
+    int32_t y1;
+};
+
+/* One frame's host->core transfer. The CORE (pump) owns the rects buffer and
+ * the flush loop; the HOST owns input dispatch + rendering and fills this in
+ * render_frame():
+ *   - rects/max_rects : core-allocated buffer (capacity in).
+ *   - count           : host writes the number of dirty rects (0 = idle).
+ *   - pixels/stride/w/h/fmt : host writes the staging buffer it rendered into.
+ * The core flushes each rect [x0,x1) x [y0,y1) from pixels (stride row pitch)
+ * to the display via flush(). count==0 means nothing changed -- core flushes
+ * nothing (idle skip). */
+struct visor_frame {
+    visor_rect*        rects;
+    uint32_t           max_rects;
+    uint32_t           count;
+    const void*        pixels;
+    uint32_t           stride;
+    uint32_t           width;
+    uint32_t           height;
+    visor_pixel_format format;
+};
 
 /* ============================================================
  * Core host table -- every host fills this (MCU has no Desktop part).
  * ============================================================ */
-typedef struct {
+struct visor_host_core {
     /* ---- L1 Display backend: flush model (v2) ----
      * Core owns the staging/render buffer. After rendering it pushes each dirty
      * rect to the backend for display. Replaces begin_frame->pointer (unsafe
@@ -74,6 +105,26 @@ typedef struct {
     /* ---- L2 Input backend ---- */
     bool (*poll_event)(void* ctx, visor_event_header* out, uint16_t out_cap);
 
+    /* ---- L4 Frame work (host owns input dispatch + rendering; core owns the
+     *      frame loop + flush). visor core never sees the host's GUI types --
+     *      it drains raw events via poll_event, hands each to dispatch_event,
+     *      then calls render_frame once and flushes the reported dirty rects.
+     *      This is what keeps the core host-neutral (zero host includes). ---- */
+
+    /* Consume one input event the core just drained. @p ev is the fixed-width
+     * header; @p payload points to the ev->payload_len bytes immediately behind
+     * it. The host deserialises + applies it to its own GUI state; any change
+     * shows up later as dirty rects from render_frame. NULL = host has no input
+     * path (events are dropped). */
+    void (*dispatch_event)(void* ctx, const visor_event_header* ev, const void* payload);
+
+    /* Do all per-frame host work (poll outputs, cursor footprint, composite into
+     * the staging buffer) and report the dirty rects + the staging buffer in
+     * @p frame. frame->count == 0 means nothing changed this iteration (idle --
+     * the core flushes nothing). Called once per pump iteration after the input
+     * drain. NULL = host renders nothing (display frozen). */
+    void (*render_frame)(void* ctx, visor_frame* frame);
+
     /* ---- L2 Time backend ---- */
     uint32_t (*now_ms)(void* ctx);
     uint32_t (*next_deadline_ms)(void* ctx); /* for MCU __WFI throttling */
@@ -82,28 +133,26 @@ typedef struct {
     void* (*alloc)(void* ctx, size_t n);
     void (*free)(void* ctx, void* p);
     void (*log)(void* ctx, const char* fmt, ...);
-} visor_host_core;
+};
 
 /* ============================================================
  * Desktop extension -- Desktop profile only; NULL on MCU.
  * ============================================================ */
-typedef struct {
+struct visor_host_desktop {
     /* spawn a child process, returning its stdio handles (Desktop only). */
     int (*spawn)(void* ctx, const char* path, char* const argv[], int* stdin_fd, int* stdout_fd);
     /* rpc / shared_buffer: future multi-process server (M8), NULL initially */
-} visor_host_desktop;
+};
 
 /* ============================================================
  * Aggregate host descriptor: core (always) + optional desktop extension.
  * ============================================================ */
-typedef struct {
+struct visor_host {
     visor_host_core     core;
     visor_host_desktop* desktop; /* NULL on MCU / simulator without spawn */
     void*               ctx;     /* opaque host context passed to every callback */
-} visor_host;
+};
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#endif /* VISOR_HOST_H */

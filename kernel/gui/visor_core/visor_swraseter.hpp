@@ -21,8 +21,7 @@
  *
  * Namespace: visor
  */
-#ifndef VISOR_SWRASTER_HPP
-#define VISOR_SWRASTER_HPP
+#pragma once
 
 #include <stdint.h>
 
@@ -106,5 +105,3 @@ void draw_line(Surface& s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint3
                const ClipRect* clip);
 
 }  // namespace visor
-
-#endif  // VISOR_SWRASTER_HPP

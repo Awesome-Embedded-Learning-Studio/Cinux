@@ -1,15 +1,15 @@
 /**
  * @file kernel/gui/visor_core/visor_abi_check.cpp
- * @brief Compile-time ABI self-check for the visor Host ABI (§3a skeleton)
+ * @brief Compile-time ABI self-check for the visor Host ABI
  *
  * Includes the ABI headers and static_asserts the cross-privilege layout
  * contracts (header size, packed-ness, aggregate carries extension + ctx).
  * This is the machine-verified guarantee that the ABI is stable across
  * kernel / user-space / MCU builds.
  *
- * No runtime effect -- pure compile-time checks. GUI behaviour is unchanged:
- * visor core does not take over yet (§3a only pins the ABI boundary; the
- * Cinux adapter wiring arrives in §3b).
+ * No runtime effect -- pure compile-time checks. Updated when the pump was
+ * decoupled to a host-neutral core: the core now drives the host via
+ * dispatch_event + render_frame + flush and never includes a host header.
  *
  * Compile condition: CINUX_GUI.
  */
@@ -24,6 +24,9 @@
  * A cross-privilege ABI drift here would be caught at compile time. */
 static_assert(sizeof(visor_event_header) == 8,
               "visor_event_header must be exactly 8 bytes (packed, cross-privilege ABI)");
+
+/* visor_rect is 4x int32 with no padding -- the dirty-rect wire shape. */
+static_assert(sizeof(visor_rect) == 16, "visor_rect must be 16 bytes (4x int32)");
 
 static_assert(sizeof(visor_host_core) > 0, "visor_host_core must be non-empty");
 static_assert(sizeof(visor_host_desktop) > 0, "visor_host_desktop must be non-empty");
