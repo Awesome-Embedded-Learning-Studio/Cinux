@@ -1,6 +1,6 @@
 /**
- * @file visor/core/visor_pump.cpp
- * @brief visor core pump -- one host-neutral GUI iteration
+ * @file cgui/core/cgui_pump.cpp
+ * @brief cgui core pump -- one host-neutral GUI iteration
  *
  * Host-neutral: this body has ZERO host includes. It drains raw input events
  * via poll_event, hands each to dispatch_event, asks the host to render one
@@ -13,11 +13,11 @@
  * Compile condition: CINUX_GUI.
  */
 
-#include "visor_pump.hpp"
+#include "cgui_pump.hpp"
 
 #include <stdint.h>
 
-#include "visor_event.h"
+#include "cgui_event.h"
 
 namespace cinux::gui {
 namespace {
@@ -30,7 +30,7 @@ constexpr uint32_t kMaxDirtyRects = 64;
 
 }  // namespace
 
-void visor_pump(visor_host* host) {
+void pump(cgui_host* host) {
     if (host == nullptr) {
         return;
     }
@@ -39,9 +39,9 @@ void visor_pump(visor_host* host) {
      *    deserialises + applies it to its own GUI state; any change surfaces as
      *    dirty rects from render_frame below. */
     if (host->core.poll_event != nullptr && host->core.dispatch_event != nullptr) {
-        alignas(uint32_t) uint8_t buf[sizeof(visor_event_header) + kMaxPayload];
-        auto*                     hdr     = reinterpret_cast<visor_event_header*>(buf);
-        const void*               payload = buf + sizeof(visor_event_header);
+        alignas(uint32_t) uint8_t buf[sizeof(cgui_event_header) + kMaxPayload];
+        auto*                     hdr     = reinterpret_cast<cgui_event_header*>(buf);
+        const void*               payload = buf + sizeof(cgui_event_header);
         while (host->core.poll_event(host->ctx, hdr, sizeof(buf))) {
             host->core.dispatch_event(host->ctx, hdr, payload);
         }
@@ -53,8 +53,8 @@ void visor_pump(visor_host* host) {
     if (host->core.render_frame == nullptr || host->core.flush == nullptr) {
         return;
     }
-    visor_rect  rects[kMaxDirtyRects];
-    visor_frame frame{};
+    cgui_rect  rects[kMaxDirtyRects];
+    cgui_frame frame{};
     frame.rects     = rects;
     frame.max_rects = kMaxDirtyRects;
     host->core.render_frame(host->ctx, &frame);
@@ -66,7 +66,7 @@ void visor_pump(visor_host* host) {
     /* 3. Flush each dirty rect from the staging buffer to the display. The
      *    host's flush forwards (framebuffer / SPI / DMA) per its backend. */
     for (uint32_t i = 0; i < frame.count; i++) {
-        const visor_rect& r = frame.rects[i];
+        const cgui_rect& r = frame.rects[i];
         host->core.flush(host->ctx, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0, frame.pixels,
                          frame.stride, frame.format);
     }

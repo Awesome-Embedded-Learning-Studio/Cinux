@@ -1,19 +1,19 @@
 /**
- * @file visor/core/visor_region.cpp
- * @brief visor region algebra implementation (F13 §4b)
+ * @file cgui/core/cgui_region.cpp
+ * @brief cgui region algebra implementation (F13 §4b)
  *
- * See visor_region.hpp for the design rules (half-open rects, degenerate =
+ * See cgui_region.hpp for the design rules (half-open rects, degenerate =
  * empty, capacity collapse to bounding box = never under-cover). Integer-only,
  * fixed storage, no allocation.
  *
  * Compile condition: CINUX_GUI.
  */
 
-#include "visor_region.hpp"
+#include "cgui_region.hpp"
 
 #include <stdint.h>
 
-namespace visor {
+namespace cinux::gui {
 
 uint32_t rect_subtract(const Rect& a, const Rect& b, Rect out[4]) {
     if (a.empty()) {
@@ -119,4 +119,4 @@ Rect Region::bounds() const {
     return b;
 }
 
-}  // namespace visor
+}  // namespace cinux::gui

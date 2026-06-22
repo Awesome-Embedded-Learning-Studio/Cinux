@@ -201,9 +201,9 @@ void WindowManager::composite() {
     // Draw the mouse cursor on top of everything
     draw_cursor(*screen_);
 
-    // F13 §4c: the frame is NOT presented here. The visor pump flushes the dirty
+    // F13 §4c: the frame is NOT presented here. The cgui pump flushes the dirty
     // region to the host (which forwards to the framebuffer) after composite()
-    // returns. See visor_pump(). Behaviour is identical to the old flip(); the
+    // returns. See pump(). Behaviour is identical to the old flip(); the
     // display path now runs through the Host ABI so it is host-agnostic.
 }
 
@@ -211,13 +211,13 @@ void WindowManager::composite() {
 // Dirty region (F13 §4c)
 // ============================================================
 
-void WindowManager::invalidate(const visor::Rect& r) {
+void WindowManager::invalidate(const cinux::gui::Rect& r) {
     if (screen_ == nullptr || r.empty()) {
         return;
     }
     /* Clip to the screen so we never track off-screen area. */
-    visor::Rect clipped =
-        visor::rect_intersect(r, visor::Rect{0, 0, static_cast<int32_t>(screen_->width()),
+    cinux::gui::Rect clipped =
+        cinux::gui::rect_intersect(r, cinux::gui::Rect{0, 0, static_cast<int32_t>(screen_->width()),
                                              static_cast<int32_t>(screen_->height())});
     if (!clipped.empty()) {
         dirty_.add(clipped);
@@ -228,7 +228,7 @@ void WindowManager::invalidate_all() {
     if (screen_ == nullptr) {
         return;
     }
-    invalidate(visor::Rect{0, 0, static_cast<int32_t>(screen_->width()),
+    invalidate(cinux::gui::Rect{0, 0, static_cast<int32_t>(screen_->width()),
                            static_cast<int32_t>(screen_->height())});
 }
 
@@ -253,9 +253,9 @@ void WindowManager::invalidate_cursor_move() {
          * Over-cover is safe; the back buffer is always fully repainted. */
         const int32_t pad      = 2;
         const int32_t cur_size = static_cast<int32_t>(CURSOR_SIZE);
-        invalidate(visor::Rect{last_cursor_x_ - pad, last_cursor_y_ - pad,
+        invalidate(cinux::gui::Rect{last_cursor_x_ - pad, last_cursor_y_ - pad,
                                last_cursor_x_ + cur_size + pad, last_cursor_y_ + cur_size + pad});
-        invalidate(visor::Rect{cx - pad, cy - pad, cx + cur_size + pad, cy + cur_size + pad});
+        invalidate(cinux::gui::Rect{cx - pad, cy - pad, cx + cur_size + pad, cy + cur_size + pad});
     }
     last_cursor_x_ = cx;
     last_cursor_y_ = cy;

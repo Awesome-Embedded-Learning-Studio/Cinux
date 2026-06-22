@@ -1,12 +1,12 @@
 /**
- * @file visor/core/visor_swraseter.cpp
- * @brief visor L3 software rasteriser primitive implementations (§4a skeleton)
+ * @file cgui/core/cgui_swraseter.cpp
+ * @brief cgui L3 software rasteriser primitive implementations (§4a skeleton)
  *
- * See visor_swraseter.hpp for scope. All primitives are integer-only (Q8.8
+ * See cgui_swraseter.hpp for scope. All primitives are integer-only (Q8.8
  * blend) and clip to clip ∩ surface bounds. §4a implements XRGB8888 only;
  * other formats are no-ops here and gain their paths with profile support.
  *
- * §4a: NOT wired into visor_pump yet -- visor_pump still composites via
+ * §4a: NOT wired into pump yet -- pump still composites via
  * wm.composite(). The SwRaster takes over rendering in §4c (staging buffer +
  * dirty region + flush). These primitives are exercised by unit tests only
  * until then.
@@ -14,11 +14,11 @@
  * Compile condition: CINUX_GUI.
  */
 
-#include "visor_swraseter.hpp"
+#include "cgui_swraseter.hpp"
 
 #include <stdint.h>
 
-namespace visor {
+namespace cinux::gui {
 namespace {
 
 /* Intersect [a0,a1) with [b0,b1); write the overlap to [o0,o1).
@@ -63,7 +63,7 @@ inline const uint32_t* xrgb_crow(const Surface& s, int32_t y) {
 
 void fill_rect(Surface& s, int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color,
                const ClipRect* clip) {
-    if (s.format != VISOR_PIX_XRGB8888) {
+    if (s.format != CGUI_PIX_XRGB8888) {
         return; /* §4a: XRGB8888 only */
     }
     int32_t ex0, ey0, ex1, ey1;
@@ -85,7 +85,7 @@ void fill_rect(Surface& s, int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_
 
 void blit(Surface& dst, int32_t dx, int32_t dy, const Surface& src, uint32_t sx, uint32_t sy,
           uint32_t w, uint32_t h, const ClipRect* clip) {
-    if (dst.format != VISOR_PIX_XRGB8888 || src.format != VISOR_PIX_XRGB8888) {
+    if (dst.format != CGUI_PIX_XRGB8888 || src.format != CGUI_PIX_XRGB8888) {
         return;
     }
     int32_t ex0, ey0, ex1, ey1;
@@ -117,7 +117,7 @@ void blit(Surface& dst, int32_t dx, int32_t dy, const Surface& src, uint32_t sx,
 
 void blit_blend(Surface& dst, int32_t dx, int32_t dy, const Surface& src, uint32_t sx, uint32_t sy,
                 uint32_t w, uint32_t h, uint16_t alpha_q8, const ClipRect* clip) {
-    if (dst.format != VISOR_PIX_XRGB8888 || src.format != VISOR_PIX_XRGB8888) {
+    if (dst.format != CGUI_PIX_XRGB8888 || src.format != CGUI_PIX_XRGB8888) {
         return;
     }
     /* alpha in [0,256]; clamp the upper end (256 = fully opaque, beyond is ill-formed). */
@@ -173,7 +173,7 @@ void blit_blend(Surface& dst, int32_t dx, int32_t dy, const Surface& src, uint32
 
 void glyph_blit(Surface& s, int32_t x, int32_t y, const uint8_t* bits, uint32_t gw, uint32_t gh,
                 uint32_t color, const ClipRect* clip) {
-    if (s.format != VISOR_PIX_XRGB8888 || bits == nullptr) {
+    if (s.format != CGUI_PIX_XRGB8888 || bits == nullptr) {
         return;
     }
     int32_t ex0, ey0, ex1, ey1;
@@ -202,7 +202,7 @@ void glyph_blit(Surface& s, int32_t x, int32_t y, const uint8_t* bits, uint32_t 
 
 void draw_line(Surface& s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t color,
                const ClipRect* clip) {
-    if (s.format != VISOR_PIX_XRGB8888) {
+    if (s.format != CGUI_PIX_XRGB8888) {
         return;
     }
     int32_t ex0, ey0, ex1, ey1;
@@ -239,4 +239,4 @@ void draw_line(Surface& s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint3
     }
 }
 
-}  // namespace visor
+}  // namespace cinux::gui

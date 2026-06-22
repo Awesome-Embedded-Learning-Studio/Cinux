@@ -18,7 +18,7 @@
 #include "kernel/gui/desktop_icon.hpp"
 #include "kernel/gui/icon.hpp"
 #include "kernel/gui/terminal.hpp"
-#include "kernel/gui/visor_host_cinux.hpp"
+#include "kernel/gui/cgui_host_cinux.hpp"
 #include "kernel/gui/window_manager.hpp"
 #include "kernel/ipc/pipe.hpp"
 #include "kernel/ipc/pipe_ops.hpp"
@@ -59,7 +59,7 @@ void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font) {
 
     // Initialise the window manager. The desktop itself is NOT drawn here --
     // gui_start() composites it once after icons are registered, and ongoing
-    // refresh is driven by the gui_worker thread calling visor_pump() (see
+    // refresh is driven by the gui_worker thread calling pump() (see
     // init.cpp), not by a PIT IRQ callback.
     WindowManager::instance().init(&screen, &font);
 
@@ -237,7 +237,7 @@ void gui_start() {
 
     // Composite the desktop once now (icons registered) so the staging back
     // buffer is populated. Ongoing refresh is driven by the gui_worker thread
-    // calling visor_pump() in a loop (see init.cpp), NOT by a PIT IRQ callback.
+    // calling pump() in a loop (see init.cpp), NOT by a PIT IRQ callback.
     // This removes the GUI's dependency on PIT tick delivery, which only fires
     // once under APIC routing on the production path (pre-existing F4 issue) --
     // the worker pump keeps the screen live regardless of whether PIT ticks
@@ -248,10 +248,10 @@ void gui_start() {
     wm.invalidate_all();
     cinux::lib::kprintf("[GUI] desktop composited; refresh driven by gui_worker pump loop.\n");
 
-    // Initialise the visor Host ABI adapter (F13 §3b/§4c): fills the host table
-    // that the gui_worker's visor_pump() drives. The callbacks forward to the
+    // Initialise the cgui Host ABI adapter (F13 §3b/§4c): fills the host table
+    // that the gui_worker's pump() drives. The callbacks forward to the
     // facilities wired above; flush forwards dirty rects to the framebuffer.
-    cinux_visor_host_init(g_screen != nullptr ? g_screen->framebuffer() : nullptr);
+    cinux_host_init(g_screen != nullptr ? g_screen->framebuffer() : nullptr);
 }
 
 }  // namespace cinux::gui

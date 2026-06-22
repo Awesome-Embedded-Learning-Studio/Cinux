@@ -1,17 +1,17 @@
 /**
- * @file kernel/gui/visor_host_cinux.cpp
- * @brief Cinux host adapter -- fills visor_host for the in-kernel desktop
+ * @file kernel/gui/cgui_host_cinux.cpp
+ * @brief Cinux host adapter -- fills cgui_host for the in-kernel desktop
  *
- * See visor_host_cinux.hpp. Every callback forwards to an existing in-tree
+ * See cgui_host_cinux.hpp. Every callback forwards to an existing in-tree
  * facility; no new behaviour is introduced. The poll_event callback is the
  * only non-trivial one: it dequeues a cinux::gui::Event from the unified mouse
- * queue and serialises it into a visor_event_header + typed payload so the
- * (host-agnostic) visor_pump body can consume it.
+ * queue and serialises it into a cgui_event_header + typed payload so the
+ * (host-agnostic) pump body can consume it.
  *
  * Compile condition: CINUX_GUI.
  */
 
-#include "visor_host_cinux.hpp"
+#include "cgui_host_cinux.hpp"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -26,23 +26,23 @@
 #include "kernel/lib/kprintf.hpp"         // kvprintf / kprintf
 #include "kernel/lib/string.hpp"          // memcpy
 #include "kernel/mm/slab.hpp"             // kmalloc / kfree
-#include "visor/core/visor_event.h"
-#include "visor/core/visor_event_payload.h"
-#include "visor/core/visor_region.hpp"  // visor::Region (dirty rects -> visor_rect)
+#include "cgui/core/cgui_event.h"
+#include "cgui/core/cgui_event_payload.h"
+#include "cgui/core/cgui_region.hpp"  // cinux::gui::Region (dirty rects -> cgui_rect)
 
 namespace cinux::gui {
 namespace {
 
-visor_host_desktop           g_cinux_desktop{};
-visor_host                   g_cinux_host{};
+cgui_host_desktop           g_cinux_desktop{};
+cgui_host                   g_cinux_host{};
 cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here (§4c) */
 
 /* ============================================================
- * L2 Input: dequeue one cinux::gui::Event and serialise it to a visor event.
+ * L2 Input: dequeue one cinux::gui::Event and serialise it to a cgui event.
  * ============================================================ */
-bool cinux_poll_event(void* ctx, visor_event_header* out, uint16_t out_cap) {
+bool cinux_poll_event(void* ctx, cgui_event_header* out, uint16_t out_cap) {
     (void)ctx;
-    if (out == nullptr || out_cap < sizeof(visor_event_header)) {
+    if (out == nullptr || out_cap < sizeof(cgui_event_header)) {
         return false;
     }
 
@@ -51,25 +51,25 @@ bool cinux_poll_event(void* ctx, visor_event_header* out, uint16_t out_cap) {
         return false;
     }
 
-    out->magic   = VISOR_EVENT_MAGIC;
-    out->version = VISOR_ABI_VERSION;
+    out->magic   = CGUI_EVENT_MAGIC;
+    out->version = CGUI_ABI_VERSION;
     out->flags   = 0;
 
-    uint8_t* tail  = reinterpret_cast<uint8_t*>(out) + sizeof(visor_event_header);
-    uint16_t avail = static_cast<uint16_t>(out_cap - sizeof(visor_event_header));
+    uint8_t* tail  = reinterpret_cast<uint8_t*>(out) + sizeof(cgui_event_header);
+    uint16_t avail = static_cast<uint16_t>(out_cap - sizeof(cgui_event_header));
 
     switch (ev.type_) {
     case EventType::MouseMove:
     case EventType::MouseDown:
     case EventType::MouseUp: {
-        if (avail < sizeof(visor_pointer_payload)) {
+        if (avail < sizeof(cgui_pointer_payload)) {
             return false;
         }
-        out->type = VISOR_EVENT_POINTER;
-        visor_pointer_payload p;
-        p.kind    = (ev.type_ == EventType::MouseDown) ? VISOR_POINTER_KIND_DOWN
-                    : (ev.type_ == EventType::MouseUp) ? VISOR_POINTER_KIND_UP
-                                                       : VISOR_POINTER_KIND_MOVE;
+        out->type = CGUI_EVENT_POINTER;
+        cgui_pointer_payload p;
+        p.kind    = (ev.type_ == EventType::MouseDown) ? CGUI_POINTER_KIND_DOWN
+                    : (ev.type_ == EventType::MouseUp) ? CGUI_POINTER_KIND_UP
+                                                       : CGUI_POINTER_KIND_MOVE;
         p.x       = ev.mouse.x;
         p.y       = ev.mouse.y;
         p.dx      = ev.mouse.dx;
@@ -81,21 +81,21 @@ bool cinux_poll_event(void* ctx, visor_event_header* out, uint16_t out_cap) {
     }
     case EventType::KeyDown:
     case EventType::KeyUp: {
-        if (avail < sizeof(visor_keycode_payload)) {
+        if (avail < sizeof(cgui_keycode_payload)) {
             return false;
         }
-        out->type  = VISOR_EVENT_KEYCODE;
+        out->type  = CGUI_EVENT_KEYCODE;
         /* Derive press/release from the dispatch type_ (not ev.key.pressed) so the
          * switch that accepted this event and the PRESSED flag the deserialiser
          * reads are authoritative from one source -- the two can never diverge
          * even if a producer ever lets type_ and key.pressed disagree. */
-        out->flags = (ev.type_ == EventType::KeyDown) ? VISOR_EVENT_FLAG_PRESSED : 0;
-        visor_keycode_payload k;
+        out->flags = (ev.type_ == EventType::KeyDown) ? CGUI_EVENT_FLAG_PRESSED : 0;
+        cgui_keycode_payload k;
         k.ascii     = ev.key.ascii;
         k.scancode  = ev.key.scancode;
-        k.modifiers = static_cast<uint8_t>((ev.key.shift ? VISOR_KEYMOD_SHIFT : 0u) |
-                                           (ev.key.ctrl ? VISOR_KEYMOD_CTRL : 0u) |
-                                           (ev.key.alt ? VISOR_KEYMOD_ALT : 0u));
+        k.modifiers = static_cast<uint8_t>((ev.key.shift ? CGUI_KEYMOD_SHIFT : 0u) |
+                                           (ev.key.ctrl ? CGUI_KEYMOD_CTRL : 0u) |
+                                           (ev.key.alt ? CGUI_KEYMOD_ALT : 0u));
         memcpy(tail, &k, sizeof(k));
         out->payload_len = static_cast<uint16_t>(sizeof(k));
         break;
@@ -112,18 +112,18 @@ bool cinux_poll_event(void* ctx, visor_event_header* out, uint16_t out_cap) {
 /* ============================================================
  * L4 Frame work: the host side of the host-neutral pump.
  *
- * dispatch_event: deserialise a visor event (the pump drained it via
+ * dispatch_event: deserialise a cgui event (the pump drained it via
  * poll_event) back into a cinux::gui::Event and apply it to the window
  * manager. This is the other half of the poll_event serialiser -- together
- * they exercise the visor_event ABI so the same pump body is host-neutral.
+ * they exercise the cgui_event ABI so the same pump body is host-neutral.
  * render_frame: do all per-frame cinux work (deferred icon spawn, terminal
  * poll, cursor footprint, composite) and report the dirty rects + the staging
  * back buffer. count==0 = idle (nothing changed, the pump flushes nothing).
  * ============================================================ */
-void cinux_dispatch_event(void* ctx, const visor_event_header* ev, const void* payload) {
+void cinux_dispatch_event(void* ctx, const cgui_event_header* ev, const void* payload) {
     (void)ctx;
-    if (ev == nullptr || payload == nullptr || ev->magic != VISOR_EVENT_MAGIC ||
-        ev->version != VISOR_ABI_VERSION) {
+    if (ev == nullptr || payload == nullptr || ev->magic != CGUI_EVENT_MAGIC ||
+        ev->version != CGUI_ABI_VERSION) {
         return;
     }
 
@@ -132,20 +132,20 @@ void cinux_dispatch_event(void* ctx, const visor_event_header* ev, const void* p
     cinux::gui::Event out;
 
     switch (ev->type) {
-    case VISOR_EVENT_POINTER: {
-        if (ev->payload_len < sizeof(visor_pointer_payload)) {
+    case CGUI_EVENT_POINTER: {
+        if (ev->payload_len < sizeof(cgui_pointer_payload)) {
             return;
         }
-        visor_pointer_payload p;
+        cgui_pointer_payload p;
         memcpy(&p, tail, sizeof(p));
         switch (p.kind) {
-        case VISOR_POINTER_KIND_MOVE:
+        case CGUI_POINTER_KIND_MOVE:
             out.type_ = EventType::MouseMove;
             break;
-        case VISOR_POINTER_KIND_DOWN:
+        case CGUI_POINTER_KIND_DOWN:
             out.type_ = EventType::MouseDown;
             break;
-        case VISOR_POINTER_KIND_UP:
+        case CGUI_POINTER_KIND_UP:
             out.type_ = EventType::MouseUp;
             break;
         default:
@@ -162,20 +162,20 @@ void cinux_dispatch_event(void* ctx, const visor_event_header* ev, const void* p
         wm.handle_mouse(out);
         return;
     }
-    case VISOR_EVENT_KEYCODE: {
-        if (ev->payload_len < sizeof(visor_keycode_payload)) {
+    case CGUI_EVENT_KEYCODE: {
+        if (ev->payload_len < sizeof(cgui_keycode_payload)) {
             return;
         }
-        visor_keycode_payload k;
+        cgui_keycode_payload k;
         memcpy(&k, tail, sizeof(k));
-        const bool pressed = (ev->flags & VISOR_EVENT_FLAG_PRESSED) != 0;
+        const bool pressed = (ev->flags & CGUI_EVENT_FLAG_PRESSED) != 0;
         out.type_          = pressed ? EventType::KeyDown : EventType::KeyUp;
         out.key.ascii      = k.ascii;
         out.key.scancode   = k.scancode;
         out.key.pressed    = pressed;
-        out.key.shift      = (k.modifiers & VISOR_KEYMOD_SHIFT) != 0;
-        out.key.ctrl       = (k.modifiers & VISOR_KEYMOD_CTRL) != 0;
-        out.key.alt        = (k.modifiers & VISOR_KEYMOD_ALT) != 0;
+        out.key.shift      = (k.modifiers & CGUI_KEYMOD_SHIFT) != 0;
+        out.key.ctrl       = (k.modifiers & CGUI_KEYMOD_CTRL) != 0;
+        out.key.alt        = (k.modifiers & CGUI_KEYMOD_ALT) != 0;
         wm.handle_key(out);
         return;
     }
@@ -184,7 +184,7 @@ void cinux_dispatch_event(void* ctx, const visor_event_header* ev, const void* p
     }
 }
 
-void cinux_render_frame(void* ctx, visor_frame* frame) {
+void cinux_render_frame(void* ctx, cgui_frame* frame) {
     (void)ctx;
     if (frame == nullptr) {
         return;
@@ -234,16 +234,16 @@ void cinux_render_frame(void* ctx, visor_frame* frame) {
      *    the core's buffer, collapse to the bounding box (over-cover, never
      *    under-cover). The region already self-collapses at kMaxRects, so this
      *    is just defense. */
-    const visor::Region& dirty = wm.dirty();
+    const cinux::gui::Region& dirty = wm.dirty();
     uint32_t             n     = dirty.count();
     if (n > frame->max_rects) {
-        const visor::Rect b = dirty.bounds();
-        frame->rects[0]     = visor_rect{b.x0, b.y0, b.x1, b.y1};
+        const cinux::gui::Rect b = dirty.bounds();
+        frame->rects[0]     = cgui_rect{b.x0, b.y0, b.x1, b.y1};
         n                   = 1;
     } else {
         for (uint32_t i = 0; i < n; i++) {
-            const visor::Rect& r = dirty.rects()[i];
-            frame->rects[i]      = visor_rect{r.x0, r.y0, r.x1, r.y1};
+            const cinux::gui::Rect& r = dirty.rects()[i];
+            frame->rects[i]      = cgui_rect{r.x0, r.y0, r.x1, r.y1};
         }
     }
     frame->count  = n;
@@ -251,7 +251,7 @@ void cinux_render_frame(void* ctx, visor_frame* frame) {
     frame->stride = screen->pitch();
     frame->width  = screen->width();
     frame->height = screen->height();
-    frame->format = VISOR_PIX_XRGB8888;
+    frame->format = CGUI_PIX_XRGB8888;
 
     wm.clear_dirty();
 }
@@ -284,7 +284,7 @@ __attribute__((format(printf, 2, 3))) void cinux_log(void* ctx, const char* fmt,
 /* ============================================================
  * L1 Display: flush a dirty rect from the staging buffer to the framebuffer.
  *
- * §4c: the visor pump renders into the screen canvas's back buffer (the
+ * §4c: the cgui pump renders into the screen canvas's back buffer (the
  * staging Surface) and pushes only the dirty rects through this callback.
  * @p pixels is the staging buffer base; the rect at display coords (x,y,w,h)
  * lives at row offset y*stride + x*4 within it. We copy each row into the VBE
@@ -294,12 +294,12 @@ __attribute__((format(printf, 2, 3))) void cinux_log(void* ctx, const char* fmt,
  * path now runs through the Host ABI (host-agnostic).
  * ============================================================ */
 void cinux_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
-                 visor_pixel_format fmt) {
+                 cgui_pixel_format fmt) {
     (void)ctx;
     if (g_fb == nullptr || pixels == nullptr || w <= 0 || h <= 0) {
         return;
     }
-    if (fmt != VISOR_PIX_XRGB8888) {
+    if (fmt != CGUI_PIX_XRGB8888) {
         return; /* Desktop framebuffer is 32bpp XRGB; other formats arrive later */
     }
 
@@ -346,7 +346,7 @@ void cinux_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint
  * accepted for ABI completeness but ignored -- a generic spawn(path, argv)
  * returning real stdio handles is §4+ work. Today there is exactly one
  * desktop action (open a shell), and create_shell_terminal() does exactly
- * that, so behaviour matches the non-visor gui_pump() path.
+ * that, so behaviour matches the non-cgui gui_pump() path.
  * ============================================================ */
 int cinux_spawn(void* ctx, const char* path, char* const argv[], int* stdin_fd, int* stdout_fd) {
     (void)ctx;
@@ -364,11 +364,11 @@ int cinux_spawn(void* ctx, const char* path, char* const argv[], int* stdin_fd, 
 
 }  // namespace
 
-visor_host& cinux_visor_host() {
+cgui_host& cinux_host() {
     return g_cinux_host;
 }
 
-void cinux_visor_host_init(cinux::drivers::Framebuffer* fb) {
+void cinux_host_init(cinux::drivers::Framebuffer* fb) {
     g_fb                               = fb;
     g_cinux_host.core.poll_event       = cinux_poll_event;
     g_cinux_host.core.dispatch_event   = cinux_dispatch_event;
@@ -387,7 +387,7 @@ void cinux_visor_host_init(cinux::drivers::Framebuffer* fb) {
     g_cinux_host.desktop  = &g_cinux_desktop;
     g_cinux_host.ctx      = nullptr;
 
-    cinux::lib::kprintf("[visor] Cinux host ABI adapter initialised\n");
+    cinux::lib::kprintf("[cgui] Cinux host ABI adapter initialised\n");
 }
 
 }  // namespace cinux::gui

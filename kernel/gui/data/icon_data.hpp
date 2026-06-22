@@ -119,7 +119,7 @@ constexpr IconBitmap build_icon(const uint32_t (&palette)[16], const char* const
 
 /// Fixed 32x32 1-bpp alpha mask (32 rows x 4 bytes). A set bit = opaque pixel.
 /// Freestanding aggregate (no STL); MSB-first within each row, matching the
-/// visor glyph-mask convention so a single blitter handles both.
+/// cgui glyph-mask convention so a single blitter handles both.
 struct IconMask {
     uint8_t bytes[128];
 

@@ -207,7 +207,7 @@ public:
     /**
      * @brief Underlying back (staging) buffer, as a flat uint32_t row-major span
      *
-     * The visor render engine treats this as its staging Surface (F13 §4c): the
+     * The cgui render engine treats this as its staging Surface (F13 §4c): the
      * compositor renders into it and the host flushes dirty rects out of it.
      * Rows are spaced @p pitch() bytes apart, so row r column c is at
      * `back_buffer()[r * (pitch()/4) + c]`.

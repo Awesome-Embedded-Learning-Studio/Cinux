@@ -1,16 +1,16 @@
 /**
- * @file visor/core/visor_swraseter.hpp
- * @brief visor L3 software rasteriser -- pure-CPU pixel primitives (§4a skeleton)
+ * @file cgui/core/cgui_swraseter.hpp
+ * @brief cgui L3 software rasteriser -- pure-CPU pixel primitives (§4a skeleton)
  *
- * The render engine visor core uses to draw into a staging Surface before
+ * The render engine cgui core uses to draw into a staging Surface before
  * flushing it to the host. Everything is integer-only (Q8.8 blend) so it runs
- * on a VISOR_NO_FPU profile (MCU-F1) unchanged; no floats leak.
+ * on a CGUI_NO_FPU profile (MCU-F1) unchanged; no floats leak.
  *
- * §4a scope (see document/todo/f13-gui/visor-02-refactor-and-separation.md §4):
+ * §4a scope (see document/todo/f13-gui/cgui-02-refactor-and-separation.md §4):
  * this is the shape skeleton + unit tests. The primitives are generalised from
  * the legacy Canvas draw_* (canvas.cpp) but operate on a bare Surface descriptor
- * (no Canvas dependency) so visor core stays host-agnostic. They are NOT wired
- * into visor_pump yet -- visor_pump still composites via wm.composite(); the
+ * (no Canvas dependency) so cgui core stays host-agnostic. They are NOT wired
+ * into pump yet -- pump still composites via wm.composite(); the
  * SwRaster takes over rendering in §4c (staging buffer + dirty region + flush).
  *
  * Pixel format: §4a implements XRGB8888 only (Desktop). Other formats
@@ -19,15 +19,15 @@
  *
  * Compile condition: CINUX_GUI.
  *
- * Namespace: visor
+ * Namespace: cgui
  */
 #pragma once
 
 #include <stdint.h>
 
-#include "visor_host.h"  // visor_pixel_format
+#include "cgui_host.h"  // cgui_pixel_format
 
-namespace visor {
+namespace cinux::gui {
 
 /**
  * @brief Half-open clip rectangle [x0,x1) x [y0,y1)
@@ -45,7 +45,7 @@ struct ClipRect {
 /**
  * @brief Bare pixel-buffer descriptor -- SwRaster does NOT own the buffer
  *
- * The caller (visor_pump staging buffer in §4c, or a host adapter / unit test)
+ * The caller (pump staging buffer in §4c, or a host adapter / unit test)
  * owns the storage. stride_bytes is explicit (may exceed width*bpp/8 when the
  * backend aligns rows to a cache line -- presets §4 pixel-format hard contract).
  */
@@ -54,7 +54,7 @@ struct Surface {
     uint32_t           width;
     uint32_t           height;
     uint32_t           stride_bytes;
-    visor_pixel_format format;
+    cgui_pixel_format format;
 };
 
 /**
@@ -78,7 +78,7 @@ void blit(Surface& dst, int32_t dx, int32_t dy, const Surface& src, uint32_t sx,
           uint32_t w, uint32_t h, const ClipRect* clip);
 
 /**
- * @brief Q8.8 alpha blend src -> dst (integer-only, VISOR_NO_FPU safe)
+ * @brief Q8.8 alpha blend src -> dst (integer-only, CGUI_NO_FPU safe)
  *
  * @p alpha_q8 in [0,256]: 0 = dst unchanged, 256 = fully src, 128 = 50/50.
  * Per channel: dst = (src*a + dst*(256-a)) >> 8. XRGB8888 only (alpha byte
@@ -104,4 +104,4 @@ void glyph_blit(Surface& s, int32_t x, int32_t y, const uint8_t* bits, uint32_t 
 void draw_line(Surface& s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t color,
                const ClipRect* clip);
 
-}  // namespace visor
+}  // namespace cinux::gui

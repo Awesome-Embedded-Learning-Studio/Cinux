@@ -1,13 +1,13 @@
 /**
- * @file kernel/test/test_visor_dirty.cpp
- * @brief QEMU in-kernel tests for the visor dirty-region + pump flush path (F13)
+ * @file kernel/test/test_cgui_dirty.cpp
+ * @brief QEMU in-kernel tests for the cgui dirty-region + pump flush path (F13)
  *
  * Two layers (the pump is now a host-neutral shell -- it drains events, calls
  * render_frame, flushes the reported rects; the dirty POLICY lives in the host
  * adapter, exercised by the GUI smoke):
  *   1. WindowManager dirty-mechanism unit tests -- invalidate/invalidate_all/
  *      clipping directly on the Region (no pump).
- *   2. visor_pump flush-loop tests -- a fake host whose render_frame fills rects
+ *   2. pump flush-loop tests -- a fake host whose render_frame fills rects
  *      + a recording flush; asserts the pump flushes exactly what render_frame
  *      reports and flushes nothing when render_frame reports count==0 (idle).
  *
@@ -20,15 +20,15 @@
 
 #ifdef CINUX_GUI
 #    include "kernel/drivers/canvas.hpp"
-#    include "visor/core/visor_host.h"
-#    include "visor/core/visor_pump.hpp"
-#    include "visor/core/visor_region.hpp"
+#    include "cgui/core/cgui_host.h"
+#    include "cgui/core/cgui_pump.hpp"
+#    include "cgui/core/cgui_region.hpp"
 #    include "kernel/gui/window_manager.hpp"
 #endif
 
 #ifdef CINUX_GUI
 
-using visor::Rect;
+using cinux::gui::Rect;
 using cinux::drivers::Canvas;
 using cinux::gui::WindowManager;
 
@@ -47,7 +47,7 @@ uint32_t  g_flushed_n = 0;
 
 /// Fake host flush: ignore the pixels, just record the rect the pump pushed.
 void record_flush(void* /*ctx*/, int x, int y, int w, int h, const void* /*pixels*/,
-                  uint32_t /*stride*/, visor_pixel_format /*fmt*/) {
+                  uint32_t /*stride*/, cgui_pixel_format /*fmt*/) {
     if (g_flushed_n < 64) {
         g_flushed[g_flushed_n] = FlushRect{x, y, w, h};
         g_flushed_n++;
@@ -55,17 +55,17 @@ void record_flush(void* /*ctx*/, int x, int y, int w, int h, const void* /*pixel
 }
 
 /// Fake render_frame: report two dirty rects.
-void fake_render_two(void* /*ctx*/, visor_frame* frame) {
-    frame->rects[0] = visor_rect{1, 2, 3, 4};     /* x=1 y=2 w=2 h=2 */
-    frame->rects[1] = visor_rect{10, 20, 30, 40}; /* x=10 y=20 w=20 h=20 */
+void fake_render_two(void* /*ctx*/, cgui_frame* frame) {
+    frame->rects[0] = cgui_rect{1, 2, 3, 4};     /* x=1 y=2 w=2 h=2 */
+    frame->rects[1] = cgui_rect{10, 20, 30, 40}; /* x=10 y=20 w=20 h=20 */
     frame->count    = 2;
     frame->pixels   = reinterpret_cast<const void*>(0x1); /* non-null so the pump flushes */
     frame->stride   = 4;
-    frame->format   = VISOR_PIX_XRGB8888;
+    frame->format   = CGUI_PIX_XRGB8888;
 }
 
 /// Fake render_frame: idle (nothing changed).
-void fake_render_idle(void* /*ctx*/, visor_frame* frame) {
+void fake_render_idle(void* /*ctx*/, cgui_frame* frame) {
     frame->count = 0;
 }
 
@@ -75,7 +75,7 @@ void fake_render_idle(void* /*ctx*/, visor_frame* frame) {
 // WindowManager dirty-mechanism unit tests (no pump)
 // ============================================================
 
-namespace test_visor_dirty_api {
+namespace test_cgui_dirty_api {
 
 void test_invalidate_adds_clipped_rect() {
     Canvas screen;
@@ -126,20 +126,20 @@ void test_invalidate_clips_partial_offscreen() {
     TEST_ASSERT_EQ(r.y1, 50);
 }
 
-}  // namespace test_visor_dirty_api
+}  // namespace test_cgui_dirty_api
 
 // ============================================================
-// visor_pump flush-loop tests (host-neutral pump + fake host)
+// pump flush-loop tests (host-neutral pump + fake host)
 // ============================================================
 
-namespace test_visor_pump_flush {
+namespace test_pump_flush {
 
 void test_pump_flushes_rendered_rects() {
     g_flushed_n = 0;
-    visor_host h{};
+    cgui_host h{};
     h.core.render_frame = fake_render_two;
     h.core.flush        = record_flush;
-    cinux::gui::visor_pump(&h);
+    cinux::gui::pump(&h);
 
     TEST_ASSERT_EQ(g_flushed_n, 2u);
     TEST_ASSERT_EQ(g_flushed[0].x, 1);
@@ -154,28 +154,28 @@ void test_pump_flushes_rendered_rects() {
 
 void test_pump_idle_flushes_nothing() {
     g_flushed_n = 0;
-    visor_host h{};
+    cgui_host h{};
     h.core.render_frame = fake_render_idle;
     h.core.flush        = record_flush;
-    cinux::gui::visor_pump(&h);
+    cinux::gui::pump(&h);
 
     TEST_ASSERT_EQ(g_flushed_n, 0u);
 }
 
-}  // namespace test_visor_pump_flush
+}  // namespace test_pump_flush
 
-extern "C" void run_visor_dirty_tests() {
-    TEST_SECTION("visor Dirty/Flush Tests (F13)");
-    RUN_TEST(test_visor_dirty_api::test_invalidate_adds_clipped_rect);
-    RUN_TEST(test_visor_dirty_api::test_invalidate_all_covers_screen);
-    RUN_TEST(test_visor_dirty_api::test_invalidate_clips_partial_offscreen);
-    RUN_TEST(test_visor_pump_flush::test_pump_flushes_rendered_rects);
-    RUN_TEST(test_visor_pump_flush::test_pump_idle_flushes_nothing);
+extern "C" void run_cgui_dirty_tests() {
+    TEST_SECTION("cgui Dirty/Flush Tests (F13)");
+    RUN_TEST(test_cgui_dirty_api::test_invalidate_adds_clipped_rect);
+    RUN_TEST(test_cgui_dirty_api::test_invalidate_all_covers_screen);
+    RUN_TEST(test_cgui_dirty_api::test_invalidate_clips_partial_offscreen);
+    RUN_TEST(test_pump_flush::test_pump_flushes_rendered_rects);
+    RUN_TEST(test_pump_flush::test_pump_idle_flushes_nothing);
     TEST_SUMMARY();
 }
 
 #else /* !CINUX_GUI */
 
-extern "C" void run_visor_dirty_tests() {}
+extern "C" void run_cgui_dirty_tests() {}
 
 #endif /* CINUX_GUI */

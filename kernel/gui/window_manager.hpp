@@ -26,7 +26,7 @@
 #include "kernel/drivers/canvas.hpp"
 #include "kernel/gui/desktop_icon.hpp"
 #include "kernel/gui/event.hpp"
-#include "visor/core/visor_region.hpp"
+#include "cgui/core/cgui_region.hpp"
 #include "kernel/gui/window.hpp"
 
 namespace cinux::gui {
@@ -195,7 +195,7 @@ public:
      *
      * Clears the back buffer with the desktop colour, draws the desktop icons,
      * blits each window from lowest Z-order to highest, then draws the mouse
-     * cursor. This renders the frame but does NOT present it: the visor pump
+     * cursor. This renders the frame but does NOT present it: the cgui pump
      * (F13 §4c) flushes the dirty region to the host afterwards. Previously
      * this called Canvas::flip() (full-frame copy); the display now goes
      * through the Host ABI flush so behaviour is identical but the path is
@@ -214,7 +214,7 @@ public:
      * region is a conservative over-approximation: callers may over-mark
      * freely (extra flush cost) but must never under-mark (stale pixels).
      */
-    void invalidate(const visor::Rect& r);
+    void invalidate(const cinux::gui::Rect& r);
 
     /** Mark the whole screen dirty (structural / z-order / drag changes). */
     void invalidate_all();
@@ -230,7 +230,7 @@ public:
     void invalidate_cursor_move();
 
     /** The accumulated dirty region for this frame (read by the pump). */
-    const visor::Region& dirty() const { return dirty_; }
+    const cinux::gui::Region& dirty() const { return dirty_; }
 
     /** Reset the dirty region (called by the pump after flushing). */
     void clear_dirty() { dirty_.clear(); }
@@ -415,7 +415,7 @@ private:
 
     // Dirty region (F13 §4c) -- what the pump flushes to the host this frame.
     // Conservatively over-approximated; cleared by the pump after flushing.
-    visor::Region dirty_;  ///< Accumulated dirty rects for the current frame
+    cinux::gui::Region dirty_;  ///< Accumulated dirty rects for the current frame
 
     // Cursor footprint tracking for invalidate_cursor_move(). Sentinel value
     // (kCursorInvalid) until the first frame, which marks the whole screen.

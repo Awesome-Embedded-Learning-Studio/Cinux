@@ -1,11 +1,11 @@
 /**
- * @file visor/core/visor_region.hpp
- * @brief visor L3 region algebra -- first-class Rect + bounded Region (F13 §4b)
+ * @file cgui/core/cgui_region.hpp
+ * @brief cgui L3 region algebra -- first-class Rect + bounded Region (F13 §4b)
  *
  * A region is the unit of "what changed" in the render engine. The §4c dirty
  * tracker accumulates a Region per frame and the host flushes exactly those
  * rects; the compositor's occlusion / subtract (§5) and MCU page-band lowering
- * (visor-02 §4.4) build on the same algebra.
+ * (cgui-02 §4.4) build on the same algebra.
  *
  * Design rules (correctness over cleverness -- this governs what reaches the
  * screen, so a wrong answer is a visible glitch):
@@ -18,17 +18,17 @@
  *     drops a pixel that did. For dirty regions, over-coverage is a perf cost;
  *     under-coverage is a stale-pixel bug.
  *
- * Integer-only (VISOR_NO_FPU safe), no allocation (fixed storage).
+ * Integer-only (CGUI_NO_FPU safe), no allocation (fixed storage).
  *
  * Compile condition: CINUX_GUI.
  *
- * Namespace: visor
+ * Namespace: cgui
  */
 #pragma once
 
 #include <stdint.h>
 
-namespace visor {
+namespace cinux::gui {
 
 /**
  * @brief Half-open 2D rectangle [x0,x1) x [y0,y1)
@@ -163,4 +163,4 @@ private:
     uint32_t count_ = 0;
 };
 
-}  // namespace visor
+}  // namespace cinux::gui

@@ -1,13 +1,13 @@
 /**
- * @file kernel/test/test_visor_region.cpp
- * @brief QEMU in-kernel tests for the visor region algebra (F13 §4b)
+ * @file kernel/test/test_cgui_region.cpp
+ * @brief QEMU in-kernel tests for the cgui region algebra (F13 §4b)
  *
  * Pure-logic tests: each builds Rects / a Region, runs an operation, and
  * asserts exact results. The degenerate (empty) and capacity-collapse paths
  * are exercised explicitly -- those are what keep dirty regions from dropping
  * pixels.
  *
- * Compile condition: CINUX_GUI (visor_region lives under kernel/gui).
+ * Compile condition: CINUX_GUI (cgui_region lives under kernel/gui).
  */
 
 #include <stdint.h>
@@ -15,20 +15,20 @@
 #include "big_kernel_test.h"
 
 #ifdef CINUX_GUI
-#    include "visor/core/visor_region.hpp"
+#    include "cgui/core/cgui_region.hpp"
 #endif
 
 #ifdef CINUX_GUI
 
-using visor::Rect;
-using visor::Region;
+using cinux::gui::Rect;
+using cinux::gui::Region;
 
-namespace test_visor_rect {
+namespace test_cgui_rect {
 
 void test_intersect_overlap() {
     Rect a{0, 0, 10, 10};
     Rect b{5, 5, 15, 15};
-    Rect r = visor::rect_intersect(a, b);
+    Rect r = cinux::gui::rect_intersect(a, b);
     TEST_ASSERT_EQ(r.x0, 5);
     TEST_ASSERT_EQ(r.y0, 5);
     TEST_ASSERT_EQ(r.x1, 10);
@@ -39,14 +39,14 @@ void test_intersect_overlap() {
 void test_intersect_disjoint_degenerate() {
     Rect a{0, 0, 4, 4};
     Rect b{5, 5, 9, 9};
-    Rect r = visor::rect_intersect(a, b);
+    Rect r = cinux::gui::rect_intersect(a, b);
     TEST_ASSERT_TRUE(r.empty());
 }
 
 void test_union_envelope() {
     Rect a{0, 0, 4, 4};
     Rect b{6, 6, 10, 10};
-    Rect r = visor::rect_union(a, b);
+    Rect r = cinux::gui::rect_union(a, b);
     TEST_ASSERT_EQ(r.x0, 0);
     TEST_ASSERT_EQ(r.y0, 0);
     TEST_ASSERT_EQ(r.x1, 10);
@@ -56,14 +56,14 @@ void test_union_envelope() {
 void test_union_one_empty() {
     Rect a{0, 0, 0, 0};  // degenerate
     Rect b{1, 1, 3, 3};
-    Rect r = visor::rect_union(a, b);
+    Rect r = cinux::gui::rect_union(a, b);
     TEST_ASSERT_EQ(r.x0, 1);
     TEST_ASSERT_EQ(r.y1, 3);
 }
 
 void test_translate() {
     Rect a{1, 2, 3, 4};
-    Rect r = visor::rect_translate(a, 10, -5);
+    Rect r = cinux::gui::rect_translate(a, 10, -5);
     TEST_ASSERT_EQ(r.x0, 11);
     TEST_ASSERT_EQ(r.y0, -3);
     TEST_ASSERT_EQ(r.x1, 13);
@@ -93,15 +93,15 @@ void test_empty_degenerate() {
     TEST_ASSERT_FALSE((Rect{0, 0, 1, 1}.empty()));
 }
 
-}  // namespace test_visor_rect
+}  // namespace test_cgui_rect
 
-namespace test_visor_subtract {
+namespace test_cgui_subtract {
 
 void test_subtract_no_overlap() {
     Rect     a{0, 0, 4, 4};
     Rect     b{10, 10, 20, 20};
     Rect     out[4];
-    uint32_t n = visor::rect_subtract(a, b, out);
+    uint32_t n = cinux::gui::rect_subtract(a, b, out);
     TEST_ASSERT_EQ(n, 1u);
     TEST_ASSERT_EQ(out[0].x0, 0);
     TEST_ASSERT_EQ(out[0].y1, 4);  // a unchanged
@@ -112,7 +112,7 @@ void test_subtract_hole_all_four() {
     Rect     a{0, 0, 10, 10};
     Rect     b{3, 3, 7, 7};
     Rect     out[4];
-    uint32_t n = visor::rect_subtract(a, b, out);
+    uint32_t n = cinux::gui::rect_subtract(a, b, out);
     TEST_ASSERT_EQ(n, 4u);
     /* Top band [0,10)x[0,3) */
     TEST_ASSERT_EQ(out[0].x0, 0);
@@ -137,7 +137,7 @@ void test_subtract_covers_all() {
     Rect     a{2, 2, 5, 5};
     Rect     b{0, 0, 10, 10};
     Rect     out[4];
-    uint32_t n = visor::rect_subtract(a, b, out);
+    uint32_t n = cinux::gui::rect_subtract(a, b, out);
     TEST_ASSERT_EQ(n, 0u);
 }
 
@@ -146,7 +146,7 @@ void test_subtract_edge_touch() {
     Rect     a{0, 0, 10, 10};
     Rect     b{0, 0, 4, 4};
     Rect     out[4];
-    uint32_t n = visor::rect_subtract(a, b, out);
+    uint32_t n = cinux::gui::rect_subtract(a, b, out);
     /* No top band (isect.y0 == a.y0); no left band (isect.x0 == a.x0). */
     TEST_ASSERT_EQ(n, 2u);
     /* Bottom band [0,10)x[4,10) */
@@ -157,9 +157,9 @@ void test_subtract_edge_touch() {
     TEST_ASSERT_EQ(out[1].y1, 4);
 }
 
-}  // namespace test_visor_subtract
+}  // namespace test_cgui_subtract
 
-namespace test_visor_region {
+namespace test_cgui_region {
 
 void test_region_add_bounds() {
     Region reg;
@@ -261,36 +261,36 @@ void test_region_capacity_collapse() {
     TEST_ASSERT_EQ(b.y1, 1);
 }
 
-}  // namespace test_visor_region
+}  // namespace test_cgui_region
 
-extern "C" void run_visor_region_tests() {
-    TEST_SECTION("visor Region Tests (F13 §4b)");
-    RUN_TEST(test_visor_rect::test_intersect_overlap);
-    RUN_TEST(test_visor_rect::test_intersect_disjoint_degenerate);
-    RUN_TEST(test_visor_rect::test_union_envelope);
-    RUN_TEST(test_visor_rect::test_union_one_empty);
-    RUN_TEST(test_visor_rect::test_translate);
-    RUN_TEST(test_visor_rect::test_contains_point);
-    RUN_TEST(test_visor_rect::test_contains_rect);
-    RUN_TEST(test_visor_rect::test_empty_degenerate);
-    RUN_TEST(test_visor_subtract::test_subtract_no_overlap);
-    RUN_TEST(test_visor_subtract::test_subtract_hole_all_four);
-    RUN_TEST(test_visor_subtract::test_subtract_covers_all);
-    RUN_TEST(test_visor_subtract::test_subtract_edge_touch);
-    RUN_TEST(test_visor_region::test_region_add_bounds);
-    RUN_TEST(test_visor_region::test_region_add_ignores_degenerate);
-    RUN_TEST(test_visor_region::test_region_intersect);
-    RUN_TEST(test_visor_region::test_region_intersect_drops_outside);
-    RUN_TEST(test_visor_region::test_region_translate);
-    RUN_TEST(test_visor_region::test_region_subtract);
-    RUN_TEST(test_visor_region::test_region_clear);
-    RUN_TEST(test_visor_region::test_region_bounds_empty);
-    RUN_TEST(test_visor_region::test_region_capacity_collapse);
+extern "C" void run_cgui_region_tests() {
+    TEST_SECTION("cgui Region Tests (F13 §4b)");
+    RUN_TEST(test_cgui_rect::test_intersect_overlap);
+    RUN_TEST(test_cgui_rect::test_intersect_disjoint_degenerate);
+    RUN_TEST(test_cgui_rect::test_union_envelope);
+    RUN_TEST(test_cgui_rect::test_union_one_empty);
+    RUN_TEST(test_cgui_rect::test_translate);
+    RUN_TEST(test_cgui_rect::test_contains_point);
+    RUN_TEST(test_cgui_rect::test_contains_rect);
+    RUN_TEST(test_cgui_rect::test_empty_degenerate);
+    RUN_TEST(test_cgui_subtract::test_subtract_no_overlap);
+    RUN_TEST(test_cgui_subtract::test_subtract_hole_all_four);
+    RUN_TEST(test_cgui_subtract::test_subtract_covers_all);
+    RUN_TEST(test_cgui_subtract::test_subtract_edge_touch);
+    RUN_TEST(test_cgui_region::test_region_add_bounds);
+    RUN_TEST(test_cgui_region::test_region_add_ignores_degenerate);
+    RUN_TEST(test_cgui_region::test_region_intersect);
+    RUN_TEST(test_cgui_region::test_region_intersect_drops_outside);
+    RUN_TEST(test_cgui_region::test_region_translate);
+    RUN_TEST(test_cgui_region::test_region_subtract);
+    RUN_TEST(test_cgui_region::test_region_clear);
+    RUN_TEST(test_cgui_region::test_region_bounds_empty);
+    RUN_TEST(test_cgui_region::test_region_capacity_collapse);
     TEST_SUMMARY();
 }
 
 #else /* !CINUX_GUI */
 
-extern "C" void run_visor_region_tests() {}
+extern "C" void run_cgui_region_tests() {}
 
 #endif /* CINUX_GUI */
