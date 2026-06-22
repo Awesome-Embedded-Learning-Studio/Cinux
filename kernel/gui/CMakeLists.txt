@@ -32,30 +32,11 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/terminal.cpp
 )
 
-# visor Host ABI skeleton (F13 §3a): ABI headers + compile-time self-check.
-# visor core does not take over yet; this only pins the ABI boundary
-# (machine-verifies header sizes / packed-ness across kernel/user/MCU builds).
+# F13 visor: the host-neutral core now lives at top-level visor/ (built as the
+# visor_core STATIC lib, linked into the kernel from kernel/CMakeLists.txt).
+# kernel/gui/ keeps ONLY the Cinux host adapter -- the single host-specific TU
+# that fills the ABI table against the kernel's drivers/framebuffer. The core
+# (pump / region / swraseter / abi_check) compiles standalone; see visor/host/.
 target_sources(big_kernel_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_abi_check.cpp
-)
-
-# F13 visor §3b: visor core pump + Cinux host adapter (table-driven GUI path).
-# The gui_worker drives the desktop through visor_pump() via the host table;
-# the legacy gui_pump() is removed (single path).
-target_sources(big_kernel_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_pump.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_host_cinux.cpp
-)
-
-# F13 visor §4a: software rasteriser primitives (pure-CPU, integer-only Q8.8
-# blend). Shape skeleton + unit tests only; wired into visor_pump in §4c
-# (staging buffer + dirty region + flush).
-target_sources(big_kernel_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_swraseter.cpp
-)
-
-# F13 visor §4b: first-class region algebra (Rect + bounded Region). Consumed
-# by the §4c dirty tracker; pure data structure, no host coupling.
-target_sources(big_kernel_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/visor_core/visor_region.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/visor_host_cinux.cpp
 )

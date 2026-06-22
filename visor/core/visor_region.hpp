@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_region.hpp
+ * @file visor/core/visor_region.hpp
  * @brief visor L3 region algebra -- first-class Rect + bounded Region (F13 §4b)
  *
  * A region is the unit of "what changed" in the render engine. The §4c dirty

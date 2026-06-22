@@ -18,7 +18,7 @@
 #include "kernel/gui/desktop_icon.hpp"
 #include "kernel/gui/icon.hpp"
 #include "kernel/gui/terminal.hpp"
-#include "kernel/gui/visor_core/visor_host_cinux.hpp"
+#include "kernel/gui/visor_host_cinux.hpp"
 #include "kernel/gui/window_manager.hpp"
 #include "kernel/ipc/pipe.hpp"
 #include "kernel/ipc/pipe_ops.hpp"

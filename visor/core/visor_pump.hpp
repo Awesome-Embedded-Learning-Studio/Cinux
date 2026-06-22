@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_pump.hpp
+ * @file visor/core/visor_pump.hpp
  * @brief visor core pump -- one host-neutral GUI iteration through the Host ABI
  *
  * visor_pump() is the core-side partner of the host adapter: it has ZERO host

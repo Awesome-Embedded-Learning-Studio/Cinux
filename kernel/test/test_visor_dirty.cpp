@@ -20,9 +20,9 @@
 
 #ifdef CINUX_GUI
 #    include "kernel/drivers/canvas.hpp"
-#    include "kernel/gui/visor_core/visor_host.h"
-#    include "kernel/gui/visor_core/visor_pump.hpp"
-#    include "kernel/gui/visor_core/visor_region.hpp"
+#    include "visor/core/visor_host.h"
+#    include "visor/core/visor_pump.hpp"
+#    include "visor/core/visor_region.hpp"
 #    include "kernel/gui/window_manager.hpp"
 #endif
 

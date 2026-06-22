@@ -15,7 +15,7 @@
 #include "big_kernel_test.h"
 
 #ifdef CINUX_GUI
-#    include "kernel/gui/visor_core/visor_region.hpp"
+#    include "visor/core/visor_region.hpp"
 #endif
 
 #ifdef CINUX_GUI

@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_host.h
+ * @file visor/core/visor_host.h
  * @brief visor Host ABI -- the ONLY hard seam between visor core and host
  *
  * DRAFT v2 ABI. visor core never touches framebuffer / IRQ / syscall / process

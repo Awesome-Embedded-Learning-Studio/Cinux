@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_host_cinux.cpp
+ * @file kernel/gui/visor_host_cinux.cpp
  * @brief Cinux host adapter -- fills visor_host for the in-kernel desktop
  *
  * See visor_host_cinux.hpp. Every callback forwards to an existing in-tree
@@ -26,9 +26,9 @@
 #include "kernel/lib/kprintf.hpp"         // kvprintf / kprintf
 #include "kernel/lib/string.hpp"          // memcpy
 #include "kernel/mm/slab.hpp"             // kmalloc / kfree
-#include "visor_event.h"
-#include "visor_event_payload.h"
-#include "visor_region.hpp"  // visor::Region (dirty rects -> visor_rect)
+#include "visor/core/visor_event.h"
+#include "visor/core/visor_event_payload.h"
+#include "visor/core/visor_region.hpp"  // visor::Region (dirty rects -> visor_rect)
 
 namespace cinux::gui {
 namespace {

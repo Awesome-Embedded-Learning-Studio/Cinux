@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_swraseter.hpp
+ * @file visor/core/visor_swraseter.hpp
  * @brief visor L3 software rasteriser -- pure-CPU pixel primitives (§4a skeleton)
  *
  * The render engine visor core uses to draw into a staging Surface before

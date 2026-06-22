@@ -66,6 +66,11 @@ enable_testing()
 
 add_subdirectory(boot)
 add_subdirectory(user)
+# F13 visor: host-neutral core built as its own STATIC lib at top-level visor/,
+# BEFORE kernel/ so the visor_core target exists when the kernel links it.
+if(CINUX_GUI)
+    add_subdirectory(visor)
+endif()
 add_subdirectory(kernel)
 
 include(cmake/qemu.cmake)

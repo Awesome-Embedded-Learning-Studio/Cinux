@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_abi_check.cpp
+ * @file visor/core/visor_abi_check.cpp
  * @brief Compile-time ABI self-check for the visor Host ABI
  *
  * Includes the ABI headers and static_asserts the cross-privilege layout

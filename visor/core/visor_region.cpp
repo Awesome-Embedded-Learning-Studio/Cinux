@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_region.cpp
+ * @file visor/core/visor_region.cpp
  * @brief visor region algebra implementation (F13 §4b)
  *
  * See visor_region.hpp for the design rules (half-open rects, degenerate =

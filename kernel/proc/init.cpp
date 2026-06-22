@@ -20,8 +20,8 @@
 
 #ifdef CINUX_GUI
 #    include "kernel/gui/gui_init.hpp"
-#    include "kernel/gui/visor_core/visor_host_cinux.hpp"
-#    include "kernel/gui/visor_core/visor_pump.hpp"
+#    include "kernel/gui/visor_host_cinux.hpp"
+#    include "visor/core/visor_pump.hpp"
 #endif
 
 namespace cinux::proc {

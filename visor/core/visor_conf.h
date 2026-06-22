@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_conf.h
+ * @file visor/core/visor_conf.h
  * @brief visor compile-time profile / config macros (lv_conf.h-style gating)
  *
  * DRAFT v2. All trimming is compile-time #if -- runtime config is a luxury on

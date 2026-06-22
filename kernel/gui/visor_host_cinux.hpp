@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_host_cinux.hpp
+ * @file kernel/gui/visor_host_cinux.hpp
  * @brief Cinux host adapter -- fills the visor_host table for the in-kernel desktop
  *
  * The Host ABI table (visor_host.h) is the ONLY hard seam between visor core
@@ -22,7 +22,7 @@
  */
 #pragma once
 
-#include "visor_host.h"
+#include "visor/core/visor_host.h"
 
 #ifdef __cplusplus
 

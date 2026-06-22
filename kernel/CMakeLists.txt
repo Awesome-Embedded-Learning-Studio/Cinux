@@ -159,6 +159,10 @@ add_executable(big_kernel
 
 target_sources(big_kernel PRIVATE $<TARGET_OBJECTS:big_kernel_common>)
 target_link_libraries(big_kernel PRIVATE big_kernel_common)
+# F13 visor: link the host-neutral core (top-level visor/, GUI only).
+if(CINUX_GUI)
+    target_link_libraries(big_kernel PRIVATE visor_core)
+endif()
 add_dependencies(big_kernel user_binary_obj initrd_obj)
 target_sources(big_kernel PRIVATE
     ${CMAKE_BINARY_DIR}/user/user_binary.o
@@ -254,6 +258,9 @@ add_executable(big_kernel_test
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)
 target_link_libraries(big_kernel_test PRIVATE big_kernel_common)
+if(CINUX_GUI)
+    target_link_libraries(big_kernel_test PRIVATE visor_core)
+endif()
 add_dependencies(big_kernel_test user_binary_obj initrd_obj)
 target_sources(big_kernel_test PRIVATE
     ${CMAKE_BINARY_DIR}/user/user_binary.o

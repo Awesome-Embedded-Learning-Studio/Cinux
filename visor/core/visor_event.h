@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_event.h
+ * @file visor/core/visor_event.h
  * @brief visor ABI -- fixed-width event header + variable tail (cross-privilege stable)
  *
  * DRAFT v2 ABI. Replaces the bare union Event in kernel/gui/event.hpp with a

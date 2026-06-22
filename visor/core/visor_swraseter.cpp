@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_swraseter.cpp
+ * @file visor/core/visor_swraseter.cpp
  * @brief visor L3 software rasteriser primitive implementations (§4a skeleton)
  *
  * See visor_swraseter.hpp for scope. All primitives are integer-only (Q8.8

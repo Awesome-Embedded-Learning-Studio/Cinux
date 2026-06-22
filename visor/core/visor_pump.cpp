@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_pump.cpp
+ * @file visor/core/visor_pump.cpp
  * @brief visor core pump -- one host-neutral GUI iteration
  *
  * Host-neutral: this body has ZERO host includes. It drains raw input events

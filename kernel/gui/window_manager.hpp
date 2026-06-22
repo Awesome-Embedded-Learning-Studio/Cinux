@@ -26,7 +26,7 @@
 #include "kernel/drivers/canvas.hpp"
 #include "kernel/gui/desktop_icon.hpp"
 #include "kernel/gui/event.hpp"
-#include "kernel/gui/visor_core/visor_region.hpp"
+#include "visor/core/visor_region.hpp"
 #include "kernel/gui/window.hpp"
 
 namespace cinux::gui {

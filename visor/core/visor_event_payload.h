@@ -1,5 +1,5 @@
 /**
- * @file kernel/gui/visor_core/visor_event_payload.h
+ * @file visor/core/visor_event_payload.h
  * @brief visor ABI -- typed payloads that follow visor_event_header
  *
  * DRAFT v2 ABI. visor_event.h defines the fixed-width 8-byte header; this
