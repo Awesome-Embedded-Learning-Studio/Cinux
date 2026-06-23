@@ -260,6 +260,7 @@ void XHCIController::poll_events() {
     while (event_ring_.dequeue(ev)) {
         if (trb_type(ev.control) == TrbType::kCommandCompletion) {
             ++cmd_completion_count_;
+            last_cmd_completion_ = ev;  // most recent CCE (run_command matches it)
         }
     }
     // Advance ERDP to the current dequeue pointer (acknowledges processed events
@@ -270,6 +271,63 @@ void XHCIController::poll_events() {
     ir0_->erdp_hi = static_cast<uint32_t>(erdp >> 32);
     // Clear IMAN.IP (write-1-to-clear).
     ir0_->iman    = ir0_->iman | Iman::kPending;
+}
+
+cinux::lib::ErrorOr<Trb> XHCIController::run_command(uint64_t parameter, uint32_t status,
+                                                     uint32_t control) {
+    // Capture the command-TRB slot we are about to fill, so we can match the
+    // Command Completion Event whose parameter echoes its physical address.
+    const uint64_t expected =
+        cmd_ring_buf_.phys() + static_cast<uint64_t>(cmd_ring_.enqueue_index()) * 16;
+    submit_command(parameter, status, control);
+    for (uint32_t i = 0; i < kResetIters; ++i) {
+        poll_events();
+        if (trb_type(last_cmd_completion_.control) == TrbType::kCommandCompletion &&
+            (last_cmd_completion_.parameter & 0xFFFFFFFFFFFFFFC0ULL) ==
+                (expected & 0xFFFFFFFFFFFFFFC0ULL)) {
+            return last_cmd_completion_;
+        }
+    }
+    cinux::lib::kprintf("[xHCI] run_command timed out (param=0x%lx)\n",
+                        static_cast<unsigned long>(parameter));
+    return cinux::lib::Error::TimedOut;
+}
+
+volatile uint32_t* XHCIController::portsc(uint8_t port) {
+    return reinterpret_cast<volatile uint32_t*>(reinterpret_cast<uintptr_t>(op_regs_) +
+                                                PortRegs::kBaseOffset +
+                                                static_cast<uint64_t>(port) * PortRegs::kSpacing);
+}
+
+uint32_t XHCIController::read_portsc(uint8_t port) {
+    return *portsc(port);
+}
+
+cinux::lib::ErrorOr<uint32_t> XHCIController::port_reset(uint8_t port) {
+    volatile uint32_t* psc = portsc(port);
+    // Power the port (no-op on QEMU qemu-xhci: PPC=0, ports always powered;
+    // real hardware with HCC PPC needs this before reset).
+    *psc                   = *psc | Portsc::kPortPower;
+    // Assert reset; the controller clears PORT_RESET when reset completes.
+    *psc                   = *psc | Portsc::kPortReset;
+    for (uint32_t i = 0; i < kResetIters; ++i) {
+        if (!(*psc & Portsc::kPortReset)) {
+            break;
+        }
+    }
+    if (*psc & Portsc::kPortReset) {
+        cinux::lib::kprintf("[xHCI] port %u reset did not complete (PORTSC=0x%x)\n",
+                            static_cast<unsigned>(port), *psc);
+        return cinux::lib::Error::TimedOut;
+    }
+    // Clear the change bits (write-1-to-clear) so they don't linger.
+    *psc = *psc | (Portsc::kConnectStatusChange | Portsc::kPortEnableChange |
+                   Portsc::kPortResetChange | Portsc::kPortLinkStateChange);
+    return Portsc::portsc_speed(*psc);
+}
+
+void XHCIController::dcbaa_set(uint8_t slot, uint64_t phys) {
+    static_cast<uint64_t*>(dcbaa_buf_.virt())[slot] = phys;
 }
 
 void XHCIController::event_irq_thunk() {

@@ -69,4 +69,47 @@ inline uint32_t trb_type(uint32_t control) {
     return (control >> kTrbTypeShift) & 0x3F;
 }
 
+// ============================================================
+// Command TRB slot-ID field + Address Device bit
+// ============================================================
+
+/// Slot ID field [31:24], shared by command TRBs (Enable Slot / Address Device /
+// Configure Endpoint carry the target slot) and Command Completion Events.
+constexpr uint32_t kSlotIdShift = 24;
+
+/// Build the slot-ID field for a command TRB control word.
+constexpr uint32_t slot_id_for_trb(uint32_t slot_id) {
+    return (slot_id & 0xFF) << kSlotIdShift;
+}
+
+/// Block Set Address Request (Address Device command control [9]).  BSR=0
+/// completes the address stage (device -> Addressed); BSR=1 blocks at Default
+/// until a SET_ADDRESS request.  xHCI host drivers use BSR=0.
+constexpr uint32_t kBlockSetAddress = 1U << 9;
+
+// ============================================================
+// Command Completion Event parsing (event TRBs produced by the controller)
+// ============================================================
+
+/// Completion Code values (CCE status [31:24]).
+namespace CompCode {
+constexpr uint32_t kSuccess          = 1;  ///< command succeeded
+constexpr uint32_t kTrbError         = 5;  ///< malformed / invalid parameter TRB
+constexpr uint32_t kStallError       = 6;
+constexpr uint32_t kResourceError    = 7;  ///< no slot / bandwidth available
+constexpr uint32_t kNoSlotsAvailable = 9;
+constexpr uint32_t kShortPacket      = 13;
+}  // namespace CompCode
+
+/// Slot ID returned by the completed command (CCE control [31:24]).  Enable
+/// Slot reports the newly assigned slot ID here.
+constexpr uint32_t cmd_completion_slot_id(uint32_t control) {
+    return (control >> kSlotIdShift) & 0xFF;
+}
+
+/// Completion code (CCE status [31:24]); CompCode::kSuccess == 1.
+constexpr uint32_t cmd_completion_code(uint32_t status) {
+    return (status >> 24) & 0xFF;
+}
+
 }  // namespace cinux::drivers::usb

@@ -122,9 +122,40 @@ constexpr uint32_t kSpacing    = 0x10;   ///< bytes between port register sets
 namespace Portsc {
 constexpr uint32_t kCurrentConnect = 1U << 0;  ///< CCS: device present
 constexpr uint32_t kPortEnabled    = 1U << 1;  ///< PED
+constexpr uint32_t kOverCurrent    = 1U << 3;  ///< OCA
 constexpr uint32_t kPortReset      = 1U << 4;  ///< PR: set to reset the port
-// Speed (PS), Port Power (PP) and Port Link State (PLS) bits are added in
-// Batch 3B once verified against QEMU xHCI.
+
+// Port Link State [8:5] (read current PM state; written with Link State Strobe).
+constexpr uint32_t kLinkStateShift = 5;
+constexpr uint32_t kLinkStateMask  = 0xFU << 5;
+namespace LinkState {
+constexpr uint32_t kU0       = 0;  ///< enabled, idle
+constexpr uint32_t kPolling  = 7;  ///< reset / polling (device present, resetting)
+constexpr uint32_t kHotReset = 9;
+constexpr uint32_t kResume   = 0xF;
+}  // namespace LinkState
+
+constexpr uint32_t kPortPower  = 1U << 9;  ///< PP: port power (if HCC PPC)
+constexpr uint32_t kSpeedShift = 10;       ///< device speed [13:10]
+constexpr uint32_t kSpeedMask  = 0xFU << 10;
+constexpr uint32_t kLinkStrobe = 1U << 16;  ///< set when writing the link state
+
+// Change bits (write-1-to-clear).
+constexpr uint32_t kConnectStatusChange = 1U << 17;  ///< CSC
+constexpr uint32_t kPortEnableChange    = 1U << 18;  ///< PEC
+constexpr uint32_t kPortResetChange     = 1U << 21;  ///< RC: 1->0 transition of PR
+constexpr uint32_t kPortLinkStateChange = 1U << 22;  ///< PLC
+
+/// Extract the Port Link State [8:5] from a PORTSC value.  Pure (host-testable).
+constexpr uint32_t portsc_link_state(uint32_t portsc) {
+    return (portsc & kLinkStateMask) >> kLinkStateShift;
+}
+
+/// Extract the device speed [13:10] from a PORTSC value (0=undef,1=FS,2=LS,
+/// 3=HS,4=SS).  Matches the Slot Context dev_info speed encoding.  Pure.
+constexpr uint32_t portsc_speed(uint32_t portsc) {
+    return (portsc & kSpeedMask) >> kSpeedShift;
+}
 }  // namespace Portsc
 
 // ============================================================

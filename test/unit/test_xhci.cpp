@@ -216,6 +216,41 @@ TEST("xhci: input_add_flag sets context-index bit (slot=bit0, EP0=bit1)") {
     ASSERT_EQ(input_add_flag(3), 8u);  // EP1-in
 }
 
+// ============================================================
+// 6. PORTSC + Command Completion Event parsing (Batch 3B)
+// ============================================================
+
+TEST("xhci: portsc_speed extracts device speed [13:10]") {
+    ASSERT_EQ(Portsc::portsc_speed(1u << 10), 1u);  // full speed
+    ASSERT_EQ(Portsc::portsc_speed(3u << 10), 3u);  // high speed
+    ASSERT_EQ(Portsc::portsc_speed(0), 0u);         // undefined
+}
+
+TEST("xhci: portsc_link_state extracts [8:5]") {
+    ASSERT_EQ(Portsc::portsc_link_state(7u << 5), 7u);  // polling
+    ASSERT_EQ(Portsc::portsc_link_state(0), 0u);        // U0
+}
+
+TEST("xhci: cmd_completion_slot_id extracts [31:24] of control") {
+    ASSERT_EQ(cmd_completion_slot_id(5u << 24), 5u);
+    ASSERT_EQ(cmd_completion_slot_id(0), 0u);
+}
+
+TEST("xhci: cmd_completion_code extracts [31:24] of status") {
+    ASSERT_EQ(cmd_completion_code(1u << 24), CompCode::kSuccess);
+    ASSERT_EQ(cmd_completion_code(5u << 24), 5u);  // TRB error
+}
+
+TEST("xhci: slot_id_for_trb packs slot into [31:24]") {
+    ASSERT_EQ(slot_id_for_trb(3), 3u << 24);
+}
+
+TEST("xhci: Address Device TRB control carries type + slot id") {
+    const uint32_t ctrl = trb_control(TrbType::kAddressDevice) | slot_id_for_trb(2);
+    ASSERT_EQ(trb_type(ctrl), TrbType::kAddressDevice);
+    ASSERT_EQ(cmd_completion_slot_id(ctrl), 2u);
+}
+
 int main() {
     RUN_ALL_TESTS();
     return _tests_failed > 0 ? 1 : 0;

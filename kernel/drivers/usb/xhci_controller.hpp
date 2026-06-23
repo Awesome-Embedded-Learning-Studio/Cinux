@@ -77,6 +77,27 @@ public:
     /// Count of Command Completion Events observed by poll_events().
     uint32_t cmd_completions() const { return cmd_completion_count_; }
 
+    /// Synchronous command: enqueue + doorbell, then poll until THIS command's
+    /// Command Completion Event arrives (matched by the command-TRB pointer the
+    /// controller echoes back), returning the completion event.  Times out ->
+    /// Error::TimedOut.  Caller reads slot_id / completion_code from the result.
+    cinux::lib::ErrorOr<Trb> run_command(uint64_t parameter, uint32_t status, uint32_t control);
+
+    /// Most recent Command Completion Event captured by poll_events().
+    Trb last_cmd_completion() const { return last_cmd_completion_; }
+
+    // ---- Port + slot management (Batch 3B: Address Device) ----
+
+    /// PORTSC register for @p port (op_base + 0x400 + port*0x10).
+    volatile uint32_t*            portsc(uint8_t port);
+    uint32_t                      read_portsc(uint8_t port);
+    /// Assert port reset, wait for PORT_RESET self-clear, clear change bits,
+    /// return the PORTSC device speed (0=undef,1=FS,2=LS,3=HS,4=SS).
+    /// Error::TimedOut if reset never completes.
+    cinux::lib::ErrorOr<uint32_t> port_reset(uint8_t port);
+    /// Write a device-context physical address into DCBAA[slot].
+    void                          dcbaa_set(uint8_t slot, uint64_t phys);
+
     /// ISR hook target: dispatches to s_instance_->poll_events().
     static void event_irq_thunk();
 
@@ -102,6 +123,7 @@ private:
     pci::msix::MsixCap        msix_cap_{};
     pci::msix::MsixController msix_;
     uint32_t                  cmd_completion_count_ = 0;
+    Trb                       last_cmd_completion_{};
 
     // DMA-backed rings + tables (own physical memory for the controller's
     // lifetime).  DmaBuffer is move-only, so XHCIController is move-only.

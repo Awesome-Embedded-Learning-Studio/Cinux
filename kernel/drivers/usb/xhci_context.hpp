@@ -79,8 +79,11 @@ struct EndpointContext {
 };
 static_assert(sizeof(EndpointContext) == 32, "Endpoint context must be 32 bytes");
 
-/// Input Control Context: add-flags / drop-flags + reserved.  Precedes the
-/// device context in an Input Context (Address Device / Configure Endpoint).
+/// Input Control Context: DW0 = drop-flags (D0..D31), DW1 = add-flags
+/// (A0..A31), DW2..7 reserved.  Precedes the device context in an Input Context
+/// (Address Device / Configure Endpoint).  Drop precedes Add -- matches Linux
+/// xhci_input_ctrl_ctx { drop_flags; add_flags; } and QEMU hcd-xhci (which
+/// requires ictx DW0==0 && DW1==0x3 for Address Device).
 struct InputControlContext {
     volatile uint32_t dw[8];
 };

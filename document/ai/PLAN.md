@@ -31,8 +31,8 @@
 > | 2A | TRB + ring 数学（纯） | 558a781 | run-kernel-test 929/0 + test_xhci 11 例(含 5 ring) |
 > | 2B | DCBAA + 中断器/ERST + 启动 | 265b9c1 | run-kernel-test-xhci **929/0**(控制器 running,scratchpad=15) |
 > | 2C | 接线 MSI-X→event-ring ISR + doorbell NOOP→中断（最高风险） | 1b89843 | run-kernel-test-xhci **929/0**(cmd_completions=1 EINT=1,命令管线+中断路径端到通) |
-> | 3A | USB SETUP 包+描述符+xHCI context 编码器(纯层,host 测) | (本次) | run-kernel-test **929/0** + test_host 53/53(context 位布局已 Linux xhci.h 核实) |
-> | 3B | Address Device 状态机 | ⏳ | |
+> | 3A | USB SETUP 包+描述符+xHCI context 编码器(纯层,host 测) | 9bfd7a4 | run-kernel-test **929/0** + test_host 53/53(context 位布局已 Linux xhci.h 核实) |
+> | 3B | Address Device 状态机(端口 reset+Enable Slot+寻址) | (本次) | run-kernel-test-xhci **930/0**(address device code=1 slot_state=2 dev_addr=1,真机设备 addressed) |
 > | 3C | GET_DESCRIPTOR + SET_CONFIGURATION | ⏳ | |
 > | 4A | HID boot SET_PROTOCOL + interrupt-in + 解码 | ⏳ | |
 > | 4B | 注入事件队列 + 输入源互斥 | ⏳ | |

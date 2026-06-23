@@ -17,6 +17,7 @@
 #include "big_kernel_test.h"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/usb/xhci_controller.hpp"
+#include "kernel/drivers/usb/xhci_slot.hpp"
 #include "kernel/lib/kprintf.hpp"
 
 using cinux::drivers::pci::PCIDevice;
@@ -84,10 +85,88 @@ void test_find_and_reset() {
     TEST_ASSERT_TRUE((usbsts & Usbsts::kEventInterrupt) != 0);
 }
 
+// ============================================================
+// Test 2: Address Device -- enumerate one connected USB device
+// (Batch 3B).  Runs only under run-kernel-test-xhci (a device is
+// attached); skips if no controller or no connected port.
+// ============================================================
+
+void test_address_device() {
+    PCI pci;
+    pci.init();
+
+    PCIDevice dev{};
+    if (!pci.find_xhci(dev)) {
+        cinux::lib::kprintf("[xHCI] no controller present -- skipping address-device test\n");
+        return;
+    }
+
+    XHCIController xhci;
+    if (!xhci.init(dev).ok()) {
+        TEST_ASSERT_TRUE(false);
+        return;
+    }
+    if (!xhci.start().ok()) {
+        TEST_ASSERT_TRUE(false);
+        return;
+    }
+
+    // Scan ports for a connected device (CCS).
+    uint8_t port = 0xFF;
+    for (uint8_t p = 0; p < xhci.max_ports(); ++p) {
+        if (xhci.read_portsc(p) & Portsc::kCurrentConnect) {
+            port = p;
+            break;
+        }
+    }
+    if (port == 0xFF) {
+        cinux::lib::kprintf("[xHCI] no connected device -- skipping address-device test\n");
+        return;  // no device attached: counts as a pass (skip)
+    }
+
+    // Reset the port; the controller negotiates and reports the speed.
+    auto speed_r = xhci.port_reset(port);
+    TEST_ASSERT_TRUE(speed_r.ok());
+    const uint32_t speed = speed_r.value();
+
+    // Enable Slot -> the controller returns the assigned slot ID.
+    auto es = xhci.run_command(0, 0, trb_control(TrbType::kEnableSlot));
+    TEST_ASSERT_TRUE(es.ok());
+    const uint8_t slot_id = static_cast<uint8_t>(cmd_completion_slot_id(es.value().control));
+    cinux::lib::kprintf("[xHCI] enable slot -> slot_id=%u (port=%u speed=%u)\n",
+                        static_cast<unsigned>(slot_id), static_cast<unsigned>(port), speed);
+    TEST_ASSERT_TRUE(slot_id >= 1);
+    TEST_ASSERT_TRUE(slot_id <= xhci.max_slots());
+
+    // Allocate contexts and register the device context in the DCBAA.
+    XhciSlot slot;
+    TEST_ASSERT_TRUE(slot.allocate(slot_id).ok());
+    xhci.dcbaa_set(slot_id, slot.device_context_phys());
+
+    // EP0 max packet: 64 for high speed, 8 otherwise (unknown pre-descriptor).
+    const uint32_t ep0_maxpacket = (speed == UsbSpeed::kHigh) ? 64 : 8;
+    slot.build_address_input(speed, port + 1, ep0_maxpacket);  // rh_port is 1-based
+
+    // Address Device (BSR=0 -- complete the address stage).
+    auto ad = xhci.run_command(slot.input_context_phys(), 0,
+                               trb_control(TrbType::kAddressDevice) | slot_id_for_trb(slot_id));
+    TEST_ASSERT_TRUE(ad.ok());
+    const uint32_t code = cmd_completion_code(ad.value().status);
+    cinux::lib::kprintf("[xHCI] address device -> completion code=%u\n", code);
+    TEST_ASSERT_EQ(code, CompCode::kSuccess);
+
+    // Verify the device entered the Addressed state (slot DW3 dev_state [31:27]).
+    const uint32_t dev_state  = slot.device_slot_dword(3);
+    const uint32_t slot_state = (dev_state >> 27) & 0x1F;
+    cinux::lib::kprintf("[xHCI] device slot_state=%u dev_addr=%u\n", slot_state, dev_state & 0xFF);
+    TEST_ASSERT_EQ(slot_state, SlotState::kAddressed);
+}
+
 }  // namespace test_xhci
 
 extern "C" void run_xhci_tests() {
     TEST_SECTION("xHCI");
     RUN_TEST(test_xhci::test_find_and_reset);
+    RUN_TEST(test_xhci::test_address_device);
     TEST_SUMMARY();
 }
