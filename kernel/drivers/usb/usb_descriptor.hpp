@@ -109,6 +109,10 @@ constexpr uint8_t kInterfaceClass    = 0x03;  ///< HID
 constexpr uint8_t kBootSubclass      = 0x01;  ///< boot interface
 constexpr uint8_t kBootProtoMouse    = 0x02;
 constexpr uint8_t kBootProtoKeyboard = 0x01;
+// HID class request codes (bRequest; bmRequestType = 0x21 OUT or 0xA1 IN).
+constexpr uint8_t kSetProtocol       = 0x0B;  ///< wValue: 0=boot, 1=report
+constexpr uint8_t kGetProtocol       = 0x03;
+constexpr uint8_t kSetIdle           = 0x0A;
 }  // namespace UsbHid
 
 // ============================================================

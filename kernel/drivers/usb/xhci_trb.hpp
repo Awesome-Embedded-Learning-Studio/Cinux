@@ -170,4 +170,17 @@ constexpr uint32_t status_stage_control(bool data_in) {
     return trb_control(TrbType::kStatus, kInterruptOnCompletion | (data_in ? 0U : kDataDirIn));
 }
 
+/// Normal TRB (type 1) for an interrupt-IN poll (Batch 4A): IOC (event on
+/// completion) + ISP (short-packet event).  NO DIR bit -- direction comes from
+/// the EP-context type (kIntIn).  No cycle bit (the ring adds it).
+constexpr uint32_t interrupt_in_trb_control() {
+    return trb_control(TrbType::kNormal, kInterruptOnCompletion | kInterruptOnShort);
+}
+
+/// Device Context Index (DCI) for an endpoint -- the doorbell target + the
+/// input-context EP-context slot.  EP0 = 1; EPn-OUT = 2n; EPn-IN = 2n+1.
+constexpr uint32_t ep_dci(uint32_t ep_number, bool in) {
+    return ep_number * 2 + (in ? 1u : 0u);
+}
+
 }  // namespace cinux::drivers::usb

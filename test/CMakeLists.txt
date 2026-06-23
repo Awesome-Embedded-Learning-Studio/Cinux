@@ -96,6 +96,8 @@ add_cinux_integration_test(xhci
 )
 # F5-M5 Batch 3A: USB SETUP packet + descriptor encoding (header-only, pure).
 add_cinux_test(usb)
+# F5-M5 Batch 4A: HID boot-mouse decode + config-descriptor walk (header-only).
+add_cinux_test(hid)
 add_cinux_test(ext2)
 add_cinux_test(ahci_write)
 add_cinux_test(ext2_allocator)
@@ -229,7 +231,7 @@ set(ALL_HOST_TESTS
     test_big_kernel_loader test_kprintf test_pic test_pit test_font
     test_console test_framebuffer test_keyboard test_pmm test_vmm
     test_address_space test_scheduler test_sync test_sync_concurrent
-    test_usermode test_syscall test_shell test_ahci test_pci test_xhci test_usb test_ramdisk test_fd_table
+    test_usermode test_syscall test_shell test_ahci test_pci test_xhci test_usb test_hid test_ramdisk test_fd_table
     test_vfs_mount test_ext2 test_ahci_write test_ext2_allocator test_ext2_ops
     test_ext2_inode_ops test_syscall_ext2 test_shell_write test_cwd_stat
     test_canvas test_bitmap_icon test_mouse test_event_queue test_window

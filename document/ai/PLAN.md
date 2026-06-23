@@ -33,8 +33,8 @@
 > | 2C | 接线 MSI-X→event-ring ISR + doorbell NOOP→中断（最高风险） | 1b89843 | run-kernel-test-xhci **929/0**(cmd_completions=1 EINT=1,命令管线+中断路径端到通) |
 > | 3A | USB SETUP 包+描述符+xHCI context 编码器(纯层,host 测) | 9bfd7a4 | run-kernel-test **929/0** + test_host 53/53(context 位布局已 Linux xhci.h 核实) |
 > | 3B | Address Device 状态机(端口 reset+Enable Slot+寻址) | c51065b | run-kernel-test-xhci **930/0**(address device code=1 slot_state=2 dev_addr=1,真机设备 addressed) |
-> | 3C | 控制传输(SETUP/Data/Status)+ GET_DESCRIPTOR + SET_CONFIGURATION | (本次) | run-kernel-test-xhci **930/0**(读到 usb-kbd 描述符 vid=0x627 + set_configuration ok,真控制传输端到端) |
-> | 4A | HID boot SET_PROTOCOL + interrupt-in + 解码 | ⏳ | |
+> | 3C | 控制传输(SETUP/Data/Status)+ GET_DESCRIPTOR + SET_CONFIGURATION | 48b5ff4 | run-kernel-test-xhci **930/0**(读到 usb-kbd 描述符 vid=0x627 + set_configuration ok,真控制传输端到端) |
+> | 4A | HID boot:Configure Endpoint + interrupt-in EP + SET_PROTOCOL + 报告解码 | (本次) | run-kernel-test-xhci **930/0**(configure endpoint ok 加 interrupt-IN EP;静止鼠标 NAK 无报告符合预期) |
 > | 4B | 注入事件队列 + 输入源互斥 | ⏳ | |
 > | 5A | boot 接线 + QEMU 切换（run-kernel-test-xhci） | ⏳ | |
 > | 5B | 测试加固 + docs 同步 | ⏳ | |

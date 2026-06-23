@@ -287,6 +287,22 @@ TEST("xhci: transfer_event_epid extracts [20:16], remaining extracts [23:0]") {
     ASSERT_EQ(cmd_completion_code(status), 1u);  // code reuses the CCE extractor
 }
 
+// ============================================================
+// 8. Interrupt-IN transfer TRB + endpoint DCI (Batch 4A)
+// ============================================================
+
+TEST("xhci: interrupt_in_trb_control packs Normal(type1) + IOC + ISP") {
+    // (1<<10=0x400) | IOC(bit5=0x20) | ISP(bit2=0x4) = 0x424, no DIR
+    ASSERT_EQ(interrupt_in_trb_control(), 0x00000424u);
+}
+
+TEST("xhci: ep_dci maps EP number + direction to the doorbell target") {
+    ASSERT_EQ(ep_dci(0, true), 1u);   // EP0 control = DCI 1
+    ASSERT_EQ(ep_dci(1, true), 3u);   // EP1-IN  = DCI 3
+    ASSERT_EQ(ep_dci(1, false), 2u);  // EP1-OUT = DCI 2
+    ASSERT_EQ(ep_dci(2, true), 5u);   // EP2-IN  = DCI 5
+}
+
 int main() {
     RUN_ALL_TESTS();
     return _tests_failed > 0 ? 1 : 0;

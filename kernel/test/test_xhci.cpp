@@ -16,6 +16,7 @@
 
 #include "big_kernel_test.h"
 #include "kernel/drivers/pci/pci.hpp"
+#include "kernel/drivers/usb/hid.hpp"
 #include "kernel/drivers/usb/usb_descriptor.hpp"
 #include "kernel/drivers/usb/xhci_controller.hpp"
 #include "kernel/drivers/usb/xhci_slot.hpp"
@@ -182,11 +183,102 @@ void test_address_device() {
     cinux::lib::kprintf("[xHCI] set_configuration(1) ok\n");
 }
 
+// ============================================================
+// Test 3: HID boot mouse -- scan ports for a boot-mouse device,
+// configure its interrupt-IN endpoint (Batch 4A).  Skips if no
+// controller / no mouse.  The report poll is best-effort: an idle
+// mouse NAKs (no Transfer Event) -- that is correct, not a failure.
+// ============================================================
+
+void test_hid_mouse() {
+    PCI pci;
+    pci.init();
+
+    PCIDevice dev{};
+    if (!pci.find_xhci(dev)) {
+        cinux::lib::kprintf("[xHCI] no controller present -- skipping HID mouse test\n");
+        return;
+    }
+
+    XHCIController xhci;
+    if (!xhci.init(dev).ok() || !xhci.start().ok()) {
+        TEST_ASSERT_TRUE(false);
+        return;
+    }
+
+    // Scan ports; address each connected device, read its config descriptor,
+    // and boot the first HID boot mouse found.
+    for (uint8_t port = 0; port < xhci.max_ports(); ++port) {
+        if (!(xhci.read_portsc(port) & Portsc::kCurrentConnect)) {
+            continue;
+        }
+
+        auto speed_r = xhci.port_reset(port);
+        if (!speed_r.ok()) {
+            continue;
+        }
+        auto es = xhci.run_command(0, 0, trb_control(TrbType::kEnableSlot));
+        if (!es.ok()) {
+            continue;
+        }
+        const uint8_t slot_id = static_cast<uint8_t>(cmd_completion_slot_id(es.value().control));
+        XhciSlot      slot;
+        if (!slot.allocate(slot_id).ok()) {
+            continue;
+        }
+        xhci.dcbaa_set(slot_id, slot.device_context_phys());
+        const uint32_t speed = speed_r.value();
+        const uint32_t maxp  = (speed == UsbSpeed::kHigh) ? 64 : 8;
+        slot.build_address_input(speed, port + 1, maxp);
+        auto ad = xhci.run_command(slot.input_context_phys(), 0,
+                                   trb_control(TrbType::kAddressDevice) | slot_id_for_trb(slot_id));
+        if (!ad.ok() || cmd_completion_code(ad.value().status) != CompCode::kSuccess) {
+            continue;  // not addressable -- try the next port
+        }
+
+        // Read the config descriptor + look for a HID boot mouse.
+        auto cfg = slot.get_descriptor(xhci, UsbDescType::kConfiguration, 0, 255);
+        if (!cfg.ok()) {
+            continue;
+        }
+        BootMouseEp mep{};
+        if (!find_boot_mouse(slot.data_virt(), cfg.value(), mep)) {
+            continue;  // not a boot mouse (e.g. the keyboard) -- try the next port
+        }
+
+        // Found the mouse: configure it + boot the HID interrupt-IN endpoint.
+        TEST_ASSERT_TRUE(slot.set_configuration(xhci, 1).ok());
+        TEST_ASSERT_TRUE(slot.set_protocol(xhci, mep.interface_number, 0).ok());  // boot protocol
+        auto ce =
+            slot.add_interrupt_endpoint(xhci, mep.ep_number, mep.max_packet_size, mep.interval);
+        cinux::lib::kprintf(
+            "[xHCI] HID mouse: iface=%u ep%u-IN maxp=%u interval=%u -> configure endpoint %s\n",
+            static_cast<unsigned>(mep.interface_number), static_cast<unsigned>(mep.ep_number),
+            static_cast<unsigned>(mep.max_packet_size), static_cast<unsigned>(mep.interval),
+            ce.ok() ? "ok" : "FAILED");
+        TEST_ASSERT_TRUE(ce.ok());
+
+        // Best-effort poll: an idle mouse NAKs (no movement) -> TimedOut, expected.
+        auto rpt = slot.poll_mouse_report(xhci);
+        if (rpt.ok()) {
+            cinux::lib::kprintf("[xHCI] mouse report: buttons=%u dx=%d dy=%d\n",
+                                static_cast<unsigned>(rpt.value().buttons),
+                                static_cast<int>(rpt.value().dx), static_cast<int>(rpt.value().dy));
+        } else {
+            cinux::lib::kprintf("[xHCI] mouse idle (no report yet) -- expected on still mouse\n");
+        }
+        return;  // booted the mouse
+    }
+
+    cinux::lib::kprintf("[xHCI] no HID boot mouse found -- skipping HID test\n");
+}
+
 }  // namespace test_xhci
 
 extern "C" void run_xhci_tests() {
     TEST_SECTION("xHCI");
     RUN_TEST(test_xhci::test_find_and_reset);
     RUN_TEST(test_xhci::test_address_device);
+    RUN_TEST(test_xhci::test_hid_mouse);
     TEST_SUMMARY();
 }

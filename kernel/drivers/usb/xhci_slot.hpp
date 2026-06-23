@@ -18,7 +18,9 @@
 
 #include <cinux/expected.hpp>
 
+#include "hid.hpp"
 #include "kernel/drivers/dma/dma_buffer.hpp"
+#include "usb_descriptor.hpp"
 #include "usb_request.hpp"
 #include "xhci_context.hpp"
 #include "xhci_ring.hpp"
@@ -65,6 +67,25 @@ public:
     /// Convenience: SET_CONFIGURATION (OUT, no data stage).
     cinux::lib::ErrorOr<void> set_configuration(XHCIController& hc, uint8_t config_value);
 
+    // ---- HID boot (Batch 4A) ----
+
+    /// SET_PROTOCOL (HID class, OUT, no data) on @p interface.  @p protocol: 0
+    /// = boot protocol, 1 = report protocol.
+    cinux::lib::ErrorOr<void> set_protocol(XHCIController& hc, uint8_t interface_number,
+                                           uint8_t protocol);
+
+    /// Add an interrupt-IN endpoint via the Configure Endpoint command (TRB type
+    /// 12).  @p ep_number from the endpoint descriptor; @p max_packet +
+    /// @p interval from the descriptor.  Allocates the interrupt transfer ring.
+    cinux::lib::ErrorOr<void> add_interrupt_endpoint(XHCIController& hc, uint8_t ep_number,
+                                                     uint16_t max_packet, uint8_t interval);
+
+    /// Poll the interrupt-IN endpoint once: enqueue a Normal TRB, ring the
+    /// doorbell, wait for the Transfer Event, decode the boot-mouse report.
+    /// Returns Error::TimedOut when the mouse is idle (NAK, no event) -- this is
+    /// correct interrupt-IN behavior, not an error.
+    cinux::lib::ErrorOr<HidMouseReport> poll_mouse_report(XHCIController& hc);
+
     /// Control-IN data buffer -- descriptor reads land here (valid after a
     /// successful control_in / get_descriptor).
     const uint8_t* data_virt() const { return static_cast<const uint8_t*>(data_buf_.virt()); }
@@ -92,7 +113,11 @@ private:
     cinux::drivers::dma::DmaBuffer in_ctx_buf_;    ///< ICC + device-context copy (input)
     cinux::drivers::dma::DmaBuffer ep0_ring_buf_;  ///< EP0 transfer ring storage
     cinux::drivers::dma::DmaBuffer data_buf_;      ///< control-IN data buffer (descriptors)
+    cinux::drivers::dma::DmaBuffer int_ring_buf_;  ///< interrupt-IN transfer ring storage
+    cinux::drivers::dma::DmaBuffer report_buf_;    ///< interrupt-IN report buffer
     TrbRing                        ep0_ring_;
+    TrbRing                        int_ring_;          ///< interrupt-IN ring
+    uint8_t                        mouse_ep_dci_ = 0;  ///< interrupt-IN EP DCI (doorbell target)
 };
 
 }  // namespace cinux::drivers::usb

@@ -25,11 +25,17 @@
 namespace cinux::drivers::usb {
 
 namespace {
-constexpr uint64_t kDevCtxBytes  = 64;   ///< slot (32) + EP0 (32)
-constexpr uint64_t kInCtxBytes   = 96;   ///< ICC (32) + slot (32) + EP0 (32)
+// Device context: slot (ctx0) + EP0 (ctx1) + EP1-out (ctx2) + EP1-in (ctx3) = 4
+// contexts.  Enlarged in 4A so Configure Endpoint can add the interrupt-IN EP
+// (ctx3) without overflowing (3B used slot+EP0 = 64 B).
+constexpr uint64_t kDevCtxBytes  = 128;  ///< slot + EP0 + EP1-out + EP1-in (4 contexts)
+// Input context: ICC (32) + device-context copy through ctx3 = 32 + 4*32 = 160.
+constexpr uint64_t kInCtxBytes   = 160;  ///< ICC + slot + EP0 + EP1-out + EP1-in
 constexpr uint64_t kDataBufBytes = 256;  ///< control-IN data (device + config descriptors)
 constexpr uint32_t kEp0RingTrbs  = 16;   ///< EP0 control ring depth (+1 Link TRB)
 constexpr uint32_t kEp0AvgTrbLen = 8;    ///< average TRB length for control EP
+constexpr uint32_t kIntRingTrbs  = 16;   ///< interrupt-IN ring depth (+1 Link TRB)
+constexpr uint64_t kReportBytes  = 16;   ///< interrupt-IN report buffer (>= max_packet)
 
 void zero_bytes(void* p, uint64_t bytes) {
     auto* b = static_cast<uint8_t*>(p);
@@ -70,6 +76,21 @@ cinux::lib::ErrorOr<void> XhciSlot::allocate(uint8_t slot_id) {
     }
     data_buf_ = std::move(db.value());
     zero_bytes(data_buf_.virt(), kDataBufBytes);
+
+    auto ir = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kIntRingTrbs + 1) * 16);
+    if (!ir.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    int_ring_buf_ = std::move(ir.value());
+    zero_bytes(int_ring_buf_.virt(), static_cast<uint64_t>(kIntRingTrbs + 1) * 16);
+    int_ring_.init(static_cast<Trb*>(int_ring_buf_.virt()), kIntRingTrbs, int_ring_buf_.phys());
+
+    auto rb = cinux::drivers::dma::g_dma_pool.alloc(kReportBytes);
+    if (!rb.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    report_buf_ = std::move(rb.value());
+    zero_bytes(report_buf_.virt(), kReportBytes);
 
     return {};
 }
@@ -153,6 +174,82 @@ cinux::lib::ErrorOr<void> XhciSlot::set_configuration(XHCIController& hc, uint8_
         make_setup(bm_request_type(UsbDir::kOut, UsbReqType::kStandard, UsbRecipient::kDevice),
                    UsbRequest::kSetConfiguration, config_value, 0, 0);
     return control_out_no_data(hc, s);
+}
+
+// ============================================================
+// HID boot (Batch 4A) -- verified against the 4A workflow spec
+// (QEMU hcd-xhci.c xhci_configure_slot + Linux xhci-ring.c)
+// ============================================================
+
+cinux::lib::ErrorOr<void> XhciSlot::set_protocol(XHCIController& hc, uint8_t interface_number,
+                                                 uint8_t protocol) {
+    const UsbSetup s =
+        make_setup(bm_request_type(UsbDir::kOut, UsbReqType::kClass, UsbRecipient::kInterface),
+                   UsbHid::kSetProtocol, protocol, interface_number, 0);
+    return control_out_no_data(hc, s);
+}
+
+cinux::lib::ErrorOr<void> XhciSlot::add_interrupt_endpoint(XHCIController& hc, uint8_t ep_number,
+                                                           uint16_t max_packet, uint8_t interval) {
+    const uint32_t dci = ep_dci(ep_number, true);  // interrupt-IN DCI = ep*2 + 1
+    mouse_ep_dci_      = static_cast<uint8_t>(dci);
+    zero_bytes(in_ctx_buf_.virt(), kInCtxBytes);  // clear the stale Address-Device input context
+
+    auto* in = static_cast<volatile uint32_t*>(in_ctx_buf_.virt());
+    // Input Control Context: drop=0, add = A0 (slot, to update Context Entries)
+    // | A_ep.  EP0 (A1) must stay CLEAR (already exists) -- QEMU rejects otherwise.
+    in[0]    = 0;
+    in[1]    = input_add_flag(0) | input_add_flag(dci);
+
+    // Slot context (in[8..15]): preserve route/speed/rh_port from the addressed
+    // device context; update Context Entries (last_ctx [31:27]) to the new DCI.
+    uint32_t dev_info = device_slot_dword(0);
+    dev_info          = (dev_info & ~(0x1FU << 27)) | (dci << 27);
+    in[8]             = dev_info;
+    in[9]             = device_slot_dword(1);  // dev_info2 preserved
+
+    // EP context at in[8 + 8*dci ..] (input offset 32 + 32*dci).  Host writes
+    // EP_STATE=disabled; the controller flips it to running.  Interval is the
+    // descriptor bInterval taken directly (full-speed rule).
+    const uint32_t base = 8 + 8 * dci;
+    in[base + 0]        = ep_info(EpState::kDisabled, interval, 0);
+    in[base + 1]        = ep_info2(EpType::kIntIn, max_packet, 3, 0);
+    const uint64_t deq  = ep_dequeue_ptr(int_ring_buf_.phys(), true);
+    in[base + 2]        = static_cast<uint32_t>(deq);
+    in[base + 3]        = static_cast<uint32_t>(deq >> 32);
+    in[base + 4]        = ep_tx_info(max_packet, max_packet);
+
+    // Configure Endpoint command (TRB type 12).
+    auto ev = hc.run_command(in_ctx_buf_.phys(), 0,
+                             trb_control(TrbType::kConfigureEndpoint) | slot_id_for_trb(slot_id_));
+    if (!ev.ok()) {
+        return ev.error();
+    }
+    const uint32_t code = cmd_completion_code(ev.value().status);
+    if (code != CompCode::kSuccess) {
+        cinux::lib::kprintf("[xHCI] configure endpoint failed: completion code=%u\n", code);
+        return cinux::lib::Error::IOError;
+    }
+    return {};
+}
+
+cinux::lib::ErrorOr<HidMouseReport> XhciSlot::poll_mouse_report(XHCIController& hc) {
+    if (mouse_ep_dci_ == 0) {
+        return cinux::lib::Error::IOError;  // no interrupt endpoint configured
+    }
+    zero_bytes(report_buf_.virt(), kReportBytes);
+    // Normal TRB (type 1): buffer = report buffer, length = max report, IOC+ISP.
+    int_ring_.enqueue(report_buf_.phys(), kReportBytes, interrupt_in_trb_control());
+    auto ev = hc.run_transfer(slot_id_, mouse_ep_dci_);
+    if (!ev.ok()) {
+        return ev.error();  // TimedOut = idle mouse NAK (no movement) -- expected
+    }
+    const uint32_t code = cmd_completion_code(ev.value().status);
+    if (code != CompCode::kSuccess && code != CompCode::kShortPacket) {
+        cinux::lib::kprintf("[xHCI] mouse poll failed: completion code=%u\n", code);
+        return cinux::lib::Error::IOError;
+    }
+    return decode_boot_mouse(static_cast<const uint8_t*>(report_buf_.virt()));
 }
 
 }  // namespace cinux::drivers::usb
