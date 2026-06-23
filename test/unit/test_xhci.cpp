@@ -251,6 +251,42 @@ TEST("xhci: Address Device TRB control carries type + slot id") {
     ASSERT_EQ(cmd_completion_slot_id(ctrl), 2u);
 }
 
+// ============================================================
+// 7. Control-transfer stage TRB builders (Batch 3C) -- verified control words
+// (TRT at control [17:16], IDT bit6, CHAIN bit4, IOC bit5, DIR bit16, ISP bit2)
+// ============================================================
+
+TEST("xhci: setup_stage_control packs IDT+CHAIN+type + TRT at [17:16]") {
+    // IN data (GET_DESCRIPTOR): type=2, IDT(bit6), CHAIN(bit4), TRT=3<<16 -> 0x00030850
+    ASSERT_EQ(setup_stage_control(Trt::kIn), 0x00030850u);
+    // no data (SET_CONFIGURATION): TRT=0 -> 0x00000850
+    ASSERT_EQ(setup_stage_control(Trt::kNone), 0x00000850u);
+    // OUT data: TRT=2 -> 0x00020850
+    ASSERT_EQ(setup_stage_control(Trt::kOut), 0x00020850u);
+}
+
+TEST("xhci: data_stage_control sets DIR+ISP for IN, neither for OUT") {
+    ASSERT_EQ(data_stage_control(true), 0x00010C14u);   // type3(0xC00) | DIR | ISP | CHAIN
+    ASSERT_EQ(data_stage_control(false), 0x00000C10u);  // type3 | CHAIN
+}
+
+TEST("xhci: status_stage_control direction is opposite of data stage") {
+    // data IN -> status OUT handshake (no DIR): type4 | IOC
+    ASSERT_EQ(status_stage_control(true), 0x00001020u);
+    // no/OUT data -> status IN handshake (DIR): type4 | IOC | DIR
+    ASSERT_EQ(status_stage_control(false), 0x00011020u);
+}
+
+TEST("xhci: transfer_event_epid extracts [20:16], remaining extracts [23:0]") {
+    // control = (slotid<<24)|(epid<<16)|(type<<10)|cycle; status = remaining | (code<<24)
+    const uint32_t ctrl   = (5u << 24) | (1u << 16) | (32u << 10);
+    const uint32_t status = 46u | (1u << 24);  // code=Success, remaining=46
+    ASSERT_EQ(transfer_event_epid(ctrl), 1u);
+    ASSERT_EQ(cmd_completion_slot_id(ctrl), 5u);  // slot id reuses the CCE extractor
+    ASSERT_EQ(transfer_event_remaining(status), 46u);
+    ASSERT_EQ(cmd_completion_code(status), 1u);  // code reuses the CCE extractor
+}
+
 int main() {
     RUN_ALL_TESTS();
     return _tests_failed > 0 ? 1 : 0;

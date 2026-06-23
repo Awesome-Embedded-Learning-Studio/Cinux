@@ -51,16 +51,22 @@ constexpr uint32_t kPortStatusChange  = 34;
 // Control-word bit constants
 // ============================================================
 
-constexpr uint32_t kCycleBit              = 1U << 0;  ///< C: ownership handshake bit
-constexpr uint32_t kToggleCycle           = 1U << 1;  ///< Link TRB: consumer flips its cycle
-constexpr uint32_t kInterruptOnCompletion = 1U << 2;  ///< IOC: raise interrupt on completion
-constexpr uint32_t kImmediateData = 1U << 4;  ///< IDT (Normal/Data): data inline in parameter
-constexpr uint32_t kChain         = 1U << 5;  ///< CH: next TRB is part of this transfer
-constexpr uint32_t kTrbTypeShift  = 10;
+// Verified against Linux drivers/usb/host/xhci.h (TRB_CYCLE/TC/ISP/CHAIN/IOC/IDT/DIR)
+// and QEMU hw/usb/hcd-xhci.c (TRB_TR_*).  The 2A draft had IDT/IOC/CH at the wrong
+// bits (1<<4 / 1<<2 / 1<<5); fixed in 3C (they were never exercised before control
+// transfers, so 2A-2B-2C stayed green).
+constexpr uint32_t kCycleBit              = 1U << 0;   ///< C: ownership handshake bit
+constexpr uint32_t kToggleCycle           = 1U << 1;   ///< Link TRB TC: consumer flips cycle
+constexpr uint32_t kInterruptOnShort      = 1U << 2;   ///< ISP: interrupt on short packet (IN)
+constexpr uint32_t kChain                 = 1U << 4;   ///< CH: next TRB is part of this transfer
+constexpr uint32_t kInterruptOnCompletion = 1U << 5;   ///< IOC: raise interrupt on completion
+constexpr uint32_t kImmediateData         = 1U << 6;   ///< IDT: data inline in parameter
+constexpr uint32_t kDataDirIn             = 1U << 16;  ///< DIR (Data/Status stage): 1 = IN
+constexpr uint32_t kTrbTypeShift          = 10;
 
 /// Build a control word from a TRB type + flags (no cycle bit -- the ring sets
 /// that from the producer cycle state).
-inline uint32_t trb_control(uint32_t type, uint32_t flags = 0) {
+constexpr uint32_t trb_control(uint32_t type, uint32_t flags = 0) {
     return (type << kTrbTypeShift) | flags;
 }
 
@@ -110,6 +116,58 @@ constexpr uint32_t cmd_completion_slot_id(uint32_t control) {
 /// Completion code (CCE status [31:24]); CompCode::kSuccess == 1.
 constexpr uint32_t cmd_completion_code(uint32_t status) {
     return (status >> 24) & 0xFF;
+}
+
+// ---- Transfer Event parsing (EP transfer completion, type 32) ----
+// Layout (QEMU xhci_write_event + Linux handle_tx_event): control [31:24] =
+// slot ID (reuse cmd_completion_slot_id), [20:16] = endpoint ID; status
+// [31:24] = completion code (reuse cmd_completion_code), [23:0] = REMAINING
+// (untransferred) bytes -> actual = requested_length - remaining.
+constexpr uint32_t transfer_event_epid(uint32_t control) {
+    return (control >> 16) & 0x1F;
+}
+constexpr uint32_t transfer_event_remaining(uint32_t status) {
+    return status & 0xFFFFFFU;
+}
+
+// ============================================================
+// Control-transfer stage TRB builders (Batch 3C) -- pure encoders.
+// Verified against Linux xhci-ring.c queue_setup/queue_status + QEMU
+// hcd-xhci.c.  TRT (Transfer Type) lives at control [17:16] (Linux layout).
+// QEMU qemu-xhci ignores TRT (routes direction from the SETUP bmRequestType),
+// so TRT is decorative on QEMU but spec-correct for real xHCI 1.0 hardware.
+// None of these include the cycle bit -- the ring adds it on enqueue.
+// ============================================================
+
+/// SETUP Stage transfer length (always 8 = the SETUP packet size).
+constexpr uint32_t kSetupStageLength = 8;
+
+/// Transfer Type (TRT) for the SETUP Stage TRB [17:16].
+namespace Trt {
+constexpr uint32_t kNone = 0;  ///< no data stage (wLength == 0)
+constexpr uint32_t kOut  = 2;  ///< OUT data stage (host -> device)
+constexpr uint32_t kIn   = 3;  ///< IN data stage (device -> host)
+}  // namespace Trt
+
+/// SETUP Stage TRB control word (type 2).  IDT (8-byte packet inline) + CHAIN
+/// (data/status follow) + TRT at [17:16].
+constexpr uint32_t setup_stage_control(uint32_t trt) {
+    return trb_control(TrbType::kSetup, kImmediateData | kChain) | (trt << 16);
+}
+
+/// Data Stage TRB control word (type 3).  CHAIN (status follows).  IN data sets
+/// DIR (device -> host) + ISP (short-packet event).  No IOC.
+constexpr uint32_t data_stage_control(bool in) {
+    const uint32_t flags = kChain | (in ? (kDataDirIn | kInterruptOnShort) : 0U);
+    return trb_control(TrbType::kData, flags);
+}
+
+/// Status Stage TRB control word (type 4).  IOC (event on completion).  The
+/// status handshake direction is the OPPOSITE of the data stage: an IN-data
+/// transfer (GET_DESCRIPTOR) -> status OUT (no DIR); an OUT/no-data transfer
+/// (SET_CONFIGURATION) -> status IN (DIR set).
+constexpr uint32_t status_stage_control(bool data_in) {
+    return trb_control(TrbType::kStatus, kInterruptOnCompletion | (data_in ? 0U : kDataDirIn));
 }
 
 }  // namespace cinux::drivers::usb

@@ -86,6 +86,15 @@ public:
     /// Most recent Command Completion Event captured by poll_events().
     Trb last_cmd_completion() const { return last_cmd_completion_; }
 
+    /// Synchronous EP transfer: ring the slot's EP doorbell, then poll until the
+    /// matching Transfer Event arrives (matched by slot ID + endpoint ID in the
+    /// event control word).  Returns the Transfer Event (caller reads completion
+    /// code + remaining bytes).  Error::TimedOut on no event.
+    cinux::lib::ErrorOr<Trb> run_transfer(uint8_t slot_id, uint8_t epid);
+
+    /// Most recent Transfer Event captured by poll_events().
+    Trb last_transfer_event() const { return last_transfer_event_; }
+
     // ---- Port + slot management (Batch 3B: Address Device) ----
 
     /// PORTSC register for @p port (op_base + 0x400 + port*0x10).
@@ -124,6 +133,7 @@ private:
     pci::msix::MsixController msix_;
     uint32_t                  cmd_completion_count_ = 0;
     Trb                       last_cmd_completion_{};
+    Trb                       last_transfer_event_{};
 
     // DMA-backed rings + tables (own physical memory for the controller's
     // lifetime).  DmaBuffer is move-only, so XHCIController is move-only.

@@ -258,9 +258,12 @@ void XHCIController::submit_command(uint64_t parameter, uint32_t status, uint32_
 void XHCIController::poll_events() {
     Trb ev;
     while (event_ring_.dequeue(ev)) {
-        if (trb_type(ev.control) == TrbType::kCommandCompletion) {
+        const uint32_t type = trb_type(ev.control);
+        if (type == TrbType::kCommandCompletion) {
             ++cmd_completion_count_;
             last_cmd_completion_ = ev;  // most recent CCE (run_command matches it)
+        } else if (type == TrbType::kTransferEvent) {
+            last_transfer_event_ = ev;  // most recent Transfer Event (run_transfer)
         }
     }
     // Advance ERDP to the current dequeue pointer (acknowledges processed events
@@ -290,6 +293,22 @@ cinux::lib::ErrorOr<Trb> XHCIController::run_command(uint64_t parameter, uint32_
     }
     cinux::lib::kprintf("[xHCI] run_command timed out (param=0x%lx)\n",
                         static_cast<unsigned long>(parameter));
+    return cinux::lib::Error::TimedOut;
+}
+
+cinux::lib::ErrorOr<Trb> XHCIController::run_transfer(uint8_t slot_id, uint8_t epid) {
+    // Ring the slot's EP doorbell: target [7:0] = endpoint DCI (1 = EP0), stream 0.
+    doorbells_[slot_id] = epid;
+    for (uint32_t i = 0; i < kResetIters; ++i) {
+        poll_events();
+        if (trb_type(last_transfer_event_.control) == TrbType::kTransferEvent &&
+            cmd_completion_slot_id(last_transfer_event_.control) == slot_id &&
+            transfer_event_epid(last_transfer_event_.control) == epid) {
+            return last_transfer_event_;
+        }
+    }
+    cinux::lib::kprintf("[xHCI] run_transfer timed out (slot=%u epid=%u)\n",
+                        static_cast<unsigned>(slot_id), static_cast<unsigned>(epid));
     return cinux::lib::Error::TimedOut;
 }
 

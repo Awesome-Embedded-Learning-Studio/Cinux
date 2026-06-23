@@ -19,14 +19,17 @@
 #include <stdint.h>
 
 #include "kernel/drivers/dma/dma_pool.hpp"
+#include "kernel/lib/kprintf.hpp"
+#include "xhci_controller.hpp"
 
 namespace cinux::drivers::usb {
 
 namespace {
-constexpr uint64_t kDevCtxBytes  = 64;  ///< slot (32) + EP0 (32)
-constexpr uint64_t kInCtxBytes   = 96;  ///< ICC (32) + slot (32) + EP0 (32)
-constexpr uint32_t kEp0RingTrbs  = 16;  ///< EP0 control ring depth (+1 Link TRB)
-constexpr uint32_t kEp0AvgTrbLen = 8;   ///< average TRB length for control EP
+constexpr uint64_t kDevCtxBytes  = 64;   ///< slot (32) + EP0 (32)
+constexpr uint64_t kInCtxBytes   = 96;   ///< ICC (32) + slot (32) + EP0 (32)
+constexpr uint64_t kDataBufBytes = 256;  ///< control-IN data (device + config descriptors)
+constexpr uint32_t kEp0RingTrbs  = 16;   ///< EP0 control ring depth (+1 Link TRB)
+constexpr uint32_t kEp0AvgTrbLen = 8;    ///< average TRB length for control EP
 
 void zero_bytes(void* p, uint64_t bytes) {
     auto* b = static_cast<uint8_t*>(p);
@@ -61,6 +64,13 @@ cinux::lib::ErrorOr<void> XhciSlot::allocate(uint8_t slot_id) {
     zero_bytes(ep0_ring_buf_.virt(), static_cast<uint64_t>(kEp0RingTrbs + 1) * 16);
     ep0_ring_.init(static_cast<Trb*>(ep0_ring_buf_.virt()), kEp0RingTrbs, ep0_ring_buf_.phys());
 
+    auto db = cinux::drivers::dma::g_dma_pool.alloc(kDataBufBytes);
+    if (!db.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    data_buf_ = std::move(db.value());
+    zero_bytes(data_buf_.virt(), kDataBufBytes);
+
     return {};
 }
 
@@ -85,6 +95,64 @@ void XhciSlot::build_address_input(uint32_t speed, uint8_t rh_port, uint32_t ep0
     in[18]             = static_cast<uint32_t>(deq);
     in[19]             = static_cast<uint32_t>(deq >> 32);
     in[20]             = ep_tx_info(kEp0AvgTrbLen);
+}
+
+// ============================================================
+// Control transfers on EP0 (Batch 3C)
+// TRB stage encoders + completion parsing are in xhci_trb.hpp (verified against
+// Linux xhci-ring.c + QEMU hcd-xhci.c).  The cycle bit is added by TrbRing on
+// enqueue, so the control words here never include it.
+// ============================================================
+
+cinux::lib::ErrorOr<uint32_t> XhciSlot::control_in(XHCIController& hc, const UsbSetup& setup,
+                                                   uint32_t len) {
+    if (len > kDataBufBytes) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // 3-stage control IN: SETUP (TRT=IN) -> Data (IN) -> Status (OUT handshake).
+    ep0_ring_.enqueue(setup_to_u64(setup), kSetupStageLength, setup_stage_control(Trt::kIn));
+    ep0_ring_.enqueue(data_buf_.phys(), len, data_stage_control(true));
+    ep0_ring_.enqueue(0, 0, status_stage_control(true));
+
+    auto ev = hc.run_transfer(slot_id_, kEp0Epid);
+    if (!ev.ok()) {
+        return ev.error();
+    }
+    const uint32_t code = cmd_completion_code(ev.value().status);
+    if (code != CompCode::kSuccess && code != CompCode::kShortPacket) {
+        cinux::lib::kprintf("[xHCI] control_in failed: completion code=%u\n", code);
+        return cinux::lib::Error::IOError;
+    }
+    return len - transfer_event_remaining(ev.value().status);  // actual bytes received
+}
+
+cinux::lib::ErrorOr<void> XhciSlot::control_out_no_data(XHCIController& hc, const UsbSetup& setup) {
+    // 2-stage control OUT (no data): SETUP (TRT=none) -> Status (IN handshake).
+    ep0_ring_.enqueue(setup_to_u64(setup), kSetupStageLength, setup_stage_control(Trt::kNone));
+    ep0_ring_.enqueue(0, 0, status_stage_control(false));
+
+    auto ev = hc.run_transfer(slot_id_, kEp0Epid);
+    if (!ev.ok()) {
+        return ev.error();
+    }
+    const uint32_t code = cmd_completion_code(ev.value().status);
+    if (code != CompCode::kSuccess) {
+        cinux::lib::kprintf("[xHCI] control_out failed: completion code=%u\n", code);
+        return cinux::lib::Error::IOError;
+    }
+    return {};
+}
+
+cinux::lib::ErrorOr<uint32_t> XhciSlot::get_descriptor(XHCIController& hc, uint8_t desc_type,
+                                                       uint16_t index, uint32_t len) {
+    return control_in(hc, make_get_descriptor_setup(desc_type, index, len), len);
+}
+
+cinux::lib::ErrorOr<void> XhciSlot::set_configuration(XHCIController& hc, uint8_t config_value) {
+    const UsbSetup s =
+        make_setup(bm_request_type(UsbDir::kOut, UsbReqType::kStandard, UsbRecipient::kDevice),
+                   UsbRequest::kSetConfiguration, config_value, 0, 0);
+    return control_out_no_data(hc, s);
 }
 
 }  // namespace cinux::drivers::usb

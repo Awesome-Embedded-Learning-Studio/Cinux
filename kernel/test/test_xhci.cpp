@@ -16,6 +16,7 @@
 
 #include "big_kernel_test.h"
 #include "kernel/drivers/pci/pci.hpp"
+#include "kernel/drivers/usb/usb_descriptor.hpp"
 #include "kernel/drivers/usb/xhci_controller.hpp"
 #include "kernel/drivers/usb/xhci_slot.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -160,6 +161,25 @@ void test_address_device() {
     const uint32_t slot_state = (dev_state >> 27) & 0x1F;
     cinux::lib::kprintf("[xHCI] device slot_state=%u dev_addr=%u\n", slot_state, dev_state & 0xFF);
     TEST_ASSERT_EQ(slot_state, SlotState::kAddressed);
+
+    // Batch 3C: GET_DESCRIPTOR(Device) -- read the 18-byte device descriptor
+    // via a 3-stage control IN transfer on EP0.
+    auto gd = slot.get_descriptor(xhci, UsbDescType::kDevice, 0, sizeof(UsbDeviceDescriptor));
+    TEST_ASSERT_TRUE(gd.ok());
+    TEST_ASSERT_EQ(gd.value(), sizeof(UsbDeviceDescriptor));
+    const auto* dd = reinterpret_cast<const UsbDeviceDescriptor*>(slot.data_virt());
+    cinux::lib::kprintf(
+        "[xHCI] device descriptor: bLength=%u vid=0x%x pid=0x%x class=0x%x ncfg=%u\n",
+        static_cast<unsigned>(dd->bLength), static_cast<unsigned>(dd->idVendor),
+        static_cast<unsigned>(dd->idProduct), static_cast<unsigned>(dd->bDeviceClass),
+        static_cast<unsigned>(dd->bNumConfigurations));
+    TEST_ASSERT_EQ(static_cast<unsigned>(dd->bLength), sizeof(UsbDeviceDescriptor));
+    TEST_ASSERT_EQ(static_cast<unsigned>(dd->bDescriptorType), UsbDescType::kDevice);
+
+    // Batch 3C: SET_CONFIGURATION(1) -- configure the device (2-stage, no data).
+    auto sc = slot.set_configuration(xhci, 1);
+    TEST_ASSERT_TRUE(sc.ok());
+    cinux::lib::kprintf("[xHCI] set_configuration(1) ok\n");
 }
 
 }  // namespace test_xhci
