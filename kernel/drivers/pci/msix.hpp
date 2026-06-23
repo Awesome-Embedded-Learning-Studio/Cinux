@@ -19,6 +19,12 @@
 
 #include <stdint.h>
 
+#include <cinux/expected.hpp>
+
+namespace cinux::drivers::pci {
+struct PCIDevice;  // forward declaration; full type lives in pci.hpp (.cpp only)
+}
+
 namespace cinux::drivers::pci::msix {
 
 // ============================================================
@@ -86,5 +92,82 @@ struct MsixCap {
  * @return        Decoded MsixCap (.found=false if MSI-X is absent)
  */
 MsixCap find_capability(uint8_t bus, uint8_t slot, uint8_t func, ConfigReader reader);
+
+// ============================================================
+// MSI-X Table entry (16 bytes, MMIO-resident inside a device BAR)
+// ============================================================
+
+/// MSI-X Table entry.  Members are volatile: both the CPU and controller
+/// access it through the BAR MMIO window.
+struct MsixTableEntry {
+    volatile uint32_t msg_addr_lower;  ///< +0:  Message Address (lower 32 bits)
+    volatile uint32_t msg_addr_upper;  ///< +4:  Message Address (upper 32 bits, 0 on xAPIC)
+    volatile uint32_t msg_data;        ///< +8:  Message Data
+    volatile uint32_t vector_control;  ///< +12: bit 0 = Mask (1 masks this vector)
+};
+static_assert(sizeof(MsixTableEntry) == 16, "MSI-X Table entry must be 16 bytes");
+
+/// Vector Control bit 0: mask this entry's vector.
+constexpr uint32_t kEntryMaskBit = 0x1;
+
+// ============================================================
+// Pure helpers (host-testable: xAPIC message format + Message Control bits)
+// ============================================================
+
+/// xAPIC (32-bit) MSI Message Address: 0xFEE00000 base, dest APIC ID in
+/// [19:12], physical destination mode, no redirection hint.  x2APIC is not
+/// supported by the kernel.
+uint32_t xapic_message_address(uint8_t dest_apic_id);
+
+/// xAPIC MSI Message Data: vector in [7:0], fixed delivery, edge-triggered.
+uint32_t xapic_message_data(uint8_t vector);
+
+/// Set the MSI-X Enable bit (Message Control bit 15).
+uint16_t message_control_with_enable(uint16_t raw);
+
+/// Clear the Function Mask bit (Message Control bit 14) so the per-entry
+/// masks take effect.
+uint16_t message_control_unmask_function(uint16_t raw);
+
+// ============================================================
+// MSI-X controller (kernel-only: Table/PBA MMIO map + entry programming)
+// ============================================================
+
+/**
+ * @brief Owns one function's MSI-X Table + PBA MMIO and programs vectors
+ *
+ * init() maps the Table and PBA; mask_all() / program_vector() manipulate
+ * Table entries; enable() flips Message Control Enable.  Kernel-only (uses
+ * VMM::map + PCI config writes) -- NOT linked into host unit tests; the pure
+ * helpers above are tested instead.  The end-to-end "vector fires" proof
+ * lands in Batch 2C (xHCI doorbell -> event-ring interrupt).
+ */
+class MsixController {
+public:
+    /// Map the MSI-X Table + PBA for @p cap on @p dev.  Assumes
+    /// cap.table_offset / cap.pba_offset are page-aligned (true for QEMU
+    /// devices).  Does not enable MSI-X -- call enable() after programming.
+    cinux::lib::ErrorOr<void> init(const MsixCap& cap, const PCIDevice& dev);
+
+    /// Set the Mask bit on every Table entry.
+    void mask_all();
+
+    /// Program Table entry @p index with an xAPIC message for @p vector
+    /// delivered to @p dest_apic_id, then unmask it.
+    void program_vector(uint8_t index, uint8_t vector, uint8_t dest_apic_id);
+
+    /// Enable MSI-X: set Message Control Enable (bit 15) and clear Function
+    /// Mask (bit 14) via one config dword write that preserves the cap id +
+    /// next-pointer in the low 16 bits.
+    void enable();
+
+    volatile MsixTableEntry* table() const { return table_; }
+
+private:
+    MsixCap                  cap_{};
+    uint8_t                  bus_ = 0, slot_ = 0, func_ = 0;
+    volatile MsixTableEntry* table_ = nullptr;
+    volatile uint32_t*       pba_   = nullptr;
+};
 
 }  // namespace cinux::drivers::pci::msix

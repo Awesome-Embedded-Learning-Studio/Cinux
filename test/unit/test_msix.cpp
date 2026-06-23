@@ -36,7 +36,12 @@
 // rejects as using-declaration targets.
 using namespace cinux::drivers::pci;
 using cinux::drivers::pci::msix::MsixCap;
+using cinux::drivers::pci::msix::MsixTableEntry;
 using cinux::drivers::pci::msix::find_capability;
+using cinux::drivers::pci::msix::message_control_unmask_function;
+using cinux::drivers::pci::msix::message_control_with_enable;
+using cinux::drivers::pci::msix::xapic_message_address;
+using cinux::drivers::pci::msix::xapic_message_data;
 
 // ============================================================
 // Mock PCI config space (256 bytes = 64 dwords)
@@ -167,6 +172,34 @@ TEST("msix: skips MSI capability, finds MSI-X after it") {
     ASSERT_TRUE(cap.found);
     ASSERT_EQ(cap.cap_offset, 0x70);
     ASSERT_EQ(cap.table_size, 8u);
+}
+
+// ============================================================
+// 4. Pure helpers (Batch 0B): xAPIC message format + Message Control bits
+// ============================================================
+
+TEST("msix: MsixTableEntry is 16 bytes") {
+    ASSERT_EQ(sizeof(MsixTableEntry), 16u);
+}
+
+TEST("msix: xapic message address for BSP (dest 0)") {
+    ASSERT_EQ(xapic_message_address(0), 0xFEE00000u);
+}
+
+TEST("msix: xapic message address encodes dest in bits 19:12") {
+    ASSERT_EQ(xapic_message_address(5), 0xFEE05000u);
+}
+
+TEST("msix: xapic message data is the vector (fixed/edge/phys)") {
+    ASSERT_EQ(xapic_message_data(0x40), 0x40u);
+}
+
+TEST("msix: message_control_with_enable sets bit 15") {
+    ASSERT_EQ(message_control_with_enable(0x0003), 0x8003u);
+}
+
+TEST("msix: message_control_unmask_function clears bit 14") {
+    ASSERT_EQ(message_control_unmask_function(0x4003), 0x0003u);
 }
 
 int main() {

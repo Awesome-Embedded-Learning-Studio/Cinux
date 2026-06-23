@@ -13,6 +13,8 @@
 
 #include "msix.hpp"
 
+#include <stdint.h>
+
 #include "pci_config.hpp"
 
 namespace cinux::drivers::pci::msix {
@@ -68,6 +70,30 @@ MsixCap find_capability(uint8_t bus, uint8_t slot, uint8_t func, ConfigReader re
     }
 
     return cap;  // MSI-X not present in the list
+}
+
+// ============================================================
+// Pure helpers (host-testable): xAPIC message format + Message Control bits
+// ============================================================
+
+uint32_t xapic_message_address(uint8_t dest_apic_id) {
+    // xAPIC MSI address: 0xFEE00000 base, destination APIC ID in bits [19:12],
+    // physical destination mode, no redirection hint.
+    return 0xFEE00000u | (static_cast<uint32_t>(dest_apic_id) << 12);
+}
+
+uint32_t xapic_message_data(uint8_t vector) {
+    // Fixed delivery mode, edge-triggered, physical destination: the vector
+    // occupies the low 8 bits of Message Data.
+    return static_cast<uint32_t>(vector);
+}
+
+uint16_t message_control_with_enable(uint16_t raw) {
+    return static_cast<uint16_t>(raw | MsixMsgCtrl::kEnable);
+}
+
+uint16_t message_control_unmask_function(uint16_t raw) {
+    return static_cast<uint16_t>(raw & ~MsixMsgCtrl::kFunctionMask);
 }
 
 }  // namespace cinux::drivers::pci::msix
