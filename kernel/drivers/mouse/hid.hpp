@@ -1,5 +1,5 @@
 /**
- * @file kernel/drivers/usb/hid.hpp
+ * @file kernel/drivers/mouse/hid.hpp
  * @brief USB HID boot-protocol decode + configuration-descriptor walk
  *
  * Pure helpers (host-testable, no hardware): decode a HID boot mouse report
@@ -15,7 +15,7 @@
 
 #include <stdint.h>
 
-#include "usb_descriptor.hpp"
+#include "kernel/drivers/usb/usb_descriptor.hpp"
 
 namespace cinux::drivers::usb {
 

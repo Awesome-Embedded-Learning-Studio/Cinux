@@ -16,7 +16,7 @@
 
 #    include <cstdint>
 
-#    include "drivers/usb/hid.hpp"
+#    include "drivers/mouse/hid.hpp"
 
 using namespace cinux::drivers::usb;
 

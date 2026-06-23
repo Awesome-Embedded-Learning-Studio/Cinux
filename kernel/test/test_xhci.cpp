@@ -15,8 +15,9 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
+#include "kernel/drivers/mouse/hid.hpp"
+#include "kernel/drivers/mouse/usb_mouse.hpp"
 #include "kernel/drivers/pci/pci.hpp"
-#include "kernel/drivers/usb/hid.hpp"
 #include "kernel/drivers/usb/usb_descriptor.hpp"
 #include "kernel/drivers/usb/xhci_controller.hpp"
 #include "kernel/drivers/usb/xhci_slot.hpp"
@@ -246,20 +247,21 @@ void test_hid_mouse() {
             continue;  // not a boot mouse (e.g. the keyboard) -- try the next port
         }
 
-        // Found the mouse: configure it + boot the HID interrupt-IN endpoint.
+        // Found the mouse: configure the device, then boot the HID mouse via the
+        // UsbMouse driver (SET_PROTOCOL + Configure Endpoint on the bound slot).
         TEST_ASSERT_TRUE(slot.set_configuration(xhci, 1).ok());
-        TEST_ASSERT_TRUE(slot.set_protocol(xhci, mep.interface_number, 0).ok());  // boot protocol
-        auto ce =
-            slot.add_interrupt_endpoint(xhci, mep.ep_number, mep.max_packet_size, mep.interval);
-        cinux::lib::kprintf(
-            "[xHCI] HID mouse: iface=%u ep%u-IN maxp=%u interval=%u -> configure endpoint %s\n",
-            static_cast<unsigned>(mep.interface_number), static_cast<unsigned>(mep.ep_number),
-            static_cast<unsigned>(mep.max_packet_size), static_cast<unsigned>(mep.interval),
-            ce.ok() ? "ok" : "FAILED");
-        TEST_ASSERT_TRUE(ce.ok());
+        cinux::drivers::UsbMouse mouse;
+        mouse.bind(slot);
+        auto mi = mouse.init(xhci, mep);
+        cinux::lib::kprintf("[xHCI] HID mouse: iface=%u ep%u-IN maxp=%u interval=%u -> boot %s\n",
+                            static_cast<unsigned>(mep.interface_number),
+                            static_cast<unsigned>(mep.ep_number),
+                            static_cast<unsigned>(mep.max_packet_size),
+                            static_cast<unsigned>(mep.interval), mi.ok() ? "ok" : "FAILED");
+        TEST_ASSERT_TRUE(mi.ok());
 
         // Best-effort poll: an idle mouse NAKs (no movement) -> TimedOut, expected.
-        auto rpt = slot.poll_mouse_report(xhci);
+        auto rpt = mouse.poll(xhci);
         if (rpt.ok()) {
             cinux::lib::kprintf("[xHCI] mouse report: buttons=%u dx=%d dy=%d\n",
                                 static_cast<unsigned>(rpt.value().buttons),

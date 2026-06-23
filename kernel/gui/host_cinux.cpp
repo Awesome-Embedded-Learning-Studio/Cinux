@@ -16,7 +16,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-#include "kernel/drivers/mouse.hpp"
+#include "kernel/drivers/mouse/mouse.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/video/framebuffer.hpp"  // Framebuffer (flush target)
 #include "kernel/gui/event.hpp"

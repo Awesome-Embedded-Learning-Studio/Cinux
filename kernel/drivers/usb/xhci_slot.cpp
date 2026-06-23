@@ -35,7 +35,6 @@ constexpr uint64_t kDataBufBytes = 256;  ///< control-IN data (device + config d
 constexpr uint32_t kEp0RingTrbs  = 16;   ///< EP0 control ring depth (+1 Link TRB)
 constexpr uint32_t kEp0AvgTrbLen = 8;    ///< average TRB length for control EP
 constexpr uint32_t kIntRingTrbs  = 16;   ///< interrupt-IN ring depth (+1 Link TRB)
-constexpr uint64_t kReportBytes  = 16;   ///< interrupt-IN report buffer (>= max_packet)
 
 void zero_bytes(void* p, uint64_t bytes) {
     auto* b = static_cast<uint8_t*>(p);
@@ -84,13 +83,6 @@ cinux::lib::ErrorOr<void> XhciSlot::allocate(uint8_t slot_id) {
     int_ring_buf_ = std::move(ir.value());
     zero_bytes(int_ring_buf_.virt(), static_cast<uint64_t>(kIntRingTrbs + 1) * 16);
     int_ring_.init(static_cast<Trb*>(int_ring_buf_.virt()), kIntRingTrbs, int_ring_buf_.phys());
-
-    auto rb = cinux::drivers::dma::g_dma_pool.alloc(kReportBytes);
-    if (!rb.ok()) {
-        return cinux::lib::Error::OutOfMemory;
-    }
-    report_buf_ = std::move(rb.value());
-    zero_bytes(report_buf_.virt(), kReportBytes);
 
     return {};
 }
@@ -177,22 +169,16 @@ cinux::lib::ErrorOr<void> XhciSlot::set_configuration(XHCIController& hc, uint8_
 }
 
 // ============================================================
-// HID boot (Batch 4A) -- verified against the 4A workflow spec
-// (QEMU hcd-xhci.c xhci_configure_slot + Linux xhci-ring.c)
+// Interrupt-IN endpoint -- generic transport (Batch 4A/4B refactor).
+// Verified against the 4A workflow spec (QEMU hcd-xhci.c xhci_configure_slot
+// + Linux xhci-ring.c).  XhciSlot configures + polls an interrupt-IN EP
+// without interpreting the payload; HID decode is the caller's job.
 // ============================================================
-
-cinux::lib::ErrorOr<void> XhciSlot::set_protocol(XHCIController& hc, uint8_t interface_number,
-                                                 uint8_t protocol) {
-    const UsbSetup s =
-        make_setup(bm_request_type(UsbDir::kOut, UsbReqType::kClass, UsbRecipient::kInterface),
-                   UsbHid::kSetProtocol, protocol, interface_number, 0);
-    return control_out_no_data(hc, s);
-}
 
 cinux::lib::ErrorOr<void> XhciSlot::add_interrupt_endpoint(XHCIController& hc, uint8_t ep_number,
                                                            uint16_t max_packet, uint8_t interval) {
     const uint32_t dci = ep_dci(ep_number, true);  // interrupt-IN DCI = ep*2 + 1
-    mouse_ep_dci_      = static_cast<uint8_t>(dci);
+    int_ep_dci_        = static_cast<uint8_t>(dci);
     zero_bytes(in_ctx_buf_.virt(), kInCtxBytes);  // clear the stale Address-Device input context
 
     auto* in = static_cast<volatile uint32_t*>(in_ctx_buf_.virt());
@@ -233,23 +219,23 @@ cinux::lib::ErrorOr<void> XhciSlot::add_interrupt_endpoint(XHCIController& hc, u
     return {};
 }
 
-cinux::lib::ErrorOr<HidMouseReport> XhciSlot::poll_mouse_report(XHCIController& hc) {
-    if (mouse_ep_dci_ == 0) {
+cinux::lib::ErrorOr<uint32_t> XhciSlot::poll_interrupt_in(XHCIController& hc, uint64_t buf_phys,
+                                                          uint32_t len) {
+    if (int_ep_dci_ == 0) {
         return cinux::lib::Error::IOError;  // no interrupt endpoint configured
     }
-    zero_bytes(report_buf_.virt(), kReportBytes);
-    // Normal TRB (type 1): buffer = report buffer, length = max report, IOC+ISP.
-    int_ring_.enqueue(report_buf_.phys(), kReportBytes, interrupt_in_trb_control());
-    auto ev = hc.run_transfer(slot_id_, mouse_ep_dci_);
+    // Normal TRB (type 1): caller's buffer + length, IOC + ISP.
+    int_ring_.enqueue(buf_phys, len, interrupt_in_trb_control());
+    auto ev = hc.run_transfer(slot_id_, int_ep_dci_);
     if (!ev.ok()) {
-        return ev.error();  // TimedOut = idle mouse NAK (no movement) -- expected
+        return ev.error();  // TimedOut = idle device NAK -- correct interrupt-IN behaviour
     }
     const uint32_t code = cmd_completion_code(ev.value().status);
     if (code != CompCode::kSuccess && code != CompCode::kShortPacket) {
-        cinux::lib::kprintf("[xHCI] mouse poll failed: completion code=%u\n", code);
+        cinux::lib::kprintf("[xHCI] interrupt-IN poll failed: completion code=%u\n", code);
         return cinux::lib::Error::IOError;
     }
-    return decode_boot_mouse(static_cast<const uint8_t*>(report_buf_.virt()));
+    return len - transfer_event_remaining(ev.value().status);  // bytes transferred
 }
 
 }  // namespace cinux::drivers::usb

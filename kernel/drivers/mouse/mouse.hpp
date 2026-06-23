@@ -1,5 +1,5 @@
 /**
- * @file kernel/drivers/mouse.hpp
+ * @file kernel/drivers/mouse/mouse.hpp
  * @brief PS/2 mouse driver (IRQ12)
  *
  * Provides interrupt-driven mouse input via the PS/2 controller.
@@ -110,13 +110,50 @@ public:
      */
     static cinux::gui::EventQueue& event_queue();
 
+    // ---- USB HID input (Batch 4B) ----
+
+    /**
+     * @brief Inject a decoded HID boot-mouse report into the event queue.
+     *
+     * Updates the absolute cursor (clamped) + button state + enqueues move /
+     * down / up events, exactly like the PS/2 path but with the HID Y axis
+     * convention (dy NOT inverted: HID Y+ == screen DOWN).  Used by the xHCI
+     * HID worker so a USB mouse drives the cursor.
+     *
+     * @param dx       X displacement (signed)
+     * @param dy       Y displacement (signed, screen-DOWN positive)
+     * @param buttons  bit0=left, bit1=right, bit2=middle
+     */
+    static void inject_usb_motion(int8_t dx, int8_t dy, uint8_t buttons);
+
+    /**
+     * @brief Select the active input source.
+     *
+     * When USB is primary, PS/2 packet bytes are ignored (the PS/2 path does
+     * not feed the event queue), preserving the single-producer invariant of
+     * the SPSC queue.  PS/2 remains the default until a USB mouse is booted.
+     *
+     * @param primary  true to route input through the USB (xHCI) path
+     */
+    static void set_usb_primary(bool primary);
+
 private:
+    /**
+     * @brief Apply a movement + button state to the cursor + event queue.
+     *
+     * Shared tail of the PS/2 (decode_packet) and USB (inject_usb_motion)
+     * paths: updates mouse_x_/mouse_y_ by @p dy_screen (already in screen
+     * space -- PS/2 passes the negated Y, USB passes it as-is), clamps to the
+     * screen bounds, detects button edges, and enqueues the events.
+     */
+    static void apply_motion(int32_t dx, int32_t dy_screen, uint8_t new_buttons);
+
     /**
      * @brief Accumulate a byte from the mouse data port
      *
      * Builds up a 3-byte packet (byte0 = buttons + flags,
      * byte1 = dx, byte2 = dy).  When a full packet is assembled,
-     * calls decode_packet().
+     * calls decode_packet().  No-op when USB is the primary input source.
      *
      * @param byte  One byte read from port 0x60
      */
@@ -152,6 +189,9 @@ private:
 
     // Previous button state for edge detection (press/release)
     static uint8_t prev_buttons_;
+
+    // Input-source selection: when true, PS/2 bytes are ignored (USB owns the queue).
+    static bool usb_primary_;
 
     // Global event queue
     static cinux::gui::EventQueue g_event_queue_;

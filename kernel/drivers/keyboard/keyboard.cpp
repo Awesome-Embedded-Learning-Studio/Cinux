@@ -17,7 +17,7 @@
 #include "kernel/proc/sync.hpp"
 
 #ifdef CINUX_GUI
-#    include "kernel/drivers/mouse.hpp"
+#    include "kernel/drivers/mouse/mouse.hpp"
 #    include "kernel/gui/event.hpp"
 #endif
 
