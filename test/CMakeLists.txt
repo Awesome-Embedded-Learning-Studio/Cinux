@@ -140,6 +140,14 @@ add_cinux_integration_test(kprintf_format
     ${CMAKE_SOURCE_DIR}/kernel/mini/lib/private/format.cpp
 )
 
+# F5-M5 Batch 0A: MSI-X capability discovery (pure, reader-injected). Links
+# the real kernel/drivers/pci/msix.cpp; the test supplies a mock config-space
+# reader so no real 0xCF8/0xCFC I/O is needed.
+add_cinux_integration_test(msix
+    unit/test_msix.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/pci/msix.cpp
+)
+
 add_cinux_integration_test(vmm
     unit/test_vmm.cpp
 )
@@ -207,6 +215,7 @@ add_cinux_integration_test(fork_exec
 # ============================================================
 
 set(ALL_HOST_TESTS
+    test_msix
     test_smoke test_kprintf_format test_gdt_idt test_ata test_elf_loader
     test_big_kernel_loader test_kprintf test_pic test_pit test_font
     test_console test_framebuffer test_keyboard test_pmm test_vmm
