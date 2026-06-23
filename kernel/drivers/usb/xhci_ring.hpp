@@ -45,6 +45,7 @@ public:
 
     uint32_t enqueue_index() const { return enqueue_; }
     bool     producer_cycle() const { return pcs_; }
+    Trb*     base() const { return storage_; }  // diagnostic access
 
 private:
     void write_link();
@@ -72,6 +73,7 @@ public:
 
     uint32_t dequeue_index() const { return dequeue_; }
     bool     consumer_cycle() const { return ccs_; }
+    Trb*     base() const { return storage_; }  // diagnostic access
 
 private:
     Trb*     storage_ = nullptr;

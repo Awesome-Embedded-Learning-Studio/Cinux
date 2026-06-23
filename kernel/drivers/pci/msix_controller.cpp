@@ -25,10 +25,12 @@
 namespace cinux::drivers::pci::msix {
 
 namespace {
-// Fixed KMEM_MMIO sub-allocations.  Earlier slots are taken (AHCI BAR5 @+0x0,
-// LAPIC @+0x10000, IOAPIC @+0x11000); xHCI BAR0 will claim +0x20000 (Batch 1C).
-constexpr uint64_t kMsixTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x21000;
-constexpr uint64_t kMsixPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x22000;
+// Fixed KMEM_MMIO sub-allocations.  These MUST NOT collide with the xHCI BAR0
+// 4-page mapping (KMEM_MMIO+0x20000..+0x23FFF), which covers the xHCI runtime
+// registers (@BAR0+RTSOFF) and doorbells (@BAR0+DBOFF).  Earlier slots are
+// taken (AHCI @+0x0, LAPIC @+0x10000, IOAPIC @+0x11000, xHCI BAR0 @+0x20000).
+constexpr uint64_t kMsixTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x40000;
+constexpr uint64_t kMsixPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x41000;
 constexpr uint64_t kMmioFlags =
     cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_WRITABLE | cinux::arch::FLAG_PCD;
 constexpr uint64_t kPageSize = 4096;

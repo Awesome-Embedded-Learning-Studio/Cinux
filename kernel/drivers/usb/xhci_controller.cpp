@@ -35,9 +35,10 @@ void XHCIController::set_instance(XHCIController* c) {
 
 namespace {
 // MMIO sub-allocation inside the KMEM_MMIO window (AHCI @+0x0, LAPIC @+0x10000,
-// IOAPIC @+0x11000, MSI-X Table @+0x21000, PBA @+0x22000).  xHCI BAR0 claims
-// +0x20000.  4 pages (16 KB) covers capability + operational + runtime +
-// doorbell blocks for QEMU qemu-xhci.
+// IOAPIC @+0x11000, xHCI BAR0 @+0x20000 (4 pages: cap/op/runtime/doorbell),
+// MSI-X Table @+0x40000, PBA @+0x41000).  The MSI-X slots sit OUTSIDE xHCI
+// BAR0's 4 pages to avoid colliding with the runtime regs (@BAR0+RTSOFF) and
+// doorbells (@BAR0+DBOFF) -- see the GOTCHA in msix_controller.cpp (Batch 2C).
 constexpr uint64_t kXhciMmioVirt = cinux::arch::KMEM_MMIO_BASE + 0x20000;
 constexpr uint64_t kMmioFlags =
     cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_WRITABLE | cinux::arch::FLAG_PCD;
@@ -66,6 +67,7 @@ static_assert(sizeof(ErstEntry) == 16, "ERST entry must be 16 bytes");
 }  // namespace
 
 cinux::lib::ErrorOr<void> XHCIController::init(const pci::PCIDevice& dev) {
+    dev_               = dev;  // retained for MSI-X setup in start()
     // 1. Enable PCI Bus Master (DMA) + Memory Space (MMIO response).
     const uint32_t cmd = pci::PCI::pci_read(dev.bus, dev.slot, dev.func, pci::PciReg::COMMAND);
     pci::PCI::pci_write(dev.bus, dev.slot, dev.func, pci::PciReg::COMMAND,
@@ -205,8 +207,24 @@ cinux::lib::ErrorOr<void> XHCIController::start() {
         ir0_->erdp_lo         = static_cast<uint32_t>(erdp);
         ir0_->erdp_hi         = static_cast<uint32_t>(erdp >> 32);
         ir0_->imod            = 0;  // no moderation (interrupt every event)
-        ir0_->iman            = ir0_->iman | Iman::kEnable;
     }
+
+    // 4b. MSI-X: arm vector kXhciIrqVector (IDT 0x40) for the event-ring
+    //     interrupt, and register the event-ring service hook.  (Live CPU
+    //     delivery needs sti+APIC, present in the production kernel -- the
+    //     test kernel observes IMAN.IP + polls the event ring instead.)
+    msix_cap_ = pci::msix::find_capability(dev_.bus, dev_.slot, dev_.func, &pci::PCI::pci_read);
+    if (msix_cap_.found) {
+        auto mr = msix_.init(msix_cap_, dev_);
+        if (!mr.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        msix_.mask_all();
+        msix_.program_vector(0, kXhciIrqVector, 0);  // entry 0 -> vector 0x40, BSP
+        msix_.enable();
+    }
+    s_instance_ = this;
+    set_xhci_irq_hook(&event_irq_thunk);
 
     // 5. CONFIG.MaxSlotsEn.
     op_regs_->config = (op_regs_->config & ~Config::kMaxSlotsEnMask) | max_slots_;
@@ -223,9 +241,41 @@ cinux::lib::ErrorOr<void> XHCIController::start() {
         return cinux::lib::Error::TimedOut;
     }
 
+    // Enable interrupter 0 after the controller is running.  Setting IE before
+    // the USBCMD.RS transition was observed to leave IE cleared (IMAN.IE == 0).
+    ir0_->iman = ir0_->iman | Iman::kEnable;
+
     cinux::lib::kprintf("[xHCI] running (MaxSlotsEn=%u, scratchpad=%u, event ring armed)\n",
                         max_slots_, spb);
     return {};
+}
+
+void XHCIController::submit_command(uint64_t parameter, uint32_t status, uint32_t control) {
+    cmd_ring_.enqueue(parameter, status, control);
+    doorbells_[0] = Doorbell::kTargetCommandRing;  // ring doorbell 0, target 0 (command ring)
+}
+
+void XHCIController::poll_events() {
+    Trb ev;
+    while (event_ring_.dequeue(ev)) {
+        if (trb_type(ev.control) == TrbType::kCommandCompletion) {
+            ++cmd_completion_count_;
+        }
+    }
+    // Advance ERDP to the current dequeue pointer (acknowledges processed events
+    // to the controller; the 16-byte-aligned ptr clears EHB).
+    const uint64_t erdp =
+        event_ring_buf_.phys() + static_cast<uint64_t>(event_ring_.dequeue_index()) * 16;
+    ir0_->erdp_lo = static_cast<uint32_t>(erdp);
+    ir0_->erdp_hi = static_cast<uint32_t>(erdp >> 32);
+    // Clear IMAN.IP (write-1-to-clear).
+    ir0_->iman    = ir0_->iman | Iman::kPending;
+}
+
+void XHCIController::event_irq_thunk() {
+    if (s_instance_ != nullptr) {
+        s_instance_->poll_events();
+    }
 }
 
 }  // namespace cinux::drivers::usb

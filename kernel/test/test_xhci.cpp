@@ -59,6 +59,29 @@ void test_find_and_reset() {
 
     cinux::lib::kprintf("[xHCI] bring-up test passed: MaxPorts=%u run USBSTS=0x%x\n",
                         static_cast<unsigned>(xhci.max_ports()), run_sts);
+
+    // Batch 2C: submit a NOOP command + ring doorbell 0.  The controller
+    // executes it, writes a Command Completion Event to the event ring, and
+    // raises the event interrupt (USBSTS.EINT).  The test kernel keeps CPU
+    // interrupts off, so we poll the event ring directly and observe EINT;
+    // live MSI-X -> CPU delivery (handler runs) is proven in the production
+    // kernel (Batch 5A, which has sti + APIC).
+    xhci.submit_command(0, 0, trb_control(TrbType::kNoOp));
+
+    for (uint32_t i = 0; i < 1000000; ++i) {
+        xhci.poll_events();
+        if (xhci.cmd_completions() > 0) {
+            break;
+        }
+    }
+    const uint32_t usbsts = xhci.op_regs()->usbsts;
+    cinux::lib::kprintf("[xHCI] command pipeline: cmd_completions=%u EINT=%d USBSTS=0x%x\n",
+                        xhci.cmd_completions(),
+                        static_cast<int>((usbsts & Usbsts::kEventInterrupt) != 0), usbsts);
+
+    TEST_ASSERT_GT(xhci.cmd_completions(), 0u);  // Command Completion Event arrived
+    // EINT (USBSTS bit 3) set => the controller asserted an event-ring interrupt.
+    TEST_ASSERT_TRUE((usbsts & Usbsts::kEventInterrupt) != 0);
 }
 
 }  // namespace test_xhci

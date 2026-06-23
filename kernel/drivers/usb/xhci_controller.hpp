@@ -21,6 +21,9 @@
 #include <cinux/expected.hpp>
 
 #include "kernel/drivers/dma/dma_buffer.hpp"
+#include "kernel/drivers/pci/msix.hpp"
+#include "kernel/drivers/pci/pci.hpp"
+#include "xhci_irq.hpp"
 #include "xhci_registers.hpp"
 #include "xhci_ring.hpp"
 
@@ -63,6 +66,20 @@ public:
     TrbRing&   command_ring() { return cmd_ring_; }
     EventRing& event_ring() { return event_ring_; }
 
+    /// Enqueue a command TRB on the command ring and ring doorbell 0.
+    void submit_command(uint64_t parameter, uint32_t status, uint32_t control);
+
+    /// Dequeue pending event TRBs, advance ERDP, and clear IMAN.IP.  Called
+    /// from the ISR hook (event_irq_thunk) in production and polled directly
+    /// by tests (the test kernel does not enable CPU interrupts).
+    void poll_events();
+
+    /// Count of Command Completion Events observed by poll_events().
+    uint32_t cmd_completions() const { return cmd_completion_count_; }
+
+    /// ISR hook target: dispatches to s_instance_->poll_events().
+    static void event_irq_thunk();
+
     uint8_t max_ports() const { return max_ports_; }
     uint8_t max_slots() const { return max_slots_; }
     bool    present() const { return cap_regs_ != nullptr; }
@@ -80,6 +97,11 @@ private:
     volatile uint32_t*   doorbells_ = nullptr;
     uint8_t              max_slots_ = 0;
     uint8_t              max_ports_ = 0;
+
+    pci::PCIDevice            dev_{};
+    pci::msix::MsixCap        msix_cap_{};
+    pci::msix::MsixController msix_;
+    uint32_t                  cmd_completion_count_ = 0;
 
     // DMA-backed rings + tables (own physical memory for the controller's
     // lifetime).  DmaBuffer is move-only, so XHCIController is move-only.
