@@ -127,3 +127,39 @@ extern "C" void run_ext2_tests() {
 - [ ] kernel 头 `#pragma once`；include 分块正确
 - [ ] 编译 + `run-kernel-test -j$(nproc)` 全绿
 - [ ] commit message 纯描述（无 Co-Auth、无里程碑标签）
+
+## 13. 分层边界 + 最简表达（两类典型反例，易在赶进度时犯）
+
+> 来源：F5-M5 HID 鼠标（2026-06-23）「梭哈」写快了被当面纠正。OS 这种长期项目，**解耦边界 + 最简表达不能为赶进度让步**——后面拆/改费劲。两条都进了反面教材。
+
+### 13a. 通用/传输类不得混入应用语义
+
+一个**按职责命名的类**只承担它名字说的那一层。**传输层**（「这个设备怎么收发字节」）绝不能长出**应用层**的知识（「这是个鼠标 / 报告怎么解码」）。判定法：把这个类换一个用途，它的字段/方法还说得通吗？说不通的就是泄漏。
+
+**反例**（已修）：`XhciSlot` 是通用「xHCI 设备槽」传输层，一度被塞进 `mouse_ep_dci_` / `report_buf_` / `poll_mouse_report()` / `set_protocol()`——一个 USB 传输类不该知道「鼠标」。换了键盘/网卡这些字段就没意义 → 说明是应用语义泄漏。
+
+**正确分层**：传输类只给原语；应用语义收进专门的驱动类。
+```
+drivers/usb/    = 纯传输：xhci_controller/slot（控制传输、add_interrupt_endpoint、poll_interrupt_in 返回原始字节）
+drivers/mouse/  = 鼠标应用：UsbMouse（哪个 EP 是鼠标、报告缓冲、HID 解码），用 XhciSlot 做传输；Mouse（光标 sink）
+```
+依赖**单向**：应用 → 传输，绝不反向。文件也按子系统收拢（`mouse/` 装所有鼠标，别散在 `drivers/` 顶层 + `usb/` 两处）。
+
+### 13b. 位布局重合就用 bitmask，别写「算恒等」的条件链
+
+写「把 A 的位映射到 B」之前，**先核两边位布局是否一致**；一致就直接 bitmask，不要套逐位三元链模板——那种链既啰嗦又经常在算恒等（读者还要逐位验证才发现是 no-op）。
+
+**反例**（已修）：HID boot mouse byte0（bit0/1/2 = left/right/middle）与 PS/2 Packet0（`LEFT=0x01/RIGHT=0x02/MIDDLE=0x04`）**位完全重合**，却写了：
+```cpp
+// 反例：三行算的是恒等映射（每项 == buttons & 那一位）
+uint8_t mapped = ((buttons & 0x01) ? LEFT : 0) |
+                 ((buttons & 0x02) ? RIGHT : 0) |
+                 ((buttons & 0x04) ? MIDDLE : 0);
+```
+**正确**：核过重合 → 一行，且加注释说明为何不用映射：
+```cpp
+// HID boot-mouse byte0 uses the SAME button bit layout as PS/2 Packet0
+// (bit0=left / 1=right / 2=middle) -- no per-bit remapping needed.
+uint8_t mapped = buttons & (LEFT_BTN | RIGHT_BTN | MIDDLE_BTN);
+```
+推而广之：位运算期望值写进测试前，自己用常量重算一遍（别凭「2<<10」直觉——`1<<10=0x400`、`2<<10=0x800`，搞反过）。
