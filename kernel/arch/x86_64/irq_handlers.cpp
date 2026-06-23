@@ -23,6 +23,7 @@
 #include "idt.hpp"
 #include "irq_backend.hpp"
 #include "kernel/drivers/pit/pit.hpp"
+#include "kernel/drivers/usb/xhci_irq.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "pic.hpp"
 #include "smp.hpp"
@@ -60,6 +61,7 @@ void irq13_stub();
 void irq14_stub();
 void irq15_stub();
 void reschedule_ipi_stub();  // F4-M4 M4-2: reschedule IPI (vector 0xE0)
+void xhci_irq_stub();        // F5-M5 Batch 0C: xHCI event-ring MSI-X (vector 0x40)
 }  // extern "C"
 
 // ============================================================
@@ -114,6 +116,20 @@ void mouse_irq12_handler(InterruptFrame* /*frame*/) {
 }
 #endif
 
+#ifndef CINUX_USB
+/**
+ * @brief Default xHCI IRQ handler when the USB driver is not compiled
+ *
+ * With CINUX_USB off, usb/xhci_irq.cpp is absent, so we provide a stub that
+ * just EOIs.  MSI-X is never programmed without the driver, so this handler
+ * should never actually fire -- it exists only to satisfy the asm stub's link
+ * reference to xhci_irq_handler.  (Mirrors the mouse #ifndef CINUX_GUI stub.)
+ */
+extern "C" void xhci_irq_handler(InterruptFrame* /*frame*/) {
+    cinux::arch::irq_eoi(0);
+}
+#endif
+
 }  // extern "C"
 
 // ============================================================
@@ -142,6 +158,13 @@ extern "C" void irq_init() {
     // system (wake_idle_ap never sends it).
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::arch::kRescheduleIpiVector),
                       reschedule_ipi_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+
+    // xHCI event-ring MSI-X interrupt (F5-M5 Batch 0C, vector kXhciIrqVector).
+    // Registered at boot so the shared IDT has the entry before APs start.  The
+    // handler is a no-op+counter until Batch 2C wires the controller, and MSI-X
+    // is not programmed until then, so it never fires prematurely.
+    g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::usb::kXhciIrqVector),
+                      xhci_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
 
     kprintf("[IRQ] All IRQ handlers registered.\n");
 }

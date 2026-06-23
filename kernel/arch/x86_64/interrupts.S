@@ -285,3 +285,13 @@ ISR_NOERRCODE irq15_stub, irq_default_handler   /* IRQ15(0x2F): Secondary ATA */
 # harmless on an IPI return path).
 # ============================================================
 ISR_NOERRCODE reschedule_ipi_stub, reschedule_ipi_handler
+
+# ============================================================
+# xHCI event-ring MSI-X interrupt (F5-M5 Batch 0C)
+# ============================================================
+# Vector 0x40 (kXhciIrqVector), registered in irq_init.  MSI-X is not
+# programmed until Batch 2C, so this never fires prematurely; the handler
+# (usb/xhci_irq.cpp, or a default EOI stub when CINUX_USB is off) counts the
+# interrupt, runs the controller's event-ring hook, and EOIs.
+# ============================================================
+ISR_NOERRCODE xhci_irq_stub, xhci_irq_handler
