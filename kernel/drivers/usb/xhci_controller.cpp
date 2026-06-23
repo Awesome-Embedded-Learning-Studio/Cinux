@@ -15,6 +15,7 @@
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
+#include "kernel/drivers/dma/dma_pool.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pci/pci_config.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -43,6 +44,25 @@ constexpr uint64_t kMmioFlags =
 constexpr uint64_t kMmioPages  = 4;
 constexpr uint32_t kResetIters = 1000000;  // bounded poll cap (QEMU completes in <<100)
 constexpr uint64_t kPageSize   = 4096;
+
+// Ring sizes (single page each via DmaPool).
+constexpr uint32_t kCommandRingTrbs = 64;  // usable; +1 Link -> 65 TRBs = 1040 B (1 page)
+constexpr uint32_t kEventRingTrbs   = 64;
+
+void zero_bytes(void* p, uint64_t bytes) {
+    auto* b = static_cast<uint8_t*>(p);
+    for (uint64_t i = 0; i < bytes; ++i) {
+        b[i] = 0;
+    }
+}
+
+/// One Event Ring Segment Table entry: base address (64-bit) + size (16-bit) + reserved.
+struct ErstEntry {
+    uint64_t base;
+    uint16_t size;
+    uint8_t  reserved[6];
+};
+static_assert(sizeof(ErstEntry) == 16, "ERST entry must be 16 bytes");
 }  // namespace
 
 cinux::lib::ErrorOr<void> XHCIController::init(const pci::PCIDevice& dev) {
@@ -102,6 +122,109 @@ cinux::lib::ErrorOr<void> XHCIController::init(const pci::PCIDevice& dev) {
     }
 
     cinux::lib::kprintf("[xHCI] controller reset complete (halted, CNR clear)\n");
+    return {};
+}
+
+cinux::lib::ErrorOr<void> XHCIController::start() {
+    // 1. DCBAA: (MaxSlots+1) 64-bit pointers; slot 0 holds the scratchpad
+    //    buffer array address (0 if no scratchpad).
+    const uint32_t dcbaa_entries = static_cast<uint32_t>(max_slots_) + 1;
+    {
+        auto b = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(dcbaa_entries) * 8);
+        if (!b.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        dcbaa_buf_ = std::move(b.value());
+        zero_bytes(dcbaa_buf_.virt(), static_cast<uint64_t>(dcbaa_entries) * 8);
+        const uint64_t phys = dcbaa_buf_.phys();
+        op_regs_->dcbaap_lo = static_cast<uint32_t>(phys);
+        op_regs_->dcbaap_hi = static_cast<uint32_t>(phys >> 32);
+    }
+
+    // 2. Scratchpad buffers (if HCSPARAMS2 requests any).
+    const uint32_t spb = scratchpad_buf_count(cap_regs_->hcsparams2);
+    if (spb > 0) {
+        auto arr = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(spb) * 8);
+        if (!arr.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        scratchpad_arr_buf_ = std::move(arr.value());
+        auto pages = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(spb) * kPageSize);
+        if (!pages.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        scratchpad_pages_buf_ = std::move(pages.value());
+        auto*          arrv   = static_cast<uint64_t*>(scratchpad_arr_buf_.virt());
+        const uint64_t pbase  = scratchpad_pages_buf_.phys();
+        for (uint32_t i = 0; i < spb; ++i) {
+            arrv[i] = pbase + static_cast<uint64_t>(i) * kPageSize;
+        }
+        static_cast<uint64_t*>(dcbaa_buf_.virt())[0] = scratchpad_arr_buf_.phys();
+    }
+
+    // 3. Command ring (CRCR).
+    {
+        auto b =
+            cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kCommandRingTrbs + 1) * 16);
+        if (!b.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        cmd_ring_buf_ = std::move(b.value());
+        zero_bytes(cmd_ring_buf_.virt(), static_cast<uint64_t>(kCommandRingTrbs + 1) * 16);
+        cmd_ring_.init(static_cast<Trb*>(cmd_ring_buf_.virt()), kCommandRingTrbs,
+                       cmd_ring_buf_.phys());
+        const uint64_t crcr = cmd_ring_buf_.phys() | Crcr::kRingCycleState;
+        op_regs_->crcr_lo   = static_cast<uint32_t>(crcr);
+        op_regs_->crcr_hi   = static_cast<uint32_t>(crcr >> 32);
+    }
+
+    // 4. Event ring + one-segment ERST + IR0 enable.
+    {
+        auto b = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kEventRingTrbs) * 16);
+        if (!b.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        event_ring_buf_ = std::move(b.value());
+        zero_bytes(event_ring_buf_.virt(), static_cast<uint64_t>(kEventRingTrbs) * 16);
+        event_ring_.init(static_cast<Trb*>(event_ring_buf_.virt()), kEventRingTrbs);
+
+        auto e = cinux::drivers::dma::g_dma_pool.alloc(sizeof(ErstEntry));
+        if (!e.ok()) {
+            return cinux::lib::Error::OutOfMemory;
+        }
+        erst_buf_ = std::move(e.value());
+        auto* seg = static_cast<ErstEntry*>(erst_buf_.virt());
+        seg->base = event_ring_buf_.phys();
+        seg->size = static_cast<uint16_t>(kEventRingTrbs);
+
+        ir0_->erstsz          = 1;  // one segment
+        const uint64_t erstba = erst_buf_.phys();
+        ir0_->erstba_lo       = static_cast<uint32_t>(erstba);
+        ir0_->erstba_hi       = static_cast<uint32_t>(erstba >> 32);
+        const uint64_t erdp   = event_ring_buf_.phys();
+        ir0_->erdp_lo         = static_cast<uint32_t>(erdp);
+        ir0_->erdp_hi         = static_cast<uint32_t>(erdp >> 32);
+        ir0_->imod            = 0;  // no moderation (interrupt every event)
+        ir0_->iman            = ir0_->iman | Iman::kEnable;
+    }
+
+    // 5. CONFIG.MaxSlotsEn.
+    op_regs_->config = (op_regs_->config & ~Config::kMaxSlotsEnMask) | max_slots_;
+
+    // 6. Run: USBCMD = RS | INTE, wait for HCH to clear (running).
+    op_regs_->usbcmd = Usbcmd::kRunStop | Usbcmd::kIntEnable;
+    for (uint32_t i = 0; i < kResetIters; ++i) {
+        if (!(op_regs_->usbsts & Usbsts::kHcHalted)) {
+            break;
+        }
+    }
+    if (op_regs_->usbsts & Usbsts::kHcHalted) {
+        cinux::lib::kprintf("[xHCI] start failed: controller did not leave HCH\n");
+        return cinux::lib::Error::TimedOut;
+    }
+
+    cinux::lib::kprintf("[xHCI] running (MaxSlotsEn=%u, scratchpad=%u, event ring armed)\n",
+                        max_slots_, spb);
     return {};
 }
 

@@ -20,7 +20,9 @@
 
 #include <cinux/expected.hpp>
 
+#include "kernel/drivers/dma/dma_buffer.hpp"
 #include "xhci_registers.hpp"
+#include "xhci_ring.hpp"
 
 namespace cinux::drivers::pci {
 struct PCIDevice;
@@ -47,6 +49,20 @@ public:
      */
     cinux::lib::ErrorOr<void> init(const pci::PCIDevice& dev);
 
+    /**
+     * @brief Allocate the rings + DCBAA and run the controller
+     *
+     * Allocates (DmaPool) and programs: DCBAA (+ scratchpad if HCSPARAMS2
+     * requests it), the command ring (CRCR), the event ring + a one-segment
+     * ERST, IR0 (enable + moderation), CONFIG.MaxSlotsEn, then sets
+     * USBCMD.RS+INTE and waits for the controller to leave HCH (running).
+     * Leaves the controller running, ready to receive doorbells (Batch 2C).
+     */
+    cinux::lib::ErrorOr<void> start();
+
+    TrbRing&   command_ring() { return cmd_ring_; }
+    EventRing& event_ring() { return event_ring_; }
+
     uint8_t max_ports() const { return max_ports_; }
     uint8_t max_slots() const { return max_slots_; }
     bool    present() const { return cap_regs_ != nullptr; }
@@ -64,6 +80,17 @@ private:
     volatile uint32_t*   doorbells_ = nullptr;
     uint8_t              max_slots_ = 0;
     uint8_t              max_ports_ = 0;
+
+    // DMA-backed rings + tables (own physical memory for the controller's
+    // lifetime).  DmaBuffer is move-only, so XHCIController is move-only.
+    cinux::drivers::dma::DmaBuffer dcbaa_buf_;
+    cinux::drivers::dma::DmaBuffer scratchpad_arr_buf_;
+    cinux::drivers::dma::DmaBuffer scratchpad_pages_buf_;
+    cinux::drivers::dma::DmaBuffer cmd_ring_buf_;
+    cinux::drivers::dma::DmaBuffer event_ring_buf_;
+    cinux::drivers::dma::DmaBuffer erst_buf_;
+    TrbRing                        cmd_ring_;
+    EventRing                      event_ring_;
 
     static XHCIController* s_instance_;
 };

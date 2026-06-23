@@ -28,8 +28,8 @@
 > | 1A | PCI find_xhci | ab37fba | run-kernel-test 928/0 + test_pci 7 例 |
 > | 1B | xHCI 寄存器布局头 | f7278b0 | run-kernel-test 928/0 + test_xhci 6 例 |
 > | 1C | 控制器 init（使能/MMIO/handoff/reset） | 6f3e24e | run-kernel-test-xhci **929/0**（真 xHCI reset 点亮!) |
-> | 2A | TRB + ring 数学（纯） | (本次) | run-kernel-test 929/0 + test_xhci 11 例(含 5 ring) |
-> | 2B | DCBAA + 中断器/ERST + 启动 | ⏳ | |
+> | 2A | TRB + ring 数学（纯） | 558a781 | run-kernel-test 929/0 + test_xhci 11 例(含 5 ring) |
+> | 2B | DCBAA + 中断器/ERST + 启动 | (本次) | run-kernel-test-xhci **929/0**(控制器 running,scratchpad=15) |
 > | 2C | 接线 MSI-X→event-ring ISR + doorbell NOOP→中断（最高风险） | ⏳ | |
 > | 3A | slot/context + 控制传输 | ⏳ | |
 > | 3B | Address Device 状态机 | ⏳ | |

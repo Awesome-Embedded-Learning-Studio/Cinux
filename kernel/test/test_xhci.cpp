@@ -51,8 +51,14 @@ void test_find_and_reset() {
     TEST_ASSERT_TRUE((sts & Usbsts::kHcHalted) != 0);
     TEST_ASSERT_FALSE((sts & Usbsts::kControllerNotReady) != 0);
 
-    cinux::lib::kprintf("[xHCI] reset test passed: MaxPorts=%u USBSTS=0x%x\n",
-                        static_cast<unsigned>(xhci.max_ports()), sts);
+    // Bring up rings + DCBAA + interrupter and run (Batch 2B).
+    cinux::lib::ErrorOr<void> rs = xhci.start();
+    TEST_ASSERT_TRUE(rs.ok());
+    const uint32_t run_sts = xhci.op_regs()->usbsts;
+    TEST_ASSERT_FALSE((run_sts & Usbsts::kHcHalted) != 0);  // now running
+
+    cinux::lib::kprintf("[xHCI] bring-up test passed: MaxPorts=%u run USBSTS=0x%x\n",
+                        static_cast<unsigned>(xhci.max_ports()), run_sts);
 }
 
 }  // namespace test_xhci
