@@ -26,8 +26,8 @@
 > | 0B | MSI-X Table/PBA MMIO 映射 + 条目编程 + 使能 | a1be57e | run-kernel-test 928/0 + test_msix 17 例 |
 > | 0C | 向量安装 helper + ISR/handler 注册 | e497e4b | run-kernel-test 928/0(向量注册,触发留 2C) |
 > | 1A | PCI find_xhci | ab37fba | run-kernel-test 928/0 + test_pci 7 例 |
-> | 1B | xHCI 寄存器布局头 | (本次) | run-kernel-test 928/0 + test_xhci 6 例 |
-> | 1C | 控制器 init（使能/MMIO/handoff/reset） | ⏳ | |
+> | 1B | xHCI 寄存器布局头 | f7278b0 | run-kernel-test 928/0 + test_xhci 6 例 |
+> | 1C | 控制器 init（使能/MMIO/handoff/reset） | (本次) | run-kernel-test-xhci **929/0**（真 xHCI reset 点亮!) |
 > | 2A | TRB + ring 数学（纯） | ⏳ | |
 > | 2B | DCBAA + 中断器/ERST + 启动 | ⏳ | |
 > | 2C | 接线 MSI-X→event-ring ISR + doorbell NOOP→中断（最高风险） | ⏳ | |

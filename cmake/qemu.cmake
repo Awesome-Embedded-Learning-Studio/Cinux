@@ -287,6 +287,22 @@ add_custom_target(run-kernel-test
     VERBATIM
 )
 
+# F5-M5: run the test kernel with a qemu-xHCI controller + usb-kbd/usb-mouse
+# attached, so the xHCI tests (find_xhci + reset + enumeration + HID) have a
+# real controller to exercise.  QEMU_COMMON_FLAGS still carries the default
+# -usb + usb-tablet (ignored by the guest's xHCI driver); this only ADDS the
+# xHCI bus.  Does not perturb the plain run-kernel-test baseline.
+add_custom_target(run-kernel-test-xhci
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
+        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
+        -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0
+        -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
+    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    USES_TERMINAL
+    COMMENT "Starting QEMU with TEST kernel + qemu-xhci (auto-exit)"
+    VERBATIM
+)
+
 # F4-M3 P2-4: SMP test kernel -- same suite but with 2 CPUs (auto-exit).
 add_custom_target(run-kernel-test-smp
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
