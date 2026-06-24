@@ -148,6 +148,8 @@ void init() {
 
     if (!mouse_ok && !kbd_ok) {
         cinux::lib::kprintf("[xHCI] no HID boot device found -- USB input disabled\n");
+    } else {
+        cinux::lib::kprintf("[xHCI] USB input primary (PS/2 standby)\n");
     }
 }
 

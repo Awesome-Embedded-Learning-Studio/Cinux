@@ -23,6 +23,9 @@
 #    include "kernel/gui/host_cinux.hpp"
 #    include "third_party/Cinux-GUI/core/pump.hpp"
 #endif
+#ifdef CINUX_USB
+#    include "kernel/drivers/usb/usb_init.hpp"
+#endif
 
 namespace cinux::proc {
 
@@ -101,6 +104,14 @@ void kernel_init_thread() {
     } else {
         cinux::lib::kprintf("[INIT] fork() failed: %d\n", child_pid);
     }
+#endif
+
+#ifdef CINUX_USB
+    // Bring up USB input (xHCI + HID boot mouse + keyboard).  Runs AFTER the
+    // GUI/shell is up so its synchronous enumeration does not delay the desktop
+    // (gui_worker is an independent thread that keeps rendering).  Interrupt-
+    // driven once armed.  Graceful no-op if no xHCI controller is present.
+    cinux::drivers::usb::init();
 #endif
 
     Scheduler::exit_current();
