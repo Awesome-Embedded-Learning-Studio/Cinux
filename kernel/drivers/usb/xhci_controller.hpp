@@ -33,6 +33,20 @@ struct PCIDevice;
 
 namespace cinux::drivers::usb {
 
+/// Async transfer-completion listener.  The controller dispatches a Transfer
+/// Event to the listener registered for that slot (in poll_events); the
+/// listener decodes the payload and re-arms the next transfer.  This keeps the
+/// controller a generic transport layer -- it never interprets HID/device
+/// payloads (the device driver does).  on_transfer_complete runs in hard-IRQ
+/// context (inside the xHCI MSI-X handler), mirroring the PS/2 IRQ handlers.
+class TransferListener {
+public:
+    virtual ~TransferListener()                                                     = default;
+    /// A Transfer Event for this listener's slot/endpoint completed.  @p ev is
+    /// the raw event TRB; read completion code / remaining bytes from it.
+    virtual void on_transfer_complete(uint8_t slot_id, uint8_t epid, const Trb& ev) = 0;
+};
+
 class XHCIController {
 public:
     static XHCIController& instance();
@@ -110,6 +124,18 @@ public:
     /// ISR hook target: dispatches to s_instance_->poll_events().
     static void event_irq_thunk();
 
+    // ---- Async transfer dispatch (Batch 5A) ----
+
+    /// Register an async transfer-completion listener for @p slot_id (the slot
+    /// a boot device was enumerated onto).  poll_events() dispatches that slot's
+    /// Transfer Events to it.  Call before the first async transfer is submitted
+    /// (boot-time single writer; ISR reads -- no lock needed).
+    void register_transfer_listener(uint8_t slot_id, TransferListener* listener);
+
+    /// Ring a slot's endpoint doorbell (async transfer submission -- the caller
+    /// enqueued the transfer TRB first).  Mirrors the internal run_transfer path.
+    void ring_doorbell(uint8_t slot_id, uint8_t epid);
+
     uint8_t max_ports() const { return max_ports_; }
     uint8_t max_slots() const { return max_slots_; }
     bool    present() const { return cap_regs_ != nullptr; }
@@ -145,6 +171,14 @@ private:
     cinux::drivers::dma::DmaBuffer erst_buf_;
     TrbRing                        cmd_ring_;
     EventRing                      event_ring_;
+
+    // Async transfer listeners indexed by slot_id (Batch 5A).  64 >> QEMU's
+    // MaxSlots (32); a boot mouse + keyboard use one slot each.  The ISR reads
+    // via poll_events, boot writes via register_transfer_listener -- no lock:
+    // registration completes before the first async transfer is submitted, so no
+    // transfer event can race it.
+    static constexpr uint32_t kListenerSlots           = 64;
+    TransferListener*         by_slot_[kListenerSlots] = {};
 
     static XHCIController* s_instance_;
 };

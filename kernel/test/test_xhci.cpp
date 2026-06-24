@@ -260,15 +260,12 @@ void test_hid_mouse() {
                             static_cast<unsigned>(mep.interval), mi.ok() ? "ok" : "FAILED");
         TEST_ASSERT_TRUE(mi.ok());
 
-        // Best-effort poll: an idle mouse NAKs (no movement) -> TimedOut, expected.
-        auto rpt = mouse.poll(xhci);
-        if (rpt.ok()) {
-            cinux::lib::kprintf("[xHCI] mouse report: buttons=%u dx=%d dy=%d\n",
-                                static_cast<unsigned>(rpt.value().buttons),
-                                static_cast<int>(rpt.value().dx), static_cast<int>(rpt.value().dy));
-        } else {
-            cinux::lib::kprintf("[xHCI] mouse idle (no report yet) -- expected on still mouse\n");
-        }
+        // (Batch 5A) mouse.poll() was best-effort (no assertion) but its
+        // run_transfer busy-waits ~1M iterations on an idle-mouse NAK -- too
+        // slow under nested KVM, and obsolete now: the production input path is
+        // async (usb_init arms an interrupt-IN transfer; reports arrive via the
+        // MSI-X event-ring interrupt -> UsbMouse::on_transfer_complete).  The
+        // init() success above already proves the HID boot mouse is configured.
         return;  // booted the mouse
     }
 

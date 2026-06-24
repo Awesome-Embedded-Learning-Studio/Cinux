@@ -264,6 +264,17 @@ void XHCIController::poll_events() {
             last_cmd_completion_ = ev;  // most recent CCE (run_command matches it)
         } else if (type == TrbType::kTransferEvent) {
             last_transfer_event_ = ev;  // most recent Transfer Event (run_transfer)
+            // Async dispatch (Batch 5A): hand the event to the listener
+            // registered for this slot (e.g. UsbMouse/UsbKeyboard).  The
+            // controller stays a generic transport layer -- it does NOT decode
+            // the payload; the device driver does, inside on_transfer_complete.
+            // No registered listener -> the synchronous run_transfer path still
+            // matches last_transfer_event_ above.
+            const uint8_t slot   = static_cast<uint8_t>(cmd_completion_slot_id(ev.control));
+            if (slot < kListenerSlots && by_slot_[slot] != nullptr) {
+                const uint8_t epid = static_cast<uint8_t>(transfer_event_epid(ev.control));
+                by_slot_[slot]->on_transfer_complete(slot, epid, ev);
+            }
         }
     }
     // Advance ERDP to the current dequeue pointer (acknowledges processed events
@@ -353,6 +364,16 @@ void XHCIController::event_irq_thunk() {
     if (s_instance_ != nullptr) {
         s_instance_->poll_events();
     }
+}
+
+void XHCIController::register_transfer_listener(uint8_t slot_id, TransferListener* listener) {
+    if (slot_id < kListenerSlots) {
+        by_slot_[slot_id] = listener;
+    }
+}
+
+void XHCIController::ring_doorbell(uint8_t slot_id, uint8_t epid) {
+    doorbells_[slot_id] = epid;  // target [7:0] = endpoint DCI, stream 0
 }
 
 }  // namespace cinux::drivers::usb

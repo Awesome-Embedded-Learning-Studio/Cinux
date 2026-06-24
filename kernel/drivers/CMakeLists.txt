@@ -35,6 +35,7 @@ if(CINUX_USB)
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_controller.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_ring.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_slot.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usb_init.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mouse/usb_mouse.cpp
     )
 endif()

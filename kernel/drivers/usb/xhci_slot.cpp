@@ -238,4 +238,15 @@ cinux::lib::ErrorOr<uint32_t> XhciSlot::poll_interrupt_in(XHCIController& hc, ui
     return len - transfer_event_remaining(ev.value().status);  // bytes transferred
 }
 
+void XhciSlot::submit_interrupt_in_async(XHCIController& hc, uint64_t buf_phys, uint32_t len) {
+    // Same enqueue + doorbell as poll_interrupt_in, but no run_transfer wait.
+    // The Transfer Event completes asynchronously: it reaches poll_events (via
+    // the xHCI MSI-X interrupt) which dispatches it to the slot's
+    // TransferListener (on_transfer_complete) -- that decodes the report and
+    // re-arms by calling this again.  Idle devices NAK and keep the transfer
+    // pending, so no event fires and no CPU is spent.
+    int_ring_.enqueue(buf_phys, len, interrupt_in_trb_control());
+    hc.ring_doorbell(slot_id_, int_ep_dci_);
+}
+
 }  // namespace cinux::drivers::usb

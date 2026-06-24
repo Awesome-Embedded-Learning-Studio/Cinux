@@ -28,7 +28,7 @@ set(QEMU_COMMON_FLAGS
     -global isa-debugcon.iobase=0xe9
     ${QEMU_ACCEL}
     ${QEMU_DISPLAY}
-    -usb -device usb-tablet
+    -usb
 )
 
 set(QEMU_DEVELOP_FLAG     
@@ -117,6 +117,8 @@ add_custom_target(image ALL
 add_custom_target(run
     COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_DEVELOP_FLAG}
         -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        -device qemu-xhci,id=xhci
+        -device usb-mouse,bus=xhci.0
         -device ahci,id=ahci
         -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
         -device ide-hd,drive=ahci-disk,bus=ahci.0

@@ -15,10 +15,12 @@
 #include <stdint.h>
 
 #include "kernel/drivers/dma/dma_pool.hpp"
+#include "kernel/drivers/mouse/mouse.hpp"
 #include "kernel/drivers/usb/usb_descriptor.hpp"
 #include "kernel/drivers/usb/usb_request.hpp"
 #include "kernel/drivers/usb/xhci_controller.hpp"
 #include "kernel/drivers/usb/xhci_slot.hpp"
+#include "kernel/lib/kprintf.hpp"
 
 namespace cinux::drivers {
 using namespace cinux::drivers::usb;
@@ -35,6 +37,7 @@ void zero_bytes(void* p, uint64_t n) {
 }  // namespace
 
 cinux::lib::ErrorOr<void> UsbMouse::init(XHCIController& hc, const BootMouseEp& ep) {
+    hc_     = &hc;  // retained for re-arm in on_transfer_complete
     auto rb = dma::g_dma_pool.alloc(kReportBytes);
     if (!rb.ok()) {
         return cinux::lib::Error::OutOfMemory;
@@ -52,7 +55,9 @@ cinux::lib::ErrorOr<void> UsbMouse::init(XHCIController& hc, const BootMouseEp& 
         return r.error();
     }
 
-    // Add the interrupt-IN endpoint via Configure Endpoint.
+    // Add the interrupt-IN endpoint via Configure Endpoint.  The caller arms the
+    // first async transfer separately (arm()) -- init() stays usable by the test
+    // kernel, which polls synchronously via poll() instead.
     return slot_->add_interrupt_endpoint(hc, ep.ep_number, ep.max_packet_size, ep.interval);
 }
 
@@ -63,6 +68,30 @@ cinux::lib::ErrorOr<HidMouseReport> UsbMouse::poll(XHCIController& hc) {
         return n.error();  // TimedOut = idle mouse NAK
     }
     return decode_boot_mouse(static_cast<const uint8_t*>(report_buf_.virt()));
+}
+
+void UsbMouse::on_transfer_complete(uint8_t /*slot_id*/, uint8_t /*epid*/, const Trb& ev) {
+    // Runs in hard-IRQ context (the xHCI MSI-X handler).  The controller has
+    // written the report into report_buf_; decode it and inject into the GUI
+    // event queue (Mouse::inject_usb_motion -- dy NOT inverted, HID convention).
+    const uint32_t code = cmd_completion_code(ev.status);
+    if (code == CompCode::kSuccess || code == CompCode::kShortPacket) {
+        const HidMouseReport rpt =
+            decode_boot_mouse(static_cast<const uint8_t*>(report_buf_.virt()));
+        Mouse::inject_usb_motion(rpt.dx, rpt.dy, rpt.buttons);
+    } else {
+        cinux::lib::kprintf("[xHCI] mouse transfer error: completion code=%u\n", code);
+    }
+
+    // Re-arm: submit the next async IN transfer.  An idle mouse NAKs, so this
+    // transfer stays pending (no event, no CPU) until the next report.
+    arm();
+}
+
+void UsbMouse::arm() {
+    if (slot_ != nullptr && hc_ != nullptr) {
+        slot_->submit_interrupt_in_async(*hc_, report_buf_.phys(), report_len_);
+    }
 }
 
 }  // namespace cinux::drivers

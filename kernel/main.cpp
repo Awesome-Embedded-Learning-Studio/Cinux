@@ -59,6 +59,9 @@
 #    include "kernel/drivers/canvas.hpp"
 #    include "kernel/gui/gui_init.hpp"
 #endif
+#ifdef CINUX_USB
+#    include "kernel/drivers/usb/usb_init.hpp"
+#endif
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -243,6 +246,14 @@ extern "C" void kernel_main() {
     } else {
         cinux::lib::kprintf("[AHCI] No AHCI controller found.\n");
     }
+
+#ifdef CINUX_USB
+    // Step 21b: Bring up USB input (xHCI + HID boot mouse, F5-M5 Batch 5A).
+    // Interrupt-driven (no worker thread), so it runs before the scheduler.
+    // Graceful no-op if no xHCI controller is present (keeps the baseline
+    // run-kernel-test, which has no qemu-xhci, green).
+    cinux::drivers::usb::init();
+#endif
 
     // Step 22: Initialise scheduler and spawn kernel init thread
     cinux::lib::kprintf("[BIG] ===== Scheduler & Init Thread =====\n");

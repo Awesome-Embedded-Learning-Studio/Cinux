@@ -83,6 +83,15 @@ public:
     cinux::lib::ErrorOr<uint32_t> poll_interrupt_in(XHCIController& hc, uint64_t buf_phys,
                                                     uint32_t len);
 
+    /// Submit an interrupt-IN transfer asynchronously (Batch 5A): enqueue the
+    /// Normal TRB + ring the doorbell, but do NOT wait for the Transfer Event.
+    /// The controller completes it when the device sends a report; the event
+    /// lands on the event ring and is dispatched to the slot's TransferListener
+    /// in poll_events (hard-IRQ context).  An idle device keeps the transfer
+    /// pending -- zero CPU.  This is the production input path; poll_interrupt_in
+    /// above stays for the test kernel (which has no sti / CPU interrupts).
+    void submit_interrupt_in_async(XHCIController& hc, uint64_t buf_phys, uint32_t len);
+
     /// Control-IN data buffer -- descriptor reads land here (valid after a
     /// successful control_in / get_descriptor).
     const uint8_t* data_virt() const { return static_cast<const uint8_t*>(data_buf_.virt()); }
