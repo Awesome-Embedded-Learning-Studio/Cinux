@@ -403,3 +403,16 @@ ISR_IRQ reschedule_ipi_stub, reschedule_ipi_handler, 0
 # EOIs.  \irq=0 is unused (MSI-X is APIC-only).
 # ============================================================
 ISR_IRQ xhci_irq_stub, xhci_irq_handler, 0
+
+# ============================================================
+# LAPIC timer (F5-M5 -smp per-CPU preemption)
+# ============================================================
+# Vector 0x30 (kLapicTimerVector), fired by each AP's local APIC timer
+# (programmed in ap_main).  Drives Scheduler::tick() on APs -- the BSP is
+# preempted by the PIT, which the IOAPIC redirects to the BSP only, so APs
+# need their own timer or a spin-waiting task (e.g. shell on stdin) deadlocks
+# the AP.  Uses ISR_NOERRCODE with an EARLY EOI inside the handler, exactly
+# like irq0_stub: the timer must be re-armed (EOI'd) before the inline
+# preemption switch in Scheduler::tick(), or the next tick could be missed.
+# ============================================================
+ISR_NOERRCODE lapic_timer_stub, lapic_timer_handler

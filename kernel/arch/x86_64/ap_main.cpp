@@ -13,6 +13,7 @@
 
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
+#include "kernel/arch/x86_64/irq_backend.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/msr.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
@@ -34,8 +35,9 @@ extern "C" uint8_t ap_entry[];
 extern "C" uint8_t ap_cr3[];
 extern "C" uint8_t ap_kernel_cr3[];
 extern "C" uint8_t ap_cpu_id[];
-extern "C" void    ap_entry_long();  // higher-half asm stub (trampoline jumps here)
+extern "C" void    ap_entry_long();      // higher-half asm stub (trampoline jumps here)
 extern "C" void    usermode_init_asm();  // BSP's STAR/EFER.SCE/SFMASK setup (usermode.S)
+extern "C" void    syscall_entry();      // SYSCALL entry (syscall.S); AP writes it into LSTAR
 
 namespace cinux::arch {
 
@@ -129,10 +131,29 @@ extern "C" void ap_main(uint64_t cpu_id) {
     //     match the BSP's CPU config" as the missing CR4.OSFXSR.
     usermode_init_asm();
 
+    // 2c. LSTAR (SYSCALL entry RIP).  usermode_init_asm() sets STAR/SFMASK/
+    //     EFER.SCE but NOT LSTAR; only the BSP's syscall_init() wrote it.  An AP
+    //     with LSTAR==0 makes a user task's first SYSCALL here load RIP<-0 and
+    //     jump to address 0 in kernel mode (CS=STAR[47:32]=0x10), cascading to a
+    //     #DF on the user stack (F5-M5 -smp Shell #DF root cause).  Single core
+    //     never hit it (the BSP's LSTAR is set).  Point it at syscall_entry.
+    constexpr uint32_t kMsrLstar = 0xC0000082;
+    write_msr(kMsrLstar, reinterpret_cast<uint64_t>(syscall_entry));
+
     // 3. Enable this CPU's Local APIC.  The MMIO window the BSP mapped decodes
     //    to whichever CPU accesses it, so g_lapic drives the local one.
     pcpu->apic_id = drivers::apic::g_lapic.id();
     drivers::apic::g_lapic.enable(0xFF);  // spurious vector (matches BSP's 0xFF)
+
+    // 3b. Arm this AP's LAPIC timer for periodic preemption.  The PIT preempts
+    //     only the BSP (IOAPIC redirect targets it); without a local timer this
+    //     AP would never be preempted, so a task that spin-waits (e.g. the shell
+    //     on an empty stdin) deadlocks the AP and starves anything pinned here
+    //     (F5-M5 -smp Shell keyboard).  Periodic, /16, count tuned for a
+    //     few-hundred-Hz tick -- see lapic_timer_handler (mirrors the PIT path).
+    constexpr uint8_t  kTimerDivide = 0x3;        // divide by 16
+    constexpr uint32_t kTimerCount  = 1'000'000;  // ~tick rate (tune if needed)
+    drivers::apic::g_lapic.setup_periodic_timer(kLapicTimerVector, kTimerDivide, kTimerCount);
 
     lib::kprintf("[AP%lu] online (apic_id=%u)\n", cpu_id, pcpu->apic_id);
 
@@ -254,6 +275,20 @@ void boot_aps() {
 // the hlt instruction.
 extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
     // EOI is sent by the ISR_IRQ stub.
+}
+
+// ============================================================
+// LAPIC timer tick (F5-M5 -smp): each AP's periodic preemption source.
+// ============================================================
+// The PIT preempts only the BSP (the IOAPIC redirect targets the BSP), so APs
+// arm their own LAPIC timer (ap_main) and land here.  This mirrors the PIT path
+// (pit_irq0_handler): an EARLY EOI before Scheduler::tick() so the timer is
+// re-armed ahead of tick's inline preemption switch (otherwise the next tick
+// could be missed on the task we switch to).  tick() runs the per-class
+// preemption policy and may context-switch.
+extern "C" void lapic_timer_handler(InterruptFrame* /*frame*/) {
+    cinux::arch::irq_eoi(0);  // EOI the LAPIC timer before the preempt switch
+    cinux::proc::Scheduler::tick();
 }
 
 void wake_idle_ap() {

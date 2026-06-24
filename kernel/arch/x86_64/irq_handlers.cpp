@@ -62,6 +62,7 @@ void irq14_stub();
 void irq15_stub();
 void reschedule_ipi_stub();  // F4-M4 M4-2: reschedule IPI (vector 0xE0)
 void xhci_irq_stub();        // F5-M5 Batch 0C: xHCI event-ring MSI-X (vector 0x40)
+void lapic_timer_stub();     // F5-M5 -smp: per-CPU LAPIC timer (vector 0x30)
 }  // extern "C"
 
 // ============================================================
@@ -182,6 +183,12 @@ extern "C" void irq_init() {
     // is not programmed until then, so it never fires prematurely.
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::usb::kXhciIrqVector),
                       xhci_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+
+    // LAPIC timer (F5-M5 -smp, vector kLapicTimerVector).  Registered into the
+    // shared IDT so APs can take it; the BSP is preempted by the PIT and never
+    // arms its LAPIC timer, so this stays dormant there.  See ap_main().
+    g_idt.set_handler(static_cast<ExceptionVector>(cinux::arch::kLapicTimerVector),
+                      lapic_timer_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
 
     kprintf("[IRQ] All IRQ handlers registered.\n");
 }
