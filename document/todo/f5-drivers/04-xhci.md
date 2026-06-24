@@ -1,5 +1,13 @@
-# M5: xHCI 最小化（仅 HID）
+# M5: xHCI 最小化（仅 HID）✅ 已实现
 
+> ✅ **已实现（F5-M5 批 0A–5B，2026-06-24）**：MSI-X 子系统 + xHCI 控制器 bring-up + async
+> interrupt-IN + TransferListener 分发 + HID boot mouse/keyboard 生产闭环（→ 现有
+> `Mouse::event_queue()` / `Keyboard` 队列 → GUI；PS/2 作静默 fallback）。实际实现偏离本草案
+> —— interrupt-IN 改 **async 中断模型**（非同步轮询），HID 分层按输入子系统收拢
+> （`drivers/mouse/` + `drivers/keyboard/`，controller 通用传输层不解释 payload）。详见
+> [PLAN.md 批表](../../ai/PLAN.md) + `document/notes/2026-06-24-f5-m5-5*`。下方任务清单为立项
+> 草案，保留作设计参考。
+>
 > xHCI USB 控制器最小化实现，仅支持键盘和鼠标。
 > 不做大容量存储、集线器等复杂功能。
 
