@@ -11,11 +11,12 @@
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
 | 1 | USB 开关归 CMake（usb_stub 空壳 + usb::poll_input 接口 + CMake else）→ init.cpp 消 3 处 `#ifdef CINUX_USB` | ✅ | 7b2cdcc | 931/0 + GUI 冒烟零 panic + 非 USB big_kernel 构建绿（usb_stub 链接） |
-| 2 | `launch_userspace()` 抽象 + GUI/non-GUI 两实现 + CMake gate（代码就绪，单核 931/0；原 -smp 2 panic 已由 F4-followup 修复）→ 消 init.cpp 头号反例 | 🔄 | — | 待 -smp 2 验证后 commit |
-| 3 | `handoff_framebuffer_to_gui()` + main.cpp Step15b 一句化 → 消 main.cpp `#ifdef CINUX_GUI` | ⏳ | — | — |
-| 4 | irq_handlers stub 文件化（mouse_stub + xhci stub 进 usb_stub）→ 消 `#ifndef`；非 GUI/非 USB 双构建验证 | ⏳ | — | — |
+| 2 | `launch_userspace()` 抽象 + GUI/non-GUI 两实现 + CMake gate → 消 init.cpp 头号反例（§14） | ✅ | 7e32888 | 931/0 + make run -smp 2 panic 0（触发并促修 SMP 迁移竞态 PR#34） |
+| 3 | `handoff_framebuffer_to_gui()` + main.cpp Step15b 一句化 → 消 main.cpp `#ifdef CINUX_GUI` | ✅ | f39cbe8 | big_kernel 编译 + 931/0 + -smp 2 panic 0 + 非 GUI 非 USB big_kernel 绿 |
+| 4 | irq_handlers stub 文件化（mouse_stub + usb_xhci_stub）→ 消 `#ifndef` | ✅ | eaaca9c | 931/0 + -smp 2 panic 0 + 非 GUI 非 USB big_kernel 绿 |
+| 5 | USB 拆核心传输(`if USB`)/HID(`if USB AND GUI`)双 gate + usb_stub/usb_xhci_stub → 非 GUI+USB big_kernel 链接 | ✅ | d4012c6 | 默认 931/0 + -smp 2 panic 0 + **非 GUI+USB big_kernel 绿（原断链现修）** + 非 GUI 非 USB 绿 |
 
-> **预存问题（follow-up）**：非 USB `big_kernel_test` 因 `test_xhci.cpp` 无 `#ifdef CINUX_USB` 守卫链接失败（批1 前就破），属 test gate，留独立 follow-up（用户拍板 test 留）。批1 只负责生产代码非 USB 兼容（big_kernel 已验）。
+> **预存 follow-up**：非 USB `big_kernel_test` 因 `test_xhci.cpp` 无 `#ifdef CINUX_USB` 守卫链接失败（test gate，用户拍板 test 留）。~~非 GUI+USB big_kernel 断链~~ ✅ 批5 修。详见 [note](../notes/2026-06-25-f-gui-decouple-b2-5.md)。
 
 ## ✅ F4-followup（SMP 任务迁移竞态修复）— 2026-06-25，已合 main PR#34（原 feat/smp-migration-fix）
 
