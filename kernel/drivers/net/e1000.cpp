@@ -1,10 +1,13 @@
 /**
  * @file kernel/drivers/net/e1000.cpp
- * @brief e1000 NIC bring-up: PCI enable + BAR0 map + reset + EEPROM MAC
+ * @brief e1000 NIC: bring-up (批a) + legacy RX/TX rings + polled receive (批b)
  *
- * 批a.  No RX/TX rings or interrupts yet.  The EEPROM MAC read + link status are
- * verified in QEMU (run-kernel-test with -device e1000): find_e1000 finds the
- * 82540em, init maps BAR0, resets, reads MAC=52:54:00:..., reports link=1.
+ * No interrupts yet.  Verified in QEMU (run-kernel-test with -device e1000):
+ * find_e1000 finds the 82540em, init reads MAC=52:54:00:..., start_rx arms the
+ * ring, and TX->SLIRP->RX round-trips prove reception -- an ARP request earns a
+ * unicast ARP reply, and a DHCPDISCOVER earns a broadcast DHCPOFFER (both caught
+ * by poll_rx).  Note: a polled RX MUST read an MMIO register (RDH) each poll so
+ * the emulator delivers the packet -- see poll_rx.
  *
  * Namespace: cinux::drivers::net
  */
@@ -16,6 +19,7 @@
 #include "e1000_mmio.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
+#include "kernel/drivers/dma/dma_pool.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pci/pci_config.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -136,6 +140,170 @@ cinux::lib::ErrorOr<void> E1000Controller::init(const pci::PCIDevice& dev) {
     return {};
 }
 
+cinux::lib::ErrorOr<void> E1000Controller::start_rx() {
+    // 1. RX descriptor ring (kRxDescCount * 16 B, page-aligned via DmaPool).
+    auto d = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kRxDescCount) * 16);
+    if (!d.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    desc_buf_  = std::move(d.value());
+    auto* desc = static_cast<volatile RxDesc*>(desc_buf_.virt());
+    for (uint32_t i = 0; i < kRxDescCount; ++i) {
+        desc[i].buffer_addr = 0;
+        desc[i].length      = 0;
+        desc[i].checksum    = 0;
+        desc[i].status      = 0;
+        desc[i].errors      = 0;
+        desc[i].special     = 0;
+    }
+
+    // 2. Packet buffers (one 2 KB page each); wire each into its descriptor.
+    for (uint32_t i = 0; i < kRxDescCount; ++i) {
+        auto b = cinux::drivers::dma::g_dma_pool.alloc(kRxBufSize);
+        if (!b.ok()) {
+            return cinux::lib::Error::OutOfMemory;  // earlier bufs freed by RAII
+        }
+        pkt_bufs_[i]        = std::move(b.value());
+        desc[i].buffer_addr = pkt_bufs_[i].phys();
+    }
+
+    // 3. Program the unicast MAC (RAL0/RAH0, AV set) + clear the multicast
+    //    table so the card accepts our frames (and, with UPE below, all frames).
+    reg_write(e1000reg::RAL0,
+              static_cast<uint32_t>(mac_[0]) | (static_cast<uint32_t>(mac_[1]) << 8) |
+                  (static_cast<uint32_t>(mac_[2]) << 16) | (static_cast<uint32_t>(mac_[3]) << 24));
+    reg_write(e1000reg::RAH0,
+              static_cast<uint32_t>(mac_[4]) | (static_cast<uint32_t>(mac_[5]) << 8) | (1U << 31));
+    for (uint32_t i = 0; i < 128; ++i) {  // MTA: 128 32-bit entries
+        reg_write(e1000reg::MTA + i * 4, 0);
+    }
+
+    // 4. Program the ring registers.  RDT = N-1 leaves one descriptor as the
+    //    sentinel so RDT never equals RDH (full/empty ambiguity).
+    const uint64_t base = desc_buf_.phys();
+    reg_write(e1000reg::RDBAL, static_cast<uint32_t>(base));
+    reg_write(e1000reg::RDBAH, static_cast<uint32_t>(base >> 32));
+    reg_write(e1000reg::RDLEN, kRxDescCount * 16);
+    reg_write(e1000reg::RDH, 0);
+    reg_write(e1000reg::RDT, kRxDescCount - 1);
+    next_to_clean_ = 0;
+
+    // 5. Enable the receiver: 2048 B buffers (BSIZE=00, BSEX=0), strip CRC,
+    //    accept broadcast + unicast-promiscuous (loopback/self-test: any frame).
+    reg_write(e1000reg::RCTL,
+              e1000reg::RCTL_EN | e1000reg::RCTL_SECRC | e1000reg::RCTL_BAM | e1000reg::RCTL_UPE);
+
+    cinux::lib::kprintf("[e1000] RX armed: %u descriptors, %u B buffers, RCTL=0x%x\n",
+                        static_cast<unsigned>(kRxDescCount), static_cast<unsigned>(kRxBufSize),
+                        reg_read(e1000reg::RCTL));
+    return {};
+}
+
+cinux::lib::ErrorOr<void> E1000Controller::start_tx() {
+    auto d = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kTxDescCount) * 16);
+    if (!d.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    tx_desc_buf_ = std::move(d.value());
+    auto* desc   = static_cast<volatile TxDesc*>(tx_desc_buf_.virt());
+    for (uint32_t i = 0; i < kTxDescCount; ++i) {
+        desc[i].buffer_addr = 0;
+        desc[i].length      = 0;
+        desc[i].cso         = 0;
+        desc[i].cmd         = 0;
+        desc[i].status      = 0;
+        desc[i].css         = 0;
+        desc[i].special     = 0;
+    }
+
+    auto b = cinux::drivers::dma::g_dma_pool.alloc(kTxBufSize);
+    if (!b.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    tx_data_buf_ = std::move(b.value());
+
+    const uint64_t base = tx_desc_buf_.phys();
+    reg_write(e1000reg::TDBAL, static_cast<uint32_t>(base));
+    reg_write(e1000reg::TDBAH, static_cast<uint32_t>(base >> 32));
+    reg_write(e1000reg::TDLEN, kTxDescCount * 16);
+    reg_write(e1000reg::TDH, 0);
+    reg_write(e1000reg::TDT, 0);
+    tx_tail_ = 0;
+
+    reg_write(e1000reg::TCTL, e1000reg::TCTL_EN | e1000reg::TCTL_PSP);
+    return {};
+}
+
+bool E1000Controller::poll_rx(uint8_t* dst, uint32_t max_len, uint32_t& out_len) {
+    // Read RDH (MMIO).  On an emulator, an inbound packet is delivered into
+    // this ring by the device model's main loop, which only runs when the guest
+    // traps out (MMIO access / interrupt / hlt).  The descriptor status lives
+    // in DMA memory (no trap), so a memory-only poll never observes the packet
+    // when CPU interrupts are off (the test kernel).  Reading RDH traps, which
+    // lets the model run and deliver.  Confirmed necessary: with this read
+    // removed, GPRC stays 0 and RDH never advances despite the packet being on
+    // the wire (filter-dump proves it).  On real HW this is a harmless extra
+    // read of the hardware head index.
+    (void)reg_read(e1000reg::RDH);
+
+    auto*            desc = static_cast<volatile RxDesc*>(desc_buf_.virt());
+    volatile RxDesc& d    = desc[next_to_clean_];
+    if ((d.status & kRxStatusDD) == 0) {
+        return false;  // no packet at this slot
+    }
+
+    const uint32_t len = d.length;
+    const uint32_t n   = (len < max_len) ? len : max_len;
+    const uint8_t* src = static_cast<const uint8_t*>(pkt_bufs_[next_to_clean_].virt());
+    for (uint32_t i = 0; i < n; ++i) {
+        dst[i] = src[i];  // DMA-written buffer; byte copy (QEMU is DMA-coherent)
+    }
+    out_len = n;
+
+    // Recycle the descriptor + advance the tail so HW can reuse the slot.
+    d.status           = 0;
+    d.buffer_addr      = pkt_bufs_[next_to_clean_].phys();
+    next_to_clean_     = (next_to_clean_ + 1) % kRxDescCount;
+    const uint32_t rdt = (next_to_clean_ == 0) ? (kRxDescCount - 1) : (next_to_clean_ - 1);
+    reg_write(e1000reg::RDT, rdt);
+    return true;
+}
+
+cinux::lib::ErrorOr<void> E1000Controller::send_packet(const uint8_t* data, uint32_t len) {
+    if (len > kTxBufSize) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    auto* dst = static_cast<uint8_t*>(tx_data_buf_.virt());
+    for (uint32_t i = 0; i < len; ++i) {
+        dst[i] = data[i];
+    }
+
+    auto*          desc    = static_cast<volatile TxDesc*>(tx_desc_buf_.virt());
+    const uint32_t slot    = tx_tail_;
+    desc[slot].buffer_addr = tx_data_buf_.phys();
+    desc[slot].length      = static_cast<uint16_t>(len);
+    desc[slot].cso         = 0;
+    desc[slot].cmd         = kTxCmdEOP | kTxCmdIFCS | kTxCmdRS;
+    desc[slot].status      = 0;
+    desc[slot].css         = 0;
+    desc[slot].special     = 0;
+
+    tx_tail_ = (tx_tail_ + 1) % kTxDescCount;
+    reg_write(e1000reg::TDT, tx_tail_);  // ring doorbell -> HW DMAs + transmits
+
+    // Bounded-poll for this descriptor's DD bit (transmit complete).
+    for (uint32_t i = 0; i < kPollIters; ++i) {
+        if (desc[slot].status & kTxStatusDD) {
+            return {};
+        }
+        if (i > 0 && (i % 10000) == 0) {
+            cinux::proc::Scheduler::yield();
+        }
+    }
+    cinux::lib::kprintf("[e1000] TX did not complete (len=%u)\n", len);
+    return cinux::lib::Error::TimedOut;
+}
+
 bool E1000Controller::link_up() const {
     if (mmio_base_ == 0) {
         return false;
@@ -147,6 +315,18 @@ void E1000Controller::mac(uint8_t out[6]) const {
     for (int i = 0; i < 6; ++i) {
         out[i] = mac_[i];
     }
+}
+
+void E1000Controller::rx_dump(const char* tag) const {
+    // Diagnostic dump of the receiver state.  GPRC > 0 means the MAC has
+    // accepted a packet (address filter passed) -- distinguishes a filter
+    // rejection from a delivery/DMA problem.
+    const auto* desc = static_cast<volatile RxDesc*>(desc_buf_.virt());
+    cinux::lib::kprintf(
+        "[e1000] %s: RCTL=0x%x RDH=%u RDT=%u GPRC=%u | d0addr=0x%lx d0st=0x%x d0len=%u\n", tag,
+        reg_read(e1000reg::RCTL), reg_read(e1000reg::RDH), reg_read(e1000reg::RDT),
+        reg_read(e1000reg::GPRC), static_cast<unsigned long>(desc[0].buffer_addr), desc[0].status,
+        desc[0].length);
 }
 
 }  // namespace cinux::drivers::net
