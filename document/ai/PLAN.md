@@ -2,13 +2,29 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## ✅ F4-followup（SMP 任务迁移竞态修复）— 2026-06-25，feat/smp-migration-fix `68b1913`（待 PR）
+## 🔄 F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 2026-06-25 立项
+
+> 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。
+> 范围（用户拍板）：核心 4 批（main+init+irq）；test 文件 `#ifdef` 整体守卫（§14 灰色边缘）留 follow-up。
+> 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿 + `make run` GUI 冒烟；批1/4 加非 USB / 非 GUI 构建验证。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 1 | USB 开关归 CMake（usb_stub 空壳 + usb::poll_input 接口 + CMake else）→ init.cpp 消 3 处 `#ifdef CINUX_USB` | ✅ | 7b2cdcc | 931/0 + GUI 冒烟零 panic + 非 USB big_kernel 构建绿（usb_stub 链接） |
+| 2 | `launch_userspace()` 抽象 + GUI/non-GUI 两实现 + CMake gate → 消 init.cpp 头号反例（§14） | ✅ | 7e32888 | 931/0 + make run -smp 2 panic 0（触发并促修 SMP 迁移竞态 PR#34） |
+| 3 | `handoff_framebuffer_to_gui()` + main.cpp Step15b 一句化 → 消 main.cpp `#ifdef CINUX_GUI` | ✅ | f39cbe8 | big_kernel 编译 + 931/0 + -smp 2 panic 0 + 非 GUI 非 USB big_kernel 绿 |
+| 4 | irq_handlers stub 文件化（mouse_stub + usb_xhci_stub）→ 消 `#ifndef` | ✅ | eaaca9c | 931/0 + -smp 2 panic 0 + 非 GUI 非 USB big_kernel 绿 |
+| 5 | USB 拆核心传输(`if USB`)/HID(`if USB AND GUI`)双 gate + usb_stub/usb_xhci_stub → 非 GUI+USB big_kernel 链接 | ✅ | d4012c6 | 默认 931/0 + -smp 2 panic 0 + **非 GUI+USB big_kernel 绿（原断链现修）** + 非 GUI 非 USB 绿 |
+
+> **预存 follow-up**：非 USB `big_kernel_test` 因 `test_xhci.cpp` 无 `#ifdef CINUX_USB` 守卫链接失败（test gate，用户拍板 test 留）。~~非 GUI+USB big_kernel 断链~~ ✅ 批5 修。详见 [note](../notes/2026-06-25-f-gui-decouple-b2-5.md)。
+
+## ✅ F4-followup（SMP 任务迁移竞态修复）— 2026-06-25，已合 main PR#34（原 feat/smp-migration-fix）
 
 > 来源：F-GUI-DECOUPLE 批2（launch_userspace 抽函数）触发 `make run -smp 2` 必现 panic，诊断为预存 SMP bug（批1 内联时序避开，批2 必现；根因 F4-M4 后潜伏，对应"偶现崩溃"痛点）。
-> **根因**：任务跨 CPU 迁移时，旧 CPU `context_switch`（存 task->ctx）与新 CPU（取同一 ctx）并发 → ctx 写花 → ret 跳垃圾 rip → #UD/#BP。F4-M4「pick removes」挡双 CPU 同运行，但漏迁移窗口（旧 CPU save 中、新 CPU 已 restore）。
-> **修复**（对齐 Linux `task_struct->on_cpu`）：Task 加 `on_cpu`（-1=已存/未运行, cpu_id=运行中）+ `context_switch.S` 存完 from 设 -1（x86 store release; ctx@Task+0 → rdi=Task*, on_cpu@96, static_assert）+ `RoundRobin::pick_next` 跳过 on_cpu≠-1 且≠本cpu 的 task（本 cpu 不跳 → 单核 yield `next==prev` return 保持）+ schedule/exit_current/run_first 切入前 claim + build/run_first/setup_ap_idle 初始化。**用 pick 跳过而非 spin**（两 CPU 互 spin 等对方存完会死锁）。
-> **验证**：单核 run-kernel-test 931/0 + `make run -smp 2` 连续 3 次 0 panic（AP1 online + xHCI + USB 正常）。on_cpu 用 `__atomic`（非 Spinlock，不进 lockdep 图），无锁改动。详见 [note](../notes/2026-06-25-f4-followup-smp-migration-race.md)。
-> **阻塞 F-GUI-DECOUPLE 批2**（feat/gui-decouple）：合 main 后回 feat/gui-decouple rebase + pop 批2 + 验证 -smp 2 绿。
+> **根因**：任务跨 CPU 迁移时，旧 CPU `context_switch`（存 task->ctx）与新 CPU（取同一 ctx）并发 → ctx 写花 → ret 跳垃圾 rip → #UD/#BP。F4-M4「pick removes」挡双 CPU 同运行，但漏迁移窗口。
+> **修复**（对齐 Linux `task_struct->on_cpu`）：Task `on_cpu` + context_switch.S 存完设 -1 + pick_next 跳过（别的 CPU 正存，本 cpu 不跳保单核 yield）+ schedule/exit_current/run_first claim + build/run_first/setup_ap_idle 初始化。**用 pick 跳过而非 spin**（互 spin 死锁）。
+> **验证**：单核 931/0 + `make run -smp 2` 连续 3 次 0 panic。详见 [note](../notes/2026-06-25-f4-followup-smp-migration-race.md)。
+> **状态**：已合 main PR#34（commit `68b1913` + docs `cd3b2b9`）。F-GUI-DECOUPLE 批2 已可 resume（-smp 2 不再 panic）。
 
 ## ✅ F-CLN 债务清理（横切，接 F-QA）— 收官 2026-06-25
 
