@@ -23,7 +23,7 @@ set(BIG_KERNEL_COMPILE_OPTIONS
     -fno-exceptions
     -fno-rtti
     -fno-pie
-    -fno-stack-protector
+    -fstack-protector-strong -mstack-protector-guard=global  # F9 batch 6: stack canary
     -mcmodel=kernel
     -mno-red-zone
     -Wall
