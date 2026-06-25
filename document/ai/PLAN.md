@@ -25,8 +25,8 @@
 | 5 | M1 收尾：机制验证 test_f9（EFER.NXE 必断言;SMEP/SMAP CPUID-gated）+ ROADMAP M1✅ + notes | ✅ | run-kernel-test 932/0（发现 SMEP/SMAP WSL2 KVM 不透传 CPUID.07H,代码 CPUID-gated 正确）（(本次)） |
 | 6 | M4 Canary：CMake -fstack-protector-strong + boot.S TSC canary + __stack_chk_fail→kpanic | ✅ | run-kernel-test 932/0（(本次)） |
 | 7 | M2 KRandom：rdrand/TSC/PIT 熵源 + xoshiro256** + splitmix64 seed | ✅ | run-kernel-test 932/0（test 留批8 ASLR 间接）（(本次)） |
-| 8 | M2 ASLR：ELF/栈/mmap 地址随机化 | ⏳ | + 每次运行地址不同 |
-| 9 | M3 凭证：Task uid/gid/euid/egid + fork/execve 继承 + getuid/setuid syscall（权限检查留 F6）| ⏳ | run-kernel-test |
+| 8 | M2 ASLR（内核侧）：栈/mmap/brk 地址随机化（ELF base 拆后续：non-PIE 绝对寻址铁证）| ✅ | run-kernel-test 936/0(+4 test_aslr) + make run 冒烟零 panic（`26e8bfa`） |
+| 9 | M3 凭证：Task uid/euid/gid/egid + fork memcpy 继承 + getuid/setuid 6 syscall（execve setuid binary 留 F6）| ✅ | run-kernel-test 942/0(+6 test_creds) + make run 冒烟零 panic（`75ad715`） |
 
 ### 风险重点
 - 批1 sigreturn 改造（碰信号投递核心路径，行为须不变）+ 批2 NXE 开闸（execve 首次真用 NX，可能暴露隐藏配置错）+ 批4 SMAP（碰 syscall entry + 全用户指针访问面）。
