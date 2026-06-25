@@ -2,6 +2,30 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F-CLN 债务清理（横切，接 F-QA）— 2026-06-25 立项
+
+> **目标**：开 F10 libc / F7 网络大弧前，把 [debt.md](../todo/quality/debt.md) 的 open 债收敛 + 补全 xHCI/USB 审计盲区（Q3 后合入未审），让新弧在干净地基上推进。
+> **来源**：2026-06-25 自检（DEBT 全表核对 + OPEN GOTCHAS + xHCI 未审面 + 报告）+ 用户决策「专门开清理事务，全部批在 `feat/f-cln-debt` 一个分支搞定」。
+> **命名**：F-CLN（债务清理，与 F-QA「质量收敛」职责区隔）。
+> **范围**：批0-8（必做批0-3 + 中危批4-7 + 收尾批8）。DEBT-019/013/020/012（用户指针 + ELF）**留 F10 顺手修**（与 F10 syscall/execve 强相关）；DEBT-011/014（低危）收尾时看。
+> **验证**：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；改公共接口/mock 补全量；批4/7 加 `-smp 2`；收尾加 LOCKDEP + host-ASAN。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 0 | xHCI/USB 专项审（D2 内存+D3 并发+D4 生命周期，deterministic 四段式，只读→报告+新债登记） | 🔄 | (本次) | docs-only |
+| 1 | DEBT-015 核实 PathBuf 改堆后 frame-larger-than 残余 + 启用门禁/关债 | ⏳ | | |
+| 2 | DEBT-016 test framework 加 ASSERT_OK 宏 + 清 32 处忽略 + 去 -Wno-unused-result | ⏳ | | |
+| 3 | DEBT-018 kMaxCpus 统一单一权威（percpu=8 vs acpi=16）+ static_assert | ⏳ | | |
+| 4 | DEBT-008 signal_setup_frame 写帧前校验栈 VMA（中风险，信号路径） | ⏳ | | |
+| 5 | DEBT-009 clear_user_mappings + free_subtree 识 huge entry | ⏳ | | |
+| 6 | DEBT-010 FDTable refcount guard()→irq_guard()/atomic 对齐 R3 | ⏳ | | |
+| 7 | DEBT-007 quantum_remaining_ 改 per-task（中风险，调度核心 + -smp2 回归） | ⏳ | | |
+| 8 | 收尾：ROADMAP/PLAN/debt/notes + 全量 + -smp2+LOCKDEP+host-ASAN 验证矩阵 | ⏳ | | |
+
+> **关键发现（立项核实）**：DEBT-015 核心已修——`sys_creat.cpp` 等已用 `PathBuf`（堆，path.cpp:19 注释 "was char[PATH_MAX] on the stack"），`grep '[PATH_MAX]' kernel/syscall/` 空。debt.md 滞后，批1 降级为"核实残余 + 关债"。DEBT-007 仍 open（quantum 仍单一共享 RoundRobin 成员，F3-M4 仅从 Scheduler 移入类，未 per-task/per-CPU）。
+> **风险重点**：批4（信号投递路径，GOTCHA#16/#11 相关，真程序高频锻炼）、批7（调度核心 tick/pick_next，-smp2 回归必做，GOTCHA#23 同族）—— 各自 `-smp 2` 验证。
+> **架构契合**：A.6 ErrorOr（批2 ASSERT_OK 强化铁律）；A 单一定义（批3 kMaxCpus 消 ODR）；A 禁 RTTI/禁异常（全批遵守）；对齐 Linux（批7 per-task quantum / 批4 expand_stack / 批5 huge free）。
+
 ## ✅ F13 cgui（PC GUI 框架 → 独立 Cinux-GUI 仓库）— 已合 main（2026-06-23，submodule `third_party/Cinux-GUI`）
 
 > ⚠️ **DRAFT**。方向可能调整。来源:11-agent workflow（5 维调研 + 综合 + 3-lens 对抗 + 完整性）+ 用户 4 决策。
