@@ -18,40 +18,12 @@
 #include "kernel/proc/sync.hpp"
 #include "kernel/proc/user_launch.hpp"
 
-#ifdef CINUX_GUI
-#    include "kernel/gui/gui_init.hpp"
-#    include "kernel/gui/host_cinux.hpp"
-#    include "third_party/Cinux-GUI/core/pump.hpp"
-#endif
 // usb_init.hpp is unconditional: when CINUX_USB is off, usb_stub.cpp supplies
 // empty usb::init()/poll_input() (§14 file gate), so this TU needs no #ifdef.
 #include "kernel/drivers/usb/usb_init.hpp"
+#include "kernel/proc/userspace.hpp"  // launch_userspace: GUI/non-GUI impl chosen by CMake (§14)
 
 namespace cinux::proc {
-
-#ifdef CINUX_GUI
-namespace {
-
-void gui_worker_thread() {
-    cinux::lib::kprintf("[GUI] Worker thread started\n");
-    while (true) {
-        // Drive the desktop through the cinux::gui Host ABI table (F13 §3b): input,
-        // time and spawn all go via host->core.* / host->desktop->*. The same
-        // pump body runs unchanged on a different host fill.
-        cinux::gui::pump(&cinux::gui::cinux_host());
-        // Service the xHCI event ring each frame (usb::poll_input is a no-op if
-        // no controller was enumerated, or if USB is compiled out -- §14 links
-        // usb_stub.cpp).  On QEMU under nested-KVM the MSI-X transfer-complete
-        // interrupt is not reliably delivered, so polling the ring here is the
-        // production event-service path; cheap when the mouse is idle (the
-        // dequeue finds the ring empty).
-        cinux::drivers::usb::poll_input();
-        Scheduler::yield();
-    }
-}
-
-}  // anonymous namespace
-#endif
 
 void kernel_init_thread() {
     auto* self = Scheduler::current();
@@ -72,46 +44,11 @@ void kernel_init_thread() {
     cinux::fs::vfs_mount_add("/", &ext2);
     cinux::lib::kprintf("[VFS] ext2 mounted at /\n");
 
-#ifdef CINUX_GUI
-    // Pipe creation is now handled per-terminal inside create_shell_terminal().
-    // No global pipe setup needed here -- each Shell desktop icon click
-    // dynamically creates its own pipe pair, forks a shell, and binds them.
-
-    cinux::lib::kprintf("[INIT] ===== Milestone 035: Multi-Terminal =====\n");
-
-    // Start the GUI: mouse init, desktop icons, PIT tick callback
-    cinux::gui::gui_start();
-
-    // Launch GUI worker thread to handle deferred work (fork/execve)
-    // outside of PIT interrupt context
-    auto* gui_task = TaskBuilder().set_entry(gui_worker_thread).set_name("gui_worker").build();
-    if (gui_task != nullptr) {
-        Scheduler::add_task(gui_task);
-        cinux::lib::kprintf("[INIT] GUI worker thread launched\n");
-    }
-#else
-    // Non-GUI mode: fork and execve the shell directly.
-    // Uses legacy sys_read (keyboard polling) for stdin and
-    // legacy sys_write (kprintf serial+console) for stdout.
-    cinux::lib::kprintf("[INIT] Launching shell (non-GUI mode)...\n");
-    int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
-    if (child_pid == 0) {
-        __asm__ volatile("cli");
-
-        auto* task       = cinux::proc::Scheduler::current();
-        task->addr_space = new cinux::mm::AddressSpace();
-
-        const char* path   = "/bin/sh";
-        const char* argv[] = {path, nullptr};
-        const char* envp[] = {nullptr};
-
-        cinux::proc::launch_user_program(path, argv, envp);
-    } else if (child_pid > 0) {
-        cinux::lib::kprintf("[INIT] Shell spawned pid=%d\n", child_pid);
-    } else {
-        cinux::lib::kprintf("[INIT] fork() failed: %d\n", child_pid);
-    }
-#endif
+    // Bring up userspace.  GUI build: desktop + gui_worker thread
+    // (kernel/gui/desktop_launch.cpp).  Non-GUI build: fork + exec /bin/sh
+    // (kernel/proc/shell_launch.cpp).  §14: one interface, two impl files,
+    // CMake selects which to link -- no #ifdef here.
+    launch_userspace();
 
     // Bring up USB input (xHCI + HID boot mouse + keyboard).  Runs AFTER the
     // GUI/shell is up so its synchronous enumeration does not delay the desktop
