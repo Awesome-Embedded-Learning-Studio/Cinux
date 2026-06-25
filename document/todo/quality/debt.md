@@ -174,8 +174,9 @@
 - **修复建议**: 每层先判 `entry.huge`：huge entry 直接 `free_page(phys_addr)` 并清零，不向下走。`AddressSpace::~AddressSpace` 的 free_subtree 同样需补。
 - **关联 GOTCHA**: #13（huge split 破坏 direct-map，相关但针对 VMM.map）
 
-### DEBT-010 `FDTable` refcount 用 `guard()` 非 `irq_guard`，与 R3 不一致
-- **维度**: 并发/SMP　**优先级**: P2　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
+### DEBT-010 `FDTable` refcount 用 `guard()` 非 `irq_guard`，与 R3 不一致 ✅
+- **维度**: 并发/SMP　**优先级**: P2　**状态**: ✅ 已修（F-CLN 批6,2026-06-25）　**核验**: ✅ -smp2 回归
+- **闭环**: acquire/release 改 `__atomic_*_fetch(&refcount_, 1, ACQ_REL)`(对齐 SharedCwd/SharedSigActions R3),去 `lock_.guard()` + racy `refcount_>0` 守卫(正确生命周期不 underflow)。release 到 0 独占(无并发)读 fds_[]+close(持锁)+delete。alloc/close/get/set 保留 `lock_.guard()`(fds_[] 数组保护,非 refcount;当前 IRQ 不触达 FDTable,未来触达再升 irq_guard)。验证 run-kernel-test 931/0 + host ctest(fd_table/pipe/shell_redirect/shell_write/sys_pipe 全过)+ **-smp 2** ALL PASSED。详见 `document/notes/2026-06-25-f-cln-b6-debt010-fdtable-refcount.md`。
 - **位置**: `kernel/fs/file.cpp:29-54`
 - **现象**: `FDTable::acquire/release` 用 `lock_.guard()`（非 IRQ-safe），对照 SharedCwd/SharedSigActions（F4-M5 R3）已改 `__atomic_*_fetch(ACQ_REL)`。
 - **根因**: 当前 IRQ 路径不碰 FDTable，不立刻死锁。但属「未爆但脆」的同步原语选型不一致 —— 未来任何 IRQ handler 触达 FDTable 即本核持锁重入死锁。
