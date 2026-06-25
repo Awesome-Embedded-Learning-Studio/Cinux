@@ -150,6 +150,15 @@ struct Task {
     /** Saved callee-saved registers for context switching. */
     CpuContext ctx;
 
+    /** SMP migration sync (F4-followup): the CPU this task currently runs on,
+     *  or -1 when its ctx is saved / it runs on no CPU.  schedule() sets it to
+     *  the local cpu_id just before switching TO this task; context_switch.S
+     *  stores -1 once the outgoing task's ctx is fully saved.  pick_next()
+     *  skips tasks whose on_cpu != -1 (their ctx save is still in flight on the
+     *  CPU they just left), so two CPUs never save/restore the same ctx at once
+     *  -- closing the migration race.  Plain int + __atomic_* (x86 TSO). */
+    int on_cpu;
+
     /** Current lifecycle state. */
     TaskState state;
 
@@ -161,7 +170,7 @@ struct Task {
     /** Time-slice quantum remaining (ticks).  per-task (DEBT-007: was a shared
      *  RoundRobin member, which multi-core tick races shrank to slice/ncpus).
      *  Refilled by SchedulingClass::pick_next / task_fork / TaskBuilder::build. */
-    int32_t quantum_remaining;
+    int32_t  quantum_remaining;
 
     /** Base of the kernel stack allocation (for freeing). */
     uint64_t kernel_stack;
@@ -283,6 +292,12 @@ struct Task {
      *  and freed by the next task's schedule() entry (reap_deferred). */
     Task* deferred_next{nullptr};
 };
+
+// F4-followup (SMP migration race): context_switch.S writes from->on_cpu = -1
+// via a hardcoded offset, relying on rdi (=&from->ctx) being &from because ctx
+// is the first data member.  Pin both layout facts the asm depends on.
+static_assert(offsetof(Task, ctx) == 0, "ctx at Task+0 (context_switch.S rdi is Task*)");
+static_assert(offsetof(Task, on_cpu) == sizeof(CpuContext), "on_cpu offset for context_switch.S");
 
 // ============================================================
 // Fork

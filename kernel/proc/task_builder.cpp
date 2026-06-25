@@ -7,12 +7,13 @@
  * context, and returns a ready-to-run Task.
  */
 
+#include "kernel/proc/task_builder.hpp"
+
 #include <stddef.h>
 #include <stdint.h>
 
 #include <new>
 
-#include "kernel/proc/task_builder.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/fs/file.hpp"
@@ -114,12 +115,16 @@ Task* TaskBuilder::build() {
     __asm__ volatile("fninit");
     __asm__ volatile("fxsave %0" : : "m"(task->fpu_state));
 
-    task->state                   = TaskState::Ready;
-    task->tid                     = next_tid.fetch_add(1, cinux::lib::MemoryOrder::Relaxed);
-    task->priority                = priority_;
-    task->quantum_remaining       = Scheduler::DEFAULT_TIME_SLICE;  // DEBT-007: fresh task, full slice
-    task->kernel_stack            = stack_virt;
-    task->kernel_stack_top        = stack_virt + stack_size;
+    task->state             = TaskState::Ready;
+    // F4-followup (SMP migration race): a fresh task has never run, so no CPU is
+    // saving its ctx.  on_cpu = -1 ("not running / ctx is saved"); schedule()
+    // sets a cpu_id before switching to it; pick_next() only picks on_cpu == -1.
+    task->on_cpu            = -1;
+    task->tid               = next_tid.fetch_add(1, cinux::lib::MemoryOrder::Relaxed);
+    task->priority          = priority_;
+    task->quantum_remaining = Scheduler::DEFAULT_TIME_SLICE;  // DEBT-007: fresh task, full slice
+    task->kernel_stack      = stack_virt;
+    task->kernel_stack_top  = stack_virt + stack_size;
     task->kernel_stack_guard_page = guard_virt;
     task->addr_space              = addr_space_;
     task->sched_class             = sched_class_;
