@@ -20,7 +20,7 @@
 | 0 | 立项 docs（本段）+ ROADMAP F9 状态 + 调研结论 | ✅ | docs-only |
 | 1 | sigreturn vDSO 化（固定可执行页，脱离栈上代码，行为不变）| ✅ | run-kernel-test 931/0 + 信号 round-trip 不变(`4a16158`) |
 | 2 | 开 EFER.NXE（x86_64 baseline，无 CPUID gate）+ 补 NX（PF handler 按 VMA Exec：mmap/demand-read/栈/heap）+ 清 deferred 注释 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
-| 3 | SMEP：CR4.SMEP + CPUID + usermode 路径验证 | ⏳ | + make run |
+| 3 | SMEP：CR4.SMEP（CPUID.07H:EBX[7] 检测）+ BSP/AP per-CPU 设 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
 | 4 | SMAP：CR4.SMAP + syscall entry stac/exit clac + 用户访存全覆盖 + 重审 DEBT-019 | ⏳ | + DEBT-019 + 可能 -smp 2 |
 | 5 | M1 收尾：QEMU 触发测试（栈执行→SIGSEGV / 内核访用户→#PF）+ notes | ⏳ | docs-only |
 | 6 | M4 Canary：CMake -fstack-protector-strong + __stack_chk_fail→kpanic + canary（TSC 种子）| ⏳ | run-kernel-test + 冒烟 |

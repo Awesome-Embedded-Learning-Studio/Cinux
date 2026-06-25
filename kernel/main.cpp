@@ -42,6 +42,7 @@
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/irq_backend.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
+#include "kernel/arch/x86_64/paging.hpp"  // F9 batch 3: enable_smep
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/pic.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
@@ -114,6 +115,7 @@ extern "C" void kernel_main() {
     // percpu() (which reads MSR_GS_BASE) works before any interrupt fires or any
     // code uses it.  Also configures STAR/EFER for SYSRET (formerly Step 18).
     cinux::arch::usermode_init();
+    cinux::arch::enable_smep();  // F9 batch 3: SMEP on the BSP (CR4 per-CPU)
     cinux::lib::kprintf("[BIG] PerCpu GS base anchored (BSP).\n");
 
     // Step 5: Initialise the PIC (remap IRQ0-7 -> 0x20-0x27,
