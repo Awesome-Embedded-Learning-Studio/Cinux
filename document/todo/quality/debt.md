@@ -165,8 +165,9 @@
 - **修复建议**: 投递前校验 `[R, user_rsp)` 落 Stack VMA 内；否则改用 sig_altstack 或直接 SIGSEGV 默认终止。
 - **关联 GOTCHA**: #11（PF 硬门控+栈增长，未覆盖信号帧写入）/ #16（sigreturn trampoline，未覆盖）
 
-### DEBT-009 clear_user_mappings 不识别 huge page entry → 误当 PT 页释放
-- **维度**: 内存安全　**优先级**: P2　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
+### DEBT-009 clear_user_mappings 不识别 huge page entry → 误当 PT 页释放 ✅
+- **维度**: 内存安全　**优先级**: P2　**状态**: ✅ 已修（F-CLN 批5,2026-06-25）　**核验**: ✅ 读码
+- **闭环**: 三处加 huge entry 检测(防御,当前 NXE off 无 user huge 不触发):clear_user_mappings(execve.cpp)PDPT 层 1GB + PD 层 2MB、free_subtree(address_space.cpp)递归各层。huge entry 是数据页非页表——原代码下钻解析 huge 内容当 PT + free garbage 物理页 → PMM 错乱。修:遇 huge → kprintf warn + 清零 entry + continue(不下钻不 free)。huge free(buddy order 2MB/1GB)未实现,留真正 huge 支持里程碑(检测到 huge 说明该里程碑漏更新此路径)。验证 run-kernel-test 931/0 + 编译零 warning。关联 GOTCHA#13(direct-map huge split,相关但针对 VMM.map)。详见 `document/notes/2026-06-25-f-cln-b5-debt009-huge-detect.md`。
 - **位置**: `kernel/proc/execve.cpp:81-105`
 - **现象**: 4 层遍历叶子层 `free_page`，中间层也 `free_page`，**全程不检查 `entry.huge`（PS bit）**。
 - **根因**: 用户空间若引入 2MB/1GB huge（mmap/brk 未来可能），huge entry 基址被当 PDPT 表页 free，并向下把 huge 内容当 PT 解析 → free garbage 物理页 → PMM 状态错乱。当前潜伏。
