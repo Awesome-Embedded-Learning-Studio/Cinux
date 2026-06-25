@@ -31,11 +31,12 @@ else()
     )
 endif()
 
-# F5-M5 xHCI: USB host controller + reusable PCI MSI-X subsystem.
-# MSI-X (pci/msix.cpp) is a generic PCI capability helper; the xHCI driver
-# (usb/*.cpp) is added under the same gate.  §14: when USB is off we link the
-# usb_stub.cpp no-op so init.cpp's usb::init()/poll_input() calls resolve
-# without any #ifdef on the call site.
+# F5-M5 xHCI: USB split into core transport + HID injection (both §14 file gates).
+# Core (xHCI controller/rings/slots + MSI-X): if(CINUX_USB).  It uses the
+# TransferListener base class (xhci_controller.hpp) and does NOT depend on
+# Mouse/Keyboard, so it builds without GUI.
+# HID (usb_init + usb_mouse/usb_tablet/usb_keyboard): depends on Mouse/Keyboard
+# (GUI-gated), so gated on (CINUX_USB AND CINUX_GUI).
 if(CINUX_USB)
     target_sources(big_kernel_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/pci/msix.cpp
@@ -44,13 +45,32 @@ if(CINUX_USB)
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_controller.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_ring.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/xhci_slot.cpp
+    )
+endif()
+
+if(CINUX_USB AND CINUX_GUI)
+    target_sources(big_kernel_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/usb_init.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mouse/usb_mouse.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mouse/usb_tablet.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/keyboard/usb_keyboard.cpp
     )
-else()
+endif()
+
+# usb::init()/poll_input() stub: when HID is off (no USB, OR no GUI), so init.cpp
+# calls resolve with no #ifdef at the call site.  USB core above still links under
+# CINUX_USB, but usb::init is a no-op, so the controller is never brought up --
+# harmless dead code when GUI is off.
+if(NOT (CINUX_USB AND CINUX_GUI))
     target_sources(big_kernel_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/usb/usb_stub.cpp
+    )
+endif()
+
+# xhci_irq_handler stub: when CINUX_USB is off (xhci_irq.cpp absent).  USB builds
+# link the real handler in xhci_irq.cpp; this only fills the asm stub's reference.
+if(NOT CINUX_USB)
+    target_sources(big_kernel_common PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usb_xhci_stub.cpp
     )
 endif()

@@ -25,14 +25,3 @@ void poll_input() {
 }
 
 }  // namespace cinux::drivers::usb
-
-namespace cinux::arch {
-struct InterruptFrame;
-}  // namespace cinux::arch
-
-// §14: xhci_irq.cpp is USB-only.  Non-USB builds link this stub so the asm
-// xhci_irq_stub's reference to xhci_irq_handler (C ABI) resolves.  MSI-X is
-// never programmed without the driver, so this handler never fires.
-extern "C" void xhci_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
-    // EOI is owned by the ISR stub.
-}
