@@ -39,11 +39,11 @@
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
-| a | PCI find_e1000 + E1000Controller（BAR0 映射 + 复位 + EERD 读 EEPROM MAC + 链路）+ CINUX_NET gate + test + QEMU -device e1000 | ✅ | (本批) | 932/0 + MAC=52:54:00:12:34:56 link=1 + 全量绿 |
-| b | RX 描述符环（legacy 16B）+ RCTL + poll_rx 收一帧 + net::poll_rx boot 接口 + net_stub | ⏳ | | |
-| c | TX + 中断（MSI / legacy INTx，非 MSI-X）替代 polling | ⏳（延后） | | |
+| a | PCI find_e1000 + E1000Controller（BAR0 映射 + 复位 + EERD 读 EEPROM MAC + 链路）+ CINUX_NET gate + test + QEMU -device e1000 | ✅ | 4b4184c | 932/0 + MAC=52:54:00:12:34:56 link=1 + 全量绿 |
+| b | RX/TX 描述符环 + 轮询收发 + `net::init()` 生产 boot 接入 + **单播(ARP)/广播(DHCP)收包铁证** + `make run` GUI 冒烟 | ✅ | (本批) | 934/0 + 单播 ARP reply + 广播 DHCP offer + GUI 零 panic |
+| c | TX 完整化 + 中断（MSI / legacy INTx，非 MSI-X）替代 polling + netdev 抽象交接 F7 | ⏳（延后） | | |
 
-> 批a 详见 [note](../notes/2026-06-25-f5-m6-e1000-b1-detect-mac.md)。延后项见 note 边界节。
+> 批a [note](../notes/2026-06-25-f5-m6-e1000-b1-detect-mac.md)；批b [note](../notes/2026-06-26-f5-m6-e1000-b2-rx-tx.md)。**批b 关键 GOTCHA（接手必读）**：① 轮询 RX 在模拟器上必须读 MMIO(RDH)才收得到包（内存轮询不 trap，模型 main loop 不跑 → 不投递；GPRC 0→1 证实）；② QEMU e1000 **不模拟** RCTL.LBM loopback，别做 loopback 自测，用 SLIRP ARP/DHCP round-trip；③ 直接跑 QEMU 前要 `regenerate-ext2-image`（否则 ext2 inode 耗尽假失败）。
 
 ## 🔄 F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 2026-06-25 立项
 

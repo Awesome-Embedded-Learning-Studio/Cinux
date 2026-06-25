@@ -130,6 +130,7 @@ add_custom_target(run
         -device ide-hd,drive=ahci-disk,bus=ahci.0
         -drive file=${EXT2_IMAGE},format=raw,if=none,id=ext2-disk
         -device ide-hd,drive=ext2-disk,bus=ahci.1
+        -device e1000,netdev=net0 -netdev user,id=net0
     DEPENDS image ${AHCI_TEST_IMAGE} ${EXT2_IMAGE}
     COMMENT "Starting QEMU (serial: stdio)"
     VERBATIM

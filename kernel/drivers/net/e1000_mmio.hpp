@@ -67,4 +67,22 @@ constexpr uint32_t RCTL_UPE   = 1U << 3;   ///< Unicast Promiscuous Enable
 constexpr uint32_t RCTL_BAM   = 1U << 15;  ///< Broadcast Accept Mode
 constexpr uint32_t RCTL_SECRC = 1U << 26;  ///< Strip Ethernet CRC from RX
 
+// ============================================================
+// Transmit (批b: loopback self-test)
+// ============================================================
+
+constexpr uint32_t TCTL  = 0x0400;  ///< Transmit Control
+constexpr uint32_t TDBAL = 0x3800;  ///< TX Descriptor Base Low
+constexpr uint32_t TDBAH = 0x3804;  ///< TX Descriptor Base High
+constexpr uint32_t TDLEN = 0x3808;  ///< TX Descriptor Length
+constexpr uint32_t TDH   = 0x3810;  ///< TX Descriptor Head
+constexpr uint32_t TDT   = 0x3818;  ///< TX Descriptor Tail
+
+// TCTL bits
+constexpr uint32_t TCTL_EN  = 1U << 1;  ///< Transmit Enable
+constexpr uint32_t TCTL_PSP = 1U << 3;  ///< Pad Short Packets (< 60 B)
+
+// Statistics (read for diagnostics)
+constexpr uint32_t GPRC = 0x4074;  ///< Good Packets Received Count
+
 }  // namespace cinux::drivers::net::e1000reg
