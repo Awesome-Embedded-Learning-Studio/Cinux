@@ -116,6 +116,7 @@ Task* TaskBuilder::build() {
     task->state                   = TaskState::Ready;
     task->tid                     = next_tid.fetch_add(1, cinux::lib::MemoryOrder::Relaxed);
     task->priority                = priority_;
+    task->quantum_remaining       = Scheduler::DEFAULT_TIME_SLICE;  // DEBT-007: fresh task, full slice
     task->kernel_stack            = stack_virt;
     task->kernel_stack_top        = stack_virt + stack_size;
     task->kernel_stack_guard_page = guard_virt;

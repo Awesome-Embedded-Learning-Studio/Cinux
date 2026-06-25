@@ -19,7 +19,7 @@
 | 4 | DEBT-008 signal_setup_frame 写帧前校验栈 VMA（中风险，信号路径） | ✅ | (本次) | 931/0 + make run 冒烟;校验 fallback signal_exec_default |
 | 5 | DEBT-009 clear_user_mappings + free_subtree 识 huge entry | ✅ | (本次) | 931/0;三处 huge 检测(防御,warn+不下钻) |
 | 6 | DEBT-010 FDTable refcount guard()→irq_guard()/atomic 对齐 R3 | ✅ | (本次) | 931/0 + host ctest + -smp2;acquire/release atomic |
-| 7 | DEBT-007 quantum_remaining_ 改 per-task（中风险，调度核心 + -smp2 回归） | ⏳ | | |
+| 7 | DEBT-007 quantum_remaining_ 改 per-task（中风险，调度核心 + -smp2 回归） | ✅ | (本次) | 931/0 + -smp2 + ctest54/0;Task::quantum_remaining per-task |
 | 8 | 收尾：ROADMAP/PLAN/debt/notes + 全量 + -smp2+LOCKDEP+host-ASAN 验证矩阵 | ⏳ | | |
 
 > **关键发现（立项核实）**：DEBT-015 核心已修——`sys_creat.cpp` 等已用 `PathBuf`（堆，path.cpp:19 注释 "was char[PATH_MAX] on the stack"），`grep '[PATH_MAX]' kernel/syscall/` 空。debt.md 滞后，批1 降级为"核实残余 + 关债"。DEBT-007 仍 open（quantum 仍单一共享 RoundRobin 成员，F3-M4 仅从 Scheduler 移入类，未 per-task/per-CPU）。

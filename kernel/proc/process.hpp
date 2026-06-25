@@ -157,6 +157,10 @@ struct Task {
 
     /** Scheduling priority (lower = higher priority, for future use). */
     uint64_t priority;
+    /** Time-slice quantum remaining (ticks).  per-task (DEBT-007: was a shared
+     *  RoundRobin member, which multi-core tick races shrank to slice/ncpus).
+     *  Refilled by SchedulingClass::pick_next / task_fork / TaskBuilder::build. */
+    int32_t quantum_remaining;
 
     /** Base of the kernel stack allocation (for freeing). */
     uint64_t kernel_stack;

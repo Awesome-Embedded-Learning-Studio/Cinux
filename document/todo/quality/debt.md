@@ -148,8 +148,9 @@
 - **修复建议**: `AddressSpace` 加原子 refcount；clone CLONE_VM 时 acquire；线程退出 release，归 0 才 delete。与 DEBT-002 同批。
 - **关联 GOTCHA**: 无
 
-### DEBT-007 `quantum_remaining_` 单一共享 quantum → 多核时间片错乱
-- **维度**: 并发/SMP　**优先级**: P2　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
+### DEBT-007 `quantum_remaining_` 单一共享 quantum → 多核时间片错乱 ✅
+- **维度**: 并发/SMP　**优先级**: P2　**状态**: ✅ 已修（F-CLN 批7,2026-06-25）　**核验**: ✅ -smp2 + 单核回归
+- **闭环**: quantum 从 RoundRobin 类单一成员(`quantum_remaining_`)→ **per-task 字段**(`Task::quantum_remaining`,对齐 Linux `task_struct->rt.time_slice`)。原 multi-core bug:两核 tick 各自递减同一 `quantum_remaining_` → 实际时间片变 `DEFAULT_TIME_SLICE/ncpus`,一核 recharge 重置另一核正在跑的任务。改动:process.hpp Task 加 `int32_t quantum_remaining`;scheduler.hpp RoundRobin 删成员;roundrobin.cpp ctor/pick_next/clear/task_tick 改用 `task->quantum_remaining`;task_fork + TaskBuilder::build 设 child/新任务满量子(DEFAULT_TIME_SLICE)。验证 run-kernel-test 931/0 + **-smp 2** ALL PASSED + host ctest 54/0(单核 per-task 等价旧共享)。详见 `document/notes/2026-06-25-f-cln-b7-debt007-quantum-per-task.md`。
 - **位置**: `kernel/proc/roundrobin.cpp:40,109,142-156`
 - **现象**: `default_rr_` 全局单例的 `quantum_remaining_` 被 `lock_.irq_guard()` 保护（不崩溃），但两核 tick 各自递减同一变量。
 - **根因**: 实际时间片变 `DEFAULT_TIME_SLICE / ncpus`，一核耗尽 recharge 影响另一核正在跑的任务。**行为错非崩溃**，调度不可预测。

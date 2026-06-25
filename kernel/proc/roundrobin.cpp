@@ -37,7 +37,7 @@ uint64_t SchedulingClass::task_deadline(Task*) {
 // ============================================================
 
 RoundRobin::RoundRobin()
-    : head_(0), tail_(0), count_(0), quantum_remaining_(Scheduler::DEFAULT_TIME_SLICE) {
+    : head_(0), tail_(0), count_(0) {
     for (int i = 0; i < MAX_TASKS; i++) {
         run_queue_[i] = nullptr;
     }
@@ -107,9 +107,9 @@ Task* RoundRobin::pick_next() {
     // (schedule() re-enqueues the yielding prev; unblock() re-enqueues a woken
     // task).  Single-core round-robin is preserved: schedule() re-enqueues the
     // yielding prev before picking, so a lone task picks itself and continues.
-    task->state        = TaskState::Running;
-    // A freshly scheduled task starts with a full time quantum.
-    quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
+    task->state              = TaskState::Running;
+    // A freshly scheduled task starts with a full time quantum (DEBT-007: per-task).
+    task->quantum_remaining  = Scheduler::DEFAULT_TIME_SLICE;
 
     return task;
 }
@@ -136,20 +136,22 @@ void RoundRobin::clear() {
     head_              = 0;
     tail_              = 0;
     count_             = 0;
-    quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
 }
 
 bool RoundRobin::task_tick(Task* current) {
     auto g = lock_.irq_guard();
     (void)g;
-    (void)current;
-    if (quantum_remaining_ > 0) {
-        quantum_remaining_--;
+    // DEBT-007: per-task quantum (was a shared RoundRobin member -> multi-core
+    // tick races shrank the slice to DEFAULT_TIME_SLICE/ncpus, and one core's
+    // recharge reset the other's running task).  Aligned with Linux
+    // task_struct->rt.time_slice.
+    if (current->quantum_remaining > 0) {
+        current->quantum_remaining--;
     }
-    if (quantum_remaining_ == 0) {
+    if (current->quantum_remaining == 0) {
         // Quantum exhausted: request preemption and recharge so that, if no
         // other task is runnable, the same task is not re-preempted every tick.
-        quantum_remaining_ = Scheduler::DEFAULT_TIME_SLICE;
+        current->quantum_remaining = Scheduler::DEFAULT_TIME_SLICE;
         return true;
     }
     return false;
@@ -161,6 +163,9 @@ void RoundRobin::task_fork(Task* parent, Task* child) {
     // scheduling class derive child parameters without touching fork/clone.
     if (parent != nullptr && child != nullptr) {
         child->priority = parent->priority;
+        // DEBT-007: child starts with a full quantum (memcpy copied parent's
+        // remaining ticks; a fresh task should not inherit a near-expired slice).
+        child->quantum_remaining = Scheduler::DEFAULT_TIME_SLICE;
     }
 }
 
