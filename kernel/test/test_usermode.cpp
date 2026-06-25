@@ -124,13 +124,13 @@ void test_f9_nxe_smep_smap_enabled() {
     uint64_t efer = read_msr(0xC0000080);
     TEST_ASSERT_TRUE((efer >> 11) & 1);
 
-    // SMEP/SMAP are CPUID-gated (CPUID.07H:EBX[7]/[20]). The kernel's
-    // enable_smep_smap() sets CR4[20]/[21] only when the CPU reports support,
-    // so the test mirrors that: assert CR4 only on CPUs that expose the feature.
-    // (WSL2 nested KVM returns EBX=0 for leaf 7 -> correctly left clear here;
-    // real HW / full KVM exposes them -> asserted.)
+    // SMEP/SMAP are CPUID-gated (CPUID.07H:EBX[7]/[20], sub-leaf ecx=0). The
+    // kernel's enable_smep_smap() sets CR4[20]/[21] only when the CPU reports
+    // support; the test mirrors that. Verified on -cpu host (SMEP/SMAP exposed
+    // + asserted). -cpu max on WSL2 KVM hides CPUID leaf 7 (EBX=0) -> correctly
+    // left clear there; real HW exposes them -> asserted.
     uint32_t a7 = 7, b7 = 0, c7 = 0, d7 = 0;
-    __asm__ volatile("cpuid" : "+a"(a7), "=b"(b7), "=c"(c7), "=d"(d7));
+    __asm__ volatile("cpuid" : "+a"(a7), "+c"(c7), "=b"(b7), "=d"(d7));
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     if (b7 & (1u << 7)) {

@@ -17,6 +17,7 @@
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
+#include "kernel/arch/x86_64/paging.hpp"  // F9: enable_smep_smap
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/lib/kallsyms.hpp"
@@ -127,6 +128,7 @@ extern "C" void kernel_main() {
     // suite runs -- percpu() reads MSR_GS_BASE, so it must be set first.  This
     // also configures STAR/EFER for SYSRET; run_usermode_tests still observes them.
     cinux::arch::usermode_init();
+    cinux::arch::enable_smep_smap();  // F9 batch 3/4: mirror production main (test_f9 verifies CR4)
 
     // F2-M7 direct-map identity probe (batch 1): the loader mapped all RAM into
     // the DIRECT_MAP_BASE window with 1 GB huge pages.  Verify it is identity by

@@ -46,7 +46,7 @@ bool has_1gb_pages() {
 // (ap_main) must call this.
 void enable_smep_smap() {
     uint32_t eax = 7, ebx = 0, ecx = 0, edx = 0;
-    __asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+    __asm__ volatile("cpuid" : "+a"(eax), "+c"(ecx), "=b"(ebx), "=d"(edx));
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     if (ebx & (1u << 7)) {
