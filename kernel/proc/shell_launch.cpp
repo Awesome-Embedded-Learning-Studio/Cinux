@@ -42,4 +42,11 @@ void launch_userspace() {
     }
 }
 
+void handoff_framebuffer_to_gui(cinux::drivers::Framebuffer& /*fb*/,
+                                cinux::drivers::PSFFont& /*font*/,
+                                cinux::drivers::Console& /*console*/) {
+    // GUI compiled out -- nothing to hand off.  §14 stub (paired with
+    // desktop_launch.cpp's real impl; CMake links one).
+}
+
 }  // namespace cinux::proc

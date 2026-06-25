@@ -13,7 +13,9 @@
 
 #include <stdint.h>
 
+#include "kernel/drivers/canvas.hpp"
 #include "kernel/drivers/usb/usb_init.hpp"
+#include "kernel/drivers/video/console.hpp"
 #include "kernel/gui/gui_init.hpp"
 #include "kernel/gui/host_cinux.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -62,6 +64,19 @@ void launch_userspace() {
         Scheduler::add_task(gui_task);
         cinux::lib::kprintf("[INIT] GUI worker thread launched\n");
     }
+}
+
+void handoff_framebuffer_to_gui(cinux::drivers::Framebuffer& fb, cinux::drivers::PSFFont& font,
+                                cinux::drivers::Console& console) {
+    // The canvas is static: it must outlive the boot-time fb it wraps and stay
+    // live for the desktop's whole lifetime.  gui_init wires the mouse + window
+    // manager + renders the desktop.  Detach the text console so routine logs
+    // stop overlaying the desktop (still serial + klog; kpanic re-enables).
+    static cinux::drivers::Canvas g_canvas;
+    g_canvas.init(fb);
+    cinux::gui::gui_init(g_canvas, font);
+    cinux::lib::kprintf_set_sink_enabled(cinux::drivers::Console::console_sink_adapter, &console,
+                                         false);
 }
 
 }  // namespace cinux::proc
