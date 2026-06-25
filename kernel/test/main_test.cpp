@@ -99,9 +99,6 @@ void run_memory_stats_tests();
 void run_user_ptr_tests();
 void run_pmm_mapcount_tests();
 void run_xhci_tests();
-#ifdef CINUX_NET
-void run_e1000_tests();
-#endif
 }
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
@@ -268,13 +265,6 @@ extern "C" void kernel_main() {
     // qemu-xhci is present (default config); exercises real bring-up under the
     // run-kernel-test-xhci target.
     run_xhci_tests();
-
-#ifdef CINUX_NET
-    // e1000 tests (F5-M6 批a): PCI find + BAR0 map + reset + EEPROM MAC.  Skips
-    // (passes) when no e1000 is present; exercises real bring-up under
-    // run-kernel-test (-device e1000) / run-kernel-test-net.
-    run_e1000_tests();
-#endif
 
     // Ramdisk tests (026): verifies ustar parsing of embedded initrd
     run_ramdisk_tests();

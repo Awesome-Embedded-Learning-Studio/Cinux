@@ -14,7 +14,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F2 | 内存管理增强 | M1 VMA✅ M2 mmap✅ M3 brk✅ M4 Page Cache✅ M5 Demand Paging✅ M6 ext2 Cache✅ M7 Buddy✅ M7b Slab✅ | mmap/Page Cache/brk/分层分配器 |
 | F3 | 进程与线程 | M1 信号✅ M2 clone/futex/TLS✅ M3 进程组+waitpid阻塞✅ M4 调度器✅ | POSIX 信号/线程/futex/进程组/优先级调度 |
 | F4 | SMP 多核 | M1 ACPI✅ M2 APIC✅ M3 AP启动✅ M4 多核调度✅ M5 同步原语✅ | ACPI+LAPIC+IOAPIC+PIC→APIC切换 ✅；per-CPU 架构(GS/gdt_blocks/swapgs)✅；IPI+trampoline+AP boot ✅(-smp 2 双核 online+idle)；**M4 多核调度 ✅**(per-CPU idle+runq+reschedule IPI+prepare-to-wait+真 user-task 迁移;-smp 2 AP 真跑 user task/无 GP)；**M5 同步原语 ✅**(R3 原子引用计数 SharedCwd/SharedSigActions + R6-Part2 lockdep 锁序图死锁检测 opt-in CINUX_LOCKDEP)。**F4 SMP 全域 M1-M5 收官**；**+F4-followup SMP 迁移竞态修复 ✅**（task on_cpu 关闭迁移时旧/新 CPU 并发存取同一 ctx 的竞态,对齐 Linux task_struct->on_cpu;feat/smp-migration-fix 68b1913 待 PR;F-GUI-DECOUPLE 批2 触发定位） |
-| F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI✅ M6 E1000🔄 M7 VirtIO Net⏳ | 7 驱动 |
+| F5 | 设备驱动 | M1 AHCI DMA✅ M2 VirtIO⏳ M3 NVMe⏳ M4 HPET/RTC⏳ M5 xHCI✅ M6 E1000⏳ M7 VirtIO Net⏳ | 7 驱动 |
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
 | F7 | 网络协议栈 | M1 以太网⏳ M2 ARP⏳ M3 IPv4/ICMP⏳ M4 UDP⏳ M5 TCP⏳ M6 Socket⏳ | TCP/IP+Socket API |
 | F8 | IPC 扩展 | M1 Pipe增强⏳ M2 FIFO⏳ M3 Unix Socket⏳ M4 共享内存⏳ M5 epoll⏳ | CV/PTY/shm/epoll |
