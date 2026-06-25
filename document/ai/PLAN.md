@@ -22,7 +22,7 @@
 | 2 | 开 EFER.NXE（x86_64 baseline，无 CPUID gate）+ 补 NX（PF handler 按 VMA Exec：mmap/demand-read/栈/heap）+ 清 deferred 注释 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
 | 3 | SMEP：CR4.SMEP（CPUID.07H:EBX[7] 检测）+ BSP/AP per-CPU 设 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
 | 4 | SMAP：CR4.SMAP（CPUID.07H:EBX[20]）+ syscall/ISR 全入口 stac(clac)（条件同 swapgs）+ DEBT-019 重审（SMAP 双层保护） | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
-| 5 | M1 收尾：QEMU 触发测试（栈执行→SIGSEGV / 内核访用户→#PF）+ notes | ⏳ | docs-only |
+| 5 | M1 收尾：机制验证 test_f9（EFER.NXE 必断言;SMEP/SMAP CPUID-gated）+ ROADMAP M1✅ + notes | ✅ | run-kernel-test 932/0（发现 SMEP/SMAP WSL2 KVM 不透传 CPUID.07H,代码 CPUID-gated 正确）（(本次)） |
 | 6 | M4 Canary：CMake -fstack-protector-strong + __stack_chk_fail→kpanic + canary（TSC 种子）| ⏳ | run-kernel-test + 冒烟 |
 | 7 | M2 KRandom：rdrand/TSC/PIT 熵源 + xoshiro + next32/next64/fill | ⏳ | + host 单测 |
 | 8 | M2 ASLR：ELF/栈/mmap 地址随机化 | ⏳ | + 每次运行地址不同 |

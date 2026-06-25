@@ -18,7 +18,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F6 | VFS/文件系统 | M1 VFS增强+mount⏳ M2 ProcFS⏳ M3 DevFS⏳ M4 tmpfs⏳ M5 ext4⏳ M6 ext2独立库⏳ | Dentry Cache/5 FS/mount |
 | F7 | 网络协议栈 | M1 以太网⏳ M2 ARP⏳ M3 IPv4/ICMP⏳ M4 UDP⏳ M5 TCP⏳ M6 Socket⏳ | TCP/IP+Socket API |
 | F8 | IPC 扩展 | M1 Pipe增强⏳ M2 FIFO⏳ M3 Unix Socket⏳ M4 共享内存⏳ M5 epoll⏳ | CV/PTY/shm/epoll |
-| F9 | 安全机制 | M1 NX/SMEP/SMAP🔄(2026-06-25 立项,批0 docs;NXE 总开关未开是头号前置) M2 ASLR⏳ M3 UID/GID⏳ M4 Stack Canary⏳ | 硬件保护/ASLR/权限;详见 PLAN「🔄 F9」 |
+| F9 | 安全机制 | M1 NX/SMEP/SMAP✅(2026-06-25;NXE 真生效;SMEP/SMAP 代码 CPUID-gated 正确,WSL2 nested KVM 不透传 CPUID.07H 故开发环境未生效,真机/完整KVM 会) M2 ASLR⏳ M3 UID/GID⏳ M4 Stack Canary⏳ | 硬件保护/ASLR/权限;详见 PLAN「🔄 F9」 |
 | F10 | 用户态运行时 | M1 libc扩展⏳ M2 ELF动态链接⏳ M3 TTY⏳ M4 CFBox+init⏳ M5 musl+glibc⏳ | 80+ syscall/ld.so/CFBox/musl |
 | F11 | 启动与平台 | M1 FAT32⏳ M2 UEFI启动⏳ | BIOS+UEFI 双启动 |
 | F12 | 开发者生态 | M1 GDB/KALLSYMS⏳ M2 Lua⏳ M3 TinyCC⏳ M4 编辑器+包管理⏳ | 自举开发环境 |
