@@ -12,6 +12,7 @@
 
 #include <new>
 
+#include "kernel/proc/task_builder.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/fs/file.hpp"
