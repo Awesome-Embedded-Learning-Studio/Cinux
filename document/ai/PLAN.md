@@ -24,7 +24,7 @@
 | 4 | SMAP：CR4.SMAP（CPUID.07H:EBX[20]）+ syscall/ISR 全入口 stac(clac)（条件同 swapgs）+ DEBT-019 重审（SMAP 双层保护） | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
 | 5 | M1 收尾：机制验证 test_f9（EFER.NXE 必断言;SMEP/SMAP CPUID-gated）+ ROADMAP M1✅ + notes | ✅ | run-kernel-test 932/0（发现 SMEP/SMAP WSL2 KVM 不透传 CPUID.07H,代码 CPUID-gated 正确）（(本次)） |
 | 6 | M4 Canary：CMake -fstack-protector-strong + boot.S TSC canary + __stack_chk_fail→kpanic | ✅ | run-kernel-test 932/0（(本次)） |
-| 7 | M2 KRandom：rdrand/TSC/PIT 熵源 + xoshiro + next32/next64/fill | ⏳ | + host 单测 |
+| 7 | M2 KRandom：rdrand/TSC/PIT 熵源 + xoshiro256** + splitmix64 seed | ✅ | run-kernel-test 932/0（test 留批8 ASLR 间接）（(本次)） |
 | 8 | M2 ASLR：ELF/栈/mmap 地址随机化 | ⏳ | + 每次运行地址不同 |
 | 9 | M3 凭证：Task uid/gid/euid/egid + fork/execve 继承 + getuid/setuid syscall（权限检查留 F6）| ⏳ | run-kernel-test |
 

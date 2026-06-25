@@ -58,6 +58,7 @@
 #include "kernel/drivers/video/framebuffer.hpp"
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/lib/random.hpp"  // F9 batch 7: g_random
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_cache.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -128,6 +129,9 @@ extern "C" void kernel_main() {
 
     // Step 7: Initialise PIT channel 0 at 100 Hz (10 ms per tick)
     PIT::init(100);
+
+    // F9 batch 7: seed the kernel PRNG (rdrand/TSC/PIT entropy) for ASLR (b8).
+    cinux::lib::g_random.init();
 
     // Step 7b: Parse ACPI (RSDP/MADT) for the APIC base addresses and CPU list
     // that M2 consumes.  Only needs the loader's direct map, which is already up.
