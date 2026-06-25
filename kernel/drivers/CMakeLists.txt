@@ -26,7 +26,9 @@ endif()
 
 # F5-M5 xHCI: USB host controller + reusable PCI MSI-X subsystem.
 # MSI-X (pci/msix.cpp) is a generic PCI capability helper; the xHCI driver
-# (usb/*.cpp) is added in later batches under the same gate.
+# (usb/*.cpp) is added under the same gate.  §14: when USB is off we link the
+# usb_stub.cpp no-op so init.cpp's usb::init()/poll_input() calls resolve
+# without any #ifdef on the call site.
 if(CINUX_USB)
     target_sources(big_kernel_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/pci/msix.cpp
@@ -39,5 +41,9 @@ if(CINUX_USB)
         ${CMAKE_CURRENT_SOURCE_DIR}/mouse/usb_mouse.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mouse/usb_tablet.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/keyboard/usb_keyboard.cpp
+    )
+else()
+    target_sources(big_kernel_common PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usb_stub.cpp
     )
 endif()
