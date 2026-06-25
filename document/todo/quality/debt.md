@@ -179,8 +179,9 @@
 - **修复建议**: 统一 `irq_guard()`，或像 SharedCwd 把 refcount 改 atomic（单字段独立于 fds_[]，release 到 0 再持锁清理）。
 - **关联 GOTCHA**: 无（R3 范围明确只覆盖 SharedCwd+SharedSigActions）
 
-### DEBT-016 test fixture 忽略 ErrorOr 返回值（32 处，[[nodiscard]] 触发）
-- **维度**: 测试覆盖(D8)　**优先级**: P2　**状态**: 🆕 登记待办(F-QA Q1-2 触发)　**核验**: ✅ -Wunused-result 坐实
+### DEBT-016 test fixture 忽略 ErrorOr 返回值（32 处，[[nodiscard]] 触发）✅
+- **维度**: 测试覆盖(D8)　**优先级**: P2　**状态**: ✅ 已修（F-CLN 批2,2026-06-25）　**核验**: ✅ -Wunused-result 零命中
+- **闭环**: 两套 framework 各加 `ASSERT_OK` 宏（非 void-safe,失败 abort/exit 不 return,区别于 TEST_ASSERT 的 `return;`）：`big_kernel_test.h` 用 QEMU isa-debug-exit(io_outb 0xf4←1),`test_framework.h` 用 `_TEST_ABORT()`(host abort/QEMU hlt)。32 处忽略全包:big_kernel_test 29 处(test_ramdisk 17 mount + test_ext2 系 4 result.ext2->mount + vfs/cwd_stat/file_mmap/page_cache get_page/shell_write/syscall_ext2/ahci_write)+ host 3 处(test_shell_redirect write)。去 `test/CMakeLists.txt:16` 全局 + `kernel/CMakeLists.txt:299` big_kernel_test 的 `-Wno-unused-result`。验证 run-kernel-test 931/0 + host ctest 54/0 + 零 ignoring。详见 `document/notes/2026-06-25-f-cln-b2-debt016-assert-ok.md`。
 - **位置**: `kernel/test/test_ramdisk.cpp`(17 处 mount 忽略) / `test_ext2*`+`test_cwd_stat`/`test_ahci_write`/`test_file_mmap`/`test_shell_write`/`test_syscall_ext2`(~11 处 ext2 mount 忽略) / `kernel/test/test_page_cache.cpp:237`(get_page) / `test/unit/test_shell_redirect.cpp:205-207`(write)。**生产 kernel 代码零忽略**。
 - **现象**: ErrorOr class 加 `[[nodiscard]]`(F-QA Q1-2)后,32 处 test fixture 忽略 ErrorOr 返回值触发 `-Wunused-result`。多为 setup helper 内 `ext2/ramdisk->mount()` 忽略 + 少量 get_page/write。
 - **根因**: test 沿用"setup 忽略错误"习惯。尝试用 `TEST_ASSERT_TRUE` 清,但该宏失败时 `return;`(无值),不能用在返回 `Ramdisk*`/`AhciExt2Pair` 的非 void setup helper → 编译 error。需非 void-safe 的检查原语。

@@ -296,7 +296,7 @@ target_link_options(big_kernel_test PRIVATE ${BIG_KERNEL_LINK_OPTIONS})
 # gate above. Test fixtures legitimately place large objects (LogEntry[16], AHCI
 # request arrays, ramdisk buffers) on the stack; they do not run under IRQ
 # nesting on the 16 KB kernel stack. Production (big_kernel) stays gated.
-target_compile_options(big_kernel_test PRIVATE -Wno-unused-result -Wno-frame-larger-than)
+target_compile_options(big_kernel_test PRIVATE -Wno-frame-larger-than)
 
 # Build test disk image: copy the test ELF to sectors where the big kernel lives
 set(BIG_KERNEL_TEST_BIN "${CMAKE_BINARY_DIR}/kernel/big/big_kernel_test_crc.bin")

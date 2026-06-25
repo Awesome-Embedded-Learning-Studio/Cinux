@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "kernel/arch/x86_64/io.hpp"
 #include "kernel/fs/vfs_filesystem.hpp"
 #include "kernel/lib/kprintf.hpp"
 
@@ -148,6 +149,23 @@ inline int64_t readdir_or_neg1(const cinux::fs::Inode* inode, uint64_t index, ch
 #define TEST_ASSERT_NOT_NULL(ptr) TEST_ASSERT((ptr) != nullptr)
 #define TEST_ASSERT_TRUE(expr)    TEST_ASSERT((expr) == true)
 #define TEST_ASSERT_FALSE(expr)   TEST_ASSERT((expr) == false)
+
+/// Assert an ErrorOr expression is OK; on failure mark the test failed and
+/// force-exit the run via QEMU isa-debug-exit (port 0xf4 <- 1).  Non-void-safe:
+/// unlike TEST_ASSERT it cannot `return;` from a helper that returns a value,
+/// so it terminates the whole run instead.  Use for setup calls
+/// (mount/get_page/...) whose ErrorOr result was previously dropped (DEBT-016).
+#define ASSERT_OK(expr)                                                                            \
+    do {                                                                                           \
+        auto&& _aok_r = (expr);                                                                    \
+        if (!_aok_r.ok()) {                                                                        \
+            kprintf("[FAIL] %s error at %s:%d\n", #expr, __FILE__, __LINE__);                      \
+            test::tests_failed++;                                                                  \
+            cinux::io::io_outb(0xf4, 1);  /* QEMU isa-debug-exit: failure (exit code 3) */        \
+            while (true) {                                                                         \
+            }                                                                                      \
+        }                                                                                          \
+    } while (0)
 
 // ============================================================
 // Test Runner Macros
