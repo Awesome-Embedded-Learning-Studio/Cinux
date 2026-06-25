@@ -13,7 +13,7 @@
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
 | 0 | xHCI/USB 专项审（D2 内存+D3 并发+D4 生命周期，deterministic 四段式，只读→报告+新债登记） | ✅ | (本次) | docs-only；D2/D4 清洁，D3→**DEBT-021(P1)** |
-| 1 | DEBT-015 核实 PathBuf 改堆后 frame-larger-than 残余 + 启用门禁/关债 | ⏳ | | |
+| 1 | DEBT-015 核实 PathBuf 改堆后 frame-larger-than 残余 + 启用门禁/关债 | ✅ | (本次) | 931/0;sys_dmesg LogEntry[16]→堆,big_kernel 零 frame 命中,门禁 warning 级(GCC 限制 -Werror= 不可行) |
 | 2 | DEBT-016 test framework 加 ASSERT_OK 宏 + 清 32 处忽略 + 去 -Wno-unused-result | ⏳ | | |
 | 3 | DEBT-018 kMaxCpus 统一单一权威（percpu=8 vs acpi=16）+ static_assert | ⏳ | | |
 | 4 | DEBT-008 signal_setup_frame 写帧前校验栈 VMA（中风险，信号路径） | ⏳ | | |

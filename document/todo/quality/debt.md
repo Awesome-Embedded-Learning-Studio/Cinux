@@ -109,8 +109,9 @@
 - **修复建议**: `PidAllocator` 内置 irq-safe `Spinlock`，alloc/free/is_allocated 持锁；或 atomic bitmap + CAS。
 - **关联 GOTCHA**: 无
 
-### DEBT-015 syscall handler 栈帧过大（char[PATH_MAX] 缓冲置栈，4-8KB/16KB 栈）
-- **维度**: 内存安全(栈)　**优先级**: P1　**状态**: 🆕 登记待办(F-QA Q1-1 触发)　**核验**: ✅ -Wframe-larger-than=1024 坐实
+### DEBT-015 syscall handler 栈帧过大（char[PATH_MAX] 缓冲置栈，4-8KB/16KB 栈）✅
+- **维度**: 内存安全(栈)　**优先级**: P1　**状态**: ✅ 已修（F-CLN 批1,2026-06-25）　**核验**: ✅ big_kernel -Wframe-larger-than=1024 零命中
+- **闭环**: 8 个 syscall(creat/mkdir/unlink/rmdir/open/chdir/stat/path)早年改 `PathBuf`(堆,path.cpp:19 "was char[PATH_MAX] on the stack");**批1 补最后残余 `sys_dmesg`** `LogEntry[16]`(272B×16=4.4KB)改 `new[]`/`delete[]` 堆。big_kernel 生产零 frame 命中。**门禁**:`-Wframe-larger-than=1024` warning 级保留(big_kernel_common PUBLIC);**GCC 技术限制**——`-Werror=frame-larger-than` GCC 拒绝(带参 warning 名不支持 -Werror= 升级),故硬门禁靠审计 grep 非构建失败;`big_kernel_test` `-Wno-frame-larger-than`(test fixture 栈大是设计)。详见 `document/notes/2026-06-25-f-cln-b1-debt015-frame-size.md`。
 - **位置**: `kernel/syscall/sys_creat.cpp:29,44`(8272B) / `sys_mkdir.cpp:74`(8256) / `sys_unlink.cpp:74`(8240) / `sys_rmdir.cpp:103`(8288) / `sys_open.cpp:72`(4144) / `sys_chdir.cpp:78`(4144) / `sys_stat.cpp:75`(4224) / `sys_dmesg.cpp:109`(4400) / `kernel/fs/path.cpp:88`(4096)
 - **现象**: 9 个 syscall/path handler 在 16KB 核栈上放 `char resolved[PATH_MAX]`(4096) + 常第二个 `char parent_buf[PATH_MAX]` → 单帧 4-8KB。`-Wframe-larger-than=1024` 全部命中。
 - **根因**: path 解析缓冲放栈上(对齐 POSIX PATH_MAX)；sys_creat 尤甚(两个 PATH_MAX=8KB)。16KB 栈下 syscall 上下文 + 中断嵌套 + 调用链(lookup/create)有溢出风险。Linux 用 `getname`/`struct filename` 堆分配 path。
