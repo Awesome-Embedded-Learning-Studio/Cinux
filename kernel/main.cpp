@@ -115,7 +115,7 @@ extern "C" void kernel_main() {
     // percpu() (which reads MSR_GS_BASE) works before any interrupt fires or any
     // code uses it.  Also configures STAR/EFER for SYSRET (formerly Step 18).
     cinux::arch::usermode_init();
-    cinux::arch::enable_smep();  // F9 batch 3: SMEP on the BSP (CR4 per-CPU)
+    cinux::arch::enable_smep_smap();  // F9 batch 3/4: SMEP+SMAP on the BSP (CR4 per-CPU)
     cinux::lib::kprintf("[BIG] PerCpu GS base anchored (BSP).\n");
 
     // Step 5: Initialise the PIC (remap IRQ0-7 -> 0x20-0x27,

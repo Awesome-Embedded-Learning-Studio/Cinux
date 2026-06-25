@@ -138,7 +138,7 @@ extern "C" void ap_main(uint64_t cpu_id) {
     //     AP -- the trampoline sets only EFER.LME).  Same class of "AP didn't
     //     match the BSP's CPU config" as the missing CR4.OSFXSR.
     usermode_init_asm();
-    cinux::arch::enable_smep();  // F9 batch 3: SMEP on this AP (CR4 is per-CPU)
+    cinux::arch::enable_smep_smap();  // F9 batch 3/4: SMEP+SMAP on this AP (CR4 per-CPU)
 
     // 2c. LSTAR (SYSCALL entry RIP).  usermode_init_asm() sets STAR/SFMASK/
     //     EFER.SCE but NOT LSTAR; only the BSP's syscall_init() wrote it.  An AP

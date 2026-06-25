@@ -38,20 +38,23 @@ bool has_1gb_pages() {
 
 }  // anonymous namespace
 
-// F9 batch 3: SMEP (CR4 bit 20) stops the kernel executing code on user
-// pages. The kernel never jumps to user code directly (it switches via
-// SYSRET/IRETQ), so enabling it is safe -- a stray execution would #PF.
-// CPUID-gated: writing CR4[20] on a CPU without SMEP #GP-faults. CR4 is
-// per-CPU, so both the BSP (main) and every AP (ap_main) must call this.
-void enable_smep() {
+// F9 batch 3/4: enable SMEP (CR4[20]) + SMAP (CR4[21]) on this CPU. SMEP
+// stops the kernel executing user pages; SMAP stops it reading/writing them
+// unless STAC (set AC) temporarily allows it -- syscall/ISR entries STAC,
+// exits CLAC (syscall.S / interrupts.S). CPUID-gated: writing an unsupported
+// CR4 bit #GP-faults. CR4 is per-CPU, so both the BSP (main) and every AP
+// (ap_main) must call this.
+void enable_smep_smap() {
     uint32_t eax = 7, ebx = 0, ecx = 0, edx = 0;
     __asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
-    if ((ebx & (1u << 7)) == 0) {
-        return;  // CPU lacks SMEP; CR4[20] is reserved -> writing it would #GP.
-    }
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
-    cr4 |= (1ULL << 20);  // CR4.SMEP
+    if (ebx & (1u << 7)) {
+        cr4 |= (1ULL << 20);  // CR4.SMEP (CPUID.07H:EBX[7])
+    }
+    if (ebx & (1u << 20)) {
+        cr4 |= (1ULL << 21);  // CR4.SMAP (CPUID.07H:EBX[20])
+    }
     __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
 }
 

@@ -79,9 +79,9 @@ inline void write_cr3(uint64_t cr3) {
 
 void map_mmio(uint64_t phys, uint64_t size);
 
-/// Enable SMEP (CR4[20]) on this CPU if the CPU supports it (F9 batch 3).
-/// CR4 is per-CPU -- both the BSP and every AP must call it. No-op on CPUs
-/// without SMEP (CPUID.07H:EBX[7]).
-void enable_smep();
+/// Enable SMEP (CR4[20]) + SMAP (CR4[21]) on this CPU if supported (F9 b3/b4).
+/// CR4 is per-CPU -- both the BSP and every AP must call it. Bits without CPU
+/// support (CPUID.07H:EBX[7]=SMEP, [20]=SMAP) are left clear (writing them #GP).
+void enable_smep_smap();
 
 }  // namespace cinux::arch
