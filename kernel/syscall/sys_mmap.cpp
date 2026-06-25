@@ -18,6 +18,7 @@
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/inode.hpp"
 #include "kernel/fs/vfs_mount.hpp"
+#include "kernel/lib/aslr.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -110,8 +111,11 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
         // munmap; here we only fix the bookkeeping).
         (void)task->addr_space->vmas().remove(map_addr, map_addr + aligned_len);
     } else {
-        auto area =
-            task->addr_space->vmas().find_free_area(cinux::arch::USER_MMAP_BASE, aligned_len);
+        // F9 batch 8 (ASLR): jitter the first-fit hint so each process's
+        // mappings start at an unpredictable address. The window bounds stay
+        // fixed; MAP_FIXED (above) still honours the caller's exact address.
+        const uint64_t hint = cinux::arch::USER_MMAP_BASE + cinux::lib::aslr_mmap_offset();
+        auto           area = task->addr_space->vmas().find_free_area(hint, aligned_len);
         if (!area.ok()) {
             return -to_errno(area.error());
         }

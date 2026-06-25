@@ -18,6 +18,7 @@
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"  // F9 batch 1: USER_SIGRETURN_PAGE
 #include "kernel/fs/vfs_mount.hpp"
+#include "kernel/lib/aslr.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/proc/elf_types.hpp"
@@ -335,7 +336,16 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
     // F2-M3: initialise the user heap.  brk starts at the page-aligned end of
     // the ELF image; the Heap VMA spans [brk_initial, USER_BRK_MAX) so demand
     // paging services heap growth without further bookkeeping.
-    task->brk_initial = (max_seg_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    //
+    // F9 batch 8 (ASLR): add a page-aligned random gap above the image so the
+    // heap start moves per-exec. Clamped to stay under USER_BRK_MAX with real
+    // heap room left (our ~4 MB image never trips the clamp).
+    uint64_t brk_start = (max_seg_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint64_t brk_gap   = cinux::lib::aslr_brk_offset();
+    if (brk_start + brk_gap >= cinux::arch::USER_BRK_MAX) {
+        brk_gap = 0;
+    }
+    task->brk_initial = brk_start + brk_gap;
     task->brk_current = task->brk_initial;
     task->brk_max     = cinux::arch::USER_BRK_MAX;
     constexpr cinux::mm::VmaFlags kHeapVma =

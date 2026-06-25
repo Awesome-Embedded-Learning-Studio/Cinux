@@ -265,6 +265,7 @@ add_executable(big_kernel_test
     test/test_gui_swraster.cpp
     test/test_gui_region.cpp
     test/test_gui_dirty.cpp
+    test/test_aslr.cpp
 )
 
 # F5-M5 xHCI: gate the USB test on CINUX_USB so a CINUX_USB=OFF build links
