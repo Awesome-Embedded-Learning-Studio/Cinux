@@ -32,6 +32,20 @@
 - 批1 sigreturn 改造（碰信号投递核心路径，行为须不变）+ 批2 NXE 开闸（execve 首次真用 NX，可能暴露隐藏配置错）+ 批4 SMAP（碰 syscall entry + 全用户指针访问面）。
 - 批2 加 `make run` 冒烟（真用户程序跑通）；批4 加 DEBT-019 重审。
 
+## 🔄 F5-M6（e1000 NIC 驱动）— 2026-06-25 立项，与 F9 并行
+
+> worktree `worktree-f5-m6-e1000`（从干净 main `8be32d4` 拉，零 F9 污染；F9 在 feat/f9-security 上继续，两者零依赖）。F7 网络协议栈被 F5-NIC 阻塞（ROADMAP「F5 网卡→阻塞整个网络栈」），F5-M6 e1000 是 F7-M1 以太网层的地基。整条 HW 跑道（PCI / DmaPool / MSI-X / ISR / poll）已被 xHCI/AHCI 验过，e1000 是现有套路延伸。**polling 优先**（QEMU nested-KVM 不可靠锁存中断）。用户决策「先把驱动打通」，跳过立项 docs。
+> 验证：`timeout 40 cmake --build build --target run-kernel-test -j$(nproc)`（带 `-device e1000`）；改 pci.hpp 公共头补全量。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| a | PCI find_e1000 + E1000Controller（BAR0 映射 + 复位 + EERD 读 EEPROM MAC + 链路）+ CINUX_NET gate + test + QEMU -device e1000 | ✅ | 4b4184c | 932/0 + MAC=52:54:00:12:34:56 link=1 + 全量绿 |
+| b | RX/TX 描述符环 + 轮询收发 + `net::init()` 生产 boot 接入 + 单播(ARP)/广播(DHCP)收包 + `make run` GUI 冒烟 | ✅ | 95fd10d | 934/0(rebase 前基线 8be32d4;rebase 到 F9 后 target 路径 FAIL,见 b-fix) + GUI 零 panic |
+| b-fix | RX 时序:LAPIC timer(0x30)唤醒 sti+hlt 替 trap 循环 hack(test kernel 关中断→main loop 不投递 reply) | ✅ | b4a846b | run-kernel-test **3× 945/0**(ARP+DHCP 真 reply)+ 全量 + test_host 绿 |
+| c | TX 完整化 + 中断（MSI / legacy INTx，非 MSI-X）替代 polling + netdev 抽象交接 F7 | ⏳（延后） | | |
+
+> 批a [note](../notes/2026-06-25-f5-m6-e1000-b1-detect-mac.md)；批b [note](../notes/2026-06-26-f5-m6-e1000-b2-rx-tx.md)；**批b-fix [note](../notes/2026-06-26-f5-m6-e1000-rx-timer-fix.md)**。**关键 GOTCHA（接手必读；批b-fix 推翻批b 原结论 ①）**：① ~~轮询 RX 读 MMIO(RDH)才收得到包~~ —— **错的**：批b 那个「读 RDH → GPRC 0→1」是**带 filter-dump 调试时的副作用**，去掉 filter-dump（target 路径）GPRC 稳定 0。真相：**test kernel 关中断 → QEMU main loop 不跑 → SLIRP reply 不投递**。正解 = LAPIC periodic timer(0x30) + poll 没 包时 `sti;hlt;cli`（hlt 让 main loop 投递，timer IRQ 唤醒），**别写 MMIO trap 循环「泵」main loop**（64-trap / filter-dump 都是碰运气）；② QEMU e1000 **不模拟** RCTL.LBM loopback，用 SLIRP ARP/DHCP round-trip；③ 直接跑 QEMU 前要 `regenerate-ext2-image`（否则 ext2 inode 耗尽假失败）；④ `/dev/kvm` 是 root:kvm，手动跑诊断用 `-accel tcg`；⑤ `net_timer_handler` 直接 `g_lapic.eoi()`，**不能** `irq_eoi(0)`（test 没 switch_to_apic，会走 8259 EOI 不了 LAPIC）。
+
 ## 🔄 F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 2026-06-25 立项
 
 > 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。
