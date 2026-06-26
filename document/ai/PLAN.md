@@ -18,7 +18,7 @@
 | 批 | 范围 | 状态 | 测试 |
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F10 🔄 + 清 PLAN 顶 F9/F5-M6/F-GUI-DECOUPLE 三段 🔄→✅ + 重写 todo/f10-userspace/00-libc.md（musl-first 策略 + ABI 差距清单）| ✅ | docs-only |
-| 1 | syscall 号纠偏（chdir 12→80，全表对齐 Linux x86_64）+ 返回约定收尾（getpid/getppid/pipe 等 `-1`→`-errno`）| ⏳ | run-kernel-test 绿 + chdir 回归 |
+| 1 | syscall 号纠偏（chdir 12→80，全表对齐 Linux x86_64）+ 返回约定收尾（getpid/getppid/getcwd/pipe `-1`→`-errno`）+ sys_pipe RAII 化（`std::unique_ptr`，用户授权 scope 加）| ✅ | run-kernel-test 945/0 + chdir 回归 + 全量绿（`7a9f1e6`）|
 | 2 | Linux 结构体布局：`sys_stat`==Linux stat(144B) / `UserSigAction`==Linux sigaction / sigset / iovec 对齐 | ⏳ | run-kernel-test 绿 + stat/signal 回归 |
 | 3 | execve 压 auxv（AT_PHDR/PHNUM/PAGESZ/RANDOM/ENTRY…），向后兼容 | ⏳ | run-kernel-test 绿 + 现有 shell 不崩 |
 | 4 | 补 musl 所需 syscall：openat/newfstatat/close/read/write/exit_group/mmap/munmap/mprotect/brk/lseek/getpid/getuid…/futex/rt_sig*/clone/wait4（装不下拆 4a/4b）| ⏳ | run-kernel-test 绿 + 每个新 syscall 最小测 |
