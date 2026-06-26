@@ -18,8 +18,10 @@
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging.hpp"  // F9: enable_smep_smap
+#include "kernel/arch/x86_64/smp.hpp"     // F5-M6: kLapicTimerVector
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
+#include "kernel/drivers/apic/local_apic.hpp"  // F5-M6: g_lapic (e1000 poll timer)
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -108,6 +110,8 @@ void run_creds_tests();  // F9 batch 9: process credentials
 void run_e1000_tests();
 #endif
 }
+
+extern "C" void net_timer_stub();  // F5-M6: e1000 RX-poll LAPIC timer ISR (interrupts.S)
 
 static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
 
@@ -280,6 +284,24 @@ extern "C" void kernel_main() {
 #endif
 
 #ifdef CINUX_NET
+    // Arm a LAPIC periodic timer (vector 0x30) so e1000 RX poll can sti+hlt
+    // between polls: hlt lets QEMU's device-model main loop run and pull SLIRP
+    // replies into the e1000 ring, and the timer IRQ wakes the CPU.  The test
+    // kernel runs IF=0 everywhere else, so without this the main loop never
+    // advances during a busy poll and GPRC stays 0.  Handler is net_timer_stub
+    // (no-op + direct LAPIC EOI, registered into the shared IDT).  IF keeps the
+    // timer masked outside e1000's poll, so other suites are undisturbed.
+    cinux::drivers::apic::g_lapic.init(0xFEE00000);  // QEMU x86 LAPIC MMIO (fixed)
+    cinux::drivers::apic::g_lapic.enable(0xFF);      // SVR: spurious=0xFF + APIC enable
+    cinux::arch::g_idt.set_handler(
+        static_cast<cinux::arch::ExceptionVector>(cinux::arch::kLapicTimerVector), net_timer_stub,
+        cinux::arch::GDT_KERNEL_CODE,
+        cinux::arch::make_idt_attr(cinux::arch::IDTPrivilege::Kernel,
+                                   cinux::arch::IDTGateType::Interrupt),
+        0);
+    cinux::drivers::apic::g_lapic.setup_periodic_timer(cinux::arch::kLapicTimerVector, 0x3,
+                                                       200'000);  // /16, ~300 Hz
+
     // e1000 tests (F5-M6 批a): PCI find + BAR0 map + reset + EEPROM MAC.  Skips
     // (passes) when no e1000 is present; exercises real bring-up under
     // run-kernel-test (-device e1000) / run-kernel-test-net.

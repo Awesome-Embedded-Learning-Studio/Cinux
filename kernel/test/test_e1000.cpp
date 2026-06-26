@@ -14,10 +14,10 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
+#include "kernel/arch/x86_64/irq.hpp"  // F5-M6: sti/hlt for e1000 RX poll
 #include "kernel/drivers/net/e1000.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/lib/kprintf.hpp"
-#include "kernel/proc/scheduler.hpp"
 
 using cinux::drivers::net::E1000Controller;
 using cinux::drivers::pci::PCIDevice;
@@ -128,11 +128,17 @@ void test_arp_roundtrip() {
             got = true;
             break;
         }
-        if (i > 0 && (i % 10000) == 0) {
-            cinux::proc::Scheduler::yield();
-        }
+        // No packet yet: sti+hlt lets QEMU's main loop run and pull SLIRP's
+        // reply into the ring; the LAPIC timer IRQ (armed in main_test) wakes
+        // us to retry.  IF stays off outside this block.
+        cinux::arch::irq_enable();
+        cinux::arch::hlt();
+        cinux::arch::irq_disable();
     }
 
+    if (!got) {
+        nic.rx_dump("arp-timeout");
+    }
     TEST_ASSERT_TRUE(got);
     cinux::lib::kprintf("[e1000] ARP round-trip: reply len=%u ethertype=%02x%02x op=%02x%02x\n",
                         len, rx[12], rx[13], rx[20], rx[21]);
@@ -233,11 +239,17 @@ void test_broadcast_rx() {
             got = true;
             break;
         }
-        if (i > 0 && (i % 10000) == 0) {
-            cinux::proc::Scheduler::yield();
-        }
+        // No packet yet: sti+hlt lets QEMU's main loop run and pull SLIRP's
+        // reply into the ring; the LAPIC timer IRQ (armed in main_test) wakes
+        // us to retry.  IF stays off outside this block.
+        cinux::arch::irq_enable();
+        cinux::arch::hlt();
+        cinux::arch::irq_disable();
     }
 
+    if (!got) {
+        nic.rx_dump("dhcp-timeout");
+    }
     TEST_ASSERT_TRUE(got);
     const bool bcast = rx[0] == 0xFF && rx[1] == 0xFF && rx[2] == 0xFF && rx[3] == 0xFF &&
                        rx[4] == 0xFF && rx[5] == 0xFF;

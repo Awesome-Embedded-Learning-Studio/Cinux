@@ -235,15 +235,13 @@ cinux::lib::ErrorOr<void> E1000Controller::start_tx() {
 }
 
 bool E1000Controller::poll_rx(uint8_t* dst, uint32_t max_len, uint32_t& out_len) {
-    // Read RDH (MMIO).  On an emulator, an inbound packet is delivered into
-    // this ring by the device model's main loop, which only runs when the guest
-    // traps out (MMIO access / interrupt / hlt).  The descriptor status lives
-    // in DMA memory (no trap), so a memory-only poll never observes the packet
-    // when CPU interrupts are off (the test kernel).  Reading RDH traps, which
-    // lets the model run and deliver.  Confirmed necessary: with this read
-    // removed, GPRC stays 0 and RDH never advances despite the packet being on
-    // the wire (filter-dump proves it).  On real HW this is a harmless extra
-    // read of the hardware head index.
+    // Read RDH (MMIO).  On real HW the packet lands in the ring the instant it
+    // arrives.  Under QEMU TCG, pulling the SLIRP reply into the ring needs the
+    // device-model main loop to run, which a polled ring alone does not drive
+    // -- the caller (test_e1000.cpp) sti+hlt's between polls so the main loop
+    // runs and a LAPIC-timer IRQ wakes it (see main_test.cpp).  In production
+    // the PIT/LAPIC tick already keeps the main loop alive, so this single read
+    // is plenty.  Harmless on real HW.
     (void)reg_read(e1000reg::RDH);
 
     auto*            desc = static_cast<volatile RxDesc*>(desc_buf_.virt());
