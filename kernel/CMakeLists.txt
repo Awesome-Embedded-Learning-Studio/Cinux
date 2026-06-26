@@ -287,6 +287,7 @@ endif()
 # (the driver is absent; run_e1000_tests is #ifdef CINUX_NET'd in main_test.cpp).
 if(CINUX_NET)
     target_sources(big_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/test_e1000.cpp)
+    target_sources(big_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/test_net.cpp)
 endif()
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)

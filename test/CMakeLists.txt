@@ -145,6 +145,13 @@ add_cinux_integration_test(net_checksum
     unit/test_net_checksum.cpp
     ${CMAKE_SOURCE_DIR}/third_party/Cinux-Base/src/checksum.cpp
 )
+# F7 L1: ArpModule (request->reply, reply->cache, resolve_l3 miss->request).  Mock
+# Ethernet device; links the real arp.cpp + net_stack.cpp.
+add_cinux_integration_test(net_arp_module
+    unit/test_net_arp_module.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/arp.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
+)
 
 # ============================================================
 # Tests with threading support

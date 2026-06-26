@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "kernel/net/net_types.hpp"
+#include "kernel/net/protocol_handler.hpp"  // ProtocolHandler (ArpModule base)
 
 namespace cinux::net {
 
@@ -141,6 +142,38 @@ private:
     };
     Entry    entries_[kSlots]{};
     uint32_t next_ = 0;  ///< round-robin eviction cursor
+};
+
+/// @brief ARP protocol module (ethertype 0x0806 handler) + the L3 next-hop
+///        resolver IPv4 consults before a TX.
+///
+/// On an inbound ARP frame: learn the sender (request or reply) into the cache,
+/// and answer requests for OUR local IP on the device they arrived on (FOLD-B:
+/// the reply egresses the SAME NIC).  resolve_l3() serves a cached MAC or fires
+/// an async ARP request (retried on the next poll -- same patience as RX).
+class ArpModule : public ProtocolHandler {
+public:
+    /// @brief Handle an inbound ARP frame (request -> reply; reply/request -> cache).
+    void on_frame(const L2Info& l2, FrameView payload, NetDevice& dev, NetStack& stack) override;
+
+    /// @brief Cached-MAC lookup without sending (host-testable).
+    bool lookup(Ipv4Addr ip, EthAddr& out) const { return cache_.lookup(ip, out); }
+
+    /// @brief Resolve @p ip on @p dev.  Cache hit -> fill @p out, return true.
+    ///        Miss -> send an ARP request (async; retried next poll), return false.
+    ///        No-op on a no-L2 device (loopback) -- returns false without sending.
+    bool resolve_l3(NetDevice& dev, Ipv4Addr ip, NetStack& stack, EthAddr& out);
+
+    /// @brief Reset state (test isolation).
+    void reset() {
+        cache_.clear();
+        sent_requests_ = 0;
+    }
+    uint32_t request_count() const { return sent_requests_; }
+
+private:
+    ArpCache cache_;
+    uint32_t sent_requests_ = 0;
 };
 
 }  // namespace cinux::net
