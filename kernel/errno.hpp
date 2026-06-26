@@ -34,6 +34,7 @@ constexpr int kEnotdir      = 20;   ///< Not a directory
 constexpr int kEisdir       = 21;   ///< Is a directory
 constexpr int kEinval       = 22;   ///< Invalid argument
 constexpr int kEmfile       = 24;   ///< Too many open files
+constexpr int kEnotty       = 25;   ///< Inappropriate ioctl for device
 constexpr int kEnospc       = 28;   ///< No space left on device
 constexpr int kEpipe        = 32;   ///< Broken pipe
 constexpr int kErange       = 34;   ///< Numerical result out of range (buffer too small)

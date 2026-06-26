@@ -78,4 +78,11 @@ int64_t sys_exit(uint64_t code, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t
     return 0;
 }
 
+int64_t sys_exit_group(uint64_t code, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
+    // F10-M1 batch 4: musl exit() calls exit_group.  Single-threaded today,
+    // so terminating the current task matches exit(); when thread groups are
+    // exercised this should walk the group and reap each thread first.
+    return sys_exit(code, 0, 0, 0, 0, 0);
+}
+
 }  // namespace cinux::syscall
