@@ -2,6 +2,36 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F9 安全机制（NX/SMEP/SMAP + ASLR + UID/GID + Canary）— 2026-06-25 立项
+
+> Feature 域里程碑（开 F10 用户态运行时大弧前）。目标：CPU 硬件级保护（NX/SMEP/SMAP）+ 地址随机化（ASLR）+ 进程凭证（UID/GID）+ 栈溢出保护（Canary），为 F10 libc/ELF/TTY 铺安全地基（**F9 NXE 是 F10 硬前置**）。来源：用户决策「干掉 F9」+ memory `f4-current-focus`（F9 为 F10 前置）。范围：用户拍板 **M1-M4 全做**（文件权限 check_permission 与 F6 VFS 强耦合，仍建议留 F6）。分支 `feat/f9-security`（从干净 main `8be32d4`）。
+> 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；NXE/SMAP 批加 `make run` 冒烟（用户程序真能跑、不因 NX/SMAP 崩）；SMAP 批加 DEBT-019 重审。
+
+### 调研结论（决定打法，已读码核实）
+- **EFER.NXE 总开关当前未开**：`usermode.S` 设 EFER 只 `orq $1`（SCE），无 NXE（bit 11）；mini 长模式入口亦未设。`paging_config.hpp` 早有 `FLAG_NX=1<<63`，`execve.cpp:256` 已给非 PF_X 段设 NX，但 NXE 关时 bit 63 是保留位（矛盾，批2 查清）。五处代码（signal/address_space/sys_mmap/execve/exception_handlers）注释里等 NXE。
+- **sigreturn 是 NXE 开闸的头号拦路虎**：`signal.cpp:354-358` 把 8 字节 `int $0x80` trampoline **写在用户栈上**，handler ret 落此执行进 sigreturn gate（vector 0x80）。注释明说「依赖用户栈可执行（NXE off until F9）」。开 NXE + 栈标 NX 后必崩 → **批1 先把 sigreturn vDSO 化**（固定用户可执行页 @0x100000，对齐 Linux `__restore_rt`），再开闸。
+- **SMAP 是 M1 硬骨头（非 SMEP）**：内核无 copy_from_user，只 `validate_user_ptr` 校验地址 + syscall 直接解引用用户内存。SMAP 开后这些直解引用全要 stac/clac 护（照 Linux：syscall entry stac 一次，handler 全程放行，exit clac）。撞 DEBT-019（用户指针 PF 兜底），批4 重审。
+- **SMEP 低风险**：内核经 sysretq/iretq 进用户态，不直接执行用户页。
+- **VmaFlags::Exec 已有**（execve.cpp:318 设）：批2 demand-read 判 NX 可用。地址布局：ELF@0x400000 / heap≤0x4000000 / mmap 4–24GB / 栈顶 0x7FFFFF000。
+
+### 批表（M1 为主，M2-M4 随后）
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F9 状态 + 调研结论 | ✅ | docs-only |
+| 1 | sigreturn vDSO 化（固定可执行页，脱离栈上代码，行为不变）| ✅ | run-kernel-test 931/0 + 信号 round-trip 不变(`4a16158`) |
+| 2 | 开 EFER.NXE（x86_64 baseline，无 CPUID gate）+ 补 NX（PF handler 按 VMA Exec：mmap/demand-read/栈/heap）+ 清 deferred 注释 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
+| 3 | SMEP：CR4.SMEP（CPUID.07H:EBX[7] 检测）+ BSP/AP per-CPU 设 | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
+| 4 | SMAP：CR4.SMAP（CPUID.07H:EBX[20]）+ syscall/ISR 全入口 stac(clac)（条件同 swapgs）+ DEBT-019 重审（SMAP 双层保护） | ✅ | run-kernel-test 931/0 + make run GUI/shell/xHCI 冒烟零 panic（(本次)） |
+| 5 | M1 收尾：机制验证 test_f9（EFER.NXE 必断言;SMEP/SMAP CPUID-gated）+ ROADMAP M1✅ + notes | ✅ | run-kernel-test 932/0（发现 SMEP/SMAP WSL2 KVM 不透传 CPUID.07H,代码 CPUID-gated 正确）（(本次)） |
+| 6 | M4 Canary：CMake -fstack-protector-strong + boot.S TSC canary + __stack_chk_fail→kpanic | ✅ | run-kernel-test 932/0（(本次)） |
+| 7 | M2 KRandom：rdrand/TSC/PIT 熵源 + xoshiro256** + splitmix64 seed | ✅ | run-kernel-test 932/0（test 留批8 ASLR 间接）（(本次)） |
+| 8 | M2 ASLR（内核侧）：栈/mmap/brk 地址随机化（ELF base 拆后续：non-PIE 绝对寻址铁证）| ✅ | run-kernel-test 936/0(+4 test_aslr) + make run 冒烟零 panic（`26e8bfa`） |
+| 9 | M3 凭证：Task uid/euid/gid/egid + fork memcpy 继承 + getuid/setuid 6 syscall（execve setuid binary 留 F6）| ✅ | run-kernel-test 942/0(+6 test_creds) + make run 冒烟零 panic（`75ad715`） |
+
+### 风险重点
+- 批1 sigreturn 改造（碰信号投递核心路径，行为须不变）+ 批2 NXE 开闸（execve 首次真用 NX，可能暴露隐藏配置错）+ 批4 SMAP（碰 syscall entry + 全用户指针访问面）。
+- 批2 加 `make run` 冒烟（真用户程序跑通）；批4 加 DEBT-019 重审。
+
 ## 🔄 F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 2026-06-25 立项
 
 > 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。

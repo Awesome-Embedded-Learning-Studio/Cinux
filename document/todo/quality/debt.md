@@ -219,6 +219,7 @@
 - **现象**: CinuxOS 用户边界用 `validate_user_ptr`(canonical address 检查)+ 直接解引用,PF handler(F2-M5 硬门控:user PF 无 VMA→segfault)兜底。**非 Linux copy_to_from_user + access_ok 模型**。
 - **根因**: (1) validate 不查映射存在/权限/长度(多字节结构跨页未映射→PF,kernel-mode 解引用容错零页);(2) 多核 TOCTOU(user 另核改映射 + kernel 解引用 race);(3) 不对齐 Linux copy 模型。当前单核 + 用户态串行不触发;多核用户态 + SMP 理论风险。
 - **修复建议**: 未来多核用户态时引入 copy_to_from_user(access_ok + 长度 + 页 copy),或至少 validate 查 VMA + 长度。当前 PF 兜底可接受(单核)。
+- **F9 批4 更新（SMAP 启用）**: 合法访用户经 syscall/ISR entry STAC 显式放行,意外（漏 STAC）访用户 → SMAP #PF（双层保护,不再仅 PF 兜底）。validate 行为不变;完整 copy_from_user 修复仍留 F10。
 - **关联 GOTCHA**: #11(PF 硬门控 user-mode 判定)
 
 ### DEBT-020 execve ELF 字段算术无溢出检查（恶意/损坏 ELF → VMA 映射错乱）
