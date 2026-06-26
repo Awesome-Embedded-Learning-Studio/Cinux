@@ -36,6 +36,7 @@ constexpr int kEinval       = 22;   ///< Invalid argument
 constexpr int kEmfile       = 24;   ///< Too many open files
 constexpr int kEnospc       = 28;   ///< No space left on device
 constexpr int kEpipe        = 32;   ///< Broken pipe
+constexpr int kErange       = 34;   ///< Numerical result out of range (buffer too small)
 constexpr int kEnametoolong = 36;   ///< File name too long
 constexpr int kEnosys       = 38;   ///< Function not implemented
 constexpr int kEnotempty    = 39;   ///< Directory not empty

@@ -25,7 +25,7 @@ enum class SyscallNr : uint64_t {
     SYS_close          = 3,
     SYS_stat           = 4,
     SYS_fstat          = 5,
-    SYS_chdir          = 12,
+    SYS_chdir          = 80,  ///< change working directory (was wrongly 12, collided with brk)
     SYS_exit           = 60,
     SYS_yield          = 24,
     SYS_getcwd         = 79,
