@@ -23,6 +23,7 @@
 #include "kernel/net/icmp.hpp"
 #include "kernel/net/ipv4.hpp"
 #include "kernel/net/loopback_device.hpp"
+#include "kernel/net/net_init.hpp"
 #include "kernel/net/net_stack.hpp"
 
 using cinux::drivers::net::E1000Controller;
@@ -143,11 +144,44 @@ void test_ping_e1000() {
                         static_cast<unsigned>(icmp.reply_count()));
 }
 
+// ============================================================
+// Production wiring via cinux::net::init() + ping() (singleton path).
+// Mirrors boot: bring up the NIC, publish the singleton (as drivers::net::init
+// does at boot), then call the production net::init() to build the stack over
+// it, and ping() through the production API.  Proves the wiring before the
+// syscall + shell layers ride on top.
+// ============================================================
+
+void test_production_ping() {
+    PCI pci;
+    pci.init();
+    PCIDevice dev{};
+    if (!pci.find_e1000(dev)) {
+        cinux::lib::kprintf("[net] no NIC -- skipping production ping test\n");
+        return;
+    }
+    static E1000Controller nic;
+    if (!nic.init(dev).ok() || !nic.start_rx().ok() || !nic.start_tx().ok()) {
+        TEST_ASSERT_TRUE(false);
+        return;
+    }
+    E1000Controller::set_instance(&nic);  // mimic production drivers::net::init()
+
+    cinux::net::init();  // builds the stack over the singleton + attaches
+    auto r = cinux::net::ping(cinux::net::kSlirpGateway, 0xBEEF, 1);
+    TEST_ASSERT_TRUE(r.ok());
+    TEST_ASSERT_TRUE(r.value().got_reply);
+    TEST_ASSERT_EQ(r.value().id, 0xBEEFu);
+    cinux::lib::kprintf("[net] production ping 10.0.2.2: reply id=0x%04x seq=%u\n", r.value().id,
+                        static_cast<unsigned>(r.value().seq));
+}
+
 }  // namespace test_net
 
 extern "C" void run_net_tests() {
     TEST_SECTION("net");
     RUN_TEST(test_net::test_ping_loopback);
     RUN_TEST(test_net::test_ping_e1000);
+    RUN_TEST(test_net::test_production_ping);
     TEST_SUMMARY();
 }
