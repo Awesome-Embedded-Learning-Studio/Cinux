@@ -25,6 +25,7 @@
 #include "kernel/net/loopback_device.hpp"
 #include "kernel/net/net_init.hpp"
 #include "kernel/net/net_stack.hpp"
+#include "kernel/syscall/sys_ping.hpp"  // B2: call the sys_ping handler directly
 
 using cinux::drivers::net::E1000Controller;
 using cinux::drivers::net::E1000NetDevice;
@@ -176,6 +177,25 @@ void test_production_ping() {
                         static_cast<unsigned>(r.value().seq));
 }
 
+// ============================================================
+// sys_ping handler (B2): call the syscall handler directly.  Proves the IP
+// unpacking + errno translation + that the shell's _syscall3 -> dispatch path
+// lands on a working handler.  Depends on test_production_ping having brought
+// the stack up (singleton + net::init) -- skips if no NIC.
+// ============================================================
+
+void test_syscall_ping() {
+    if (!E1000Controller::has_controller()) {
+        cinux::lib::kprintf("[net] no NIC -- skipping sys_ping test\n");
+        return;  // test_production_ping skipped too -> stack not up
+    }
+    // 10.0.2.2 packed MSB-first: (10<<24)|(0<<16)|(2<<8)|2 = 0x0A000202.
+    constexpr uint32_t kIp = (10u << 24) | (0u << 16) | (2u << 8) | 2u;
+    const int64_t      r   = cinux::syscall::sys_ping(kIp, 0xCAFE, 1, 0, 0, 0);
+    TEST_ASSERT_EQ(r, 0);  // 0 == echo reply received
+    cinux::lib::kprintf("[net] sys_ping(10.0.2.2) -> reply (rc=0)\n");
+}
+
 }  // namespace test_net
 
 extern "C" void run_net_tests() {
@@ -183,5 +203,6 @@ extern "C" void run_net_tests() {
     RUN_TEST(test_net::test_ping_loopback);
     RUN_TEST(test_net::test_ping_e1000);
     RUN_TEST(test_net::test_production_ping);
+    RUN_TEST(test_net::test_syscall_ping);
     TEST_SUMMARY();
 }
