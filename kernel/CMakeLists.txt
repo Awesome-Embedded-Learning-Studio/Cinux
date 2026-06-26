@@ -105,6 +105,7 @@ add_subdirectory(mm)
 add_subdirectory(proc)
 add_subdirectory(syscall)
 add_subdirectory(ipc)
+add_subdirectory(net)
 
 # GUI mode: add compile definition and GUI-specific sources
 if(CINUX_GUI)

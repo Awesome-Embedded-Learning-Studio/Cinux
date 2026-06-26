@@ -130,6 +130,22 @@ target_include_directories(test_cinux_base_types PRIVATE
 # path via TEST_INCLUDE_DIRS.
 add_cinux_test(refcount)
 
+# F7 net stack (L0 foundation): NetStack dispatch + L2 parse + buffer recycle
+# contract + ARP cache + the Cinux-Base internet checksum. The stack core is
+# pure logic (zero kprintf), so net_dispatch links the real net_stack.cpp and
+# net_checksum links Cinux-Base/src/checksum.cpp directly -- proving the L3
+# stack is host-buildable and driver-agnostic before any NIC is attached.
+add_cinux_integration_test(net_dispatch
+    unit/test_net_dispatch.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
+)
+add_cinux_test(net_arp_cache)
+add_cinux_test(net_buffer)
+add_cinux_integration_test(net_checksum
+    unit/test_net_checksum.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-Base/src/checksum.cpp
+)
+
 # ============================================================
 # Tests with threading support
 # ============================================================
