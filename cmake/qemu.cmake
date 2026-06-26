@@ -51,11 +51,16 @@ add_custom_command(
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 set(USER_SHELL_ELF "${CMAKE_BINARY_DIR}/user/shell")
+# F10-M1 batch 6: musl static hello at /hello when present (built by
+# tools/musl/build-musl.sh + build-hello.sh; not a CMake target, so not a hard
+# dependency — the script includes it iff the file exists, and the ring-3 smoke
+# test skips when /hello is absent).
+set(MUSL_HELLO_ELF "${CMAKE_BINARY_DIR}/musl/hello")
 add_custom_command(
     OUTPUT ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
-    COMMENT "Creating ext2 filesystem image with /bin/sh"
+    COMMENT "Creating ext2 filesystem image with /bin/sh (+ /hello if musl built)"
     VERBATIM
 )
 
@@ -280,7 +285,7 @@ add_custom_target(run-stress-test
 # 每次 run-kernel-test 前强制重建 ext2.img，确保磁盘状态干净
 add_custom_target(regenerate-ext2-image
     COMMAND ${CMAKE_COMMAND} -E remove -f ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM
