@@ -2,7 +2,34 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F9 安全机制（NX/SMEP/SMAP + ASLR + UID/GID + Canary）— 2026-06-25 立项
+## 🔄 F10-M1（用户态运行时 / musl 静态移植）— 2026-06-26 立项
+
+> Feature 域大弧。F9 安全地基已就位（NX/SMEP/SMAP + ASLR + 凭证 + Canary 全完成并合 main PR#38）。**方向决策（用户 2026-06-26）**：**不自建 libc 生态**——`user/libc`（syscall/string/printf 三件套）仅作 QEMU 测试壳保留，不扩；**直接移植 musl 作唯一 libc**。先自己源码编译 musl（自包含 sysroot），跑通后切 **musl-gcc** 当工具链驱动（CFBox 等一律 musl-gcc 编）。砍掉旧 M1「自建 libc 扩 80 syscall」（造轮子无意义）。旧 M5「musl+glibc」内容并入本 M1；glibc 静态兼容降为可选 stretch（比 musl 重得多）。分支 `feat/f10-musl`（从干净 main `fb25c89`）。
+> 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；批1/2/4 改公共 syscall 接口补全量 `cmake --build build`；批6 加 `timeout 40 cmake --build build --target run` 冒烟（musl hello world 真输出）。
+
+### 调研结论（决定打法，已读码核实）
+- **syscall 返回约定基本已是 Linux 风格**：`sys_open` 返 `-to_errno(...)`（[sys_open.cpp:42](../../kernel/syscall/sys_open.cpp#L42)，`kernel/errno.hpp::to_errno`），即 musl 要的"负 errno"。仅几个老 syscall 返裸 `-1`（`sys_getpid:20` / `sys_getppid:17` / `sys_pipe:56,86,98`），批1 收尾改 `-errno`。
+- **execve 未压 auxv 辅助向量**（grep 全空）—— **musl 头号拦路虎**。musl `__init_libc` 启动必从栈读 `AT_PHDR/AT_PHNUM/AT_PAGESZ/AT_RANDOM/AT_ENTRY...`，没有直接崩。批3 补（向后兼容：老程序读不到 auxv 无害）。
+- **`SYS_chdir=12` 与 `SYS_brk=12` 撞号**（[syscall_nums.hpp:28,48](../../kernel/syscall/syscall_nums.hpp#L28)），brk 后注册覆盖 chdir → **chdir 当前是坏的**。Linux 正确号 chdir=80、brk=12。批1 全表对齐 Linux x86_64 号顺手修。
+- **musl 走 `*at` 家族**（`openat=257` / `newfstatat=262`），不调老 `open/stat`。故"补 syscall"= 补 musl 真正会发的那 ~25 个，非旧规划的 80。
+- 现有 ELF 加载：`kernel/proc/execve.cpp` + `kernel/mini/elf_loader.cpp` 在用（加载测试 shell）；musl 静态 ELF 走同路径，唯一缺口是 auxv。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F10 🔄 + 清 PLAN 顶 F9/F5-M6/F-GUI-DECOUPLE 三段 🔄→✅ + 重写 todo/f10-userspace/00-libc.md（musl-first 策略 + ABI 差距清单）| ✅ | docs-only |
+| 1 | syscall 号纠偏（chdir 12→80，全表对齐 Linux x86_64）+ 返回约定收尾（getpid/getppid/pipe 等 `-1`→`-errno`）| ⏳ | run-kernel-test 绿 + chdir 回归 |
+| 2 | Linux 结构体布局：`sys_stat`==Linux stat(144B) / `UserSigAction`==Linux sigaction / sigset / iovec 对齐 | ⏳ | run-kernel-test 绿 + stat/signal 回归 |
+| 3 | execve 压 auxv（AT_PHDR/PHNUM/PAGESZ/RANDOM/ENTRY…），向后兼容 | ⏳ | run-kernel-test 绿 + 现有 shell 不崩 |
+| 4 | 补 musl 所需 syscall：openat/newfstatat/close/read/write/exit_group/mmap/munmap/mprotect/brk/lseek/getpid/getuid…/futex/rt_sig*/clone/wait4（装不下拆 4a/4b）| ⏳ | run-kernel-test 绿 + 每个新 syscall 最小测 |
+| 5 | musl 源码编译 + sysroot（configure+make → libc.a/crt1.o），自包含；`-static` 编 hello world | ⏳ | host 产出 musl 静态 ELF |
+| 6 | 端到端：musl hello world 经 execve+ELF loader+auxv 在 QEMU 跑通，printf 输出；加测试项；notes | ⏳ | run-kernel-test 绿 + hello world 真输出 |
+
+### 风险重点
+- **批3 auxv**（碰程序启动核心路径，保现有 shell 不崩）；**批5 musl 源码编译**（host 工具链依赖，最大外部不确定项）；批1 改号是 ABI 破坏性，碰 `user/libc/syscall.h` + shell，全量回归。
+- 架构契合：A.6 禁异常/ErrorOr（内核侧 ErrorOr，仅 trap 入口翻 -errno，批1/4 强化翻译边界）；A 子模块边界（musl 外部库/独立 sysroot，不进 kernel/）；对齐 Linux（musl 强制全树 Linux ABI，顺清 chdir 撞号等历史债）。
+
+## ✅ F9 安全机制（NX/SMEP/SMAP + ASLR + UID/GID + Canary）— 收官 2026-06-26（PR#38 d06c842，942/0）
 
 > Feature 域里程碑（开 F10 用户态运行时大弧前）。目标：CPU 硬件级保护（NX/SMEP/SMAP）+ 地址随机化（ASLR）+ 进程凭证（UID/GID）+ 栈溢出保护（Canary），为 F10 libc/ELF/TTY 铺安全地基（**F9 NXE 是 F10 硬前置**）。来源：用户决策「干掉 F9」+ memory `f4-current-focus`（F9 为 F10 前置）。范围：用户拍板 **M1-M4 全做**（文件权限 check_permission 与 F6 VFS 强耦合，仍建议留 F6）。分支 `feat/f9-security`（从干净 main `8be32d4`）。
 > 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；NXE/SMAP 批加 `make run` 冒烟（用户程序真能跑、不因 NX/SMAP 崩）；SMAP 批加 DEBT-019 重审。
@@ -32,7 +59,7 @@
 - 批1 sigreturn 改造（碰信号投递核心路径，行为须不变）+ 批2 NXE 开闸（execve 首次真用 NX，可能暴露隐藏配置错）+ 批4 SMAP（碰 syscall entry + 全用户指针访问面）。
 - 批2 加 `make run` 冒烟（真用户程序跑通）；批4 加 DEBT-019 重审。
 
-## 🔄 F5-M6（e1000 NIC 驱动）— 2026-06-25 立项，与 F9 并行
+## ✅ F5-M6（e1000 NIC 驱动）— 收官 2026-06-26（PR#40 fb25c89，945/0；批c 中断/netdev 延后交 F7）
 
 > worktree `worktree-f5-m6-e1000`（从干净 main `8be32d4` 拉，零 F9 污染；F9 在 feat/f9-security 上继续，两者零依赖）。F7 网络协议栈被 F5-NIC 阻塞（ROADMAP「F5 网卡→阻塞整个网络栈」），F5-M6 e1000 是 F7-M1 以太网层的地基。整条 HW 跑道（PCI / DmaPool / MSI-X / ISR / poll）已被 xHCI/AHCI 验过，e1000 是现有套路延伸。**polling 优先**（QEMU nested-KVM 不可靠锁存中断）。用户决策「先把驱动打通」，跳过立项 docs。
 > 验证：`timeout 40 cmake --build build --target run-kernel-test -j$(nproc)`（带 `-device e1000`）；改 pci.hpp 公共头补全量。
@@ -46,7 +73,7 @@
 
 > 批a [note](../notes/2026-06-25-f5-m6-e1000-b1-detect-mac.md)；批b [note](../notes/2026-06-26-f5-m6-e1000-b2-rx-tx.md)；**批b-fix [note](../notes/2026-06-26-f5-m6-e1000-rx-timer-fix.md)**。**关键 GOTCHA（接手必读；批b-fix 推翻批b 原结论 ①）**：① ~~轮询 RX 读 MMIO(RDH)才收得到包~~ —— **错的**：批b 那个「读 RDH → GPRC 0→1」是**带 filter-dump 调试时的副作用**，去掉 filter-dump（target 路径）GPRC 稳定 0。真相：**test kernel 关中断 → QEMU main loop 不跑 → SLIRP reply 不投递**。正解 = LAPIC periodic timer(0x30) + poll 没 包时 `sti;hlt;cli`（hlt 让 main loop 投递，timer IRQ 唤醒），**别写 MMIO trap 循环「泵」main loop**（64-trap / filter-dump 都是碰运气）；② QEMU e1000 **不模拟** RCTL.LBM loopback，用 SLIRP ARP/DHCP round-trip；③ 直接跑 QEMU 前要 `regenerate-ext2-image`（否则 ext2 inode 耗尽假失败）；④ `/dev/kvm` 是 root:kvm，手动跑诊断用 `-accel tcg`；⑤ `net_timer_handler` 直接 `g_lapic.eoi()`，**不能** `irq_eoi(0)`（test 没 switch_to_apic，会走 8259 EOI 不了 LAPIC）。
 
-## 🔄 F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 2026-06-25 立项
+## ✅ F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 收官 2026-06-26（PR#35 8be32d4；促修 SMP 迁移竞态 PR#34）
 
 > 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。
 > 范围（用户拍板）：核心 4 批（main+init+irq）；test 文件 `#ifdef` 整体守卫（§14 灰色边缘）留 follow-up。
