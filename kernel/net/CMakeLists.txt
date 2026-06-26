@@ -19,3 +19,13 @@ if(CINUX_NET)
         ${CMAKE_CURRENT_SOURCE_DIR}/loopback_device.cpp
     )
 endif()
+
+# F7 L3: machine-enforce the net-stack decoupling invariants (the 4 greps).
+# `cmake --build build --target check_net_decoupling` runs the script; a future
+# developer who leaks e1000/dma/irq into kernel/net/ -- or calls ::instance()
+# from a new adapter -- fails here, not when the 2nd NIC lands.
+add_custom_target(check_net_decoupling
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check_net_decoupling.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking net-stack decoupling invariants (4 greps)"
+)
