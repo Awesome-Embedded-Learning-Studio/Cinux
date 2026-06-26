@@ -22,7 +22,7 @@
 | 2 | Linux 结构体布局：`sys_stat` 改 Linux 144B（顺序/pad0/`*_nsec`/`__unused`）+ `UserSigAction` 重排 `{handler,flags,restorer,mask}` + sa_flags 接入；sigset 已 8B 合规；iovec 留批4 | ✅ | g++ 探针逐字段对齐 Linux UAPI + run-kernel-test 945/0（`40be22e`）|
 | 3 | execve/launch 压 Linux 初始栈（argc/argv/envp/auxv）：纯函数 `build_initial_stack`（host 单测）+ execve `ElfAuxInfo` out-param + launch_user_program 直接铺栈页（AT_PHDR/PHNUM/PHENT/PAGESZ/ENTRY/UID…/SECURE/RANDOM，rsp%16==0）。sys_execve 替换路径栈铺设留 follow-up | ✅ | helper host 单测 3/3 + run-kernel-test 945/0 + make run 无崩；end-to-end 留批6（`20baf76`）|
 | 4 | 补 musl 所需 syscall：openat/newfstatat/close/read/write/exit_group/mmap/munmap/mprotect/brk/lseek/getpid/getuid…/futex/rt_sig*/clone/wait4（装不下拆 4a/4b）| ✅ | run-kernel-test 950/0(+5) + 全量绿 + test_host 55/0（`8bab7a2`）|
-| 5 | musl 源码编译 + sysroot（configure+make → libc.a/crt1.o），自包含；`-static` 编 hello world | ⏳ | host 产出 musl 静态 ELF |
+| 5 | musl 源码编译 + sysroot（configure+make → libc.a/crt1.o），自包含；`-static` 编 hello world | ✅ | tools/musl/ 脚本端到端可复现：build-musl.sh→build-hello.sh→hello 输出+ELF ET_EXEC@0x400000（`ea20c27`）|
 | 6 | 端到端：musl hello world 经 execve+ELF loader+auxv 在 QEMU 跑通，printf 输出；加测试项；notes | ⏳ | run-kernel-test 绿 + hello world 真输出 |
 
 ### 风险重点
