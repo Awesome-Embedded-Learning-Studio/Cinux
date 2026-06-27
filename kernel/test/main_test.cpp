@@ -211,10 +211,45 @@ static void musl_hello_smoke_entry() {
         }
         cinux::proc::Scheduler::yield();
     }
-    bool hello_ok  = (reap_ret > 0 && status == 0);
-    int  exit_code = (g_unit_test_failures > 0 || !hello_ok) ? 1 : 0;
+    bool hello_ok = (reap_ret > 0 && status == 0);
     cinux::lib::kprintf("[F10-M1] smoke: hello exit_status=%d reap=%lld -> %s\n", status,
                         static_cast<long long>(reap_ret), hello_ok ? "PASS" : "FAIL");
+
+    // F-VERIFY M5-2: run the SMP CoW-race reproducer /forktest.  It forks
+    // repeatedly + the parent writes a shared CoW page; under correct CoW the
+    // child sees the pre-fork value.  Exits 0 iff races==0.  Under -smp 2 this
+    // is the REAL user-task fork+CoW-write stress that the F10 fixes guard --
+    // the exact path the GUI shell crash saga debugged.  Single-CPU it passes
+    // vacuously (no concurrency).  Built with FORKTEST_ITERS=50 by
+    // build-forktest.sh for gate speed; deep-dig locally with FORKTEST_ITERS=300.
+    bool forktest_ok = true;
+    int  ft_status   = -1;
+    int  ft_pid      = cinux::proc::fork(cinux::proc::g_pid_alloc);
+    if (ft_pid == 0) {
+        auto* ft        = cinux::proc::Scheduler::current();
+        ft->addr_space  = new cinux::mm::AddressSpace();
+        const char* a[] = {"/forktest", nullptr};
+        const char* e[] = {nullptr};
+        cinux::proc::launch_user_program("/forktest", a, e);
+        cinux::proc::Scheduler::exit_current();  // unreachable
+    } else if (ft_pid > 0) {
+        int64_t ft_reap = 0;
+        for (int spins = 0; spins < 500'000'000; ++spins) {
+            ft_reap = cinux::syscall::sys_waitpid(ft_pid, reinterpret_cast<uint64_t>(&ft_status), 1,
+                                                  0, 0, 0);
+            if (ft_reap != 0) {
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        forktest_ok = (ft_reap > 0 && ft_status == 0);
+        cinux::lib::kprintf("[F-VERIFY M5-2] forktest exit_status=%d reap=%lld -> %s\n", ft_status,
+                            static_cast<long long>(ft_reap), forktest_ok ? "PASS" : "FAIL");
+    } else {
+        cinux::lib::kprintf("[F-VERIFY M5-2] /forktest fork failed (%d) -- skipping\n", ft_pid);
+    }
+
+    int exit_code = (g_unit_test_failures > 0 || !hello_ok || !forktest_ok) ? 1 : 0;
     __asm__ volatile("outl %0, $0xf4" : : "a"(exit_code));
     while (1)
         __asm__ volatile("cli; hlt");
