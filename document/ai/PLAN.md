@@ -2,6 +2,31 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F10-M3 TTY + ioctl（Phase 1）— 2026-06-27 立项
+
+> 分支 `feat/f10-tty-dyn`（从干净 main `295d536`）。接 F10-M1（musl 静态移植 ✅ PR#42）。用户拍板：**先 TTY+ioctl，同分支续叠 M2 动态链接**；按需 + libc 解耦（PTY/`/dev/*` 留 F6 DevFS）。
+> **前置修 `9fba65b`**：handle_pf CoW 解析松 U 位门控——内核态写 CoW 用户页（syscall 直接解引用，如 waitpid 写 `*status`）不再 panic。run-kernel-test-all 955/0 + -smp2 AP 回读 PASS，零回归。（ring-3 自动回归未成：内核写 CoW 的 mmap 页不 fault、栈页才 fault，差异未解；待 GUI `make run` 复验。）
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 绿才提交。
+
+### 现状（已 grep 坐实）
+stdin 无设备节点/DevFS：`sys_read` 硬编码 `fd==0` 键盘 spin 轮询（无键 spin 1M 后返 0 = 被 musl 当 EOF）；`fd==1` 走 kprintf；`sys_ioctl` 全返 `-ENOTTY`（musl 探 TIOCGWINSZ 失败 → 全缓冲，printf 不及时）。`Task::controlling_tty` 字段已预埋（F3-M3，-1=无）；F3 信号 + 进程组 + killpg ✅；Console echo sink ✅。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | ✅ 立项 docs（本段）+ ROADMAP F10-M3 🔄 + todo 02-tty.md Phase 1 范围 | ✅ | docs-only |
+| 1 | TTY 核心 `drivers/tty/tty.{hpp,cpp}` + termios UAPI struct + 默认 ICANON\|ECHO\|ISIG + 行规范状态机（纯逻辑，不接 read 路径，host 单测） | ⏳ | test_host + run-kernel-test 绿（新文件零行为变） |
+| 2 | 接输入源 + 回显：Keyboard `dispatch_key`→TTY `input_char` + Console 当 echo sink + 系统 console TTY 单例 | ⏳ | run-kernel-test 绿 + 回显机制测 |
+| 3 | stdin 阻塞读：`sys_read fd==0` 改读 TTY cooked line_buf + 无行 block（F3 `prepare_to_wait`/`schedule_blocked`）+ 键盘 IRQ 唤醒。**修 musl 误 EOF** | ⏳ | run-kernel-test-all 两 leg + 阻塞→IRQ→唤醒机制测 |
+| 4 | ioctl 实命令：TCGETS/TCSETS/TIOCGWINSZ（+ TIOCGPGRP/TIOCSPGRP 用 `controlling_tty`）→ musl/glibc 行缓冲 | ⏳ | run-kernel-test 绿 + isatty 机制测 |
+| 5 | 信号生成：Ctrl+C→SIGINT / Ctrl+Z→SIGTSTP / Ctrl+\\→SIGQUIT 经 killpg 投前台组 + Ctrl+D→EOF | ⏳ | run-kernel-test 绿 + 信号机制测 |
+| 6 | 收尾 + 交织 F-VERIFY：ROADMAP F10-M3 Phase1 ✅ + notes + sys_read/write/ioctl/keyboard 的 host 镜像副本→链真码（批2 微增量，单独 commit）。**🚩TTY 绿 checkpoint：决定 PR 还是续叠 M2** | ⏳ | run-kernel-test-all + test_host 全绿 |
+
+### 风险
+- 批 3 阻塞读的 IRQ 唤醒（模式同 pipe write 唤醒 read，waitpid/pipe 已验）；兜底先做 cooked-buffer 非阻塞读（有行返行、无行不返假 EOF），阻塞作子步叠加。
+- Phase 2（PTY / `/dev/*` 节点 / TIOCSCTTY）硬依赖 F6 DevFS，显式推迟；Phase 1 用 console TTY 单例 + `controlling_tty` 绕开，功能完整不欠债。
+- 解耦：termios / TIOCGWINSZ = Linux UAPI，不出现 libc 名字；TTY 与 PT_INTERP / 动态链接正交（不缠 M2）。
+
 ## 🔄 F-VERIFY（动态验证与并发检测基建）— 2026-06-27 立项
 
 > 横切里程碑（与 FO/F-INFRA/F-QA/F-CLN 同档）。**起源**：2026-06-27 audit（15-agent workflow 抽 165 调试时间坑 + 审 5 维基建）结论——2026-06-21 那轮 14 维静态债务审计量的是「代码写得对不对」，但所有超时调试都是「代码有没有真被跑到、机制有没有真生效、崩了能不能一眼看懂」（动态/环境性另一根轴，静态债表天生瞎）。165 坑根因 top：机制没真生效 27 / 并发没压到 22 / 基建≠生产 19 / 规格看错 17 / 内存 UAF 14。**目标**：把多会话 forensics 级调试变一次 CI 红灯。**用户决策（2026-06-27）**：全做 M0-M6，重锤 SMP+并发；并补**测试矩阵盘点**（现在测试太乱、没人知道到底覆盖了什么）+**测试代码整理**（框架 bug / 共享 util / 0x1234 假 CoW / 镜像副本）。先改 ROADMAP/PLAN 立项，等确认再开 feat 分支。详见 audit memory `debugging-audit-dynamic-coverage-gap`。
