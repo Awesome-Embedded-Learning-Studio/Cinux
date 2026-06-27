@@ -21,12 +21,13 @@
 #include "kernel/arch/x86_64/smp.hpp"     // F5-M6: kLapicTimerVector
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
-#include "kernel/drivers/apic/local_apic.hpp"  // F5-M6: g_lapic (e1000 poll timer)
-#include "kernel/drivers/ahci/ahci.hpp"                 // F10-M1 batch 6: ext2 mount
-#include "kernel/drivers/ahci/ahci_block_device.hpp"    // F10-M1 batch 6: ext2 mount
-#include "kernel/drivers/pci/pci.hpp"                   // F10-M1 batch 6: PCI->AHCI for ext2
-#include "kernel/fs/ext2.hpp"                           // F10-M1 batch 6: ext2 mount
-#include "kernel/fs/vfs_mount.hpp"                      // F10-M1 batch 6: VFS mount
+#include "kernel/drivers/acpi/acpi.hpp"  // F-VERIFY M3-1: real acpi::init (firmware SMP topology)
+#include "kernel/drivers/ahci/ahci.hpp"  // F10-M1 batch 6: ext2 mount
+#include "kernel/drivers/ahci/ahci_block_device.hpp"  // F10-M1 batch 6: ext2 mount
+#include "kernel/drivers/apic/local_apic.hpp"         // F5-M6: g_lapic (e1000 poll timer)
+#include "kernel/drivers/pci/pci.hpp"                 // F10-M1 batch 6: PCI->AHCI for ext2
+#include "kernel/fs/ext2.hpp"                         // F10-M1 batch 6: ext2 mount
+#include "kernel/fs/vfs_mount.hpp"                    // F10-M1 batch 6: VFS mount
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/not_null.hpp"  // F10-M1 batch 6: NotNull<Task*>
@@ -35,10 +36,10 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/slab.hpp"
 #include "kernel/mm/vmm.hpp"
-#include "kernel/proc/pid.hpp"            // F10-M1 batch 6: g_pid_alloc
-#include "kernel/proc/process.hpp"        // F10-M1 batch 6: fork()
-#include "kernel/proc/scheduler.hpp"      // F10-M1 batch 6: run_first/add_task
-#include "kernel/proc/user_launch.hpp"    // F10-M1 batch 6: launch_user_program
+#include "kernel/proc/pid.hpp"             // F10-M1 batch 6: g_pid_alloc
+#include "kernel/proc/process.hpp"         // F10-M1 batch 6: fork()
+#include "kernel/proc/scheduler.hpp"       // F10-M1 batch 6: run_first/add_task
+#include "kernel/proc/user_launch.hpp"     // F10-M1 batch 6: launch_user_program
 #include "kernel/syscall/sys_waitpid.hpp"  // F10-M1 batch 6: sys_waitpid (WNOHANG poll)
 
 extern "C" {
@@ -147,7 +148,8 @@ static void musl_hello_smoke_entry() {
     if (task == nullptr) {
         cinux::lib::kprintf("[F10-M1] smoke: no current task\n");
         __asm__ volatile("outl %0, $0xf4" : : "a"(1));
-        while (1) __asm__ volatile("cli; hlt");
+        while (1)
+            __asm__ volatile("cli; hlt");
     }
     task->children = nullptr;
 
@@ -155,10 +157,10 @@ static void musl_hello_smoke_entry() {
     // resolve /hello.  The harness keeps no global AHCI/ext2 (each ext2 test
     // does its own setup_ext2), so replicate that: PCI -> AHCI -> port-1 block
     // device -> Ext2 mount.  Objects are static so they outlive the worker.
-    static cinux::drivers::pci::PCI*          pci = nullptr;
-    static cinux::drivers::ahci::AHCI*        ahci = nullptr;
+    static cinux::drivers::pci::PCI*              pci     = nullptr;
+    static cinux::drivers::ahci::AHCI*            ahci    = nullptr;
     static cinux::drivers::ahci::AHCIBlockDevice* blk_dev = nullptr;
-    static cinux::fs::Ext2*                   ext2 = nullptr;
+    static cinux::fs::Ext2*                       ext2    = nullptr;
     if (ext2 == nullptr) {
         pci = new cinux::drivers::pci::PCI();
         pci->init();
@@ -185,10 +187,10 @@ static void musl_hello_smoke_entry() {
         // Child: the worker is a kernel thread with no user address space, so
         // fork produced a child without one too.  Install a fresh AS (mirroring
         // the non-GUI /bin/sh launch in shell_launch.cpp) before execve.
-        auto* child = cinux::proc::Scheduler::current();
-        child->addr_space = new cinux::mm::AddressSpace();
+        auto* child        = cinux::proc::Scheduler::current();
+        child->addr_space  = new cinux::mm::AddressSpace();
         const char* argv[] = {"/hello", nullptr};
-        const char* envp[]  = {nullptr};
+        const char* envp[] = {nullptr};
         cinux::proc::launch_user_program("/hello", argv, envp);
         cinux::proc::Scheduler::exit_current();  // unreachable
     }
@@ -200,8 +202,8 @@ static void musl_hello_smoke_entry() {
     int     status   = -1;
     int64_t reap_ret = 0;
     for (int spins = 0; spins < 50'000'000; ++spins) {
-        reap_ret = cinux::syscall::sys_waitpid(child_pid, reinterpret_cast<uint64_t>(&status), 1, 0,
-                                               0, 0);
+        reap_ret =
+            cinux::syscall::sys_waitpid(child_pid, reinterpret_cast<uint64_t>(&status), 1, 0, 0, 0);
         if (reap_ret != 0) {
             break;  // reaped (>0) or error (<0)
         }
@@ -212,7 +214,8 @@ static void musl_hello_smoke_entry() {
     cinux::lib::kprintf("[F10-M1] smoke: hello exit_status=%d reap=%lld -> %s\n", status,
                         static_cast<long long>(reap_ret), hello_ok ? "PASS" : "FAIL");
     __asm__ volatile("outl %0, $0xf4" : : "a"(exit_code));
-    while (1) __asm__ volatile("cli; hlt");
+    while (1)
+        __asm__ volatile("cli; hlt");
 }
 #endif  // CINUX_MUSL_HELLO_SMOKE
 
@@ -264,6 +267,28 @@ extern "C" void kernel_main() {
             }
         }
         cinux::lib::kprintf("[TEST] direct-map identity probe: %s\n", dmap_ok ? "OK" : "MISMATCH");
+    }
+
+    // F-VERIFY M3-1: real ACPI firmware scan -> g_acpi_info (cpu_count + apic_ids).
+    // The test kernel previously only tested the MADT PARSER on synthetic tables
+    // (run_acpi_tests), never the real firmware scan -- so g_acpi_info.cpu_count
+    // stayed 0 and boot_aps() bailed as "single CPU".  This real scan is the
+    // prerequisite for M3-2 (waking APs).  Under run-kernel-test-smp (-smp 2) it
+    // reports cpu_count>=2; under single-CPU run-kernel-test it reports 1.
+    cinux::drivers::acpi::init();
+    {
+        const auto& info = cinux::drivers::acpi::g_acpi_info;
+        cinux::lib::kprintf("[F-VERIFY M3-1] SMP topology: cpu_count=%u",
+                            static_cast<unsigned>(info.cpu_count));
+        for (uint32_t i = 0; i < info.cpu_count && i < 8; i++) {
+            cinux::lib::kprintf(" apic_id[%u]=%u", i, info.cpu_apic_ids[i]);
+        }
+        cinux::lib::kprintf("\n");
+        if (info.cpu_count > 1) {
+            cinux::lib::kprintf(
+                "[F-VERIFY M3-1] SMP mode (%u CPUs) -- M3-2 AP-wake tests engage here\n",
+                static_cast<unsigned>(info.cpu_count));
+        }
     }
 
     // kprintf format tests run early — only need serial + kprintf
@@ -465,8 +490,10 @@ extern "C" void kernel_main() {
     cinux::lib::kprintf("\n[F10-M1] entering scheduler for musl hello ring-3 smoke\n");
     g_unit_test_failures = test::get_total_failed();
     cinux::proc::Scheduler::init();  // pristine run queue for the smoke (tests re-init it)
-    auto* hello_worker =
-        cinux::proc::TaskBuilder().set_entry(musl_hello_smoke_entry).set_name("hello_smoke").build();
+    auto* hello_worker = cinux::proc::TaskBuilder()
+                             .set_entry(musl_hello_smoke_entry)
+                             .set_name("hello_smoke")
+                             .build();
     auto* boot_ctx =
         cinux::proc::TaskBuilder().set_entry(musl_hello_smoke_entry).set_name("boot_ctx").build();
     if (hello_worker != nullptr && boot_ctx != nullptr) {
