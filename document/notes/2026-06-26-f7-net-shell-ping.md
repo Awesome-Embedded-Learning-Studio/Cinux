@@ -3,6 +3,8 @@
 **日期**: 2026-06-26　**分支**: `worktree-f7-net-ping`　**提交**: `c0c8ddd`(B1) + `b0c817f`(B2) + `98990a4`(B3)
 **验证**: run-kernel-test **949/0**(+2) + `make run` 冒烟(`[net] L3 stack up` + shell 无 panic)
 
+> ⛔ **ring3 实跑会 #DF（未修）**：代码齐 + 内核态全证，但 shell 敲 `ping` → `sys_ping` 里 sti/hlt → 调度器在 syscall 中途抢占 → 破坏栈帧 → Double Fault。harness 抓不到（不能真跑 ring3），boot smoke 才暴露。根因 + 修法见 [handoff-df note](./2026-06-26-f7-net-handoff-df.md)。**协议栈 + ping() 函数本身没问题**（`test_production_ping` 内核态调它拿 reply）。
+
 ## 背景
 F7-M1/M2/M3 ping 在**内核测**证了(见 [L2 note](./2026-06-26-f7-net-l2-e1000-ping.md)),但 shell 够不着——
 生产 boot 没建栈、没 poll driver、没 syscall、没 shell 命令。本单元把 ping 接到 shell。

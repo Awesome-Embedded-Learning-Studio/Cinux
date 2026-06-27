@@ -62,6 +62,8 @@
 
 ### ✅ shell ping（生产 net 栈 + SYS_ping + shell 命令）— 2026-06-26，本分支续做
 > 把 ping 从"内核测证明"接到 shell。**关键决策：不要常驻 net 线程**——sys_ping 的 send+sti/hlt+poll 循环本身就是 ping 期间的 poll driver（production 开中断，LAPIC tick 唤醒 hlt 驱动 SLIRP）。详见 [shell-ping note](../notes/2026-06-26-f7-net-shell-ping.md)。
+>
+> ⛔ **ring3 实跑 #DF（未修，接手中）**：B1-B3 代码齐 + 内核态全证（test_production_ping/syscall_ping 绿），但 shell 敲 `ping` → sys_ping 里 sti/hlt → 调度器 syscall 中途抢占 → 破坏栈帧 → Double Fault。harness 抓不到（不能真跑 ring3），boot smoke 才暴露。**协议栈 + ping() 本身没问题**。根因 + 修法（阻塞式 ping + 常驻 poll driver，**不要 sti/hlt 自旋**）见 [handoff-df note](../notes/2026-06-26-f7-net-handoff-df.md)。**B1-B3 commit 暂不要 push 进主线**（敲 ping 会 panic）。
 
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
