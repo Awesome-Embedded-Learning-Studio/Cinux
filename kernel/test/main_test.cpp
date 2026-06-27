@@ -262,8 +262,11 @@ static void musl_hello_smoke_entry() {
 // Runs ON THE AP (called from ap_main's test-mode branch, after the AP signals
 // online).  Reads this AP's CR4/EFER/LSTAR/STAR/SFMASK into its result slot so
 // the BSP can assert AP-side CPU-config parity.  Writes magic LAST (x86 TSO) so
-// the BSP polling magic sees a complete slot.  ap_main halts the AP on return.
-static void ap_test_selfcheck(uint32_t cpu_id) {
+// the BSP polling magic sees a complete slot.  Return value tells ap_main what
+// to do AFTER the readback: true = enter the production scheduler (smoke on ->
+// the AP picks up forktest children for cross-core CoW stress, M5-2b); false =
+// halt (suite-only -smp gate, no scheduler).
+static bool ap_test_selfcheck(uint32_t cpu_id) {
     cinux::arch::ApSelfcheckResult& r = cinux::arch::g_ap_selfcheck_results[cpu_id];
     uint64_t                        cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
@@ -274,6 +277,13 @@ static void ap_test_selfcheck(uint32_t cpu_id) {
     r.star   = cinux::arch::read_msr(0xC0000081);
     r.sfmask = cinux::arch::read_msr(0xC0000084);
     r.magic  = cinux::arch::kApSelfcheckMagic;
+#ifdef CINUX_MUSL_HELLO_SMOKE
+    // Smoke will run the scheduler -- let this AP participate (cross-core CoW).
+    return true;
+#else
+    // Suite-only build: no scheduler, halt to avoid an is_initialized spin hang.
+    return false;
+#endif
 }
 
 // Wake APs via boot_aps and assert AP-side CPU-config readback on the BSP.

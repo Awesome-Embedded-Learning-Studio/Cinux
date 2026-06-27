@@ -59,7 +59,13 @@ struct ApSelfcheckResult {
 };
 constexpr uint32_t kApSelfcheckMagic = 0xA5C0FFEE;
 
-using ApSelfcheckFn = void (*)(uint32_t cpu_id);
+// Return: true = after the readback, enter the production scheduler spin+idle
+// (so the AP can pick up cross-core work, e.g. forktest children for the
+// F-VERIFY M5-2b cross-core CoW stress); false = halt forever (cli;hlt) -- used
+// when the test kernel runs no scheduler (suite-only -smp gate).  The test
+// kernel decides based on its own config (smoke on/off), keeping this production
+// header free of test-flag coupling.
+using ApSelfcheckFn = bool (*)(uint32_t cpu_id);
 
 // Defined in ap_main.cpp.  Results sized [proc::kMaxCpus] at the definition
 // (ap_main.cpp pulls in percpu.hpp); declared unsized here to avoid that dep.

@@ -177,18 +177,23 @@ extern "C" void ap_main(uint64_t cpu_id) {
     // 4. Signal the BSP that this AP is up.
     __atomic_add_fetch(&g_aps_online, 1, __ATOMIC_SEQ_CST);
 
-    // F-VERIFY M3-2: test-mode AP self-check.  Production default
+    // F-VERIFY M3-2 / M5-2b: test-mode AP self-check.  Production default
     // (g_ap_test_selfcheck_fn == nullptr) skips this entirely -- zero behavior
     // change.  When the test kernel sets the fn, the AP runs the readback
-    // (CR4/EFER/LSTAR/STAR/SFMASK -> g_ap_selfcheck_results[cpu_id]) then halts
-    // forever (cli;hlt): the test kernel runs no scheduler, so it never enters
-    // the spin/idle path below.  This is what turns run-kernel-test-smp from a
-    // BSP-only no-op into a real AP-wake + AP-side mechanism-readback gate.
+    // (CR4/EFER/LSTAR/STAR/SFMASK -> g_ap_selfcheck_results[cpu_id]); the fn's
+    // return then decides: false = halt forever (suite-only -smp gate, no
+    // scheduler); true = fall through to the production scheduler spin+idle so
+    // the AP picks up cross-core work (smoke run: forktest children -> cross-core
+    // CoW stress, M5-2b).  The fn (in the test kernel) encodes smoke on/off, so
+    // this production file stays free of test-flag coupling.
     if (g_ap_test_selfcheck_fn != nullptr) {
-        g_ap_test_selfcheck_fn(static_cast<uint32_t>(cpu_id));
-        for (;;) {
-            __asm__ volatile("cli; hlt");
+        const bool enter_scheduler = g_ap_test_selfcheck_fn(static_cast<uint32_t>(cpu_id));
+        if (!enter_scheduler) {
+            for (;;) {
+                __asm__ volatile("cli; hlt");
+            }
         }
+        // else: fall through to the production scheduler spin + idle below.
     }
 
     // 5. (F4-M4 M4-2-2) This AP now participates in scheduling.  boot_aps()
