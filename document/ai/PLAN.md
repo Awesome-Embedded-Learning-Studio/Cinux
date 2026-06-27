@@ -29,7 +29,7 @@
 - **批3 auxv**（碰程序启动核心路径，保现有 shell 不崩）；**批5 musl 源码编译**（host 工具链依赖，最大外部不确定项）；批1 改号是 ABI 破坏性，碰 `user/libc/syscall.h` + shell，全量回归。
 - 架构契合：A.6 禁异常/ErrorOr（内核侧 ErrorOr，仅 trap 入口翻 -errno，批1/4 强化翻译边界）；A 子模块边界（musl 外部库/独立 sysroot，不进 kernel/）；对齐 Linux（musl 强制全树 Linux ABI，顺清 chdir 撞号等历史债）。
 
-### ✅ F10-M1 follow-up（shell 启动 musl + SMP fork 竞态修复）— 2026-06-27，本分支续做
+### 🔄 F10-M1 follow-up（shell 启动 musl + SMP fork）— 2026-06-27，CoW+RBP 已修但 shell 仍崩（深查中）
 
 > 接批6：GUI shell 敲 /path 启动 musl 程序（fork+execve+waitpid，标准 shell fallback）。**两个根因**：
 > 1. **SMP CoW 写穿透竞态**（主因）：`copy_page_table_level`（fork.cpp/clone.cpp 共用）把**父进程在用 PTE** 改 writable→CoW 后**全程不刷 TLB** → 父 CPU 缓存陈旧 writable 项 → fork 返回用户态后父写穿透到共享物理页 → 污染子的 CoW 副本。单 CPU 稳（下次 context_switch 重载 cr3 刷 TLB）；-smp 2 父不切地址空间→陈旧 TLB 一直在→炸。6-agent workflow 对抗确认（mapcount 已原子；handle_cow_fault 对 fork 正确，无需改）。
@@ -37,7 +37,7 @@
 >
 > **修**：fork.cpp L279 + clone.cpp L115 CoW 遍历后 `flush_tlb_all()`（局部刷足够：fork IF=0 父不可迁移，子 cr3 全新 clean）；syscall.S 退出 RBX 后加 `movq 88(%rsp),%rbp`。清 syscall.cpp 的 `[FORK] dispatch` 诊断打印。
 > **复现器** `tools/musl/forktest.c`（裸 SYS_fork(57) 循环 = shell 精确路径；父 post-fork 写共享 CoW 全局、子读；races 计数走串口；装成 /hello 让 ring-3 smoke 在 -smp 2 起）。**实证**：全修 ITERS=1 -smp 2 **3/3 races=0 PASS**；未修 CoW run1 **races=1**（偶发，合 note「偶发」）。
-> **残留 follow-up**：`ITERS>=2` fork#2 父 rbp 腐蚀 segfault（rbp 在用户态被腐，非信号/非 PF handler/非 syscall 恢复；触发与 CoW fault+reap 后再 fork 相关；**不影响单 fork = shell 启动 /hello 路径**），登记待单独排查。
+> **残留（头号未解，shell 仍崩）**：CoW+RBP 两修**必要且 proven（forktest races=0）但不够**——GUI shell（`make run` -smp 2）修后仍崩（log.txt 子 `syscall_dispatch ret` #GP 内核栈帧砸；log2 子 execve path=0x0→fork 炸弹；log3 handle_pf klog 嵌套 #PF）。headless forktest ITERS=1 races=0 但 **ITERS≥2 崩**（父 rbp=0x13 at sys_fork 返回）。加内核 canary（frame+88 入口/出口对比）**未触发 → 内核 pt_regs 帧没被改写**，崩溃是**用户态控制流被劫持**（用户栈返回地址写花→跳 0x401182 sys_fork 中段绕过 prologue，rbp=垃圾）。shell 启动期已 demand-page 一堆页，其 fork 实质=forktest 第 2 次 fork（AS 已被 CoW 动过）。**已排除**：IST=0 栈别名（#PF IST=0 kernel→kernel 用当前 RSP 不撞 kernel_stack_top）；内核帧改写（canary 证伪）；yield 破坏 callee 寄存器（calleetest 2000/0）。**候选**：①`handle_cow_fault` 跨核释放 old_phys（自承认注释 process_new.cpp:115-117，另一核读到已释放+复用页→CoW 拷贝带垃圾→用户栈花）解释 -smp 2 shell 崩，但不解释单 CPU forktest；②单 CPU 那个另有因。可先试「handle_cow_fault 不释放 old_phys（接受泄漏）消 UAF」看 shell 是否稳。详见 [note](../notes/2026-06-27-f10-smp-cow-tlb-flush-fix.md)「⚠️ 更正」段。
 > **验证**：默认 run-kernel-test **954/0** + run-kernel-test-smp **954/0**（无回归）+ forktest races=0。详见 [note](../notes/2026-06-27-f10-smp-cow-tlb-flush-fix.md)。
 
 ## ✅ F9 安全机制（NX/SMEP/SMAP + ASLR + UID/GID + Canary）— 收官 2026-06-26（PR#38 d06c842，942/0）
