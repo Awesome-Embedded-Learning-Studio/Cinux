@@ -47,6 +47,37 @@ jobs:
         working-directory: build
         run: make test_host
 
+  host-tests-tsan:
+    # F-VERIFY M4: ThreadSanitizer gate for the -pthread host tests (test_pmm
+    # 4-thread alloc/free, test_sync_concurrent 8-thread lock stress). TSan is
+    # mutually exclusive with ASan, so it is a separate job, not a cell on
+    # host-tests. Catches data races in concurrent host test code (lockdep only
+    # does lock-order; it cannot see two threads touching a field with no lock).
+    # Value ramps as M2 links real kernel code into these tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3
+
+      - name: Compiler version
+        run: echo "GCC $(gcc --version | head -1)"
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_HOST_TSAN=ON -S .
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run host tests (ThreadSanitizer)
+        working-directory: build
+        run: make test_host
+
   line-limits:
     runs-on: ubuntu-latest
     timeout-minutes: 5
