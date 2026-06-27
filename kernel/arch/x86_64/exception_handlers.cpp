@@ -366,8 +366,13 @@ void handle_pf(InterruptFrame* frame) {
         }
     }
 
-    // CoW fault: page is present but write-protected (fork marks shared pages CoW)
-    if ((err & 0x01) && (err & 0x02) && (err & 0x04)) {
+    // CoW fault: page is present but write-protected (fork marks shared pages
+    // CoW).  Resolve for ANY writer (user OR kernel): CinuxOS syscalls directly
+    // dereference user pointers (no copy_to_user yet), so the kernel legitimately
+    // writes CoW user pages -- e.g. waitpid storing *status into the parent's
+    // fork-CoW'd stack.  handle_cow_fault guards on FLAG_COW, so a genuine
+    // read-only page (not CoW) still falls through to panic below.
+    if ((err & 0x01) && (err & 0x02)) {
         if (cinux::proc::handle_cow_fault(fault_addr)) {
             return;
         }
