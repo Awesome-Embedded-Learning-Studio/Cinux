@@ -151,6 +151,41 @@ void dump_first_gp(const InterruptFrame* frame) {
     debugcon_hex64(read_msr_raw(0xC0000102));
     debugcon_str(" <<<\n");
 }
+
+// F-VERIFY M6: first-#PF debugcon capture -- mirrors dump_first_gp.  Decodes the
+// PF error code (P/W/U/RSV/I) so a glance at debug.log says whether it was a
+// write-fault-on-present (CoW/permission), not-present (demand/segfault), user
+// vs supervisor, etc.  Survives the handle_pf-klog-nested-#PF information loss
+// (the log3.txt class: handle_pf's kprintf itself faulted, losing the original)
+// because debugcon is a separate always-survives channel.
+void dump_first_pf(const InterruptFrame* frame, uint64_t cr2) {
+    debugcon_str("\n>>> FIRST #PF rip=");
+    debugcon_hex64(frame->rip);
+    debugcon_str(" rsp=");
+    debugcon_hex64(frame->rsp);
+    debugcon_str(" cr2=");
+    debugcon_hex64(cr2);
+    debugcon_str(" err=0x");
+    debugcon_hex64(frame->error_code);
+    debugcon_str(" [");
+    debugcon_str((frame->error_code & 1) ? "P" : "!P");
+    debugcon_str((frame->error_code & 2) ? " W" : " R");
+    debugcon_str((frame->error_code & 4) ? " U" : " S");
+    if (frame->error_code & 8) {
+        debugcon_str(" RSV");
+    }
+    if (frame->error_code & 16) {
+        debugcon_str(" I");
+    }
+    debugcon_str("]");
+    debugcon_str(" rbp=");
+    debugcon_hex64(frame->rbp);
+    uint64_t cr3;
+    __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
+    debugcon_str(" cr3=");
+    debugcon_hex64(cr3);
+    debugcon_str(" <<<\n");
+}
 }  // namespace
 
 // Dumps the first #GP's faulting frame exactly once (recursive frames from a
@@ -160,6 +195,18 @@ void capture_first_gp(const InterruptFrame* frame) {
     if (!dumped) {
         dumped = true;
         dump_first_gp(frame);
+    }
+}
+
+// F-VERIFY M6: capture the first #PF's frame to debugcon exactly once (a
+// recursive #PF from a klog fault in the panic path is skipped).  Called from
+// handle_pf on PRESENT faults only (err&P) so debug.log is not tagged by the
+// first ordinary demand-paging (!P) fault.
+void capture_first_pf(const InterruptFrame* frame, uint64_t cr2) {
+    static bool dumped = false;
+    if (!dumped) {
+        dumped = true;
+        dump_first_pf(frame, cr2);
     }
 }
 
@@ -273,6 +320,14 @@ void handle_pf(InterruptFrame* frame) {
     uint64_t fault_addr;
     __asm__ volatile("movq %%cr2, %0" : "=r"(fault_addr));
 
+    // F-VERIFY M6: first-fault debugcon capture on PRESENT faults only (err&P --
+    // skips benign demand-paging !P so debug.log isn't tagged by the first
+    // ordinary demand-fault).  Decodes P/W/U/RSV/I; survives the panic/klog
+    // path nesting into another #PF (log3.txt class) via the debugcon channel.
+    if (frame->error_code & 0x01) {
+        capture_first_pf(frame, fault_addr);
+    }
+
     uint64_t err = frame->error_code;
 
     // ---- Stack guard page detection (scheduler task stacks) ----
@@ -377,10 +432,11 @@ void handle_pf(InterruptFrame* frame) {
                 // syscall/execve can mutate the VMA store concurrently.
                 const bool user_fault = (err & 0x04) != 0;
                 if (user_fault && task != nullptr) {
-                    klog_error("segfault: tid=%u '%s' rip=%p rsp=%p addr=%p has no VMA -- sending SIGSEGV",
-                               static_cast<unsigned>(task->tid), task->name ? task->name : "(null)",
-                               reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->rsp),
-                               reinterpret_cast<void*>(fault_addr));
+                    klog_error(
+                        "segfault: tid=%u '%s' rip=%p rsp=%p addr=%p has no VMA -- sending SIGSEGV",
+                        static_cast<unsigned>(task->tid), task->name ? task->name : "(null)",
+                        reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->rsp),
+                        reinterpret_cast<void*>(fault_addr));
                     // F3-M1: queue SIGSEGV; the ISR stub's signal_check_deliver_isr
                     // (invoked right after handle_pf returns) delivers it -- to a
                     // custom handler if installed, else the default Terminate.
