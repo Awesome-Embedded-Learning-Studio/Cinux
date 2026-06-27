@@ -122,6 +122,10 @@ Claude Code 必须输出：
 - [ ] 改公共接口/host mock 相关代码时补全量 build 或 host test。
 - [ ] 改 SMP/调度/中断时补 `-smp 2` 相关验证或说明不可跑原因。
 - [ ] 新行为有测试；无法测试的路径写明人工冒烟和日志证据。
+- [ ] **串口日志读法**：QEMU serial.log 带 ANSI escape，手动 `grep` 须加 `-a`
+      （否则只报 `binary file matches`，GOTCHA#2 复发 3+ 次）；脚本侧
+      `check_test_count.sh` 已默认 `grep -a`。kprintf `%p` 已自带 `0x` 前缀，
+      调用处写 `0x%p` 会输出 `0x0x...`——用 `%p` 即可。
 
 ### G8 文档门
 
