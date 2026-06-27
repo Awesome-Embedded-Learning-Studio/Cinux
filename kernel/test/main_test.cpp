@@ -17,6 +17,7 @@
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
+#include "kernel/arch/x86_64/msr.hpp"     // F-VERIFY M3-2: read_msr (AP-side mechanism readback)
 #include "kernel/arch/x86_64/paging.hpp"  // F9: enable_smep_smap
 #include "kernel/arch/x86_64/smp.hpp"     // F5-M6: kLapicTimerVector
 #include "kernel/arch/x86_64/syscall.hpp"
@@ -36,6 +37,7 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/slab.hpp"
 #include "kernel/mm/vmm.hpp"
+#include "kernel/proc/percpu.hpp"          // F-VERIFY M3-2: kMaxCpus (AP result slots)
 #include "kernel/proc/pid.hpp"             // F10-M1 batch 6: g_pid_alloc
 #include "kernel/proc/process.hpp"         // F10-M1 batch 6: fork()
 #include "kernel/proc/scheduler.hpp"       // F10-M1 batch 6: run_first/add_task
@@ -218,6 +220,92 @@ static void musl_hello_smoke_entry() {
         __asm__ volatile("cli; hlt");
 }
 #endif  // CINUX_MUSL_HELLO_SMOKE
+
+// ============================================================
+// F-VERIFY M3-2: AP wake + AP-side mechanism readback
+// ============================================================
+// Runs ON THE AP (called from ap_main's test-mode branch, after the AP signals
+// online).  Reads this AP's CR4/EFER/LSTAR/STAR/SFMASK into its result slot so
+// the BSP can assert AP-side CPU-config parity.  Writes magic LAST (x86 TSO) so
+// the BSP polling magic sees a complete slot.  ap_main halts the AP on return.
+static void ap_test_selfcheck(uint32_t cpu_id) {
+    cinux::arch::ApSelfcheckResult& r = cinux::arch::g_ap_selfcheck_results[cpu_id];
+    uint64_t                        cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    r.cpu_id = cpu_id;
+    r.cr4    = cr4;
+    r.efer   = cinux::arch::read_msr(0xC0000080);
+    r.lstar  = cinux::arch::read_msr(0xC0000082);
+    r.star   = cinux::arch::read_msr(0xC0000081);
+    r.sfmask = cinux::arch::read_msr(0xC0000084);
+    r.magic  = cinux::arch::kApSelfcheckMagic;
+}
+
+// Wake APs via boot_aps and assert AP-side CPU-config readback on the BSP.
+// Returns false on any SMP assertion failure (OR'd into exit_code so a regression
+// fails the suite).  No-op (returns true) when cpu_count<=1 -- the SMP path only
+// engages under -smp 2, where M3-1's acpi::init detected >1 CPU.  This is what
+// turns run-kernel-test-smp from a BSP-only no-op into a real AP-wake gate.
+static bool run_smp_ap_wake_test() {
+    const auto&    info     = cinux::drivers::acpi::g_acpi_info;
+    const uint32_t ap_count = info.cpu_count > 0 ? info.cpu_count - 1 : 0;
+    if (ap_count == 0) {
+        cinux::lib::kprintf("[F-VERIFY M3-2] single-CPU: AP wake test skipped\n");
+        return true;
+    }
+
+    // boot_aps sends INIT-SIPI-SIPI via LAPIC IPI; the test kernel must init the
+    // LAPIC (IPI-capable) first.  g_pmm is already up (suites ran above).
+    cinux::drivers::apic::g_lapic.init(0xFEE00000);
+    cinux::drivers::apic::g_lapic.enable(0xFF);
+
+    cinux::arch::g_ap_test_selfcheck_fn = ap_test_selfcheck;
+    cinux::lib::kprintf("[F-VERIFY M3-2] booting %u AP(s) + readback...\n", ap_count);
+    cinux::arch::boot_aps();
+
+    bool ok = true;
+    for (uint32_t cpu = 1; cpu <= ap_count && cpu < cinux::proc::kMaxCpus; cpu++) {
+        // Poll the AP's slot until its selfcheck completes (magic written last).
+        const volatile cinux::arch::ApSelfcheckResult* slot =
+            &cinux::arch::g_ap_selfcheck_results[cpu];
+        for (volatile uint32_t spin = 0; spin < 100000000; spin++) {
+            if (slot->magic == cinux::arch::kApSelfcheckMagic) {
+                break;
+            }
+        }
+        // Field-by-field read from the volatile slot (aggregate copy can't bind a
+        // volatile source).  x86 TSO + magic-written-last => a consistent set.
+        const uint32_t magic = slot->magic;
+        const uint64_t cr4   = slot->cr4;
+        const uint64_t efer  = slot->efer;
+        const uint64_t lstar = slot->lstar;
+        cinux::lib::kprintf("[F-VERIFY M3-2] AP%u: magic=0x%lx cr4=0x%lx efer=0x%lx lstar=0x%lx\n",
+                            cpu, static_cast<unsigned long>(magic), static_cast<unsigned long>(cr4),
+                            static_cast<unsigned long>(efer), static_cast<unsigned long>(lstar));
+        if (magic != cinux::arch::kApSelfcheckMagic) {
+            cinux::lib::kprintf("[F-VERIFY M3-2] FAIL AP%u: never ran selfcheck\n", cpu);
+            ok = false;
+            continue;
+        }
+        if (lstar == 0) {
+            cinux::lib::kprintf("[F-VERIFY M3-2] FAIL AP%u: LSTAR==0 (syscall RIP -> #DF class)\n",
+                                cpu);
+            ok = false;
+        }
+        if (((cr4 >> 9) & 1) == 0 || ((cr4 >> 10) & 1) == 0) {
+            cinux::lib::kprintf("[F-VERIFY M3-2] FAIL AP%u: CR4 OSFXSR/OSXMMEXCPT clear (0x%lx)\n",
+                                cpu, static_cast<unsigned long>(cr4));
+            ok = false;
+        }
+        if ((efer & (1ULL << 11)) == 0) {
+            cinux::lib::kprintf("[F-VERIFY M3-2] FAIL AP%u: EFER.NXE clear\n", cpu);
+            ok = false;
+        }
+    }
+    cinux::lib::kprintf("[F-VERIFY M3-2] AP wake + readback: %s\n", ok ? "PASS" : "FAIL");
+    cinux::arch::g_ap_test_selfcheck_fn = nullptr;  // disarm (APs already halted)
+    return ok;
+}
 
 extern "C" void kernel_main() {
     // Step 1: Initialise serial port for test output
@@ -475,7 +563,9 @@ extern "C" void kernel_main() {
     run_clone_tests();
 
     // Step 5: Report and exit
-    int exit_code = (test::get_total_failed() > 0) ? 1 : 0;
+    // F-VERIFY M3-2: AP wake + AP-side readback (-smp 2 only; no-op single-CPU).
+    bool smp_ok    = run_smp_ap_wake_test();
+    int  exit_code = (test::get_total_failed() > 0 || !smp_ok) ? 1 : 0;
 
     if (exit_code != 0) {
         cinux::lib::kprintf("\n[TEST] TESTS FAILED (exit code %d)\n", exit_code);
