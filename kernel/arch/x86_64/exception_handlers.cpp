@@ -186,6 +186,42 @@ void dump_first_pf(const InterruptFrame* frame, uint64_t cr2) {
     debugcon_hex64(cr3);
     debugcon_str(" <<<\n");
 }
+
+// F-VERIFY M6-2: CoW-resolution-failed diagnostic.  Lock-free walk of the
+// faulting PTE (read CR3, descend PML4->PDPT->PD->PT through kernel page-table
+// pages only -- no locks, no SMAP bypass) to print the backing phys + its
+// mapcount.  A cross-core CoW UAF (page freed while another core still maps it)
+// shows mapcount=0 or a stale phys here -- one-shot diagnosis instead of a
+// multi-hypothesis debug session.  Called only on the CoW-FAIL path (rare), so
+// no noise on the normal CoW-resolved path.
+void dump_cow_fail_diagnostic(uint64_t fault_addr) {
+    uint64_t cr3;
+    __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
+    auto*     t = reinterpret_cast<const cinux::arch::PageEntry*>(cinux::arch::DIRECT_MAP_BASE +
+                                                                  (cr3 & cinux::arch::ADDR_MASK));
+    uint64_t  phys    = 0;
+    const int shft[4] = {39, 30, 21, 12};
+    bool      present = true;
+    for (int level = 0; level < 4 && present; level++) {
+        const cinux::arch::PageEntry& e = t[(fault_addr >> shft[level]) & 0x1FF];
+        if (!e.is_present()) {
+            break;
+        }
+        if (e.huge || level == 3) {
+            phys = e.phys_addr();  // huge leaf or PT leaf
+            break;
+        }
+        t = reinterpret_cast<const cinux::arch::PageEntry*>(cinux::arch::DIRECT_MAP_BASE +
+                                                            e.phys_addr());
+    }
+    debugcon_str("\n>>> CoW-FAIL cr2=");
+    debugcon_hex64(fault_addr);
+    debugcon_str(" phys=");
+    debugcon_hex64(phys);
+    debugcon_str(" mapcount=");
+    debugcon_hex64(static_cast<uint64_t>(cinux::mm::g_pmm.mapcount_load(phys)));
+    debugcon_str(" <<<\n");
+}
 }  // namespace
 
 // Dumps the first #GP's faulting frame exactly once (recursive frames from a
@@ -502,6 +538,10 @@ void handle_pf(InterruptFrame* frame) {
         if (cinux::proc::handle_cow_fault(fault_addr)) {
             return;
         }
+        // F-VERIFY M6-2: CoW resolution failed -- dump phys + mapcount to debugcon
+        // (lock-free PTE walk; see dump_cow_fail_diagnostic).  Rare path, no noise
+        // on the normal CoW-resolved path.
+        dump_cow_fail_diagnostic(fault_addr);
     }
 
     const char* present  = (err & 0x01) ? "protection violation" : "page not present";
