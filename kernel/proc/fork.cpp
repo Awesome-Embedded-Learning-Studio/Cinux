@@ -153,6 +153,15 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int fork(PidAllocat
     child->set_child_tid   = 0;
     child->ppid            = parent->pid;
     child->state           = TaskState::Ready;
+    // F10 SMP-race: memcpy just inherited the parent's on_cpu (= the parent's
+    // current CPU).  That trips the F4-followup migration-race guard in
+    // pick_next(), which reads on_cpu==X as "CPU X is mid-saving this ctx" and
+    // skips the task on every other CPU.  A freshly forked child has never run
+    // -- its ctx is fully set up right here -- so it must read as "not running /
+    // ctx saved" (-1), exactly like a TaskBuilder-built task.  Without this,
+    // under -smp the child is pinned to the parent's CPU until first run and
+    // violates the guard's invariant.  See [[smp-migration-context-race]].
+    child->on_cpu          = -1;
     child->parent          = parent;
     child->children        = nullptr;
     child->exit_status     = 0;
@@ -212,6 +221,18 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int fork(PidAllocat
     child->ctx.rsp = (current_rbp + 8) - current_rsp + child_stack_start;
     child->ctx.rbp = *reinterpret_cast<uint64_t*>(current_rbp);
     child->ctx.rip = reinterpret_cast<uint64_t>(fork_child_trampoline);
+
+    // F10 shell-launch SMP-race diagnostic: the child unwinds from
+    // fork_child_trampoline through the return address at ctx.rsp.  Dump it so
+    // we can see if the child resumes at the right place (fork()'s caller).
+    {
+        uint64_t ret_addr = *reinterpret_cast<uint64_t*>(child->ctx.rsp);
+        cinux::lib::kprintf(
+            "[FORK] child tid=%lu ctx.rip=%p ctx.rsp=%p retaddr=%p (trampoline=%p)\n",
+            static_cast<unsigned long>(child->tid), reinterpret_cast<void*>(child->ctx.rip),
+            reinterpret_cast<void*>(child->ctx.rsp), reinterpret_cast<void*>(ret_addr),
+            reinterpret_cast<void*>(fork_child_trampoline));
+    }
 
     // CoW page table handling
     if (parent->addr_space != nullptr) {

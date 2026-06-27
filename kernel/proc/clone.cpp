@@ -191,6 +191,10 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int clone(
         child->parent       = parent;
     }
     child->state       = TaskState::Ready;
+    // F10 SMP-race: reset the stale on_cpu inherited from the parent's memcpy
+    // (see fork.cpp).  A fresh child has never run; its ctx is set up below, so
+    // pick_next() must see "not running / ctx saved" (-1), not the parent's CPU.
+    child->on_cpu      = -1;
     child->children    = nullptr;
     child->exit_status = 0;
 

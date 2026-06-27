@@ -235,6 +235,11 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
     }
 
     clear_user_mappings(*task->addr_space);
+    // F10 shell-launch: execve replaces the image, so discard any VMA records
+    // inherited from fork (a fresh AddressSpace has none; a forked child has the
+    // parent's).  Without this the new PT_LOAD insert collides with the stale
+    // set and "VMA record failed" aborts the load.
+    task->addr_space->vmas().clear();
 
     bool     has_load_segment = false;
     uint64_t max_seg_end      = 0;  ///< highest PT_LOAD end -> brk_initial

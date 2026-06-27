@@ -31,6 +31,13 @@ int64_t sys_getcwd(char* buf, size_t size);
 void    sys_exit(int code);
 void    sys_yield(void);
 
+/// Process management -- lets the shell fork + execve + reap a child program
+/// (e.g. the musl static /hello).  These are the only user/libc wrappers the
+/// shell launcher needs; musl programs bring their own libc.
+int64_t sys_fork(void);
+int64_t sys_execve(const char* path, char* const argv[], char* const envp[]);
+int64_t sys_waitpid(int pid, int* status, int options);
+
 /// Layout matches the Linux x86_64 `struct stat` (uapi/asm/stat.h), 144 bytes,
 /// so musl/glibc binaries share the on-stack buffer with the kernel verbatim.
 struct sys_stat {

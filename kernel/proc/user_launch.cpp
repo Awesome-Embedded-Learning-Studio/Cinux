@@ -25,14 +25,9 @@
 
 namespace cinux::proc {
 
-void launch_user_program(const char* path, const char* const argv[], const char* const envp[]) {
-    auto*      task = Scheduler::current();
-    ElfAuxInfo elf_aux{};
-    auto       result = execve(path, argv, envp, &elf_aux);
-    if (result != ExecveResult::Ok) {
-        cinux::lib::kprintf("[PROC] execve(%s) failed: %d\n", path, static_cast<int>(result));
-        Scheduler::exit_current();
-    }
+void enter_loaded_program(const char* path, const char* const argv[], const char* const envp[],
+                          const ElfAuxInfo& elf_aux) {
+    auto* task = Scheduler::current();
 
     // User stack: pre-map the top USER_STACK_PAGES, then record the full
     // demand-growth Stack VMA under the F2-M5 hard gate. Accesses below
@@ -131,6 +126,17 @@ void launch_user_program(const char* path, const char* const argv[], const char*
     update_syscall_stack(task->kernel_stack_top);
     jump_to_usermode(entry, user_rsp, 0);
     Scheduler::exit_current();  // unreachable; jump_to_usermode does not return
+}
+
+void launch_user_program(const char* path, const char* const argv[], const char* const envp[]) {
+    ElfAuxInfo elf_aux{};
+    auto       result = execve(path, argv, envp, &elf_aux);
+    if (result != ExecveResult::Ok) {
+        cinux::lib::kprintf("[PROC] execve(%s) failed: %d\n", path, static_cast<int>(result));
+        Scheduler::exit_current();
+    }
+    enter_loaded_program(path, argv, envp, elf_aux);
+    Scheduler::exit_current();  // unreachable; enter_loaded_program jumps
 }
 
 }  // namespace cinux::proc
