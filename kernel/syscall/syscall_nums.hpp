@@ -73,6 +73,7 @@ enum class SyscallNr : uint64_t {
     SYS_exit_group      = 231,  ///< terminate thread group (musl exit(); falls back to SYS_exit)
     SYS_openat          = 257,  ///< open relative to dirfd (musl open/openat; AT_FDCWD=-100)
     SYS_newfstatat      = 262,  ///< stat relative to dirfd (musl stat/fstat/lstat)
+    SYS_ping           = 220,  ///< ICMP echo (F7 shell ping; Cinux-custom)
 };
 
 /// Dispatch table covers all assigned Linux x86_64 numbers (max ~440) with

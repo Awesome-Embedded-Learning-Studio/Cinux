@@ -34,4 +34,5 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_arch_prctl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_set_tid_address.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_clock_gettime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_ping.cpp
 )

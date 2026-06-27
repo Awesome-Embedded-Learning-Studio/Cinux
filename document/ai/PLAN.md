@@ -73,6 +73,35 @@
 
 > 批a [note](../notes/2026-06-25-f5-m6-e1000-b1-detect-mac.md)；批b [note](../notes/2026-06-26-f5-m6-e1000-b2-rx-tx.md)；**批b-fix [note](../notes/2026-06-26-f5-m6-e1000-rx-timer-fix.md)**。**关键 GOTCHA（接手必读；批b-fix 推翻批b 原结论 ①）**：① ~~轮询 RX 读 MMIO(RDH)才收得到包~~ —— **错的**：批b 那个「读 RDH → GPRC 0→1」是**带 filter-dump 调试时的副作用**，去掉 filter-dump（target 路径）GPRC 稳定 0。真相：**test kernel 关中断 → QEMU main loop 不跑 → SLIRP reply 不投递**。正解 = LAPIC periodic timer(0x30) + poll 没 包时 `sti;hlt;cli`（hlt 让 main loop 投递，timer IRQ 唤醒），**别写 MMIO trap 循环「泵」main loop**（64-trap / filter-dump 都是碰运气）；② QEMU e1000 **不模拟** RCTL.LBM loopback，用 SLIRP ARP/DHCP round-trip；③ 直接跑 QEMU 前要 `regenerate-ext2-image`（否则 ext2 inode 耗尽假失败）；④ `/dev/kvm` 是 root:kvm，手动跑诊断用 `-accel tcg`；⑤ `net_timer_handler` 直接 `g_lapic.eoi()`，**不能** `irq_eoi(0)`（test 没 switch_to_apic，会走 8259 EOI 不了 LAPIC）。
 
+## 🔄 F7 网络协议栈（底子优先：loopback 先 → host 单测 → e1000 收尾）— 2026-06-26 立项
+
+> worktree `worktree-f7-net-ping`（从 main `fb25c89`）。e1000 RX/TX（PR#40）已合，netdev 抽象（F5-M6 批c）延后到此。**用户两度拍板**：① 抽象要做对（加网卡不疼）→ 含零拷贝借用模型 + loopback；② **不急 ping，底子优先**——e1000「梭哈」教训（批b「读 RDH 收得到包」是 filter-dump 副作用，绿了 ≠ 对了）。打法：loopback 当确定性试验台（躲 SLIRP 时序），每层 host 单测站住，e1000 最后接（ping 是栈正确的自然结果，不是 gate）。详见 [L0 note](../notes/2026-06-26-f7-net-l0-netdev-abstraction.md)。
+> 验证：每层 host 单测（`test_host`）+ `run-kernel-test`；解耦 4 grep（`kernel/net/` 不 include e1000/dma_buffer/irq）。
+
+| 层 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| L0 | netdev 抽象（NetDevice/NetStack/ProtocolHandler）+ Packet 借用 buffer（BufferSink/scope_guard）+ ARP cache + 复用 Cinux-Base（Span/ScopeGuard/internet_checksum） | ✅ | 8ab2569 | host 4/4（dispatch/buffer/arp_cache/checksum）+ 945/0 + 解耦 grep 成立 |
+| L1 | ArpModule + Ipv4Module + IcmpModule + LoopbackDevice → 内核测 ping `127.0.0.1`（确定性，无 SLIRP） | ✅ | 794147f | host net 5/5（+net_arp_module）+ 946/0（+1 test_net loopback ping）|
+| L2 | E1000NetDevice adapter（copy RX）+ 生产 arm TX + main 接线 → 真 ping `10.0.2.2`（失败锁死 adapter） | ✅ | 92b82fd | 947/0（+1 test_ping_e1000 真 ping 10.0.2.2 reply）+ host net 5/5 |
+| L3 | notes + ROADMAP F7-M1/M2/M3✅ + 4 解耦 grep 落 `check_net_decoupling` target（负测能抓人） | ✅ | 本次 | check_net_decoupling 绿 + 全量绿 |
+
+> **L2 铁证**：`[net] e1000 ping 10.0.2.2: reply id=0x1234 seq=1` —— ARP resolve + ICMP echo 真往返 SLIRP。**底子优先回报**：栈在 loopback 上证明后,e1000 接入一次过。详见 [L2 note](../notes/2026-06-26-f7-net-l2-e1000-ping.md)。**解耦机器执行**：`cmake --build build --target check_net_decoupling`（4 grep,负测往 kernel/net/ 注 irq.hpp 立刻 FAIL）。**F7-M1/M2/M3 收官**（以太网帧/ARP/IPv4+ICMP）。
+
+### ✅ shell ping（生产 net 栈 + SYS_ping + shell 命令）— 2026-06-26，本分支续做
+> 把 ping 从"内核测证明"接到 shell。**关键决策：不要常驻 net 线程**——sys_ping 的 send+sti/hlt+poll 循环本身就是 ping 期间的 poll driver（production 开中断，LAPIC tick 唤醒 hlt 驱动 SLIRP）。详见 [shell-ping note](../notes/2026-06-26-f7-net-shell-ping.md)。
+>
+> ⛔ **ring3 实跑 #DF（未修，接手中）**：B1-B3 代码齐 + 内核态全证（test_production_ping/syscall_ping 绿），但 shell 敲 `ping` → sys_ping 里 sti/hlt → 调度器 syscall 中途抢占 → 破坏栈帧 → Double Fault。harness 抓不到（不能真跑 ring3），boot smoke 才暴露。**协议栈 + ping() 本身没问题**。根因 + 修法（阻塞式 ping + 常驻 poll driver，**不要 sti/hlt 自旋**）见 [handoff-df note](../notes/2026-06-26-f7-net-handoff-df.md)。**B1-B3 commit 暂不要 push 进主线**（敲 ping 会 panic）。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| B1 | 生产 `cinux::net::init()`(建栈+attach e1000 单例,声明 kernel/net/ 实现 drivers/net/)+ `ping()`(sti/hlt 循环)+ stub + main 接线 | ✅ | c0c8ddd | test_production_ping reply id=0xbeef + 948/0 |
+| B2 | `SYS_ping=220` + sys_ping.cpp(调 cinux::net::ping,IP 解包+errno)+ 注册 syscall_table | ✅ | b0c817f | 948/0(syscall 注册编译) |
+| B3 | sys_ping 用户桩 + cmd_ping.cpp(解析 IP+count,循环打 reply)+ shell 注册 + make run 冒烟 | ✅ | 98990a4 | test_syscall_ping rc=0 + 949/0 + make run `[net] L3 stack up` 无 panic |
+
+> **live 交互**：`make run` → Shell → `ping 10.0.2.2`（输出走 GUI 屏,串口捕不到；路径全证：sys_ping handler→reply 内核测 + cmd_ping 编链 + 生产 boot 起栈 + syscall 派发同现有 syscall）。残留：常驻 poll driver(被动收包)/socket 层(F7-M6)/中断(批c)/UDP·TCP。
+
+> **架构**：两轴分离（NetDevice 设备轴 / ProtocolHandler 协议轴）+ FOLD-A（mac 可选 / 设备自决 L2 帧）+ FOLD-B（设备表 kMaxDevs=2 / `on_frame` 透传 `NetDevice&`，栈无 singleton）。e1000 copy adapter **不碰 E1000Controller**；loopback 零拷贝 RX 证明借用通路；virtio 零拷贝 future（`supports_zerocopy()` 诚实声明）。buffer 三红队：UAF = copy-to-retain 契约 / drop = scope_guard 全出口 recycle / 重入 = loopback send 只入队下轮派发。
+
 ## ✅ F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 收官 2026-06-26（PR#35 8be32d4；促修 SMP 迁移竞态 PR#34）
 
 > 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。

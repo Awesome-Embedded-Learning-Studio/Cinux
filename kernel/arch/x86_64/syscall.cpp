@@ -41,6 +41,7 @@
 #include "kernel/syscall/sys_mmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
+#include "kernel/syscall/sys_ping.hpp"
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_rmdir.hpp"
@@ -131,6 +132,9 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_exit_group, sys_exit_group);
     syscall_register(SyscallNr::SYS_openat, sys_openat);
     syscall_register(SyscallNr::SYS_newfstatat, sys_newfstatat);
+
+    // F7: ICMP echo (shell ping).
+    syscall_register(SyscallNr::SYS_ping, sys_ping);
 }
 
 }  // anonymous namespace
