@@ -119,6 +119,15 @@ syscall_entry:
     movq 8(%rsp), %rcx                 # frame+8→%rcx: user RIP (SYSRETQ loads RIP from RCX)
     movq 16(%rsp), %r11                # frame+16→%r11: user RFLAGS (SYSRETQ loads RFLAGS from R11)
     movq 80(%rsp), %rbx                # frame+80→%rbx: RESTORE user RBX (callee-saved)
+    movq 88(%rsp), %rbp                # frame+88→%rbp: RESTORE user RBP (callee-saved)
+                                      # (F10 fix: RBP is callee-saved per the SysV
+                                      #  ABI -- the kernel must preserve it across
+                                      #  syscall. The entry saved it at frame+88 but
+                                      #  the exit restored only RBX, so any user code
+                                      #  using a frame pointer across a syscall -- e.g.
+                                      #  musl's compiled wrappers or a hand-written
+                                      #  sys_fork -- resumed with a corrupt RBP and
+                                      #  segfaulted on the first [rbp+off] access.)
 
     # Deallocate trap frame (12 slots * 8 bytes = 96 bytes)
     addq $96, %rsp                     # $96→%rsp: remove entire trap frame
