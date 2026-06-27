@@ -309,6 +309,17 @@ void Keyboard::register_key_listener(KeyListener listener) {
 
 void Keyboard::dispatch_key(uint8_t code, char ascii, bool pressed, bool shift, bool ctrl,
                             bool alt) {
+    // Ctrl + letter -> control char (^C=0x03, ^D=0x04, ^Z=0x1A, ^\=0x1C ...).
+    // The scan tables yield the base letter; Ctrl was tracked but not applied,
+    // so Ctrl+C arrived as 'c' instead of 0x03 and never reached the TTY's
+    // VINTR handling. Apply the standard PC ^X = X & 0x1F decoding for letters.
+    if (ctrl && ascii != 0) {
+        char lower = static_cast<char>(ascii | 0x20);  // fold to lowercase
+        if (lower >= 'a' && lower <= 'z') {
+            ascii = static_cast<char>(ascii & 0x1F);
+        }
+    }
+
     KeyEvent ev{};
     ev.scancode = code;
     ev.pressed  = pressed;
