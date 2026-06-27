@@ -34,7 +34,47 @@ jobs:
       - name: Build
         run: cmake --build build -j$(nproc)
 
+      - name: Check memory layout (region/LBA overlap)
+        # F-VERIFY M0-5: check_memory_layout.py was authored (parses linker
+        # scripts + ELF PT_LOAD segments + disk LBA, exits 1 on overlap) but
+        # never ran in CI -- so the MSI-X/xHCI BAR0 collision class was a
+        # debug session, not a build failure. Wire it so a future static
+        # overlap fails CI. (Runtime-allocated MMIO like xHCI BAR0 can't be
+        # caught here -- that's a runtime self-test, tracked in M3/M6.)
+        run: python3 scripts/check_memory_layout.py --mini-elf build/kernel/mini/mini_kernel --big-elf build/kernel/big/big_kernel
+
       - name: Run host tests
+        working-directory: build
+        run: make test_host
+
+  host-tests-tsan:
+    # F-VERIFY M4: ThreadSanitizer gate for the -pthread host tests (test_pmm
+    # 4-thread alloc/free, test_sync_concurrent 8-thread lock stress). TSan is
+    # mutually exclusive with ASan, so it is a separate job, not a cell on
+    # host-tests. Catches data races in concurrent host test code (lockdep only
+    # does lock-order; it cannot see two threads touching a field with no lock).
+    # Value ramps as M2 links real kernel code into these tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3
+
+      - name: Compiler version
+        run: echo "GCC $(gcc --version | head -1)"
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_HOST_TSAN=ON -S .
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run host tests (ThreadSanitizer)
         working-directory: build
         run: make test_host
 
@@ -93,16 +133,17 @@ jobs:
           cmake --build build -j$(nproc)
           cmake --build build -j$(nproc)
 
-      - name: Run kernel tests
+      - name: Run kernel tests (single-CPU + -smp 2)
         working-directory: build
-        # timeout 180 fails fast on a panic-loop/deadlock hang (normal run is
-        # <60s); tee captures the full QEMU serial output to serial.log so the
-        # next step can upload it as an artifact for post-mortem (kprintf /
-        # panic / backtrace / memstats). pipefail propagates the test exit code
-        # through tee.
+        # F-VERIFY: run-kernel-test-all runs the suite under single-CPU THEN
+        # -smp 2 in one target, so CI can't forget the SMP variant (the 47/47
+        # SMP-空转 blind spot was a process gap, not just code). Either leg
+        # failing fails the build (wrapper maps isa-debug-exit). timeout 300
+        # for two QEMU runs (each <60s normal). tee captures both legs to
+        # serial.log for post-mortem; pipefail propagates the exit code.
         run: |
           set -o pipefail
-          timeout 180 make run-kernel-test 2>&1 | tee serial.log
+          timeout 300 make run-kernel-test-all 2>&1 | tee serial.log
 
       - name: Check test count did not regress (F-QA Q1-4)
         # F-QA Q1-4: fail if fewer tests than baseline ran (silent test loss).

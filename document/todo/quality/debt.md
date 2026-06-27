@@ -228,6 +228,7 @@
 - **现象**: ELF phdr 字段(p_vaddr/p_memsz/p_offset/p_filesz)参与算术无溢出检查。`validate_elf_header`(L181)只校验 ehdr,不校验 phdr 算术。p_vaddr + p_memsz 若 wrap(UINT64_MAX 附近)→ seg_end 错乱 → VMA/页表映射错乱(L267 map)。
 - **根因**: ELF 字段用户可控(损坏/恶意 ELF)。当前 init/shell 是仓库编译 ELF(字段合法,不触发);未来 execve 用户自定义 ELF + 恶意构造触发。read 兜底部分(ReadFailed)但 seg_end 用于 VMA 映射(L267 map)。
 - **修复建议**: validate 扩展 phdr:p_vaddr + p_memsz 不溢出 + 在用户地址空间范围(USER_BRK_MAX 等)+ p_offset + p_filesz ≤ inode->size。拒绝越界/wrap phdr。
+- **F-VERIFY M0-2 核实（2026-06-27）**: `-fsanitize=unsigned-integer-overflow` 是 **Clang-only**，GCC 工具链（本项目 CI + toolchain-x86_64）编译器报 `unrecognized argument`；**不能用 UBSAN flag 兜底 unsigned wrap**。必须 validate 内显式 checked 运算（saturating-add / checked-mul 拒绝 wrap）。audit 假设的 flag 路线作废。
 - **关联**: DEBT-012(phnum 无上限,同 validate 漏)
 
 ### DEBT-011 slab 双重释放检测为启发式（word[1]==poison），可伪造

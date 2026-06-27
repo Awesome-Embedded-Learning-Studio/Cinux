@@ -118,10 +118,14 @@ Claude Code 必须输出：
 
 ### G7 测试门
 
-- [ ] 基础验证只用 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)`。
+- [ ] 基础验证**默认 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)`**（F-VERIFY：单核 → -smp 2 一条命令，防忘跑 -smp 变体）；单 leg 调试用 `timeout 40 ... run-kernel-test`。
 - [ ] 改公共接口/host mock 相关代码时补全量 build 或 host test。
 - [ ] 改 SMP/调度/中断时补 `-smp 2` 相关验证或说明不可跑原因。
 - [ ] 新行为有测试；无法测试的路径写明人工冒烟和日志证据。
+- [ ] **串口日志读法**：QEMU serial.log 带 ANSI escape，手动 `grep` 须加 `-a`
+      （否则只报 `binary file matches`，GOTCHA#2 复发 3+ 次）；脚本侧
+      `check_test_count.sh` 已默认 `grep -a`。kprintf `%p` 已自带 `0x` 前缀，
+      调用处写 `0x%p` 会输出 `0x0x...`——用 `%p` 即可。
 
 ### G8 文档门
 
