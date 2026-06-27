@@ -2,6 +2,37 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F-VERIFY（动态验证与并发检测基建）— 2026-06-27 立项
+
+> 横切里程碑（与 FO/F-INFRA/F-QA/F-CLN 同档）。**起源**：2026-06-27 audit（15-agent workflow 抽 165 调试时间坑 + 审 5 维基建）结论——2026-06-21 那轮 14 维静态债务审计量的是「代码写得对不对」，但所有超时调试都是「代码有没有真被跑到、机制有没有真生效、崩了能不能一眼看懂」（动态/环境性另一根轴，静态债表天生瞎）。165 坑根因 top：机制没真生效 27 / 并发没压到 22 / 基建≠生产 19 / 规格看错 17 / 内存 UAF 14。**目标**：把多会话 forensics 级调试变一次 CI 红灯。**用户决策（2026-06-27）**：全做 M0-M6，重锤 SMP+并发；并补**测试矩阵盘点**（现在测试太乱、没人知道到底覆盖了什么）+**测试代码整理**（框架 bug / 共享 util / 0x1234 假 CoW / 镜像副本）。先改 ROADMAP/PLAN 立项，等确认再开 feat 分支。详见 audit memory `debugging-audit-dynamic-coverage-gap`。
+
+### 调研结论（决定打法，已读码 + workflow 核实）
+- **run-kernel-test-smp 是空转 SMP 门**：[main_test.cpp](../../kernel/test/main_test.cpp) 全程不调 `boot_aps()`、不 `sti`、worker 无 AddressSpace；唯一的 `smp.hpp` 引用只借 `kLapicTimerVector` 给 e1000 定时器。`-smp 2` 起来但套件 BSP-only 跑 → SMP 门通过=没通过。
+- **fork/CoW 在测试里是死代码**：[test_clone.cpp:142](../../kernel/test/test_clone.cpp#L142) 用 `reinterpret_cast<AddressSpace*>(0x1234)` 哨兵，不建带用户页表的真 AS；[main_test.cpp:189](../../kernel/test/main_test.cpp#L189) 那个 `new AddressSpace()` 是 ring-3 smoke 临跑前装的全新 AS，从不走继承父 AS 的 CoW 页表拷贝。→ F10 shell fork/CoW 那类 bug CI 永远抓不到（现靠 headless forktest 装 /hello 绕过）。
+- **全仓零数据竞争检测器**：`CINUX_HOST_TSAN` 在 [test/CMakeLists.txt:22](../../test/CMakeLists.txt#L22) 只是注释，无 `option()`；lockdep（F4-M5）只看锁序 AB-BA，看不见「两核裸碰一个字段」这种原始数据竞争——这正是 CoW 跨核 UAF / registry·pid 锁 / 迁移竞态的盲区。
+- **RUN_ALL_TESTS 虚报 PASS**：[test_framework.h](../../test/framework/test_framework.h) 逐项永远打 `[PASS]`+`_tests_passed++`，即使 ASSERT 失败（失败计数也 +1，但 PASS 计数虚高、逐项 PASS 行不可信）。M0 先修。
+- **机制回读只有单点**：仅 `test_usermode::test_f9` 读 CR4 SMEP/SMAP（BSP 单核）；AP 侧 LSTAR/EFER/STAR/SFMASK/CR4.OSFXSR 零回读——这是 SMEP/SMAP「4 批 931/0 假绿」的同根。
+- **F10 四修已合 main**（PR#42 `b31d65e`，`ITERS=2` 单 CPU + `-smp 2` 均 races=0、954/0）：CoW TLB flush / syscall frame 128B callee-saved / free_subtree mapcount / copied-stack RBP 重定位。**但都是 forensics 修的、无 harness 测试守**——M5 的价值 = 建回归网 + 在 -smp 真压力下复验，防下次回归又变多会话排查。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 零风险快速赢点（核实后定稿）：修 RUN_ALL_TESTS 虚报（快照 `_tests_failed` 前后比对，删 `\|\|true` 死分支）/ `-fsanitize=unsigned-integer-overflow` 进 CINUX_UBSAN（`__ubsan_handle_*_overflow` 桩已核实存在，抓 ELF 边界 DEBT-020/012）/ 全仓禁字面 `0x%p` lint + DIRECTIVES 记 `grep -a` 手动命令约定（`check_test_count.sh` 已 -a，无需改）/ `test_f9` 扩 OSFXSR·OSXMMEXCPT 回读 / `check_memory_layout.py` 接 CI 重叠门（扩 PCI BAR）。~~`kMaxCpus` static_assert~~ 已存在 [ap_main.cpp:35](../../kernel/arch/x86_64/ap_main.cpp#L35)（核实后砍） | ⏳ | run-kernel-test 绿 + 门禁自身可核 |
+| 1 | **测试矩阵盘点**：建 `document/todo/quality/test-matrix.md`——子系统 × {host-unit / host-integration(真码) / QEMU-kernel / QEMU-SMP / ring-3 userspace / 机制回读} → 覆盖/缺/假测；标出假测（0x1234 哨兵 CoW、镜像 `syscall_dispatch`、ring0 够不到的 ring3 路径等）；平行 [debt.md](../todo/quality/debt.md) 作 F-VERIFY 追踪表（机制回读是其一个轴） | ⏳ | docs-only（每格 grep 坐实） |
+| 2 | **测试代码整理 + 共享 util**：`CurrentTaskGuard` / 标准化 `current`+`AddressSpace`+`MockPMM` mocking util / 拆 flat [main_test.cpp](../../kernel/test/main_test.cpp) 按域分组 / 镜像副本改链接真码（依赖轻的 fork·clone CoW 标记、scheduler enqueue·pick、execve 映射）/ DIRECTIVES 记 harness↔生产 bring-up parity 清单 | ⏳ | run-kernel-test 绿（重构不改语义） |
+| 3 | **SMP 测试唤醒基建**（enabler，技术最硬）：测试内核镜像生产 `boot_aps()`，AP 唤醒进 per-CPU 受控 test-worker 上下文（非生产 init 线程），跑完跨核压力向 BSP 汇报；`run-kernel-test-smp` 不再空转；DIRECTIVES 标注旧 -smp 空转历史 | ⏳ | run-kernel-test-smp AP 真跑（per-cpu 结果槽非空，其他 943 测试无感） |
+| 4 | **并发检测基建**：host `CINUX_HOST_TSAN` option（链接真码的 -pthread 测试：sync_concurrent/fd_table/vma/pmm）+ 内核 KCSAN-lite（opt-in `CINUX_KCSAN`，只在已知 TOCTOU 点重读热字段两次→kpanic）；补 lockdep 看不见的原始数据竞争 | ⏳ | 注入竞态负测试：检测器必报 |
+| 5 | **真用户 fork/CoW 压力回归 + 继承 AS execve**：harness 原生真用户任务 fork（parent 带满 AS fork，child 写 CoW 触发真 #PF→handle_cow_fault，断言物理页隔离 / mapcount 不漏 / parent 不变，每 CI 跑、非 /hello hack）+ 第二个 fork-then-execve musl ELF 覆盖继承 AS 路径；-smp 真压力复验 F10 四修 | ⏳ | run-kernel-test-smp 压力 races=0 + 负测试（撤一修必红） |
+| 6 | **故障可观测增强**：`handle_pf` 命中 CoW 页走 PTE 打 mapcount / 用户态 panic 加用户栈 hexdump（~16 qwords）/ #PF debugcon 首故障捕获（镜像 `capture_first_gp`）/ no-VMA 分支 USER STACK OVERFLOW 诊断 / page owner tag（opt-in `CINUX_PAGE_OWNER`） | ⏳ | 触发 CoW #PF 看到一行定位；负测试可观测不丢首故障 |
+
+### 风险重点
+- **M3 技术最硬**：测试内核镜像 SMP bring-up 不引入生产依赖，需重构 harness 启动模型（GOTCHA 候选：test-worker per-CPU 栈/GS/中断；AP worker 不能干扰 943 个现有测试，全程 `cli` 默认、局部 `sti`）。
+- **M2 镜像副本改链接真码**依赖提取非平凡（fork/scheduler/execve 牵连多），可能拆 2a/2b；**M5 依赖 M3 的 SMP 真能跑**。
+- **M4 KCSAN-lite 误报**：只插桩已知 TOCTOU 点（Task state/refcount/registry/pid/mapcount），不全局插桩，否则噪声淹没信号。
+- **M5 会主动暴露回归**：负测试设计好（撤掉任一 F10 修必红），证明测试真有效而非又一张假绿——这正是 F-VERIFY 的精神。
+- 架构契合：A.6 无异常/RTTI（KCSAN-lite 走 kpanic 不走异常）；opt-in（`CINUX_HOST_TSAN`/`CINUX_KCSAN`/`CINUX_PAGE_OWNER`）不污染默认构建性能/确定性；对齐 Linux（机制回读矩阵、数据竞争检测 CONFIG_KCSAN）。
+- 建议顺序：M0 → M1（摸清家底）→ M2（理地基）→ M3（SMP enabler）→ M5（回归网，headline）→ M4 ‖ M6（独立收口）。
+
 ## 🔄 F10-M1（用户态运行时 / musl 静态移植）— 2026-06-26 立项
 
 > Feature 域大弧。F9 安全地基已就位（NX/SMEP/SMAP + ASLR + 凭证 + Canary 全完成并合 main PR#38）。**方向决策（用户 2026-06-26）**：**不自建 libc 生态**——`user/libc`（syscall/string/printf 三件套）仅作 QEMU 测试壳保留，不扩；**直接移植 musl 作唯一 libc**。先自己源码编译 musl（自包含 sysroot），跑通后切 **musl-gcc** 当工具链驱动（CFBox 等一律 musl-gcc 编）。砍掉旧 M1「自建 libc 扩 80 syscall」（造轮子无意义）。旧 M5「musl+glibc」内容并入本 M1；glibc 静态兼容降为可选 stretch（比 musl 重得多）。分支 `feat/f10-musl`（从干净 main `fb25c89`）。
