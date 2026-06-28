@@ -662,13 +662,27 @@ extern "C" void kernel_main() {
     auto* boot_ctx =
         cinux::proc::TaskBuilder().set_entry(musl_hello_smoke_entry).set_name("boot_ctx").build();
     if (hello_worker != nullptr && boot_ctx != nullptr) {
-        cinux::proc::Scheduler::add_task(cinux::lib::NotNull<cinux::proc::Task*>{hello_worker});
+        // wake_ap=false: do NOT IPI an idle AP for the initial worker -- tilt the
+        // race toward the BSP running the smoke. (Not a hard guarantee: an AP in
+        // sti;hlt can still be pulled out by a LAPIC-timer tick and steal the
+        // worker. The park below handles that case.)
+        cinux::proc::Scheduler::add_task(cinux::lib::NotNull<cinux::proc::Task*>{hello_worker},
+                                         /*wake_ap=*/false);
         cinux::proc::Scheduler::run_first(cinux::lib::NotNull<cinux::proc::Task*>{boot_ctx});
-        // run_first returns only if the run queue was empty; the worker exits
-        // QEMU via isa-debug-exit, so reaching here is unexpected.
-        cinux::lib::kprintf("[F10-M1] smoke worker did not run -- falling back\n");
+        // run_first() returns ONLY if the run queue was empty, which means an AP
+        // seized hello_worker first (a task is removed from the queue exactly
+        // once by pick_next; if the BSP did not get it, the AP did). The smoke
+        // is therefore running on the AP and will exit QEMU itself via
+        // isa-debug-exit. The BSP must NOT outl here -- that would kill the AP
+        // mid-smoke (the old false-red/green). Park with interrupts off until
+        // the AP's outl ends QEMU.
+        cinux::lib::kprintf("[F10-M1] smoke seized by AP; BSP parking until QEMU exit\n");
+        while (true) {
+            __asm__ volatile("cli; hlt");
+        }
     } else {
         cinux::lib::kprintf("[F10-M1] smoke task alloc failed\n");
+        exit_code = 1;
     }
 #endif
 

@@ -172,6 +172,20 @@ void Scheduler::init() {
         cinux::lib::kprintf("[SCHED] BSP idle task created tid=%lu\n", idle_tasks_[0]->tid);
     }
 
+    // SMP: rebuild each online AP's idle task. The wipe above (test isolation)
+    // nulls the whole table, but on -smp2 an AP left without an idle task has
+    // idle()==nullptr. A task exiting on that AP then cannot be switched out:
+    // schedule() finds an empty run queue and no idle to fall back to, so it
+    // returns WITHOUT context-switching and the Zombie loops forever re-entering
+    // its exit path -- the -smp2 exit/reap "resurrection" bug. setup_ap_idle() is
+    // idempotent and rebuilds lazily, exactly as normal AP bringup does. (During
+    // the single-core unit-test suites the APs are not online yet, so this is a
+    // no-op there; it only matters for the -smp2 ring-3 smoke's re-init.)
+    const uint32_t online_aps = cinux::arch::online_ap_count();
+    for (uint32_t c = 1; c <= online_aps && c < kMaxCpus; ++c) {
+        setup_ap_idle(c);
+    }
+
     initialized_ = true;
     cinux::lib::kprintf("[SCHED] Scheduler initialised with %s class\n", default_rr_.name());
 }
@@ -199,7 +213,7 @@ Task* Scheduler::pick_next_task() {
     return pick_next_from(classes_, class_count_);
 }
 
-void Scheduler::add_task(lib::NotNull<Task*> task) {
+void Scheduler::add_task(lib::NotNull<Task*> task, bool wake_ap) {
     if (task->sched_class == nullptr) {
         task->sched_class = &default_rr_;
     }
@@ -208,8 +222,12 @@ void Scheduler::add_task(lib::NotNull<Task*> task) {
     cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' added to %s\n", task->tid, task->name,
                         task->sched_class->name());
     // A newly runnable task may be claimable by an idle AP (F4-M4 M4-2).  No-op
-    // on a single-core system.
-    arch::wake_idle_ap();
+    // on a single-core system.  Suppressed by the bootstrap path (wake_ap=false)
+    // so run_first() deterministically picks the first worker on the BSP
+    // instead of racing an AP for it.
+    if (wake_ap) {
+        arch::wake_idle_ap();
+    }
 }
 
 void Scheduler::remove_task(lib::NotNull<Task*> task) {
