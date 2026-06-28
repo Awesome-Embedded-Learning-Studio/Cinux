@@ -82,6 +82,13 @@ add_subdirectory(user)
 # added BEFORE kernel/ so the cinux-gui target exists when the kernel links it.
 if(CINUX_GUI)
     add_subdirectory(third_party/Cinux-GUI)
+    # F13/PF-gate: cinux-gui is added BEFORE kernel/, so it does NOT inherit
+    # kernel/CMakeLists.txt's -mstack-protector-guard=global. Without this the
+    # core's canary reads fs:0x28 (TLS default), which faults in the kernel
+    # (no TLS canary slot); the legacy PF handler's zero-page demand-paging
+    # masked it (read 0, canary 0==0 false-OK), so pump() silently ran with a
+    # dead canary. Point the canary at the kernel's global __stack_chk_guard.
+    target_compile_options(cinux-gui PRIVATE -mstack-protector-guard=global)
 endif()
 add_subdirectory(kernel)
 

@@ -312,8 +312,24 @@ void handle_pf(InterruptFrame* frame) {
                     cinux::proc::signal_send(task, cinux::proc::Signal::kSigsegv);
                     return;
                 }
-                // Kernel-mode fault or no current task: keep the legacy
-                // zero-page service so test/boot PF injection still works.
+                // Kernel NULL/near-NULL deref (the nullptr->field pattern): Linux
+                // oopses here ("kernel NULL pointer dereference", address <
+                // PAGE_SIZE). Demand-paging the zero page would MASK the bug --
+                // the kernel reads 0 and continues, crashing later in an
+                // unrelated spot (the gui_worker saga: a fault @0x28 was demand-
+                // paged to a zero page, then PANIC @0x28 -- root cause eaten).
+                // Panic at the deref point with the full frame + backtrace so
+                // the offending RIP is obvious instead of a mystery downstream.
+                if (fault_addr < 0x1000) {
+                    panic(frame, "#PF", 14,
+                          "kernel NULL-pointer dereference @ %p (nullptr+0x%lx) -- "
+                          "not demand-paging the NULL page (would mask the bug)",
+                          reinterpret_cast<void*>(fault_addr), fault_addr);
+                }
+                // Kernel-mode fault or no current task on a non-NULL user addr:
+                // keep the legacy zero-page service so test/boot PF injection
+                // and user-access helpers (no exception table -> rely on demand
+                // paging) still work.
                 klog_warn(
                     "demand-paged user addr %p has no VMA (kernel-mode/no-task "
                     "context; mapping zero page)",
