@@ -183,37 +183,59 @@ static void musl_hello_smoke_entry() {
     cinux::lib::kprintf("[F10-M1] ext2 mounted at / for smoke (mounted=%d, blk=%d)\n",
                         ext2->is_mounted() ? 1 : 0, blk_dev != nullptr ? 1 : 0);
 
-    cinux::lib::kprintf("[F10-M1] musl hello ring-3 smoke: forking child for /hello\n");
-    int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
-    if (child_pid == 0) {
-        // Child: the worker is a kernel thread with no user address space, so
-        // fork produced a child without one too.  Install a fresh AS (mirroring
-        // the non-GUI /bin/sh launch in shell_launch.cpp) before execve.
-        auto* child        = cinux::proc::Scheduler::current();
-        child->addr_space  = new cinux::mm::AddressSpace();
-        const char* argv[] = {"/hello", nullptr};
-        const char* envp[] = {nullptr};
-        cinux::proc::launch_user_program("/hello", argv, envp);
-        cinux::proc::Scheduler::exit_current();  // unreachable
-    }
-
-    // Parent: poll for the child's exit (WNOHANG) yielding between checks.  The
-    // blocking waitpid path relies on block/unblock plumbing that the minimal
-    // harness scheduler does not reliably exercise; polling lets the child run
-    // cooperatively and avoids a hang.
-    int     status   = -1;
-    int64_t reap_ret = 0;
-    for (int spins = 0; spins < 50'000'000; ++spins) {
-        reap_ret =
-            cinux::syscall::sys_waitpid(child_pid, reinterpret_cast<uint64_t>(&status), 1, 0, 0, 0);
-        if (reap_ret != 0) {
-            break;  // reaped (>0) or error (<0)
+    // P3 ring-3 stress: run the musl /hello fork+execve+waitpid path repeatedly
+    // (not once) to flush out intermittent accessor/CoW/cleartid/futex races --
+    // the -smp2 shell "multiple /hello" saga showed these only fire on repeat.
+    constexpr int kHelloIters = 20;
+    int           hello_pass  = 0;
+    int           hello_fail  = 0;
+    cinux::lib::kprintf("[F10-M1] musl hello ring-3 smoke: %d iterations\n", kHelloIters);
+    for (int hi = 0; hi < kHelloIters; ++hi) {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            // Child: the worker is a kernel thread with no user address space,
+            // so fork produced a child without one too.  Install a fresh AS
+            // (mirroring the non-GUI /bin/sh launch) before execve.
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {"/hello", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program("/hello", argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
         }
-        cinux::proc::Scheduler::yield();
+
+        // Parent: poll for the child's exit (WNOHANG) yielding between checks.
+        int     status   = -1;
+        int64_t reap_ret = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            // Kernel inner waitpid (writes a kernel status) directly: smoke_entry
+            // is a kernel task with no user AS, so sys_waitpid's put_user would
+            // reject the kernel &status with -EFAULT.
+            int                        kstatus = 0;
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                status   = kstatus;
+                reap_ret = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap_ret = static_cast<int64_t>(wr);  // error (<0)
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        if (reap_ret > 0 && status == 0) {
+            ++hello_pass;
+        } else {
+            ++hello_fail;
+            cinux::lib::kprintf("[F10-M1] smoke: hello iter %d FAIL (status=%d reap=%lld)\n", hi,
+                                status, static_cast<long long>(reap_ret));
+        }
     }
-    bool hello_ok = (reap_ret > 0 && status == 0);
-    cinux::lib::kprintf("[F10-M1] smoke: hello exit_status=%d reap=%lld -> %s\n", status,
-                        static_cast<long long>(reap_ret), hello_ok ? "PASS" : "FAIL");
+    bool hello_ok = (hello_fail == 0);
+    cinux::lib::kprintf("[F10-M1] smoke: hello %d/%d iters PASS -> %s\n", hello_pass, kHelloIters,
+                        hello_ok ? "PASS" : "FAIL");
 
     // F-VERIFY M5-2: run the SMP CoW-race reproducer /forktest.  It forks
     // repeatedly + the parent writes a shared CoW page; under correct CoW the
@@ -235,9 +257,17 @@ static void musl_hello_smoke_entry() {
     } else if (ft_pid > 0) {
         int64_t ft_reap = 0;
         for (int spins = 0; spins < 500'000'000; ++spins) {
-            ft_reap = cinux::syscall::sys_waitpid(ft_pid, reinterpret_cast<uint64_t>(&ft_status), 1,
-                                                  0, 0, 0);
-            if (ft_reap != 0) {
+            // Kernel inner waitpid (writes kernel &ft_status); see hello reap.
+            int                        ft_kstatus = 0;
+            cinux::proc::WaitpidResult fwr =
+                cinux::proc::waitpid(ft_pid, &ft_kstatus, 1, cinux::proc::g_pid_alloc);
+            if (fwr == cinux::proc::WaitpidResult::Ok) {
+                ft_status = ft_kstatus;
+                ft_reap   = ft_pid;
+                break;
+            }
+            if (fwr != cinux::proc::WaitpidResult::NotExited) {
+                ft_reap = static_cast<int64_t>(fwr);
                 break;
             }
             cinux::proc::Scheduler::yield();
