@@ -107,6 +107,15 @@ void dump_registers(const InterruptFrame* frame, const char* name, uint8_t vecto
     }
     cinux::mm::dump_memory_stats();
     kprintf("==================================\n");
+    // isa-debug-exit (port 0xf4): terminate QEMU immediately with a code that
+    // names the cause, so CI fails FAST instead of hanging on cli;hlt until the
+    // timeout kills QEMU (the old "PF-killed" 2-minute stall). Encoding:
+    // value = vector + 2 (value 0=success and 1=test-fail are reserved; value 128
+    // also collides with success via (v<<1|1) mod 256, so stay < 128). QEMU exits
+    // (value<<1)|1: #DE(0)->5, #DF(8)->21, #GP(13)->31, #PF(14)->33. No-op on bare
+    // metal / the production `run` target (no isa-debug-exit device there) --
+    // fatal_halt() is the fallback.
+    __asm__ volatile("outl %0, $0xf4" : : "a"(static_cast<uint32_t>(vector + 2)));
     fatal_halt();
 }
 

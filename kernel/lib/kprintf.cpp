@@ -178,6 +178,12 @@ void kpanic(const char* fmt, ...) {
     // to the boot-stack range and shows raw addresses until KALLSYMS injection.
     cinux::arch::backtrace();
 
+    // isa-debug-exit with a generic-panic code so CI fails fast (see the
+    // vector-coded exit in exception_handlers.cpp::panic() for exception faults).
+    // value 64 -> QEMU exit 129. No-op without the isa-debug-exit device
+    // (production `run` target); the cli;hlt below is the fallback.
+    __asm__ volatile("outl %0, $0xf4" : : "a"(static_cast<uint32_t>(64)));
+
     while (1) {
         __asm__ volatile("cli; hlt");
     }

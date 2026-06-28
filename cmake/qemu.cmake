@@ -82,10 +82,14 @@ set(QEMU_TEST_EXTRA_FLAGS
 # isa-debug-exit Exit Code Mapping
 # ============================================================
 # QEMU's isa-debug-exit device encodes: exit_code = (value << 1) | 1
-#   Kernel writes 0 → QEMU exits 1 → test SUCCESS
-#   Kernel writes 1 → QEMU exits 3 → test FAILURE
-# The run-kernel-test and run-stress-test targets use a bash wrapper
-# to map QEMU exit code 1 → make success, 3 → make failure.
+#   Kernel writes 0 → QEMU exits 1   → test SUCCESS
+#   Kernel writes 1 → QEMU exits 3   → test FAILURE (unit test failed)
+#   Panic writes a cause-coded value → QEMU exits (value<<1)|1, FAST (no
+#   cli;hlt → timeout stall): exception panic value = vector+2 (#DF(8)→21,
+#   #PF(14)→33, #GP(13)→31), generic kpanic value = 64 → exit 129.
+# The run-kernel-test and run-stress-test targets use qemu_test_wrapper.sh,
+# which maps exit 1 → success, 3 → failure, and labels panic exits with their
+# decoded vector. Decode: vector = (exit_code - 1)/2 - 2  (129 = generic kpanic).
 
 # 将 CMake list 转换为空格分隔的字符串（用于脚本生成）
 string(REPLACE ";" " " QEMU_COMMON_FLAGS_STR "${QEMU_COMMON_FLAGS}")
