@@ -732,18 +732,18 @@ void test_text_vs_data_flags() {
 namespace test_sys_execve_dispatch {
 
 void test_dispatch_sys_execve() {
-    // In the test harness, VFS is not mounted, so execve with a
-    // non-empty path should return an error (FileNotFound or similar).
+    // P0c: kernel-to-kernel do_execve_kernel with a kernel path. VFS not
+    // mounted / temp task has no address space -> execve returns an error.
     Task tmp{};
     tmp.pid    = 42;
     tmp.ppid   = 1;
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
 
-    // Pass a kernel pointer to a path string
-    const char* path = "/bin/test";
-    int64_t     ret  = sys_execve(reinterpret_cast<uint64_t>(path), 0, 0, 0, 0, 0);
-    // Should fail: no VFS mounted, no address space on the temp task
+    const char*        kpath = "/bin/test";
+    const char* const* kargv = nullptr;
+    const char* const* kenvp = nullptr;
+    int64_t            ret   = cinux::syscall::do_execve_kernel(kpath, kargv, kenvp);
     TEST_ASSERT_TRUE(ret < 0);
 
     cinux::proc::Scheduler::set_current(prev);
