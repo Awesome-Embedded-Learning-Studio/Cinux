@@ -190,7 +190,12 @@ constexpr CmdEntry builtin_cmds[] = {
 
 static void shell_main() {
     char  line[MAX_LINE];
-    char* argv[MAX_TOKENS];
+    // MAX_TOKENS + 1 slots: tokenize() fills up to MAX_TOKENS pointers
+    // (argv[0..MAX_TOKENS-1]) then writes a nullptr terminator at argv[argc] --
+    // which lands at argv[MAX_TOKENS] when the line has exactly MAX_TOKENS
+    // tokens. A [MAX_TOKENS] array made that terminator write out of bounds
+    // (-Warray-bounds; a real stack smash under -O2).
+    char* argv[MAX_TOKENS + 1];
 
     write_str("Cinux shell - type 'help' for commands\n");
 
