@@ -114,6 +114,22 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3
 
+      - name: Cache musl sysroot (ring-3 smoke)
+        # P3: smoke is ON by default, so CI must build the musl user binaries
+        # (/hello, /forktest) for the ext2 image. Cache the sysroot (~30s musl
+        # build) keyed on build-musl.sh; the script is idempotent on libc.a so a
+        # cache hit skips the download + compile.
+        uses: actions/cache@v4
+        with:
+          path: build/musl-sysroot
+          key: musl-${{ runner.os }}-${{ hashFiles('tools/musl/build-musl.sh') }}
+
+      - name: Build musl user binaries (/hello, /forktest)
+        run: |
+          tools/musl/build-musl.sh
+          tools/musl/build-hello.sh
+          tools/musl/build-forktest.sh
+
       - name: Compiler version
         run: echo "GCC $(gcc --version | head -1)"
 
