@@ -145,6 +145,27 @@ add_custom_target(run
     VERBATIM
 )
 
+# Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
+# fork #DF saga is -smp-2-only (cross-core CoW/syscall-frame race); single-CPU
+# is stable, so this is the path to launch external programs from the shell
+# (type a path) without hitting the saga. Use `run` for -smp 2 / AP / net work.
+add_custom_target(run-single
+    COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_DEVELOP_FLAG}
+        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        -device qemu-xhci,id=xhci
+        -device usb-kbd,bus=xhci.0
+        -device usb-tablet,bus=xhci.0
+        -device ahci,id=ahci
+        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
+        -device ide-hd,drive=ahci-disk,bus=ahci.0
+        -drive file=${EXT2_IMAGE},format=raw,if=none,id=ext2-disk
+        -device ide-hd,drive=ext2-disk,bus=ahci.1
+        -device e1000,netdev=net0 -netdev user,id=net0
+    DEPENDS image ${AHCI_TEST_IMAGE} ${EXT2_IMAGE}
+    COMMENT "Starting QEMU single-CPU (shell fork stable; no -smp 2 saga)"
+    VERBATIM
+)
+
 # F4-M3 P2-4: SMP smoke -- same as `run` but with 2 CPUs, to exercise AP boot.
 add_custom_target(run-smp
     COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_DEVELOP_FLAG}

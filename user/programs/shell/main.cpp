@@ -226,7 +226,10 @@ static void shell_main() {
             // /bin/ls in bash).  A negative result means fork/exec failed; the
             // launched program's own output (if it ran) already went to stdout.
             int64_t r = launch_program(argv[0], argv);
-            if (r < 0) {
+            // launch_program's child does sys_exit(127) when execve fails (the
+            // shell convention for "command not found"); fork/exec errors come
+            // back negative. Both -> print the not-found message.
+            if (r < 0 || r == 127) {
                 write_str(argv[0]);
                 write_str(": command not found\n");
             }
