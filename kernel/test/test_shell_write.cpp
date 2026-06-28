@@ -253,7 +253,7 @@ void test_echo_redirect_write_read() {
     const char text[]    = "hello world\n";
     auto       text_addr = reinterpret_cast<uint64_t>(text);
     int64_t    write_result =
-        cinux::syscall::sys_write(static_cast<uint64_t>(fd), text_addr, sizeof(text) - 1, 0, 0, 0);
+        cinux::syscall::do_write_kernel(static_cast<int>(fd), text, sizeof(text) - 1);
     TEST_ASSERT_EQ(write_result, static_cast<int64_t>(sizeof(text) - 1));
 
     cinux::lib::kprintf("[SHELL_WRITE] echo redirect: wrote %ld bytes\n", write_result);
@@ -271,8 +271,8 @@ void test_echo_redirect_write_read() {
     for (uint32_t i = 0; i < sizeof(read_buf); ++i)
         read_buf[i] = 0;
     auto    buf_addr = reinterpret_cast<uint64_t>(read_buf);
-    int64_t nread    = cinux::syscall::sys_read(static_cast<uint64_t>(rfd), buf_addr,
-                                                sizeof(read_buf) - 1, 0, 0, 0);
+    int64_t nread =
+        cinux::syscall::do_read_kernel(static_cast<int>(rfd), read_buf, sizeof(read_buf) - 1);
     TEST_ASSERT_EQ(nread, static_cast<int64_t>(sizeof(text) - 1));
 
     // Verify content
@@ -340,7 +340,7 @@ void test_full_shell_write_flow() {
     const char text[]    = "shell write test\n";
     auto       text_addr = reinterpret_cast<uint64_t>(text);
     int64_t    write_result =
-        cinux::syscall::sys_write(static_cast<uint64_t>(fd), text_addr, sizeof(text) - 1, 0, 0, 0);
+        cinux::syscall::do_write_kernel(static_cast<int>(fd), text, sizeof(text) - 1);
     TEST_ASSERT_EQ(write_result, static_cast<int64_t>(sizeof(text) - 1));
 
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
@@ -355,8 +355,8 @@ void test_full_shell_write_flow() {
     for (uint32_t i = 0; i < sizeof(read_buf); ++i)
         read_buf[i] = 0;
     auto    buf_addr = reinterpret_cast<uint64_t>(read_buf);
-    int64_t nread    = cinux::syscall::sys_read(static_cast<uint64_t>(rfd), buf_addr,
-                                                sizeof(read_buf) - 1, 0, 0, 0);
+    int64_t nread =
+        cinux::syscall::do_read_kernel(static_cast<int>(rfd), read_buf, sizeof(read_buf) - 1);
     TEST_ASSERT_EQ(nread, static_cast<int64_t>(sizeof(text) - 1));
     TEST_ASSERT_EQ(memcmp(read_buf, text, sizeof(text) - 1), 0);
 

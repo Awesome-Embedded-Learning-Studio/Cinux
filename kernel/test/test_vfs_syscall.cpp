@@ -225,8 +225,7 @@ void test_read_returns_correct_data() {
     // Read into a local buffer
     char    buf[64]  = {};
     auto    buf_addr = reinterpret_cast<uint64_t>(buf);
-    int64_t n =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf_addr, sizeof(buf) - 1, 0, 0, 0);
+    int64_t n        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf, sizeof(buf) - 1);
     TEST_ASSERT_GT(n, 0);
 
     const char expected[]   = "Hello from Cinux!\n";
@@ -250,14 +249,14 @@ void test_read_updates_offset() {
     // First read: 4 bytes
     char    buf1[8]   = {};
     auto    buf1_addr = reinterpret_cast<uint64_t>(buf1);
-    int64_t n1        = cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf1_addr, 4, 0, 0, 0);
+    int64_t n1        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf1, 4);
     TEST_ASSERT_EQ(n1, 4);
     TEST_ASSERT_TRUE(memcmp(buf1, "Hell", 4) == 0);
 
     // Second read: 4 bytes from updated offset
     char    buf2[8]   = {};
     auto    buf2_addr = reinterpret_cast<uint64_t>(buf2);
-    int64_t n2        = cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf2_addr, 4, 0, 0, 0);
+    int64_t n2        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf2, 4);
     TEST_ASSERT_EQ(n2, 4);
     TEST_ASSERT_TRUE(memcmp(buf2, "o fr", 4) == 0);
 
@@ -276,15 +275,13 @@ void test_read_past_end_returns_zero() {
     // Read all content first
     char    big_buf[128] = {};
     auto    big_buf_addr = reinterpret_cast<uint64_t>(big_buf);
-    int64_t n1 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd), big_buf_addr, sizeof(big_buf), 0, 0, 0);
+    int64_t n1 = cinux::syscall::do_read_kernel(static_cast<int>(fd), big_buf, sizeof(big_buf));
     TEST_ASSERT_GT(n1, 0);
 
     // Read again -- offset is now past EOF, should return 0
     char    small_buf[8]   = {};
     auto    small_buf_addr = reinterpret_cast<uint64_t>(small_buf);
-    int64_t n2             = cinux::syscall::sys_read(static_cast<uint64_t>(fd), small_buf_addr,
-                                                      sizeof(small_buf), 0, 0, 0);
+    int64_t n2 = cinux::syscall::do_read_kernel(static_cast<int>(fd), small_buf, sizeof(small_buf));
     TEST_ASSERT_EQ(n2, 0);
 
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
@@ -292,7 +289,9 @@ void test_read_past_end_returns_zero() {
 }
 
 void test_read_invalid_fd_returns_error() {
-    int64_t n = cinux::syscall::sys_read(99, 0, 10, 0, 0, 0);
+    // P0b: bad fd is kernel logic (do_read_kernel -> -EBADF), not access_ok.
+    char    discard[10] = {};
+    int64_t n           = cinux::syscall::do_read_kernel(99, discard, 10);
     TEST_ASSERT_LT(n, 0);
 }
 
@@ -311,7 +310,7 @@ void test_read_after_close_returns_error() {
     // Read from closed fd should return -1
     char    buf[8]   = {};
     auto    buf_addr = reinterpret_cast<uint64_t>(buf);
-    int64_t n = cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf_addr, sizeof(buf), 0, 0, 0);
+    int64_t n        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf, sizeof(buf));
     TEST_ASSERT_LT(n, 0);
 
     teardown_vfs(rd);
@@ -419,8 +418,7 @@ void test_open_read_close_lifecycle() {
     // Read the file content
     char    buf[64]  = {};
     auto    buf_addr = reinterpret_cast<uint64_t>(buf);
-    int64_t n =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf_addr, sizeof(buf) - 1, 0, 0, 0);
+    int64_t n        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf, sizeof(buf) - 1);
     TEST_ASSERT_GT(n, 0);
 
     const char expected[] = "Hello from Cinux!\n";
@@ -440,8 +438,7 @@ void test_open_read_close_lifecycle() {
     // Read after close should fail
     char    buf2[8]   = {};
     auto    buf2_addr = reinterpret_cast<uint64_t>(buf2);
-    int64_t n2 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf2_addr, sizeof(buf2), 0, 0, 0);
+    int64_t n2        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf2, sizeof(buf2));
     TEST_ASSERT_LT(n2, 0);
 
     teardown_vfs(rd);
@@ -466,8 +463,7 @@ void test_open_multiple_files_interleaved() {
     // Read from hello.txt
     char    buf1[64]  = {};
     auto    buf1_addr = reinterpret_cast<uint64_t>(buf1);
-    int64_t n1 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd1), buf1_addr, sizeof(buf1) - 1, 0, 0, 0);
+    int64_t n1 = cinux::syscall::do_read_kernel(static_cast<int>(fd1), buf1, sizeof(buf1) - 1);
     TEST_ASSERT_GT(n1, 0);
 
     // Verify hello.txt content
@@ -477,8 +473,7 @@ void test_open_multiple_files_interleaved() {
     // Read from readme.txt
     char    buf2[64]  = {};
     auto    buf2_addr = reinterpret_cast<uint64_t>(buf2);
-    int64_t n2 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd2), buf2_addr, sizeof(buf2) - 1, 0, 0, 0);
+    int64_t n2 = cinux::syscall::do_read_kernel(static_cast<int>(fd2), buf2, sizeof(buf2) - 1);
     TEST_ASSERT_GT(n2, 0);
 
     // Close both
@@ -486,8 +481,8 @@ void test_open_multiple_files_interleaved() {
     TEST_ASSERT_EQ(cinux::syscall::sys_close(static_cast<uint64_t>(fd2), 0, 0, 0, 0, 0), 0);
 
     // Both fds should now be invalid
-    TEST_ASSERT_LT(cinux::syscall::sys_read(static_cast<uint64_t>(fd1), buf1_addr, 4, 0, 0, 0), 0);
-    TEST_ASSERT_LT(cinux::syscall::sys_read(static_cast<uint64_t>(fd2), buf2_addr, 4, 0, 0, 0), 0);
+    TEST_ASSERT_LT(cinux::syscall::do_read_kernel(static_cast<int>(fd1), buf1, 4), 0);
+    TEST_ASSERT_LT(cinux::syscall::do_read_kernel(static_cast<int>(fd2), buf2, 4), 0);
 
     teardown_vfs(rd);
 }

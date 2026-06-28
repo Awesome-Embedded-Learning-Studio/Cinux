@@ -498,7 +498,7 @@ void test_stat_file_by_path() {
 
     const char data[]    = "stat test data\n";
     auto       data_addr = reinterpret_cast<uint64_t>(data);
-    cinux::syscall::sys_write(static_cast<uint64_t>(fd), data_addr, sizeof(data) - 1, 0, 0, 0);
+    cinux::syscall::do_write_kernel(static_cast<int>(fd), data, sizeof(data) - 1);
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
 
     // stat the file
@@ -607,7 +607,7 @@ void test_fstat_open_file() {
 
     const char data[]    = "fstat test data\n";
     auto       data_addr = reinterpret_cast<uint64_t>(data);
-    cinux::syscall::sys_write(static_cast<uint64_t>(fd), data_addr, sizeof(data) - 1, 0, 0, 0);
+    cinux::syscall::do_write_kernel(static_cast<int>(fd), data, sizeof(data) - 1);
 
     // Close and reopen for clean offset
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
@@ -650,7 +650,7 @@ void test_fstat_matches_stat() {
 
     const char data[]    = "fstat stat consistency\n";
     auto       data_addr = reinterpret_cast<uint64_t>(data);
-    cinux::syscall::sys_write(static_cast<uint64_t>(fd), data_addr, sizeof(data) - 1, 0, 0, 0);
+    cinux::syscall::do_write_kernel(static_cast<int>(fd), data, sizeof(data) - 1);
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
 
     // stat by path

@@ -479,8 +479,7 @@ void test_ext2_read_served_from_cache() {
 
     char    buf1[128] = {};
     auto    buf1_addr = reinterpret_cast<uint64_t>(buf1);
-    int64_t n1 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd), buf1_addr, sizeof(buf1), 0, 0, 0);
+    int64_t n1        = cinux::syscall::do_read_kernel(static_cast<int>(fd), buf1, sizeof(buf1));
     TEST_ASSERT_GT(n1, 0);
     cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0);
 
@@ -490,8 +489,7 @@ void test_ext2_read_served_from_cache() {
     char    buf2[128] = {};
     auto    buf2_addr = reinterpret_cast<uint64_t>(buf2);
     size_t  hits_mid  = cinux::mm::g_page_cache.hit_count();
-    int64_t n2 =
-        cinux::syscall::sys_read(static_cast<uint64_t>(fd2), buf2_addr, sizeof(buf2), 0, 0, 0);
+    int64_t n2        = cinux::syscall::do_read_kernel(static_cast<int>(fd2), buf2, sizeof(buf2));
     TEST_ASSERT_EQ(n2, n1);
     cinux::syscall::sys_close(static_cast<uint64_t>(fd2), 0, 0, 0, 0, 0);
 
