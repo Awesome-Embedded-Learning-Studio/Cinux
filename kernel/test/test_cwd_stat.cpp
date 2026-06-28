@@ -67,6 +67,16 @@ void k_strcpy(char* dst, const char* src) {
     memcpy(dst, src, len + 1);
 }
 
+/// P0a: resolve a kernel path cwd-aware (same as resolve_user_path's resolve
+/// step), so tests can target do_stat_kernel (kernel logic) without crossing
+/// the user boundary. Setup syscalls (creat/open/mkdir/...) still go through
+/// their sys_* handlers + path_util, which is fine in the test kernel.
+bool test_resolve_path(const char* path, char* resolved) {
+    auto*       cur = cinux::proc::Scheduler::current();
+    const char* cwd = (cur != nullptr && cur->cwd != nullptr) ? cur->cwd->path : "/";
+    return cinux::fs::path_resolve(cwd, path, resolved);
+}
+
 }  // anonymous namespace
 
 // ============================================================
@@ -449,15 +459,15 @@ void test_stat_root_directory() {
     auto pair = setup_cwd_stat();
     TEST_ASSERT_NOT_NULL(pair.ext2);
 
-    char path[]    = "/";
-    auto path_addr = reinterpret_cast<uint64_t>(path);
+    char path[] = "/";
 
     cinux::fs::stat st;
     for (uint32_t i = 0; i < sizeof(st); ++i)
         reinterpret_cast<uint8_t*>(&st)[i] = 0xAA;
 
-    auto    st_addr = reinterpret_cast<uint64_t>(&st);
-    int64_t result  = cinux::syscall::sys_stat(path_addr, st_addr, 0, 0, 0, 0);
+    cinux::fs::PathBuf resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(path, resolved.data()));
+    int64_t result = cinux::syscall::do_stat_kernel(resolved.data(), &st);
     TEST_ASSERT_EQ(result, 0);
 
     // Root inode number should be 2 for ext2
@@ -495,9 +505,9 @@ void test_stat_file_by_path() {
     cinux::fs::stat st;
     for (uint32_t i = 0; i < sizeof(st); ++i)
         reinterpret_cast<uint8_t*>(&st)[i] = 0;
-    auto st_addr = reinterpret_cast<uint64_t>(&st);
-
-    int64_t result = cinux::syscall::sys_stat(fpath_addr, st_addr, 0, 0, 0, 0);
+    cinux::fs::PathBuf stat_resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(fpath, stat_resolved.data()));
+    int64_t result = cinux::syscall::do_stat_kernel(stat_resolved.data(), &st);
     TEST_ASSERT_EQ(result, 0);
 
     // Verify stat fields
@@ -515,13 +525,13 @@ void test_stat_nonexistent_fails() {
     auto pair = setup_cwd_stat();
     TEST_ASSERT_NOT_NULL(pair.ext2);
 
-    char path[]    = "/no_such_file_for_stat";
-    auto path_addr = reinterpret_cast<uint64_t>(path);
+    char path[] = "/no_such_file_for_stat";
 
-    cinux::fs::stat st;
-    auto            st_addr = reinterpret_cast<uint64_t>(&st);
+    cinux::fs::stat    st;
+    cinux::fs::PathBuf resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(path, resolved.data()));
 
-    int64_t result = cinux::syscall::sys_stat(path_addr, st_addr, 0, 0, 0, 0);
+    int64_t result = cinux::syscall::do_stat_kernel(resolved.data(), &st);
     TEST_ASSERT_LT(result, 0);
 
     teardown_cwd_stat(pair);
@@ -555,10 +565,9 @@ void test_stat_relative_path_after_chdir() {
     cinux::fs::stat st;
     for (uint32_t i = 0; i < sizeof(st); ++i)
         reinterpret_cast<uint8_t*>(&st)[i] = 0;
-    auto st_addr    = reinterpret_cast<uint64_t>(&st);
-    auto fname_addr = reinterpret_cast<uint64_t>(fname);
-
-    int64_t result = cinux::syscall::sys_stat(fname_addr, st_addr, 0, 0, 0, 0);
+    cinux::fs::PathBuf rel_resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(fname, rel_resolved.data()));
+    int64_t result = cinux::syscall::do_stat_kernel(rel_resolved.data(), &st);
     TEST_ASSERT_EQ(result, 0);
     TEST_ASSERT_GT(st.st_ino, 0ULL);
 
@@ -610,9 +619,7 @@ void test_fstat_open_file() {
     cinux::fs::stat st_fstat;
     for (uint32_t i = 0; i < sizeof(st_fstat); ++i)
         reinterpret_cast<uint8_t*>(&st_fstat)[i] = 0;
-    auto st_addr = reinterpret_cast<uint64_t>(&st_fstat);
-
-    int64_t result = cinux::syscall::sys_fstat(static_cast<uint64_t>(fd2), st_addr, 0, 0, 0, 0);
+    int64_t result = cinux::syscall::do_fstat_kernel(static_cast<int>(fd2), &st_fstat);
     TEST_ASSERT_EQ(result, 0);
     TEST_ASSERT_GT(st_fstat.st_ino, 0ULL);
 
@@ -650,7 +657,9 @@ void test_fstat_matches_stat() {
     cinux::fs::stat st_path;
     for (uint32_t i = 0; i < sizeof(st_path); ++i)
         reinterpret_cast<uint8_t*>(&st_path)[i] = 0;
-    cinux::syscall::sys_stat(fpath_addr, reinterpret_cast<uint64_t>(&st_path), 0, 0, 0, 0);
+    cinux::fs::PathBuf path_resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(fpath, path_resolved.data()));
+    cinux::syscall::do_stat_kernel(path_resolved.data(), &st_path);
 
     // fstat by fd
     int64_t fd2 = cinux::syscall::sys_open(fpath_addr, 0, 0, 0, 0, 0);
@@ -659,8 +668,7 @@ void test_fstat_matches_stat() {
     cinux::fs::stat st_fd;
     for (uint32_t i = 0; i < sizeof(st_fd); ++i)
         reinterpret_cast<uint8_t*>(&st_fd)[i] = 0;
-    cinux::syscall::sys_fstat(static_cast<uint64_t>(fd2), reinterpret_cast<uint64_t>(&st_fd), 0, 0,
-                              0, 0);
+    cinux::syscall::do_fstat_kernel(static_cast<int>(fd2), &st_fd);
 
     // Compare: inode number and size should match
     TEST_ASSERT_EQ(st_path.st_ino, st_fd.st_ino);
@@ -680,10 +688,9 @@ void test_fstat_bad_fd_fails() {
     TEST_ASSERT_NOT_NULL(pair.ext2);
 
     cinux::fs::stat st;
-    auto            st_addr = reinterpret_cast<uint64_t>(&st);
 
     // fd 99 should not be open
-    int64_t result = cinux::syscall::sys_fstat(99, st_addr, 0, 0, 0, 0);
+    int64_t result = cinux::syscall::do_fstat_kernel(99, &st);
     TEST_ASSERT_LT(result, 0);
 
     teardown_cwd_stat(pair);
@@ -812,9 +819,9 @@ void test_stat_command_outputs_info() {
     cinux::fs::stat st;
     for (uint32_t i = 0; i < sizeof(st); ++i)
         reinterpret_cast<uint8_t*>(&st)[i] = 0;
-    auto st_addr = reinterpret_cast<uint64_t>(&st);
-
-    int64_t result = cinux::syscall::sys_stat(fpath_addr, st_addr, 0, 0, 0, 0);
+    cinux::fs::PathBuf shell_resolved;
+    TEST_ASSERT_TRUE(test_resolve_path(fpath, shell_resolved.data()));
+    int64_t result = cinux::syscall::do_stat_kernel(shell_resolved.data(), &st);
     TEST_ASSERT_EQ(result, 0);
     TEST_ASSERT_GT(st.st_ino, 0ULL);
 
