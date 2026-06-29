@@ -11,7 +11,7 @@
 |----|------|------|--------|------|
 | 1 | linker `__ex_table` section + `extable.hpp`(ExceptionTableEntry / extable_search 二分 / extable_sort 插入排序 / `_ASM_EXTABLE` 宏)+ main/main_test 接线 sort_extable + test_extable host 单测。**零行为变(空表)** | ✅ | `04faecd` | 两 leg 960/0 + host 7/0 + nm 空表(`__start==__stop`) |
 | 2 | copy_to_user/copy_from_user 改 inline asm(rep movsb + extable + fixup clac),**不碰 PF**;put/get 保 wrapper;更新注释 | ✅ | `77ff9cf` | 两 leg 960/0 + smoke 20/20 + nm 非空(21 项)+ 反汇编两路 clac |
-| 3 | handle_pf 顶部 extable 查找(内核态门 `cs&3==0` + `search_exception_tables(frame->rip)` 命中改 `frame->rip` return) | ⏳ | | 两 leg 绿;demand-page/CoW/fork/栈守卫 全不变(查表必 miss) |
+| 3 | handle_pf 顶部 extable 查找(内核态门 `cs&3==0` + `search_exception_tables(frame->rip)` 命中改 `frame->rip` return) | ✅ | `c09e6cf` | 两 leg 960/0 + smoke 20/0;demand-page/CoW/fork/栈守卫 全不变(查表必 miss) |
 | 4 | RSVD 负测(test_user_ptr.cpp)+ host search/sort 单测 + runner 接线 + ROADMAP/PLAN/notes/memory。对照 pre-B3 证负测会 panic | ⏳ | | 两 leg 绿且新负测过(返 false 非 panic) |
 
 > 风险:accessor 回归(~30 caller,host 路径不变 + ring-3 smoke 守)/ PF 改动影响所有 #PF(查表 miss 即原逻辑)/ sort 错→search miss→panic(批1 host 单测先证)/ fixup 漏 clac→AC 泄漏(批2 反汇编审)/ RSVD 构造环境敏感(三方案降级)。批2 故意不接线 PF → accessor 回归与 #PF 改动隔离,可二分。
