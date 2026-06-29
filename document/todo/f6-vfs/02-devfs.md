@@ -3,6 +3,19 @@
 > /dev 设备文件系统。统一字符/块设备访问接口。
 > 设备节点自动创建，用户程序通过 open/read/write 访问硬件。
 
+> ⚠️ **范围栅栏（F6-M3 实施批,2026-06-30 立项；三路并行之一,另两路 F7-M4 UDP / F10-M2 动态链接）**
+>
+> **本批做**:`DevFs`（`FileSystem` 子类,内存型虚拟 FS,无 ext2 后端)+ device inode（`InodeOps` 子类:`NullDevOps`/`ZeroDevOps`/`ConsoleDevOps`/`DevDirOps`,封装设备 ops)+ `CharSink` 抽象(console 写槽,kernel 注入 Serial / host 注入 mock)→ 挂 `/dev` → 基础节点 `/dev/null`(1:3) `/dev/zero`(1:5) `/dev/console`(5:1),read/write 走设备;`stat()` override 填 `st_rdev`。新代码类化(非全局 static + 自由函数)。
+>
+> **本批不做（并行硬约束 / 留 F6 后续)**:
+> - **不改 `fs/inode.hpp` 的 `InodeOps` 虚函数接口**(F10-M2 动态链接在用)——只加子类,签名一行不动;`st_rdev` 收进 ops 子类 `stat()` override,不加 `Inode` 字段。
+> - **不做 mknod**（T3 的用户态创建设备节点,root only)——留 F6 后续（需 DevFS 写路径 + 权限)。
+> - **不做块设备节点**（T2 的 `/dev/sda` `/dev/nvme0n1` 经 `IBlockDevice`)——留 F6 后续。
+> - **不做 F6-M1 VFS 增强（dentry cache/symlink/link/flock)、M2 ProcFS、M4 tmpfs、ext4** ——各自单独收。
+> - **`/dev/console` 本批 write→serial 输出**（基础节点)；接 `ConsoleTty` 真 stdin / `/dev/tty` / PTY 是 **F10-M3 TTY Phase2**,显式推迟不欠债。
+>
+> 详见 PLAN「🔄 F6-M3 DevFS」段。
+
 ## 目标
 
 实现 DevFS，提供 /dev 下的设备文件。
