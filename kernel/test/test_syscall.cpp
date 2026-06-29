@@ -30,8 +30,10 @@
 #include "big_kernel_test.h"
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/errno.hpp"
 #include "kernel/proc/process.hpp"
+#include "kernel/proc/signal.hpp"
 #include "kernel/syscall/sys_clock_gettime.hpp"
 #include "kernel/syscall/sys_exit.hpp"
 #include "kernel/syscall/sys_ioctl.hpp"
@@ -379,6 +381,54 @@ void test_sys_ioctl_tcgets_unmapped_efault() {
     TEST_ASSERT_EQ(r, static_cast<int64_t>(-cinux::kEfault));
 }
 
+void test_console_tty_ctrl_c_sends_sigint_to_foreground() {
+    // A task in pgid 5 is the foreground group; feeding Ctrl+C routes through
+    // the line discipline -> ConsoleTty::input -> killpg -> SIGINT pending on
+    // the task.  Proves the batch-5 signal wiring end to end, not just "green".
+    cinux::proc::Task t{};
+    t.pid         = 77;
+    t.pgid        = 5;
+    t.sig_actions = cinux::proc::SharedSigActions::create();
+    t.state       = cinux::proc::TaskState::Ready;
+    cinux::proc::signal_register_task(&t);
+    cinux::drivers::console_tty().set_foreground_pgid(5);
+
+    cinux::drivers::console_tty().input(cinux::drivers::kCharIntr);  // Ctrl+C
+
+    bool got = cinux::proc::sig_is_member(t.sig_pending, cinux::proc::Signal::kSigint);
+    cinux::proc::signal_unregister_task(&t);
+    t.sig_actions->release();
+    cinux::drivers::console_tty().set_foreground_pgid(0);  // reset shared global
+    TEST_ASSERT(got);
+}
+
+void test_console_tty_ctrl_z_sends_sigtstp_to_foreground() {
+    cinux::proc::Task t{};
+    t.pid         = 78;
+    t.pgid        = 6;
+    t.sig_actions = cinux::proc::SharedSigActions::create();
+    t.state       = cinux::proc::TaskState::Ready;
+    cinux::proc::signal_register_task(&t);
+    cinux::drivers::console_tty().set_foreground_pgid(6);
+
+    cinux::drivers::console_tty().input(cinux::drivers::kCharSusp);  // Ctrl+Z
+
+    bool got = cinux::proc::sig_is_member(t.sig_pending, cinux::proc::Signal::kSigtstp);
+    cinux::proc::signal_unregister_task(&t);
+    t.sig_actions->release();
+    cinux::drivers::console_tty().set_foreground_pgid(0);
+    TEST_ASSERT(got);
+}
+
+void test_sys_ioctl_tiocspgrp_kernel_addr_efault() {
+    // TIOCSPGRP routes the pgid through copy_from_user; a kernel-half pointer
+    // (&local) is rejected by access_ok -> -EFAULT (proves it does not
+    // dereference the arg raw). Mirrors the TCGETS extable test.
+    int     local = 7;
+    int64_t r     = sys_ioctl(0, 0x5410 /*TIOCSPGRP*/, reinterpret_cast<uint64_t>(&local), 0, 0, 0);
+    TEST_ASSERT_EQ(r, static_cast<int64_t>(-cinux::kEfault));
+}
+
 void test_sys_clock_gettime_fills_timespec() {
     // P0e: do_clock_gettime_kernel fills a kernel ktimespec.
     cinux::syscall::ktimespec ts{-1, -1};
@@ -438,6 +488,9 @@ extern "C" void run_syscall_tests() {
     RUN_TEST(test_musl_syscalls::test_sys_ioctl_non_tty_fd_enotty);
     RUN_TEST(test_musl_syscalls::test_sys_ioctl_unknown_cmd_enotty);
     RUN_TEST(test_musl_syscalls::test_sys_ioctl_tcgets_unmapped_efault);
+    RUN_TEST(test_musl_syscalls::test_console_tty_ctrl_c_sends_sigint_to_foreground);
+    RUN_TEST(test_musl_syscalls::test_console_tty_ctrl_z_sends_sigtstp_to_foreground);
+    RUN_TEST(test_musl_syscalls::test_sys_ioctl_tiocspgrp_kernel_addr_efault);
     RUN_TEST(test_musl_syscalls::test_sys_clock_gettime_fills_timespec);
     RUN_TEST(test_musl_syscalls::test_sys_clock_gettime_bad_clock_rejected);
 

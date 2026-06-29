@@ -23,7 +23,7 @@
 > 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 绿才提交。
 
 ### 现状（2026-06-29 复盘修正）
-**批1-3 已合 main**（经 SMAP saga `fix/smap_bug_fix` → PR#44，commit `53ef726`/`ced0066`/`35cb419`）：`sys_read fd==0` 走 `console_tty_read` cooked line 阻塞读（替旧键盘 spin）；keyboard `dispatch_key`→`console_tty_input` + kprintf 回显；console TTY 单例 + 行规范（ICANON/ECHO/ISIG + 退格/^U/^W + EOF）。**批4 `sys_ioctl` 实现 TCGETS/TCSETS/TIOCGWINSZ**（fd 0/1/2，copy_to/from_user extable SMAP 安全）→ 解锁 musl/glibc 行缓冲。**剩**：信号生成（`console_tty_input` 现只处理 `kLineReady/kEof` 唤醒 reader，**未处理 `kSignal`** → Ctrl+C 当前不投 SIGINT）+ TIOCGPGRP/TIOCSPGRP（批5）。`Task::controlling_tty{-1}` 已预埋；F3 信号 + 进程组 + killpg ✅。
+**批1-3 已合 main**（经 SMAP saga `fix/smap_bug_fix` → PR#44，commit `53ef726`/`ced0066`/`35cb419`）：`sys_read fd==0` 走 `console_tty_read` cooked line 阻塞读（替旧键盘 spin）；keyboard `dispatch_key`→`console_tty_input` + kprintf 回显；console TTY 单例 + 行规范（ICANON/ECHO/ISIG + 退格/^U/^W + EOF）。**批4 `sys_ioctl` 实现 TCGETS/TCSETS/TIOCGWINSZ**（fd 0/1/2，copy_to/from_user extable SMAP 安全）→ 解锁 musl/glibc 行缓冲。**批5**：信号生成（`ConsoleTty::input` 处理 `kSignal`→`take_signal`→`killpg` 投前台组，Ctrl+C/quit/suspend）+ TIOCGPGRP/TIOCSPGRP + **console_tty 类化(ConsoleTty，私有 tty_/reader_/foreground_pgid_)**（用户反馈:有 mutable 共享状态该类化）。**剩**：批6 收尾(同类异味清理 + ROADMAP F10-M3 Phase1 ✅)。
 
 ### 批表
 | 批 | 范围 | 状态 | 测试 |
@@ -33,7 +33,7 @@
 | 2 | 接输入源 + 回显：Keyboard `dispatch_key`→TTY `input_char` + Console 当 echo sink + 系统 console TTY 单例 | ✅ | run-kernel-test 绿（`ced0066`，经 SMAP saga 合 main） |
 | 3 | stdin 阻塞读：`sys_read fd==0` 改读 TTY cooked line_buf + 无行 block（F3 `prepare_to_wait`/`schedule_blocked`）+ 键盘 IRQ 唤醒。**修 musl 误 EOF** | ✅ | run-kernel-test-all 两 leg（`35cb419`，经 SMAP saga 合 main） |
 | 4 | ioctl 实命令：TCGETS/TCSETS/TIOCGWINSZon fd 0/1/2（copy_to/from_user extable SMAP 安全）+ tty.hpp ioctl UAPI + Winsize 80×25。**解锁 musl/glibc 行缓冲** | ✅ | run-kernel-test-all 964/0 两 leg + AP readback + ctest 62/0（本次） |
-| 5 | 信号生成：Ctrl+C→SIGINT / Ctrl+Z→SIGTSTP / Ctrl+\\→SIGQUIT 经 killpg 投前台组 + Ctrl+D→EOF | ⏳ | run-kernel-test 绿 + 信号机制测 |
+| 5 | 信号生成：Ctrl+C→SIGINT / Ctrl+Z→SIGTSTP / Ctrl+\\→SIGQUIT 经 killpg 投前台组 + Ctrl+D→EOF。**+ console_tty 类化(ConsoleTty)**（用户反馈:有 mutable 共享状态该类化，批6 扫同类） | ✅ | run-kernel-test-all 967/0 两 leg + AP readback + ctest 62/0（+3 测 Ctrl+C/Ctrl+Z→killpg + TIOCSPGRP） |
 | 6 | 收尾 + 交织 F-VERIFY：ROADMAP F10-M3 Phase1 ✅ + notes + sys_read/write/ioctl/keyboard 的 host 镜像副本→链真码（批2 微增量，单独 commit）。**🚩TTY 绿 checkpoint：决定 PR 还是续叠 M2** | ⏳ | run-kernel-test-all + test_host 全绿 |
 
 ### 风险
@@ -41,6 +41,7 @@
 - Phase 2（PTY / `/dev/*` 节点 / TIOCSCTTY）硬依赖 F6 DevFS，显式推迟；Phase 1 用 console TTY 单例 + `controlling_tty` 绕开，功能完整不欠债。
 - 解耦：termios / TIOCGWINSZ = Linux UAPI，不出现 libc 名字；TTY 与 PT_INTERP / 动态链接正交（不缠 M2）。
 - **smoke 默认 ON + 本地无 /hello → run-kernel-test 挂死**（hello_smoke 20-iter poll 循环撑满 timeout；根因 `build/musl/hello` 未 build，非 CMake target）。本地验证关 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`；CI 有 /hello 不受影响。
+- **类化异味清理（批6 收尾）**：console_tty 批5 已类化(ConsoleTty)；批6 扫同类异味(全局 static + mutable 共享状态 + 自由函数的伪单例)评估类化。无状态 static 工具(Mouse/Keyboard)不动。
 
 ## 🔄 F-VERIFY（动态验证与并发检测基建）— 2026-06-27 立项
 

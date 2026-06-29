@@ -132,9 +132,13 @@ public:
     /// once, distinct from "no line yet" (which blocks).
     bool take_eof();
 
-    /// Signal requested by the most recent kSignal input_char().  Cleared on
-    /// read so a signal is delivered once.
+    /// Signal requested by the most recent kSignal input_char() (peek; does
+    /// not clear).
     TtySignal pending_signal() const;
+
+    /// Consume and return the pending signal (clears it). Use on the kSignal
+    /// branch so a signal char is delivered exactly once.
+    TtySignal take_signal();
 
     const Termios& termios() const;
     void           set_termios(const Termios& t);

@@ -1,19 +1,23 @@
 /**
  * @file kernel/syscall/sys_ioctl.cpp
- * @brief sys_ioctl handler implementation (F10-M3 batch 4)
+ * @brief sys_ioctl handler implementation (F10-M3 batch 4/5)
  *
- * Console TTY ioctls: TCGETS/TCSETS (termios read/write) and TIOCGWINSZ
- * (window size) on fds 0/1/2 -- the three standard streams that back onto the
- * system console line discipline. musl/glibc probe TIOCGWINSZ on the first
- * stdout write to choose line vs full buffering, so answering it here makes
- * stdio flush promptly instead of buffering whole programs.
+ * Console TTY ioctls on fds 0/1/2 (the three standard streams that back onto
+ * the system console line discipline):
+ *   - TCGETS/TCSETS: read/write termios.
+ *   - TIOCGWINSZ: window size.  musl/glibc probe it on the first stdout write
+ *     to pick line vs full buffering, so answering it makes stdio flush
+ *     promptly instead of buffering whole programs.
+ *   - TIOCGPGRP/TIOCSPGRP (batch 5): read/write the foreground process group
+ *     that interrupt/quit/suspend signal chars (delivered by ConsoleTty::input)
+ *     target.
  *
- * SMAP-safe: termios/winsize cross the user/kernel boundary through
+ * SMAP-safe: every payload crosses the user/kernel boundary through
  * copy_to/from_user (the F-EXTABLE extable-annotated accessors), so a bad user
  * pointer faults into -EFAULT instead of panicking.
  *
- * Deferred: TIOCGPGRP/TIOCSPGRP + the Ctrl+C/^Z signal chars (batch 5) need
- * foreground-process-group wiring; every other request stays -ENOTTY.
+ * Deferred: TIOCSCTTY + the rest of job control need DevFS (F6); every other
+ * request stays -ENOTTY.
  */
 
 #include "kernel/syscall/sys_ioctl.hpp"
@@ -21,7 +25,7 @@
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (SMAP/extable)
-#include "kernel/drivers/tty/console_tty.hpp"  // console_tty()
+#include "kernel/drivers/tty/console_tty.hpp"  // console_tty() singleton
 #include "kernel/drivers/tty/tty.hpp"          // Termios/Winsize/ioctl UAPI consts
 #include "kernel/errno.hpp"
 
@@ -33,6 +37,8 @@ using cinux::drivers::console_tty;
 using cinux::drivers::kTcgets;
 using cinux::drivers::kTcsets;
 using cinux::drivers::kTiocgwinsz;
+using cinux::drivers::kTiocgpgrp;
+using cinux::drivers::kTiocspgrp;
 using cinux::user::copy_from_user;
 using cinux::user::copy_to_user;
 
@@ -62,7 +68,7 @@ int64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg, uint64_t, uint64_
     switch (request) {
     case kTcgets: {
         // Hand the caller the console TTY's current termios.
-        const Termios& tm = console_tty().termios();
+        const Termios& tm = console_tty().tty().termios();
         if (!copy_to_user(uptr, &tm, sizeof(Termios))) {
             return -cinux::kEfault;
         }
@@ -75,7 +81,7 @@ int64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg, uint64_t, uint64_
         if (!copy_from_user(&tm, uptr, sizeof(Termios))) {
             return -cinux::kEfault;
         }
-        console_tty().set_termios(tm);
+        console_tty().tty().set_termios(tm);
         return 0;
     }
     case kTiocgwinsz: {
@@ -84,9 +90,28 @@ int64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg, uint64_t, uint64_
         }
         return 0;
     }
+    case kTiocgpgrp: {
+        // Read the console TTY's foreground process group.
+        int pgid = console_tty().foreground_pgid();
+        if (!copy_to_user(uptr, &pgid, sizeof(int))) {
+            return -cinux::kEfault;
+        }
+        return 0;
+    }
+    case kTiocspgrp: {
+        // Install a caller-supplied foreground process group.
+        int pgid;
+        if (!copy_from_user(&pgid, uptr, sizeof(int))) {
+            return -cinux::kEfault;
+        }
+        if (pgid < 0) {
+            return -cinux::kEinval;
+        }
+        console_tty().set_foreground_pgid(pgid);
+        return 0;
+    }
     default:
-        // TIOCGPGRP/TIOCSPGRP + job-control ioctls arrive with batch 5's
-        // foreground-process-group wiring; other requests are not handled.
+        // Unknown request -- not a terminal ioctl this driver handles.
         return -cinux::kEnotty;
     }
 }
