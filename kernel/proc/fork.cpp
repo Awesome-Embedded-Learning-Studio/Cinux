@@ -115,7 +115,7 @@ static uint64_t relocate_copied_stack_addr(uint64_t value, uint64_t parent_stack
 
 void prepare_copied_kernel_stack_context(Task* child, uint64_t parent_stack_start,
                                          uint64_t parent_stack_top, uint64_t child_stack_start,
-                                         uint64_t current_rbp) {
+                                         uint64_t current_rbp, bool relocate_rbp_chain) {
     child->ctx.rsp = relocate_copied_stack_addr(current_rbp + sizeof(uint64_t), parent_stack_start,
                                                 parent_stack_top, child_stack_start);
     child->ctx.rbp =
@@ -123,6 +123,17 @@ void prepare_copied_kernel_stack_context(Task* child, uint64_t parent_stack_star
                                    parent_stack_top, child_stack_start);
     child->ctx.rip = reinterpret_cast<uint64_t>(fork_child_trampoline);
 
+    // Walk the saved-RBP chain and relocate each frame's saved-RBP so the child
+    // can unwind (leave;ret) through the copied frames. This is FRAGILE: it
+    // assumes every frame uses the standard `push rbp` prologue, which is not
+    // guaranteed across compilers/optimizers (it corrupts the child stack under
+    // gcc-13 -O2+ubsan, overwriting caller-frame locals). Callers whose child
+    // does NOT unwind the chain (e.g. a kernel-thread fork whose child runs one
+    // statement then calls a no-return launch) pass relocate_rbp_chain=false and
+    // skip it -- the clean memcpy of the parent stack is enough for them.
+    if (!relocate_rbp_chain) {
+        return;
+    }
     uint64_t frame = current_rbp;
     while (copied_stack_contains(frame, parent_stack_start, parent_stack_top)) {
         uint64_t next        = *reinterpret_cast<uint64_t*>(frame);
@@ -255,8 +266,16 @@ __attribute__((optimize("no-omit-frame-pointer"), noinline)) int fork(PidAllocat
     child->kernel_stack_top        = child_stack_virt + stack_size;
     child->kernel_stack_guard_page = child_guard_virt;
 
+    // A kernel-thread fork (parent has no user address space -- e.g. the ring-3
+    // smoke worker) produces a child that runs one straight-line block then calls
+    // a no-return launch_user_program; it never unwinds the saved-RBP chain. The
+    // chain-relocation walk is both unnecessary for it AND fragile (corrupts the
+    // child stack under gcc-13 -O2+ubsan), so skip it. User-task forks (which
+    // return to user mode via the syscall path and DO unwind) keep the walk.
+    const bool is_kernel_thread_fork = (parent->addr_space == nullptr);
     prepare_copied_kernel_stack_context(child, current_rsp, current_rsp + full_stack_used,
-                                        child_stack_start, current_rbp);
+                                        child_stack_start, current_rbp,
+                                        /*relocate_rbp_chain=*/!is_kernel_thread_fork);
 
     // CoW page table handling
     if (parent->addr_space != nullptr) {

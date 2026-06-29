@@ -56,7 +56,7 @@ void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level);
  */
 void prepare_copied_kernel_stack_context(Task* child, uint64_t parent_stack_start,
                                          uint64_t parent_stack_top, uint64_t child_stack_start,
-                                         uint64_t current_rbp);
+                                         uint64_t current_rbp, bool relocate_rbp_chain = true);
 
 /**
  * @brief Free a task's kernel stack (mapped, not direct-map)
