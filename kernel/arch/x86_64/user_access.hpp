@@ -83,7 +83,8 @@ inline bool access_ok(const void* addr, size_t size) {
 /// unmappable user page. The kernel path is a single rep movsb annotated with
 /// _ASM_EXTABLE so a fault resumes at the fixup (clac + ok=false) instead of
 /// panicking. The stac/clac window never blocks.
-inline bool copy_to_user(void* dst_user, const void* src_kernel, size_t n) {
+inline __attribute__((always_inline)) bool copy_to_user(void* dst_user, const void* src_kernel,
+                                                        size_t n) {
     if (!access_ok(dst_user, n)) {
         return false;
     }
@@ -115,7 +116,8 @@ inline bool copy_to_user(void* dst_user, const void* src_kernel, size_t n) {
 }
 
 /// Copy @p n bytes user -> kernel. Same contract as copy_to_user.
-inline bool copy_from_user(void* dst_kernel, const void* src_user, size_t n) {
+inline __attribute__((always_inline)) bool copy_from_user(void* dst_kernel, const void* src_user,
+                                                          size_t n) {
     if (!access_ok(src_user, n)) {
         return false;
     }
@@ -148,13 +150,13 @@ inline bool copy_from_user(void* dst_kernel, const void* src_user, size_t n) {
 
 /// Write a single typed value to user memory (Linux put_user).
 template <typename T>
-inline bool put_user(T value, T* dst_user) {
+inline __attribute__((always_inline)) bool put_user(T value, T* dst_user) {
     return copy_to_user(dst_user, &value, sizeof(T));
 }
 
 /// Read a single typed value from user memory (Linux get_user).
 template <typename T>
-inline bool get_user(T* dst_kernel, const T* src_user) {
+inline __attribute__((always_inline)) bool get_user(T* dst_kernel, const T* src_user) {
     return copy_from_user(dst_kernel, src_user, sizeof(T));
 }
 
