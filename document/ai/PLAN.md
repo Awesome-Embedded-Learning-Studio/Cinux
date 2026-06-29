@@ -2,6 +2,20 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F-EXTABLE（Linux 风格 exception table 基建,SMAP follow-up #2 阶段1）— 2026-06-29 立项
+
+> 横切里程碑(与 F-VERIFY/F-CLN 同档),接 SMAP saga follow-up #2。user accessor 现状靠 demand-page 契约(`user_access.hpp:19-25` 注释),无 extable:拷贝中途 fault 被 demand-page 掩盖(静默读 0 返 true)或 panic,accessor 真负测试写不了(kernel violation 必 panic)。建 RIP-based `__ex_table`(Linux uaccess 范式):fault RIP 命中注解 accessor 时 PF handler 改 `frame->rip` 跳 fixup 返 `-EFAULT`,解锁真负测试。**范围栅栏:只阶段 1(extable 基建 + accessor 重写 + 负测试),不改 demand-page 对用户态缺页的宽松逻辑**(F2 lazy-allocation 范式,撤它留 F2-M5 高风险)。分支 `feat/f-extable`(从干净 main `7f846c8`)。详见 plan `~/.claude/plans/lucky-seeking-hamster.md` + note `2026-06-29-f-extable-b1-extable-infra.md`。
+> 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿(基线 960/0);改公共头 push 前补全量 `cmake --build build`。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 1 | linker `__ex_table` section + `extable.hpp`(ExceptionTableEntry / extable_search 二分 / extable_sort 插入排序 / `_ASM_EXTABLE` 宏)+ main/main_test 接线 sort_extable + test_extable host 单测。**零行为变(空表)** | ✅ | `04faecd` | 两 leg 960/0 + host 7/0 + nm 空表(`__start==__stop`) |
+| 2 | copy_to_user/copy_from_user 改 inline asm(rep movsb + extable + fixup clac),**不碰 PF**;put/get 保 wrapper;更新注释 | ⏳ | | 两 leg 绿 + ring-3 smoke + nm 表非空 + 反汇编审 fixup clac |
+| 3 | handle_pf 顶部 extable 查找(内核态门 `cs&3==0` + `search_exception_tables(frame->rip)` 命中改 `frame->rip` return) | ⏳ | | 两 leg 绿;demand-page/CoW/fork/栈守卫 全不变(查表必 miss) |
+| 4 | RSVD 负测(test_user_ptr.cpp)+ host search/sort 单测 + runner 接线 + ROADMAP/PLAN/notes/memory。对照 pre-B3 证负测会 panic | ⏳ | | 两 leg 绿且新负测过(返 false 非 panic) |
+
+> 风险:accessor 回归(~30 caller,host 路径不变 + ring-3 smoke 守)/ PF 改动影响所有 #PF(查表 miss 即原逻辑)/ sort 错→search miss→panic(批1 host 单测先证)/ fixup 漏 clac→AC 泄漏(批2 反汇编审)/ RSVD 构造环境敏感(三方案降级)。批2 故意不接线 PF → accessor 回归与 #PF 改动隔离,可二分。
+
 ## 🔄 F10-M3 TTY + ioctl（Phase 1）— 2026-06-27 立项
 
 > 分支 `feat/f10-tty-dyn`（从干净 main `295d536`）。接 F10-M1（musl 静态移植 ✅ PR#42）。用户拍板：**先 TTY+ioctl，同分支续叠 M2 动态链接**；按需 + libc 解耦（PTY/`/dev/*` 留 F6 DevFS）。
