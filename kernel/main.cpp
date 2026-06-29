@@ -38,6 +38,7 @@
 #include <stdint.h>
 
 #include "boot/boot_info.h"
+#include "kernel/arch/x86_64/extable.hpp"  // F-EXTABLE: sort_extable at boot
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/irq_backend.hpp"
@@ -129,6 +130,11 @@ extern "C" void kernel_main() {
 
     // Step 6: Register IRQ handlers in the IDT (vectors 0x20-0x2F)
     irq_init();
+
+    // F-EXTABLE: sort the __ex_table (user-accessor fixup sites) by fault_rip so
+    // handle_pf can binary-search it. IDT is up and interrupts are still off, so
+    // no accessor fault can fire yet (no user program). Safe no-op while empty.
+    cinux::arch::sort_extable();
 
     // Step 7: Initialise PIT channel 0 at 100 Hz (10 ms per tick)
     PIT::init(100);

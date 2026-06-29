@@ -14,6 +14,7 @@
 
 #include "big_kernel_test.h"
 #include "boot/boot_info.h"
+#include "kernel/arch/x86_64/extable.hpp"  // F-EXTABLE: sort_extable before tests
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
@@ -369,6 +370,11 @@ extern "C" void kernel_main() {
     // Step 3: Initialise IDT (depends on GDT selectors)
     cinux::arch::g_idt.init();
     cinux::lib::kprintf("[TEST] IDT loaded.\n");
+
+    // F-EXTABLE: sort the user-accessor exception table before any suite that
+    // could fault through an accessor (demand-page / fork / CoW). No-op while
+    // empty; mirrors production main.cpp.
+    cinux::arch::sort_extable();
 
     // F4-M3 P1-2: anchor the BSP's GS base at its PerCpu block BEFORE any test
     // suite runs -- percpu() reads MSR_GS_BASE, so it must be set first.  This
