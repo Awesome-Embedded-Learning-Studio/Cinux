@@ -20,6 +20,7 @@
 
 #include "arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/backtrace.hpp"
+#include "kernel/arch/x86_64/extable.hpp"  // F-EXTABLE: search_exception_tables
 #include "kernel/arch/x86_64/fault_diag.hpp"  // F-VERIFY: capture_first_gp/pf + CoW diag (extracted from this file)
 #include "kernel/arch/x86_64/idt.hpp"
 #include "kernel/arch/x86_64/io.hpp"
@@ -197,6 +198,19 @@ void handle_gp(InterruptFrame* frame) {
 void handle_pf(InterruptFrame* frame) {
     uint64_t fault_addr;
     __asm__ volatile("movq %%cr2, %0" : "=r"(fault_addr));
+
+    // F-EXTABLE: a kernel-mode fault whose RIP is an annotated user accessor
+    // (copy_to/from_user rep movsb) recovers via the __ex_table fixup instead
+    // of demand-paging or panicking. Rewrite frame->rip to the fixup (clac +
+    // ok=false -> caller returns -EFAULT) and return; iretq resumes there.
+    // User-mode faults (cs & 3 != 0) skip this and fall through to demand-page
+    // unchanged -- the F2 lazy-allocation contract is left to a later milestone.
+    if ((frame->cs & 0x03) == 0) {
+        if (const auto* entry = cinux::arch::search_exception_tables(frame->rip)) {
+            frame->rip = entry->fixup_rip;
+            return;
+        }
+    }
 
     // F-VERIFY M6: first-fault debugcon capture on PRESENT faults only (err&P --
     // skips benign demand-paging !P so debug.log isn't tagged by the first

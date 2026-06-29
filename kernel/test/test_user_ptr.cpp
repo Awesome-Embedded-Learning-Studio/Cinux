@@ -141,6 +141,29 @@ void test_copy_rejects_kernel_addr() {
 
 }  // namespace test_user_ptr
 
+// F-EXTABLE B4: a genuine mid-accessor #PF must be caught by the __ex_table
+// fixup and return false (caller -EFAULT), NOT panic. Unlike the kernel-addr
+// tests above (rejected by access_ok before any copy runs), these pass
+// access_ok (valid user-half address) but hit an unmapped page inside the rep
+// movsb, so the fault is real and only the fixup saves us. If the fixup ever
+// fails to fire, the test kernel panics (cli;hlt) and run-kernel-test-all times
+// out -- the "panic == fail" contract is structural.
+namespace test_extable {
+
+void test_copy_from_unmapped_returns_false() {
+    uint8_t buf[8]        = {0};
+    void*   unmapped_user = reinterpret_cast<void*>(0x7000000000ULL);
+    TEST_ASSERT_FALSE(cinux::user::copy_from_user(buf, unmapped_user, sizeof(buf)));
+}
+
+void test_copy_to_unmapped_returns_false() {
+    uint8_t src[8]        = {1, 2, 3, 4, 5, 6, 7, 8};
+    void*   unmapped_user = reinterpret_cast<void*>(0x7000000000ULL);
+    TEST_ASSERT_FALSE(cinux::user::copy_to_user(unmapped_user, src, sizeof(src)));
+}
+
+}  // namespace test_extable
+
 extern "C" void run_user_ptr_tests() {
     TEST_SECTION("UserPtr (F-QA Q4a-2)");
     RUN_TEST(test_user_ptr::test_default_construct_is_null);
@@ -157,5 +180,9 @@ extern "C" void run_user_ptr_tests() {
     RUN_TEST(test_user_ptr::test_access_ok_rejects_null);
     RUN_TEST(test_user_ptr::test_access_ok_rejects_wraparound);
     RUN_TEST(test_user_ptr::test_copy_rejects_kernel_addr);
+
+    TEST_SECTION("F-EXTABLE accessor fault recovery (B4)");
+    RUN_TEST(test_extable::test_copy_from_unmapped_returns_false);
+    RUN_TEST(test_extable::test_copy_to_unmapped_returns_false);
     TEST_SUMMARY();
 }
