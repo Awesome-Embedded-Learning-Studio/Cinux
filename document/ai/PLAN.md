@@ -2,6 +2,31 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F10-M3 TTY + ioctl（Phase 1）— 2026-06-27 立项
+
+> 分支 `feat/f10-tty-dyn`（从干净 main `295d536`）。接 F10-M1（musl 静态移植 ✅ PR#42）。用户拍板：**先 TTY+ioctl，同分支续叠 M2 动态链接**；按需 + libc 解耦（PTY/`/dev/*` 留 F6 DevFS）。
+> **前置修 `9fba65b`**：handle_pf CoW 解析松 U 位门控——内核态写 CoW 用户页（syscall 直接解引用，如 waitpid 写 `*status`）不再 panic。run-kernel-test-all 955/0 + -smp2 AP 回读 PASS，零回归。（ring-3 自动回归未成：内核写 CoW 的 mmap 页不 fault、栈页才 fault，差异未解；待 GUI `make run` 复验。）
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 绿才提交。
+
+### 现状（已 grep 坐实）
+stdin 无设备节点/DevFS：`sys_read` 硬编码 `fd==0` 键盘 spin 轮询（无键 spin 1M 后返 0 = 被 musl 当 EOF）；`fd==1` 走 kprintf；`sys_ioctl` 全返 `-ENOTTY`（musl 探 TIOCGWINSZ 失败 → 全缓冲，printf 不及时）。`Task::controlling_tty` 字段已预埋（F3-M3，-1=无）；F3 信号 + 进程组 + killpg ✅；Console echo sink ✅。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | ✅ 立项 docs（本段）+ ROADMAP F10-M3 🔄 + todo 02-tty.md Phase 1 范围 | ✅ | docs-only |
+| 1 | TTY 核心 `drivers/tty/tty.{hpp,cpp}` + termios UAPI struct + 默认 ICANON\|ECHO\|ISIG + 行规范状态机（纯逻辑，不接 read 路径，host 单测） | ⏳ | test_host + run-kernel-test 绿（新文件零行为变） |
+| 2 | 接输入源 + 回显：Keyboard `dispatch_key`→TTY `input_char` + Console 当 echo sink + 系统 console TTY 单例 | ⏳ | run-kernel-test 绿 + 回显机制测 |
+| 3 | stdin 阻塞读：`sys_read fd==0` 改读 TTY cooked line_buf + 无行 block（F3 `prepare_to_wait`/`schedule_blocked`）+ 键盘 IRQ 唤醒。**修 musl 误 EOF** | ⏳ | run-kernel-test-all 两 leg + 阻塞→IRQ→唤醒机制测 |
+| 4 | ioctl 实命令：TCGETS/TCSETS/TIOCGWINSZ（+ TIOCGPGRP/TIOCSPGRP 用 `controlling_tty`）→ musl/glibc 行缓冲 | ⏳ | run-kernel-test 绿 + isatty 机制测 |
+| 5 | 信号生成：Ctrl+C→SIGINT / Ctrl+Z→SIGTSTP / Ctrl+\\→SIGQUIT 经 killpg 投前台组 + Ctrl+D→EOF | ⏳ | run-kernel-test 绿 + 信号机制测 |
+| 6 | 收尾 + 交织 F-VERIFY：ROADMAP F10-M3 Phase1 ✅ + notes + sys_read/write/ioctl/keyboard 的 host 镜像副本→链真码（批2 微增量，单独 commit）。**🚩TTY 绿 checkpoint：决定 PR 还是续叠 M2** | ⏳ | run-kernel-test-all + test_host 全绿 |
+
+### 风险
+- 批 3 阻塞读的 IRQ 唤醒（模式同 pipe write 唤醒 read，waitpid/pipe 已验）；兜底先做 cooked-buffer 非阻塞读（有行返行、无行不返假 EOF），阻塞作子步叠加。
+- Phase 2（PTY / `/dev/*` 节点 / TIOCSCTTY）硬依赖 F6 DevFS，显式推迟；Phase 1 用 console TTY 单例 + `controlling_tty` 绕开，功能完整不欠债。
+- 解耦：termios / TIOCGWINSZ = Linux UAPI，不出现 libc 名字；TTY 与 PT_INTERP / 动态链接正交（不缠 M2）。
+
 ## 🔄 F-VERIFY（动态验证与并发检测基建）— 2026-06-27 立项
 
 > 横切里程碑（与 FO/F-INFRA/F-QA/F-CLN 同档）。**起源**：2026-06-27 audit（15-agent workflow 抽 165 调试时间坑 + 审 5 维基建）结论——2026-06-21 那轮 14 维静态债务审计量的是「代码写得对不对」，但所有超时调试都是「代码有没有真被跑到、机制有没有真生效、崩了能不能一眼看懂」（动态/环境性另一根轴，静态债表天生瞎）。165 坑根因 top：机制没真生效 27 / 并发没压到 22 / 基建≠生产 19 / 规格看错 17 / 内存 UAF 14。**目标**：把多会话 forensics 级调试变一次 CI 红灯。**用户决策（2026-06-27）**：全做 M0-M6，重锤 SMP+并发；并补**测试矩阵盘点**（现在测试太乱、没人知道到底覆盖了什么）+**测试代码整理**（框架 bug / 共享 util / 0x1234 假 CoW / 镜像副本）。先改 ROADMAP/PLAN 立项，等确认再开 feat 分支。详见 audit memory `debugging-audit-dynamic-coverage-gap`。
@@ -60,13 +85,14 @@
 - **批3 auxv**（碰程序启动核心路径，保现有 shell 不崩）；**批5 musl 源码编译**（host 工具链依赖，最大外部不确定项）；批1 改号是 ABI 破坏性，碰 `user/libc/syscall.h` + shell，全量回归。
 - 架构契合：A.6 禁异常/ErrorOr（内核侧 ErrorOr，仅 trap 入口翻 -errno，批1/4 强化翻译边界）；A 子模块边界（musl 外部库/独立 sysroot，不进 kernel/）；对齐 Linux（musl 强制全树 Linux ABI，顺清 chdir 撞号等历史债）。
 
-### 🔄 F10-M1 follow-up（shell 启动 musl + SMP fork）— 2026-06-27，四类根因已修，待 GUI 交互复验
+### 🔄 F10-M1 follow-up（shell 启动 musl + SMP fork）— 五类根因全修（含 2026-06-29 复活 saga），待 GUI 交互复验
 
 > 接批6：GUI shell 敲 /path 启动 musl 程序（fork+execve+waitpid，标准 shell fallback）。**四类根因**：
 > 1. **SMP CoW 写穿透竞态**（主因）：`copy_page_table_level`（fork.cpp/clone.cpp 共用）把**父进程在用 PTE** 改 writable→CoW 后**全程不刷 TLB** → 父 CPU 缓存陈旧 writable 项 → fork 返回用户态后父写穿透到共享物理页 → 污染子的 CoW 副本。单 CPU 稳（下次 context_switch 重载 cr3 刷 TLB）；-smp 2 父不切地址空间→陈旧 TLB 一直在→炸。6-agent workflow 对抗确认（mapcount 已原子；handle_cow_fault 对 fork 正确，无需改）。
 > 2. **syscall_entry sysretq 不恢复完整 callee-saved 用户寄存器**（pre-existing ABI 违规，复现器撞出）：早期只恢复 RBX，先撞出 RBP(frame+88) 漏恢复；第二关 GUI shell 又撞出 R12-R15 漏保存/恢复。shell 编译后把 `argv[0]` 缓存在 R12，fork child 从 copied kernel stack/Task::ctx 恢复后 R12 陈旧为 0，导致 `execve path=0x0`、exit 127，看起来像 `/hello` 不打印但其实没 exec 成功。修为 syscall frame 96B→128B，保存/恢复 R12-R15+RBX+RBP。
 > 3. **AddressSpace 析构误释放 CoW 共享叶子页**（本次）：`AddressSpace::free_subtree()` 注释说 PT 层不释放 data page，但代码在循环尾部仍把叶子 PTE `phys_addr()` 当页表页 `free_page()`；fork child 被 waitpid reap 后释放了 parent 仍映射的 text/data/stack 物理页，parent 第二轮 fork 继续执行的 `0x401182` 代码页变成全 0（实际执行 `00 00`，fault addr=`rax`=pid=0xb）。修为 PT 叶子按 mapcount `dec_and_test`，最后映射才 free；中间层递归释放页表页。
 > 4. **fork/clone 拷贝内核栈后未重定位 saved RBP 链**（GUI `RIP=0xCCCC...`）：`ctx.rsp` 被平移到 child kernel stack，但 copied frames 里的 saved RBP 仍指 parent stack；child 经 `fork_child_trampoline` 返回 `sys_fork` 后，`syscall_dispatch` 的 `leave; ret` 沿 parent stack 退栈，最终 ret 到填充值 `0xCCCC...`。修为 fork/clone 共用 `prepare_copied_kernel_stack_context()`，沿实际复制的 RBP chain 把 saved RBP 重写到 child stack。
+> 5. **跨核 exit/reap「复活」UAF**（2026-06-29，最深、由 SMAP 收尾 follow-up #1「-smp2 smoke 假绿」引出，前 4 类皆必要但不足以解释 -smp2 ring-3 smoke 的反复 `sys_exit(垃圾)`）：child 在 AP 上 `sys_exit` 设 Zombie 后 `yield`，`schedule()` 该切到 idle，但 `Scheduler::init()`（smoke bootstrap 调）把 `idle_tasks_` 全置空后**只重建 BSP 的**，AP 的 `idle_tasks_[1]` 丢失 → `idle()` 返 nullptr → schedule 队列空+无 idle → 早返回 → Zombie 没被切走 → sys_exit 返回 → 回用户态循环 `exit_group(垃圾)`（每 child 重入 ~400 次，reap+free 后仍重入 = 复活 UAF）。诊断前提是 **kprintf SMP 串行化**（`ea816dc`，并发 kprintf 逐字节 `Serial::putc` 无锁致日志全乱）。**修（`24c4559`）**：① `init()` 为 online AP 重建 idle（`smp.hpp online_ap_count()` + `scheduler.cpp` 调 `setup_ap_idle`）—— 复活根因；② `waitpid` reap 前等 `on_cpu==-1`（`context_switch.S` 存完 prev ctx 的硬同步点）—— 治 free-during-switch；③ `add_task` 加 `wake_ap` 旋钮；④ smoke bootstrap `run_first` 返回=BSP `cli;hlt` park 等 AP 的 outl（治 did-not-run 假绿/假红）。详见 [复活 saga note](../notes/2026-06-29-smp-fork-reap-resurrection-fix.md)。
 >
 > **修**：fork.cpp/clone.cpp CoW 遍历后 `flush_tlb_all()`（局部刷足够：fork IF=0 父不可迁移，子 cr3 全新 clean）；syscall.S frame 扩到 128B 并保存/恢复 R12-R15+RBX+RBP；address_space.cpp `free_subtree()` PT 叶子按 mapcount 释放；fork/clone copied kernel stack RBP chain 重定位；clone user-RSP patch frame size 同步 128B。清 syscall.cpp 的 `[FORK] dispatch` 诊断打印；本次临时 syscall/PF trace 已撤。
 > **复现器** `tools/musl/forktest.c`（裸 SYS_fork(57) 循环 = shell 精确路径；父 post-fork 写共享 CoW 全局、子读；races 计数走串口；装成 /hello 让 ring-3 smoke 在 -smp 2 起）。**实证**：`ITERS=2` 单 CPU + `-smp 2` 均 `FORKTEST iters=2 races=0 clean=2 errs=0`；普通 musl hello `-smp 2` 输出 `Hello from musl on CinuxOS!` 且 smoke PASS；新增 fork/clone copied RBP chain 单测；headless 单 CPU + `-smp 2` test image 均 `954 passed, 0 failed`。当前 sandbox 不能开 CMake target 的 `-vnc :0`，用同一 CMake 产物 `-display none` 直跑 QEMU；GUI shell 交互仍需本机可视环境复验。详见 [AddressSpace note](../notes/2026-06-27-f10-address-space-free-subtree-cow-fix.md) + [fork stack note](../notes/2026-06-27-f10-fork-kernel-stack-rbp-relocation-fix.md)。

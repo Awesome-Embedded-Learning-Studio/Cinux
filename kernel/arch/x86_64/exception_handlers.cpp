@@ -107,6 +107,15 @@ void dump_registers(const InterruptFrame* frame, const char* name, uint8_t vecto
     }
     cinux::mm::dump_memory_stats();
     kprintf("==================================\n");
+    // isa-debug-exit (port 0xf4): terminate QEMU immediately with a code that
+    // names the cause, so CI fails FAST instead of hanging on cli;hlt until the
+    // timeout kills QEMU (the old "PF-killed" 2-minute stall). Encoding:
+    // value = vector + 2 (value 0=success and 1=test-fail are reserved; value 128
+    // also collides with success via (v<<1|1) mod 256, so stay < 128). QEMU exits
+    // (value<<1)|1: #DE(0)->5, #DF(8)->21, #GP(13)->31, #PF(14)->33. No-op on bare
+    // metal / the production `run` target (no isa-debug-exit device there) --
+    // fatal_halt() is the fallback.
+    __asm__ volatile("outl %0, $0xf4" : : "a"(static_cast<uint32_t>(vector + 2)));
     fatal_halt();
 }
 
@@ -312,8 +321,24 @@ void handle_pf(InterruptFrame* frame) {
                     cinux::proc::signal_send(task, cinux::proc::Signal::kSigsegv);
                     return;
                 }
-                // Kernel-mode fault or no current task: keep the legacy
-                // zero-page service so test/boot PF injection still works.
+                // Kernel NULL/near-NULL deref (the nullptr->field pattern): Linux
+                // oopses here ("kernel NULL pointer dereference", address <
+                // PAGE_SIZE). Demand-paging the zero page would MASK the bug --
+                // the kernel reads 0 and continues, crashing later in an
+                // unrelated spot (the gui_worker saga: a fault @0x28 was demand-
+                // paged to a zero page, then PANIC @0x28 -- root cause eaten).
+                // Panic at the deref point with the full frame + backtrace so
+                // the offending RIP is obvious instead of a mystery downstream.
+                if (fault_addr < 0x1000) {
+                    panic(frame, "#PF", 14,
+                          "kernel NULL-pointer dereference @ %p (nullptr+0x%lx) -- "
+                          "not demand-paging the NULL page (would mask the bug)",
+                          reinterpret_cast<void*>(fault_addr), fault_addr);
+                }
+                // Kernel-mode fault or no current task on a non-NULL user addr:
+                // keep the legacy zero-page service so test/boot PF injection
+                // and user-access helpers (no exception table -> rely on demand
+                // paging) still work.
                 klog_warn(
                     "demand-paged user addr %p has no VMA (kernel-mode/no-task "
                     "context; mapping zero page)",
@@ -366,8 +391,13 @@ void handle_pf(InterruptFrame* frame) {
         }
     }
 
-    // CoW fault: page is present but write-protected (fork marks shared pages CoW)
-    if ((err & 0x01) && (err & 0x02) && (err & 0x04)) {
+    // CoW fault: page is present but write-protected (fork marks shared pages
+    // CoW).  Resolve for ANY writer (user OR kernel): CinuxOS syscalls directly
+    // dereference user pointers (no copy_to_user yet), so the kernel legitimately
+    // writes CoW user pages -- e.g. waitpid storing *status into the parent's
+    // fork-CoW'd stack.  handle_cow_fault guards on FLAG_COW, so a genuine
+    // read-only page (not CoW) still falls through to panic below.
+    if ((err & 0x01) && (err & 0x02)) {
         if (cinux::proc::handle_cow_fault(fault_addr)) {
             return;
         }

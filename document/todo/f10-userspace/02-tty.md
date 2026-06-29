@@ -3,6 +3,9 @@
 > 终端子系统：行规范(line discipline)、伪终端(PTY)。
 > Shell 管道、Job Control、交互式终端的基础。
 
+> **Phase 1（2026-06-27 立项，不需 DevFS）**：TTY 行规范（echo / 退格 / Ctrl+C / Ctrl+D / 行积累）+ stdin 阻塞读（替 spin）+ ioctl 实命令（TCGETS / TCSETS / TIOCGWINSZ / TIOCGPGRP / TIOCSPGRP）+ 前台进程组信号。用 console TTY 单例 + `Task::controlling_tty` 字段绕开 DevFS。
+> **Phase 2（推迟到 F6 DevFS）**：PTY master/slave、`/dev/ptmx`、`/dev/pts/N`、`/dev/tty`、`/dev/console`、TIOCSCTTY——需设备 inode。按需不投机建。详见 PLAN「🔄 F10-M3」段。
+
 ## 目标
 
 1. 行规范：行编辑、回显、Ctrl+C 信号生成

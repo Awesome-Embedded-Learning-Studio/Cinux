@@ -54,6 +54,7 @@
 #include "kernel/drivers/net/e1000_init.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pit/pit.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/drivers/video/console.hpp"
 #include "kernel/drivers/video/font.hpp"
 #include "kernel/drivers/video/framebuffer.hpp"
@@ -181,6 +182,10 @@ extern "C" void kernel_main() {
     cinux::lib::kprintf_register_sink(Console::console_sink_adapter, &console);
     cinux::lib::kprintf("[BIG] Console initialised -- dual output active.\n");
 
+    // F10-M3 batch 2: wire the console TTY (stdin line discipline + echo sink)
+    // before the keyboard starts delivering IRQs.
+    cinux::drivers::console_tty_init();
+
     // Step 15b: hand the framebuffer + console off to the GUI (canvas + window
     // manager init; console detached so routine logs stop overlaying the
     // desktop).  No-op when GUI is compiled out (§14 stub linked).  kpanic
@@ -254,6 +259,12 @@ extern "C" void kernel_main() {
     // Step 22: Initialise scheduler and spawn kernel init thread
     cinux::lib::kprintf("[BIG] ===== Scheduler & Init Thread =====\n");
     Scheduler::init();
+
+    // F7 follow-up: start the resident net RX poll-driver kthread (sti/hlt +
+    // NetStack::poll). Must come after the scheduler is up; queued here, it runs
+    // once run_first() begins dispatch. Lets ping() yield (default pump) instead
+    // of sti/hlt-ing inside the syscall (the #DF hazard). No-op if no NIC.
+    cinux::net::start_poll_driver();
 
     auto* init_task =
         TaskBuilder().set_entry(cinux::proc::kernel_init_thread).set_name("kernel_init").build();
