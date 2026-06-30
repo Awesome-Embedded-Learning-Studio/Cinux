@@ -356,11 +356,16 @@ static void musl_hello_smoke_entry() {
                                 kstatus, static_cast<long long>(reap));
         }
     }
-    bool busybox_ok = (bb_fail == 0);
+    bool echo_ok = (bb_fail == 0);
     cinux::lib::kprintf("[F-ECO] busybox echo %d/%d PASS -> %s\n", bb_pass, kBbIters,
-                        busybox_ok ? "PASS" : "FAIL");
+                        echo_ok ? "PASS" : "FAIL");
 
-    // ls: observed only (getdents64 absent -> expected fail; batch 1 signal).
+    // ls: GATED (F-ECO batch 1). getdents64 (217) is implemented, so ls now
+    // resolves / and exits 0. The status gate (exit==0) catches a hard crash;
+    // the serial output should list / entries (bin/busybox...). Full output-
+    // content verification (the four-piece standard) needs the harness to
+    // capture fd1 -- a follow-up once pipe/dup2 land.
+    bool ls_ok = false;
     {
         int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
         if (child_pid == 0) {
@@ -386,11 +391,11 @@ static void musl_hello_smoke_entry() {
             }
             cinux::proc::Scheduler::yield();
         }
-        cinux::lib::kprintf(
-            "[F-ECO] busybox ls OBSERVED (status=%d reap=%lld) -- expected fail until "
-            "getdents64 lands (batch 1)\n",
-            kstatus, static_cast<long long>(reap));
+        ls_ok = (reap > 0 && kstatus == 0);
+        cinux::lib::kprintf("[F-ECO] busybox ls %s (status=%d reap=%lld)\n",
+                            ls_ok ? "PASS" : "FAIL", kstatus, static_cast<long long>(reap));
     }
+    bool busybox_ok = echo_ok && ls_ok;
 #    else
     bool busybox_ok = true;  // busybox phase compiled out
 #    endif

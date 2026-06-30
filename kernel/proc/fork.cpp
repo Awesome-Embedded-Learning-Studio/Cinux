@@ -139,7 +139,8 @@ static uint64_t relocate_copied_stack_addr(uint64_t value, uint64_t parent_stack
 void prepare_user_fork_context(Task* child, uint64_t parent_kernel_stack_top) {
     // Copy the parent's syscall pt_regs frame (128 B) to the top of the child's
     // clean kernel stack.  ret_from_fork reads user RIP/RSP/RFLAGS + the
-    // callee-saved registers out of it and SYSRETQs back to user mode (rax=0).
+    // syscall-preserved registers out of it and SYSRETQs back to user mode
+    // (rax=0).
     std::memcpy(reinterpret_cast<void*>(child->kernel_stack_top - kSyscallFrameSize),
                 reinterpret_cast<void*>(parent_kernel_stack_top - kSyscallFrameSize),
                 kSyscallFrameSize);

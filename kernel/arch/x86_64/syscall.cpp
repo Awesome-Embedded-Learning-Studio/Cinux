@@ -31,6 +31,7 @@
 #include "kernel/syscall/sys_futex.hpp"
 #include "kernel/syscall/sys_getcwd.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
+#include "kernel/syscall/sys_getdents64.hpp"  // F-ECO batch 1
 #include "kernel/syscall/sys_getpid.hpp"
 #include "kernel/syscall/sys_getppid.hpp"
 #include "kernel/syscall/sys_ioctl.hpp"
@@ -87,6 +88,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_exit, sys_exit);
     syscall_register(SyscallNr::SYS_yield, sys_yield);
     syscall_register(SyscallNr::SYS_getdents, sys_getdents);
+    syscall_register(SyscallNr::SYS_getdents64, sys_getdents64);  // F-ECO batch 1
     syscall_register(SyscallNr::SYS_creat, sys_creat);
     syscall_register(SyscallNr::SYS_mkdir, sys_mkdir);
     syscall_register(SyscallNr::SYS_mknod, sys_mknod);
@@ -96,6 +98,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_getcwd, sys_getcwd);
     syscall_register(SyscallNr::SYS_stat, sys_stat);
     syscall_register(SyscallNr::SYS_fstat, sys_fstat);
+    syscall_register(SyscallNr::SYS_lstat, sys_stat);  // F-ECO b1: lstat = stat (no symlinks yet)
     syscall_register(SyscallNr::SYS_pipe, sys_pipe);
     syscall_register(SyscallNr::SYS_getpid, sys_getpid);
     syscall_register(SyscallNr::SYS_getppid, sys_getppid);

@@ -26,6 +26,7 @@ enum class SyscallNr : uint64_t {
     SYS_close          = 3,
     SYS_stat           = 4,
     SYS_fstat          = 5,
+    SYS_lstat          = 6,  ///< F-ECO batch 1: ls lstat's entries (= stat; no symlinks yet)
     SYS_lseek          = 8,   ///< reposition read/write offset (musl fseek)
     SYS_mmap           = 9,   ///< allocate virtual memory (F2-M2)
     SYS_mprotect       = 10,  ///< set protection on a region (F2-M2)
@@ -46,7 +47,8 @@ enum class SyscallNr : uint64_t {
     SYS_exit           = 60,
     SYS_waitpid  = 61,  ///< Linux x86_64 slot 61 is wait4 (4-arg; musl waitpid passes rusage=NULL)
     SYS_kill     = 62,  ///< send a signal to a process (F3-M1)
-    SYS_getdents = 78,
+    SYS_getdents   = 78,
+    SYS_getdents64 = 217,  ///< F-ECO batch 1: musl opendir/readdir use this (not legacy 78)
     SYS_getcwd   = 79,
     SYS_chdir    = 80,  ///< change working directory (was wrongly 12, collided with brk)
     SYS_mkdir    = 83,

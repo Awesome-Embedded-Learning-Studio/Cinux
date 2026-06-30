@@ -6,6 +6,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_exit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_yield.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_getdents.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_getdents64.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_creat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_mkdir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_mknod.cpp

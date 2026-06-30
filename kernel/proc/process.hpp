@@ -309,6 +309,7 @@ struct Task {
 // is the first data member.  Pin both layout facts the asm depends on.
 static_assert(offsetof(Task, ctx) == 0, "ctx at Task+0 (context_switch.S rdi is Task*)");
 static_assert(offsetof(Task, on_cpu) == sizeof(CpuContext), "on_cpu offset for context_switch.S");
+static_assert(offsetof(Task, fpu_state) == 384, "fpu_state offset for syscall/interrupt FXSAVE");
 
 // ============================================================
 // Fork
