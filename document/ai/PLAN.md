@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## ✅ F8-M1 Pipe 增强 + F8-M2 命名 FIFO — 收官 2026-06-30（worktree `worktree-f8-pipe-fifo`，从干净 main `c0188cd`）
+## ✅ F8-M1 Pipe 增强 + F8-M2 命名 FIFO — 收官 2026-06-30（worktree `worktree-f8-pipe-fifo`，从干净 main `c0188cd`，7 commit 待 push）
 
 > Feature 域 F8 IPC 扩展前两里程碑。接 F10-M3 PTY(InodeOps::open cloning 扩展点已就位)+ F6-M3 DevFS(add_node/set_dynamic_lookup 已就位)。**M1=匿名 pipe 修齐**:① reader-gone 改返 `Error::BrokenPipe`(现 pipe_ops.cpp:43 返 IOError→kEio,故 sys_write.cpp:53-59 的 EPIPE→SIGPIPE 从未真触发)② 真调度阻塞替 sti/hlt 自旋(致命 GOTCHA:sti-in-syscall→#DF,走 prepare_to_wait/schedule_blocked,对齐 console_tty/Mutex)③ O_NONBLOCK→EAGAIN。**M2=命名 FIFO**:FifoRegistry + FifoOps(open() cloning 首读者建 Pipe)+ sys_mknod/mkfifo。依赖全在 main(SYS_pipe=22、signal_send/killpg、InodeOps::open、DevFs add_node);缺 SYS_mknod(M2 新建)。范围栅栏:不做 Unix Socket(M3)/shm(M4)/epoll(M5);用户态 shell 真闭环留后续;ConditionVariable 抽象留 sync 里程碑(本里程碑复用现成 wait queue)。
 > 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿(本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死);改公共头(InodeOps/File)push 前补全量 `cmake --build build`。
@@ -16,6 +16,7 @@
 | 3 | FIFO 核心 `fifo.{hpp,cpp}`(FifoRegistry + FifoOps open() cloning 首读者建 Pipe + fs_private 存 Fifo*)+ host 单测 | ✅ | host test_fifo 4/0 + 两 leg 990/0(open() 签名 +flags 零回归,PTY 全绿) |
 | 4 | mknod/mkfifo syscall(`SYS_mknod=133` + S_IFIFO→FifoRegistry + 注册) | ✅ | run-kernel-test-all 两 leg 990/0(DevFS dynamic_lookup 加 FIFO 先查零回归) |
 | 5 | 跨 fd round-trip + mkfifo 真测 + 两 leg + note + ROADMAP F8-M1/M2 ✅ | ✅ | run-kernel-test-all 两 leg 993/0(+3 FIFO: round-trip + ENOSYS + EEXIST) |
+| 6 | **shell 端验证补批**(用户要 shell 上验):user/libc `sys_mknod` wrapper + S_IFIFO/O_* + `cmd_mkfifo` + `cmd_fifotest`(单进程 round-trip smoke)+ 注册/help/CMake。**零内核改动**(user open 走 SYS_open→do_open_kernel 已 cloning,do_openat cloning 留 F10-M4 follow-up) | ✅ | run-kernel-test-all 两 leg 993/0 零回归 + user_shell 编译绿(fifotest/mkfifo 链入);GUI 交互验证归用户 |
 
 ### 风险 / 陷阱
 - **批2 头号风险(致命 GOTCHA)**:sti-in-syscall→#DF(见 memory sys-ping-df-sti-in-syscall)。现状 `Pipe::write/read` 在 syscall 上下文 `irq_enable();hlt()` 自旋 → 真硬件 #DF(harness 不真跑 ring3 阻塞故抓不到)。正解别 sti/hlt,走 prepare_to_wait/schedule_blocked。
