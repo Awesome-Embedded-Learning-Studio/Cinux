@@ -19,7 +19,6 @@
 #include "kernel/syscall/sys_socket.hpp"
 
 #include <cstdint>
-#include <memory>
 
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (SMAP/extable)
 #include "kernel/errno.hpp"
@@ -118,18 +117,22 @@ bool fill_sockaddr_in(uint64_t addr_virt, uint64_t addrlen_ptr, Ipv4Addr addr, u
 /// (closing the fd frees the File; the Socket/Inode share the pipe-style
 /// hobby-OS release-without-hook limitation).  Returns the fd or -errno.
 int64_t install_socket_fd(Socket* sock) {
-    std::unique_ptr<Socket> s(sock);
-    std::unique_ptr<Inode>  inode(new Inode());
+    // Manual RAII (freestanding: no <memory>/unique_ptr). On error free both;
+    // on success ownership of sock + inode transfers to the FDTable's File
+    // (closing the fd frees the File; the Socket/Inode share the pipe-style
+    // hobby-OS release-without-hook limitation).
+    Socket* s     = sock;
+    Inode*  inode = new Inode();
     inode->ops        = &socket_ops();
     inode->type       = InodeType::Regular;
-    inode->fs_private = s.get();
+    inode->fs_private = s;
 
-    int fd = current_fd_table().alloc(inode.get(), OpenFlags::RDWR);
+    int fd = current_fd_table().alloc(inode, OpenFlags::RDWR);
     if (fd < 0) {
-        return -cinux::kEmfile;  // unique_ptrs free socket + inode
+        delete inode;
+        delete s;
+        return -cinux::kEmfile;
     }
-    s.release();
-    inode.release();
     return fd;
 }
 
@@ -212,20 +215,22 @@ int64_t sys_sendto(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/, 
     if (s == nullptr) {
         return -cinux::kEbadf;
     }
-    uint32_t n = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
-    std::unique_ptr<uint8_t[]> kbuf(new uint8_t[n ? n : 1]);
-    if (n != 0 && !copy_from_user(kbuf.get(), reinterpret_cast<void*>(buf), n)) {
+    uint32_t n    = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
+    uint8_t* kbuf = new uint8_t[n ? n : 1];  // manual RAII (freestanding: no <memory>)
+    if (n != 0 && !copy_from_user(kbuf, reinterpret_cast<void*>(buf), n)) {
+        delete[] kbuf;
         return -cinux::kEfault;
     }
     cinux::lib::ErrorOr<int64_t> r =
-        (addr == 0) ? s->send(kbuf.get(), n)
+        (addr == 0) ? s->send(kbuf, n)
                     : [&] {
                           Ipv4Addr a{};
                           uint16_t port = 0;
                           return parse_sockaddr_in(addr, addrlen, &a, &port)
-                                 ? s->sendto(a, port, kbuf.get(), n)
+                                 ? s->sendto(a, port, kbuf, n)
                                  : cinux::lib::ErrorOr<int64_t>(cinux::lib::Error::InvalidArgument);
                       }();
+    delete[] kbuf;  // send/sendto consumed it
     if (!r.ok()) {
         return -cinux::to_errno(r.error());
     }
@@ -238,18 +243,21 @@ int64_t sys_recvfrom(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/
     if (s == nullptr) {
         return -cinux::kEbadf;
     }
-    uint32_t n = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
-    std::unique_ptr<uint8_t[]> kbuf(new uint8_t[n ? n : 1]);
+    uint32_t n    = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
+    uint8_t* kbuf = new uint8_t[n ? n : 1];  // manual RAII (freestanding: no <memory>)
     Ipv4Addr src{};
     uint16_t sport = 0;
-    auto r = s->recv(kbuf.get(), n, &src, &sport);
+    auto r = s->recv(kbuf, n, &src, &sport);
     if (!r.ok()) {
+        delete[] kbuf;
         return -cinux::to_errno(r.error());
     }
     uint32_t got = static_cast<uint32_t>(*r);
-    if (got != 0 && !copy_to_user(reinterpret_cast<void*>(buf), kbuf.get(), got)) {
+    if (got != 0 && !copy_to_user(reinterpret_cast<void*>(buf), kbuf, got)) {
+        delete[] kbuf;
         return -cinux::kEfault;
     }
+    delete[] kbuf;  // copied out to user
     fill_sockaddr_in(addr, addrlen_ptr, src, sport);
     return *r;
 }
