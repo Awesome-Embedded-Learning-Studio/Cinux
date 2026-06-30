@@ -131,14 +131,15 @@
 
 ---
 
-### DEBT-022 ProcFS /proc/<pid>/{stat,cmdline} TOCTOU UAF（find_by_pid 锁外解引用 Task*）
-- **维度**: 并发/SMP(D3)　**优先级**: P1　**状态**: 🆕 登记待办（F6-M2 合入后 post-hoc 审核，2026-06-30）　**核验**: ✅ 读码坐实（signal_find_task_by_pid 锁内返指针 + format_proc_stat 锁外解引用 7 字段）
+### DEBT-022 ProcFS /proc/<pid>/{stat,cmdline} TOCTOU UAF（find_by_pid 锁外解引用 Task*）✅
+- **维度**: 并发/SMP(D3)　**优先级**: P1　**状态**: ✅ 已修（fix/procfs-toctou-snapshot，2026-06-30）　**核验**: ✅ 读码坐实（signal_find_task_by_pid 锁内返指针 + format_proc_stat 锁外解引用 7 字段）
 - **位置**: `kernel/proc/signal.cpp:77-87`(signal_find_task_by_pid 锁内返 Task*) / `kernel/fs/procfs.cpp:259-266,274-281`(stat/cmdline read 锁外 format_proc_stat) / `kernel/fs/procfs_content.cpp:79-93`(解引用 t->pid/name/state/ppid/tgid/uid/gid)
 - **现象**: ProcFS read 经 `signal_find_task_by_pid` 在 `g_registry_lock` 下取 `Task*`，锁释放后 `format_proc_stat` 在锁外解引用。signal.cpp:79-81 + F6-M2 note 53 行注释「tasks 永不释放，安全（DEBT-002 未修）」**前提已失效**：DEBT-002 在 F-QA Q4e-3（4bb6ca4/e6ce2f4）已修，task 现经 exit_current→reap_deferred deferred-free。SMP(-smp 2)：CPU0 `cat /proc/<pid>/stat` 拿 t→unlock；CPU1 该 task exit→`delete t`；CPU0 format_proc_stat 解引用已 free Task → **UAF**。/proc 经 sys_open/sys_read 可达，两条 syscall 不关抢占/IRQ。
 - **根因**: find_by_pid 返回原始指针供锁外用；DEBT-002 修复（task 真释放）使旧「永不释放」契约失效，注释未同步。
 - **修复建议**: 对齐 killpg(signal.cpp:201-217)范式——加 `signal_snapshot_task(pid, TaskSnapshot&)`，ProcFS stat/cmdline read **锁内 snapshot 字段**(pid/name/state/ppid/tgid/uid/gid 拷到栈；name 拷字节不拷指针)到栈，锁外只格式化。不动 registry 接口。长期：Task refcount（find 时 acquire，reap release-then-free，RCU-safe registry）。
 - **关联**: DEBT-002（registry 释放，同族）/ 同族 UAF [[reap-deferred-oncpu-uaf]] [[smp-migration-context-race]]
 - **最低动作**: 立刻订正 signal.cpp:79-81 + note 的过时「安全」注释，防误导。
+- **✅ 已修（fix/procfs-toctou-snapshot，2026-06-30）**: 加 `TaskSnapshot` POD（process.hpp，name 拷字节防悬）+ `signal_snapshot_task(pid,snap&)` 锁内拷字段（signal.hpp/cpp，对齐 killpg 范式但 snapshot 值非指针）+ ProcFS stat/cmdline read 改走 snapshot（format 签名 `const Task*`→`const TaskSnapshot&`）+ 订正 find_by_pid 过时注释。run-kernel-test-all 两 leg 1020/0 + host 69/69。详见 [note](../../notes/2026-06-30-debt-022-procfs-toctou-snapshot.md)。
 
 ## 🟡 Medium
 
