@@ -2,6 +2,29 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F8-M1 Pipe 增强 + F8-M2 命名 FIFO — 收官 2026-06-30（worktree `worktree-f8-pipe-fifo`，从干净 main `c0188cd`，7 commit 待 push）
+
+> Feature 域 F8 IPC 扩展前两里程碑。接 F10-M3 PTY(InodeOps::open cloning 扩展点已就位)+ F6-M3 DevFS(add_node/set_dynamic_lookup 已就位)。**M1=匿名 pipe 修齐**:① reader-gone 改返 `Error::BrokenPipe`(现 pipe_ops.cpp:43 返 IOError→kEio,故 sys_write.cpp:53-59 的 EPIPE→SIGPIPE 从未真触发)② 真调度阻塞替 sti/hlt 自旋(致命 GOTCHA:sti-in-syscall→#DF,走 prepare_to_wait/schedule_blocked,对齐 console_tty/Mutex)③ O_NONBLOCK→EAGAIN。**M2=命名 FIFO**:FifoRegistry + FifoOps(open() cloning 首读者建 Pipe)+ sys_mknod/mkfifo。依赖全在 main(SYS_pipe=22、signal_send/killpg、InodeOps::open、DevFs add_node);缺 SYS_mknod(M2 新建)。范围栅栏:不做 Unix Socket(M3)/shm(M4)/epoll(M5);用户态 shell 真闭环留后续;ConditionVariable 抽象留 sync 里程碑(本里程碑复用现成 wait queue)。
+> 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿(本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死);改公共头(InodeOps/File)push 前补全量 `cmake --build build`。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs(本段)+ ROADMAP F8-M1/M2 ⏳→🔄 + todo `00-pipe.md`/`01-fifo.md` 重写(选型:直接 wait queue 替 sti/hlt,非 ConditionVariable) | ✅ | docs-only |
+| 1 | BrokenPipe 修(`PipeWriteOps::write` reader-gone→`Error::BrokenPipe`,零新接口,`reader_alive()` 区分)+ 负测验 SIGPIPE 真触发(CurrentTaskGuard + do_write_kernel → -kEpipe + sig_pending 含 kSigpipe) | ✅ | run-kernel-test-all 两 leg 987/0 + host sys_pipe 断言 BrokenPipe |
+| 2 | 真调度阻塞替 spin(Pipe 加 read/write 等待队列 + prepare_to_wait/schedule_blocked/unblock;host `#ifndef CINUX_HOST_TEST` 不阻塞)+ O_NONBLOCK(Pipe::read/write `nonblock` 参 + kWouldBlock→WouldBlock→kEagain) | ✅ | run-kernel-test-all 两 leg 990/0(+3 nonblock 负测) + host pipe/sys_pipe 零警告 |
+| 3 | FIFO 核心 `fifo.{hpp,cpp}`(FifoRegistry + FifoOps open() cloning 首读者建 Pipe + fs_private 存 Fifo*)+ host 单测 | ✅ | host test_fifo 4/0 + 两 leg 990/0(open() 签名 +flags 零回归,PTY 全绿) |
+| 4 | mknod/mkfifo syscall(`SYS_mknod=133` + S_IFIFO→FifoRegistry + 注册) | ✅ | run-kernel-test-all 两 leg 990/0(DevFS dynamic_lookup 加 FIFO 先查零回归) |
+| 5 | 跨 fd round-trip + mkfifo 真测 + 两 leg + note + ROADMAP F8-M1/M2 ✅ | ✅ | run-kernel-test-all 两 leg 993/0(+3 FIFO: round-trip + ENOSYS + EEXIST) |
+| 6 | **shell 端验证补批**(用户要 shell 上验):user/libc `sys_mknod` wrapper + S_IFIFO/O_* + `cmd_mkfifo` + `cmd_fifotest`(单进程 round-trip smoke)+ 注册/help/CMake。**零内核改动**(user open 走 SYS_open→do_open_kernel 已 cloning,do_openat cloning 留 F10-M4 follow-up) | ✅ | run-kernel-test-all 两 leg 993/0 零回归 + user_shell 编译绿(fifotest/mkfifo 链入);GUI 交互验证归用户 |
+
+### 风险 / 陷阱
+- **批2 头号风险(致命 GOTCHA)**:sti-in-syscall→#DF(见 memory sys-ping-df-sti-in-syscall)。现状 `Pipe::write/read` 在 syscall 上下文 `irq_enable();hlt()` 自旋 → 真硬件 #DF(harness 不真跑 ring3 阻塞故抓不到)。正解别 sti/hlt,走 prepare_to_wait/schedule_blocked。
+- **批2 host 兼容**:pipe.cpp 链进 host 单测(无 scheduler);Scheduler 调用包 `#ifndef CINUX_HOST_TEST`(对齐 irq.hpp 现成 host-guard,§14 rule 3 合法),host 路径不阻塞(同步单测本就不触发满/空)。
+- **O_NONBLOCK 透传**:InodeOps::read/write 签名不带 flags(改签名 blast radius 大,PTY 刚动过);匿名 pipe(2)不带 flags 故 sys_pipe 端始终 blocking;O_NONBLOCK 经 FIFO open()(M2)落地,pipe 层先备 nonblock 参。
+- **InodeOps::open cloning** 是 PTY 加的扩展点(默认返原 inode),FIFO 复用;**fs_private 存 Fifo\*** 避免改 InodeType enum(诚实的 hobby-OS 简化)。
+- **smoke 默认 ON + 本地无 build/musl → 挂死**:本地一律先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`。
+
 ## ✅ F7-M5 TCP（传输层：三次握手 / 序号-ACK / 四次挥手 + 伪首部校验和）— 收官 2026-06-30（分支 worktree-f7-m5-tcp 待 PR）
 
 > worktree `worktree-f7-m5-tcp`（从干净 main `c0188cd`，接 F7-M4 UDP ✅）。在 IPv4 同层加 TCP：`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l4(kIpProtoTcp, tcp)` 入 L4 proto 表（M4 已立单一分派机制，加协议不疼）。**范围（用户拍板）**：TCP 状态机（三次握手 / 序号-ACK / 四次挥手）+ 伪首部校验和；**最小可用（无内核 timer-wake）——单方向数据 + 无重传**；真重传/RTO/滑动窗口/拥塞控制、TCP Socket（listen/accept/recv）留 follow-up（Socket 进 F7-M6）。**栅栏**：不碰 socket/syscall（M6）、不进 production `net_init.cpp`（无消费者，同 M4 UDP）、test-only（host 单测 + loopback 内核 round-trip + e1000 TX smoke）。
