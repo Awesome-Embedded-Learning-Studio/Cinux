@@ -22,8 +22,9 @@
 | 3 | `send`（数据段 + ACK 推进）+ `close`（FIN）+ 数据/挥手 FSM（4-way）+ host 单测（established 数据 round-trip + 挥手） | ✅ `ec0aa78` | host net_tcp 9/0（+2）+ run-kernel-test-all 两 leg 各 986/0 |
 | 4 | loopback 内核 round-trip（test_net.cpp `test_tcp_loopback`：单 poll 排干握手+数据+挥手）+ e1000 TX smoke（`test_tcp_e1000_tx`：发 TCP 段，ARP resolve+send ok） | ✅ `cf0db3e` | run-kernel-test-all 两 leg 各 988/0（+2 TCP）+ check_net_decoupling 绿 |
 | 5 | note + ROADMAP F7-M5 ✅ + PLAN 收官 | ✅ | docs-only |
+| 6 | 对抗性加固：handle 头长度 sanity 门（data_off<5 / >payload 丢）+ host 6 负测（截断头/畸形 data_off×2/连接表满/迷路 ACK/乱序数据） | ✅ `24bd4e4` | host net_tcp 15/0（+6）+ run-kernel-test-all 两 leg 各 988/0 |
 
-> **F7-M5 收官**（2026-06-30,worktree-f7-m5-tcp 11 commit 待 PR）：TCP 协议层——`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l8` 入 L4 表。5 批:wire+校验和门(批1)→握手 FSM+RST(批2)→数据+四次挥手(批3)→内核 loopback 端到端+e1000 TX smoke(批4)→收官(批5)。**架构**:沿用 UDP 范式(L4Handler 缝 + 连续缓冲区伪首部校验和),加协议不疼。**最小可用诚实标注**:无重传/RTO/滑动窗口/拥塞控制(需 timer 基建)、ISN 随机化(安全,follow-up)、TCP Socket(listen/accept/recv 进 F7-M6)。范围栅栏:不进 production net_init(无消费者)、test-only。验证:host net_tcp 9/0 + run-kernel-test-all 两 leg 各 988/0 + check_net_decoupling 绿。详见各批 notes。**push/PR 归用户**。
+> **F7-M5 收官**（2026-06-30,worktree-f7-m5-tcp 12 commit 待 PR）：TCP 协议层——`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l8` 入 L4 表。6 批:wire+校验和门(批1)→握手 FSM+RST(批2)→数据+四次挥手(批3)→内核 loopback 端到端+e1000 TX smoke(批4)→收官(批5)→对抗性加固+负测(批6)。**架构**:沿用 UDP 范式(L4Handler 缝 + 连续缓冲区伪首部校验和),加协议不疼。**最小可用诚实标注**:无重传/RTO/滑动窗口/拥塞控制(需 timer 基建)、ISN 随机化(安全,follow-up)、TCP Socket(listen/accept/recv 进 F7-M6)。范围栅栏:不进 production net_init(无消费者)、test-only。验证:host net_tcp 15/0 + run-kernel-test-all 两 leg 各 988/0 + check_net_decoupling 绿。**当前不可达**(生产不注册 TCP)故零崩风险;批6 给 M6 接进生产后兜底(坏段不崩)。详见各批 notes。**push/PR 归用户**。
 
 ### 风险 / 陷阱
 - **状态机复杂度**：TCP 是网络层最复杂协议。缓解：按批递进（wire→握手→数据/挥手），每批独立绿；最小可用（无重传/窗口/拥塞）诚实标注，不包装成完整 TCP。
