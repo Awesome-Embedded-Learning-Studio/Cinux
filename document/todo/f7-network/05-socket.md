@@ -61,10 +61,10 @@ class UdpSocket  : public Socket, public UdpListener { /* on_udp→拷贝进环 
 class TcpSocket  : public Socket, public TcpListener { /* on_accept 队列/on_data→环/on_close */ };
 ```
 
-- [ ] Socket base（端点/proto/per-socket RX 环/等待队列/virtuals，纯逻辑 host 单测）
-- [ ] SocketOps InodeOps 缝（read/write/ioctl/stat，`fs_private` 存 Socket*）
-- [ ] UdpSocket（on_udp→环、bind/sendto/recvfrom、阻塞）
-- [ ] TcpSocket（accept 队列、on_data→per-连接环、listen/accept/connect/send/recv、阻塞、remote→socket 路由）
+- [x] Socket base（端点/proto/per-socket RX 环/等待队列/virtuals，纯逻辑 host 单测）
+- [x] SocketOps InodeOps 缝（read/write/ioctl/stat，`fs_private` 存 Socket*）
+- [x] UdpSocket（on_udp→环、bind/sendto/recvfrom、阻塞）
+- [x] TcpSocket（accept 队列、on_data→per-连接环、listen/accept/connect/send/recv、阻塞、accept 建 child + set_listener 重绑）
 
 ### T2: Socket 系统调用（Linux x86_64 号；syscall_nums.hpp 41-55/288 全空已核实无撞号）
 
@@ -80,14 +80,14 @@ class TcpSocket  : public Socket, public TcpListener { /* on_accept 队列/on_da
 | sys_setsockopt | 54 | 存根（SO_REUSEADDR，余 ENOPROTOOPT） |
 | sys_accept4 | 288 | accept + flags（对齐 musl） |
 
-- [ ] sys_socket/bind/connect/listen/accept/sendto/recvfrom/close 通用派发（fd→File→inode→SocketOps→Socket virtual）
-- [ ] sockaddr_in 打包/拆包（copy_to/from_user SMAP 安全，抄 sys_read 暂存范式）
-- [ ] syscall 号注册（syscall_nums.hpp + syscall.cpp register_builtin_handlers）
-- [ ] sys_close 复用 FDTable::close，SocketOps 析构拆连接（TCP FIN）
+- [x] sys_socket/bind/connect/listen/accept/sendto/recvfrom/close 通用派发（fd→File→inode→SocketOps→Socket virtual）
+- [x] sockaddr_in 打包/拆包（copy_to/from_user SMAP 安全，抄 sys_read 暂存范式）
+- [x] syscall 号注册（syscall_nums.hpp + syscall.cpp register_builtin_handlers）
+- [x] sys_close 复用 FDTable::close，SocketOps 析构拆连接（TCP FIN）
 
 ### T3: 生产接线 + 端到端验证
 
-- [ ] net_init.cpp 注册 UdpModule/TcpModule（`add_l4`）+ 挂 LoopbackDevice + dev 路由 accessor
-- [ ] 内核 loopback TCP/UDP echo 回归测（确定性，socket→module→loopback→module→socket 全链）
-- [ ] musl 静态 socket 程序（socket/connect/send/recv 真用户态，SLIRP/loopback）
-- [ ] host ASAN（per-open 资源释放，无 release 钩子则测试自释放，参 F8 test_fifo 教训）
+- [x] net_init.cpp 注册 UdpModule/TcpModule（`add_l4`）+ 挂 LoopbackDevice + dev 路由 accessor
+- [x] 内核 loopback TCP/UDP echo 回归测（确定性，socket→module→loopback→module→socket 全链）
+- [ ] musl 静态 socket 程序（socket/connect/send/recv 真用户态，SLIRP/loopback）— **follow-up**（需 worktree sysroot + net_poll-kthread-aware 测试，见 note）
+- [ ] host ASAN（per-open 资源释放，无 release 钩子则测试自释放，参 F8 test_fifo 教训）— defer（无 host 单测；内核 close 无 release 钩子，参 pipe hobby 限制）

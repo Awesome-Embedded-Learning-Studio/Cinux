@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F7-M6 Socket API（BSD socket 系统调用 / Socket=InodeOps 适配器）— 2026-06-30 立项（worktree `worktree-f7-m6-socket`，从干净 main `f1f29aa`）
+## ✅ F7-M6 Socket API 收官（BSD socket 系统调用 / Socket=InodeOps 适配器）— 2026-06-30（worktree `worktree-f7-m6-socket`，从干净 main `f1f29aa`，两 leg 1027/0）
 
 > Feature 域 F7 最后一里程碑。接 F7-M5 TCP ✅（已合 main PR#53）+ F7-M4 UDP ✅（PR#47）。网络线走到「可用」：用户态程序能用 socket()/connect()/send()/recv() 收发数据。
 > **架构（4-agent 设计面板核实，已读码）**：socket fd 走 **InodeOps 子类**（`SocketOps`），对齐 PTY/pipe——socket fd → File → Inode → SocketOps，`sys_read/write/ioctl/close` **零改动**（对 fd 层 socket fd 就是一个 pipe fd）。`socket()` 装合成 Inode（抄 `sys_pipe::do_pipe_kernel` unique_ptr→release），`accept()` 抄 `PtmxOps::open` cloning 再发一个 fd。TcpModule/UdpModule **保持纯协议层不动**；per-socket RX 环 + 阻塞 + accept 队列放 Socket 适配器，挂 listener 缝（`UdpListener::on_udp` / `TcpListener::on_accept/on_data/on_close`）——回调里**拷贝借来的帧**进环（设备 dispatch 后回收 buffer），send 直接调 module。阻塞用现成 `prepare_to_wait/schedule_blocked/unblock`（F8 pipe 那套），从 `net_poll` kthread 上下文唤醒，**不需 timer**。生产 `net_init.cpp` `add_l4(kIpProtoUdp/...)`+`add_l4(kIpProtoTcp/...)` 注册 + 挂 LoopbackDevice + dev 路由 accessor。
@@ -13,10 +13,10 @@
 | 批 | 范围 | 状态 | 测试 |
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F7-M6 ⏳→🔄 + todo `05-socket.md` 重写（范围栅栏 + 架构图 + B0-B4） | ✅ | docs-only |
-| 1 | 底座：生产注册（`g_udp`/`g_tcp` + `add_l4` + 挂 loopback + dev 路由 accessor）+ Socket base（端点/proto/per-socket RX 环/等待队列/virtuals，纯逻辑 host 可测）+ SocketOps InodeOps 缝 + `sys_socket/bind/connect/listen/accept/sendto/recvfrom/close` 通用派发（via Socket virtuals）+ syscall 号注册（41-55/288，syscall_nums.hpp 已核实空）。内部可拆 B1a(net_init+base)/B1b(fd+syscall) | ⏳ | host 单测（环 + 阻塞）+ 两 leg |
-| 2 | UDP socket：UdpSocket 适配器（`on_udp`→拷贝进环、bind/sendto/recvfrom、阻塞）+ host 单测 + loopback echo | ⏳ | host net_udp_socket + 两 leg |
-| 3 | TCP socket：TcpSocket 适配器（accept 队列、`on_data`→per-连接环、listen/accept/connect/send/recv、阻塞、remote→socket 路由）+ host 单测 + loopback echo | ⏳ | host net_tcp_socket + 两 leg |
-| 4 | 端到端 demo（内核 loopback TCP/UDP echo 回归门 + musl 静态 socket 程序 over SLIRP）+ 收官（notes + ROADMAP F7-M6 ✅） | ⏳ | loopback echo + musl socket smoke + 两 leg |
+| 1 | 底座：生产注册（`g_udp`/`g_tcp` + `add_l4` + 挂 loopback + dev 路由 accessor）+ Socket base（端点/proto/per-socket RX 环/等待队列/virtuals，纯逻辑 host 可测）+ SocketOps InodeOps 缝 + `sys_socket/bind/connect/listen/accept/sendto/recvfrom/close` 通用派发（via Socket virtuals）+ syscall 号注册（41-55/288，syscall_nums.hpp 已核实空）。内部可拆 B1a(net_init+base)/B1b(fd+syscall) | ✅ B1a `b9d2057` / B1b `66345c2` | 两 leg 1025/0（+5 socket 桩）+ 生产 boot 冒烟 + 解耦绿 |
+| 2 | UDP socket：UdpSocket 适配器（`on_udp`→拷贝进环、bind/sendto/recvfrom、阻塞、未绑自动 ephemeral）+ loopback echo | ✅ `c7d2eae` | 两 leg 1026/0（+1 UDP loopback 双向 echo）+ 解耦绿 |
+| 3 | TCP socket：TcpSocket 适配器（accept 队列、`on_data`→per-连接环、listen/accept/connect/send/recv、阻塞、accept 建 child + `TcpModule::set_listener` 重绑 TCB listener）+ loopback echo | ✅ `9ca84f4` | 两 leg 1027/0（+1 TCP loopback echo:connect→握手→accept→双向）+ 解耦绿 |
+| 4 | 收官（note + ROADMAP F7-M6 ✅ + 本段）。**loopback TCP/UDP echo 回归门已在 B2/B3 落地**；musl 静态 socket 程序作 follow-up（需 worktree sysroot + net_poll-kthread-aware 测试） | ✅ 本次 | docs-only；内核回归门见 B2/B3 |
 
 ### 风险 / 陷阱
 - **borrowed frame 必须拷贝**：`on_udp`/`on_data` 的 FrameView 借自设备 buffer，dispatch 返回后回收；回调里必须 copy 进 per-socket 环，否则 recv 拿到垃圾（udp.hpp/tcp.hpp 注释明示）。
