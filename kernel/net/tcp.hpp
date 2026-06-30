@@ -106,12 +106,18 @@ struct TcpEndpoint {
 };
 
 /// Connection states the FSM moves through.  Batch 2 covers the handshake half
-/// (Closed/SynSent/SynReceived/Established); the teardown half lands in batch 3.
+/// (Closed/SynSent/SynReceived/Established); batch 3 adds the teardown half
+/// (FinWait1/FinWait2/CloseWait/LastAck).  TIME_WAIT needs a timer (absent here)
+/// -- a closed peer's final ACK is trusted, no retransmit (follow-up).
 enum class TcpState : uint8_t {
     kClosed      = 0,
     kSynSent     = 1,
     kSynReceived = 2,
     kEstablished = 3,
+    kFinWait1    = 4,
+    kFinWait2    = 5,
+    kCloseWait   = 6,
+    kLastAck     = 7,
 };
 
 /// @brief Inbound TCP observer -- the consumer of a connection's lifecycle.
@@ -152,6 +158,21 @@ public:
     ///        connection on this 4-tuple already exists or the table is full.
     cinux::lib::ErrorOr<void> connect(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
                                       uint16_t remote_port, Ipv4Module& ipv4, NetStack& stack);
+
+    /// @brief Send @p data on an ESTABLISHED connection (PSH|ACK).  Advances
+    ///        SND.NXT by @p len; the peer's ACK (drained by poll) acknowledges it.
+    ///        Fails if no such connection or it is not ESTABLISHED.
+    cinux::lib::ErrorOr<void> send(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
+                                   uint16_t remote_port, const uint8_t* data, uint32_t len,
+                                   Ipv4Module& ipv4, NetStack& stack);
+
+    /// @brief Active close: send FIN.  From ESTABLISHED -> FIN_WAIT_1 (we
+    ///        initiate); from CLOSE_WAIT -> LAST_ACK (we finish after the peer's
+    ///        FIN).  The teardown completes as the remaining FIN/ACK exchange is
+    ///        drained by poll.  Fails if no such connection or not in a closeable
+    ///        state.
+    cinux::lib::ErrorOr<void> close(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
+                                    uint16_t remote_port, Ipv4Module& ipv4, NetStack& stack);
 
     /// @brief L4Handler: verify the pseudo-header checksum, then advance the FSM
     ///        for the matching connection (passive-open a SYN to a listened port,

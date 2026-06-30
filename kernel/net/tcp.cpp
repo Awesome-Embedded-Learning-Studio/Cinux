@@ -221,7 +221,49 @@ cinux::lib::ErrorOr<void> TcpModule::connect(NetDevice& dev, uint16_t local_port
 }
 
 // ============================================================
-// Inbound: checksum gate + handshake FSM
+// Data transfer + active close
+// ============================================================
+
+cinux::lib::ErrorOr<void> TcpModule::send(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
+                                          uint16_t remote_port, const uint8_t* data, uint32_t len,
+                                          Ipv4Module& ipv4, NetStack& stack) {
+    Connection* c = find(local_port, remote_addr, remote_port);
+    if (c == nullptr || c->state != TcpState::kEstablished) {
+        return cinux::lib::Error::InvalidArgument;  // no connection / not established
+    }
+    const uint32_t seq = c->snd_nxt;
+    auto           r   = send_segment(dev, remote_addr, local_port, remote_port, seq, c->rcv_nxt,
+                                      kTcpPsh | kTcpAck, data, len, ipv4, stack);
+    if (r.ok()) {
+        c->snd_nxt += len;  // data consumes len sequence numbers
+    }
+    return r;
+}
+
+cinux::lib::ErrorOr<void> TcpModule::close(NetDevice& dev, uint16_t local_port,
+                                           Ipv4Addr remote_addr, uint16_t remote_port,
+                                           Ipv4Module& ipv4, NetStack& stack) {
+    Connection* c = find(local_port, remote_addr, remote_port);
+    if (c == nullptr) {
+        return cinux::lib::Error::InvalidArgument;  // no connection
+    }
+    // FIN is legal from ESTABLISHED (we initiate) or CLOSE_WAIT (peer already closed).
+    const bool initiator = c->state == TcpState::kEstablished;
+    if (!initiator && c->state != TcpState::kCloseWait) {
+        return cinux::lib::Error::InvalidArgument;  // not in a closeable state
+    }
+    const uint32_t seq = c->snd_nxt;
+    auto           r   = send_segment(dev, remote_addr, local_port, remote_port, seq, c->rcv_nxt,
+                                      kTcpFin | kTcpAck, nullptr, 0, ipv4, stack);
+    if (r.ok()) {
+        c->snd_nxt += 1;  // FIN consumes one sequence number
+        c->state = initiator ? TcpState::kFinWait1 : TcpState::kLastAck;
+    }
+    return r;
+}
+
+// ============================================================
+// Inbound: checksum gate + handshake / data / teardown FSM
 // ============================================================
 
 void TcpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
@@ -312,8 +354,71 @@ void TcpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, 
         }
         break;
     }
-    case TcpState::kEstablished:
-        // Data / FIN exchange lands in batch 3.
+    case TcpState::kEstablished: {
+        // In-order data at the front of the receive window only -- no
+        // reassembly / out-of-order (follow-up).  A segment whose SEQ is not
+        // RCV.NXT is dropped (a real stack would re-ACK to elicit a retransmit).
+        const uint8_t hdrlen = tcp_header_bytes(h);
+        if (hdrlen > payload.size()) {
+            break;  // insane data offset
+        }
+        if (h.seq != c->rcv_nxt) {
+            break;  // out of order -> drop
+        }
+        const uint32_t data_len = payload.size() - hdrlen;
+        bool           need_ack = false;
+        if (data_len > 0) {
+            if (c->listener != nullptr) {
+                const TcpEndpoint local{ip.dst, c->local_port};
+                const TcpEndpoint remote{ip.src, c->remote_port};
+                c->listener->on_data(local, remote, FrameView(payload.data() + hdrlen, data_len));
+            }
+            c->rcv_nxt += data_len;
+            need_ack = true;
+        }
+        if (h.flags & kTcpFin) {
+            c->rcv_nxt += 1;  // FIN consumes one
+            need_ack = true;
+            if (c->listener != nullptr) {
+                const TcpEndpoint local{ip.dst, c->local_port};
+                const TcpEndpoint remote{ip.src, c->remote_port};
+                c->listener->on_close(local, remote);
+            }
+            c->state = TcpState::kCloseWait;
+        }
+        if (need_ack) {
+            (void)send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, c->rcv_nxt,
+                               kTcpAck, nullptr, 0, ipv4, stack);
+        }
+        break;
+    }
+    case TcpState::kFinWait1:
+        // Expecting the ACK for our FIN -> FIN_WAIT_2.
+        if ((h.flags & kTcpAck) && h.ack == c->snd_nxt) {
+            c->state = TcpState::kFinWait2;
+        }
+        break;
+    case TcpState::kFinWait2:
+        // Expecting the peer's FIN -> ACK it (seq+1) and we are done.  No
+        // TIME_WAIT: no timer here, and the closed peer's final ACK is trusted.
+        if (h.flags & kTcpFin) {
+            (void)send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, h.seq + 1,
+                               kTcpAck, nullptr, 0, ipv4, stack);
+            c->state = TcpState::kClosed;
+        }
+        break;
+    case TcpState::kCloseWait:
+        // Waiting for our app to call close().  A retransmitted peer FIN -> re-ACK.
+        if (h.flags & kTcpFin) {
+            (void)send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, h.seq + 1,
+                               kTcpAck, nullptr, 0, ipv4, stack);
+        }
+        break;
+    case TcpState::kLastAck:
+        // Our FIN was acked -> connection fully closed.
+        if ((h.flags & kTcpAck) && h.ack == c->snd_nxt) {
+            c->state = TcpState::kClosed;
+        }
         break;
     default:
         break;

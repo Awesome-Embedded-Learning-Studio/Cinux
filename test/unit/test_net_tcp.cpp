@@ -201,6 +201,18 @@ struct Capture : cinux::net::TcpListener {
     }
 };
 
+/// Drive a full 3-way handshake to ESTABLISHED on both ends: server listens on
+/// 7777, client connects from 1234, each captured segment is fed back.  Leaves
+/// client (1234->7777) and server (7777->1234) ESTABLISHED.  Used by the
+/// data/close tests so they start from a live connection.
+void do_handshake(Fixture& f, Capture& server_l) {
+    ASSERT_TRUE(f.tcp.listen(7777, server_l));
+    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());  // SYN
+    deliver(f, f.dev.sent[0]);  // -> SYN-ACK (server SynReceived)
+    deliver(f, f.dev.sent[1]);  // -> ACK (client Established)
+    deliver(f, f.dev.sent[2]);  // -> server Established + on_accept
+}
+
 }  // namespace
 
 // ============================================================
@@ -349,6 +361,75 @@ TEST("tcp_connect: a duplicate 4-tuple is rejected") {
     Fixture f{ip(127, 0, 0, 1)};
     ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
     ASSERT_FALSE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
+}
+
+// ============================================================
+// Data transfer + 4-way teardown
+// ============================================================
+
+TEST("tcp_data: established connection delivers in-order data + ACKs") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    do_handshake(f, server_l);
+    const std::vector<uint8_t> msg = {'h', 'e', 'l', 'l', 'o'};
+
+    // Client sends data -> PSH|ACK segment.
+    ASSERT_TRUE(
+        f.tcp.send(f.dev, 1234, ip(127, 0, 0, 1), 7777, msg.data(), msg.size(), f.ipv4, f.stack)
+            .ok());
+    ASSERT_EQ(f.dev.sent.size(), 4u);  // 3 handshake + 1 data
+    TcpHeader dseg;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[3], dseg));
+    ASSERT_EQ(dseg.flags, 0x18u);  // PSH|ACK
+
+    // Server receives -> on_data + ACK whose ack == data seq + len (rcv_nxt advanced).
+    deliver(f, f.dev.sent[3]);
+    ASSERT_EQ(server_l.datas, 1u);
+    ASSERT_EQ(server_l.last_data, msg);
+    ASSERT_EQ(f.dev.sent.size(), 5u);  // + server ACK
+    TcpHeader sack;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[4], sack));
+    ASSERT_EQ(sack.flags, 0x10u);  // ACK
+    ASSERT_EQ(sack.ack, dseg.seq + static_cast<uint32_t>(msg.size()));
+}
+
+TEST("tcp_close: 4-way teardown -> both connections CLOSED") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    do_handshake(f, server_l);
+
+    // Client active close -> FIN.
+    ASSERT_TRUE(f.tcp.close(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
+    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kFinWait1);
+    const size_t fin_idx = f.dev.sent.size() - 1;
+    TcpHeader    fin;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[fin_idx], fin));
+    ASSERT_EQ(fin.flags, 0x11u);  // FIN|ACK
+
+    // Server rx FIN -> ACK + on_close -> CLOSE_WAIT.
+    deliver(f, f.dev.sent[fin_idx]);
+    ASSERT_EQ(server_l.closes, 1u);
+    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kCloseWait);
+    const size_t ack_idx = f.dev.sent.size() - 1;  // server's ACK for the client FIN
+
+    // Client rx ACK -> FIN_WAIT_2.
+    deliver(f, f.dev.sent[ack_idx]);
+    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kFinWait2);
+
+    // Server app closes -> FIN -> LAST_ACK.
+    ASSERT_TRUE(f.tcp.close(f.dev, 7777, ip(127, 0, 0, 1), 1234, f.ipv4, f.stack).ok());
+    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kLastAck);
+    const size_t sfin_idx = f.dev.sent.size() - 1;
+
+    // Client rx server FIN -> ACK -> CLOSED.
+    deliver(f, f.dev.sent[sfin_idx]);
+    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kClosed);
+    const size_t final_ack_idx = f.dev.sent.size() - 1;
+
+    // Server rx final ACK -> CLOSED.  Both connections reaped.
+    deliver(f, f.dev.sent[final_ack_idx]);
+    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kClosed);
+    ASSERT_EQ(f.tcp.connection_count(), 0u);
 }
 
 int main() {
