@@ -3,6 +3,8 @@
 > HPET 高精度定时器 + RTC 实时时钟。
 > HPET 作为高精度时间源补充 APIC Timer，RTC 提供日期时间。
 
+> **本轮范围栅栏（F5-M4，2026-06-30 立项）**：只做 **free-running 计数器纯读 + 端口 RTC**，目标是给 `sys_clock_gettime` 接真时间源（MONOTONIC←HPET、REALTIME←RTC）。**不做**：HPET 周期中断（T1 的 timer channel / 中断集成，需 comparator + IRQ vector，类比 LAPIC timer，留 follow-up）、nanosleep / gettimeofday（T4 留后续）、`kernel/lib/time.hpp` 大杂烩（T2，YAGNI——两驱动自持状态由 sys_clock_gettime 组合）、RTC 周期重同步（NTP 式，需 IRQ）。PIT **不动**（仍独占 BSP 抢占）。下面清单中本轮勾的是 T1 的 MMIO 映射/counter/频率/纳秒 API + T3 的 CMOS/BCD/24h/世纪/UIP/epoch + T4 的 clock_gettime 两时钟；timer channel 配置、中断集成、nanosleep 留空。
+
 ## 任务清单
 
 ### T1: HPET 驱动
@@ -54,12 +56,12 @@ extern HPET g_hpet;
 | 0x100+0x20*n | Timer n Config | 定时器通道配置 |
 | 0x108+0x20*n | Timer n Comparator | 比较值 |
 
-- [ ] HPET MMIO 映射（从 ACPI HPET 表获取地址）
-- [ ] counter() 读取主计数器
-- [ ] 频率计算（从 period 字段，单位 femtoseconds）
-- [ ] 定时器通道配置（one-shot + periodic）
-- [ ] 中断集成（配置路由到 APIC）
-- [ ] 纳秒级时间 API
+- [x] HPET MMIO 映射（从 ACPI HPET 表获取地址）  <!-- F5-M4 批2 -->
+- [x] counter() 读取主计数器  <!-- F5-M4 批2 -->
+- [x] 频率计算（从 period 字段，单位 femtoseconds）  <!-- F5-M4 批2 -->
+- [ ] 定时器通道配置（one-shot + periodic）  <!-- follow-up: 周期中断 -->
+- [ ] 中断集成（配置路由到 APIC）  <!-- follow-up: 周期中断 -->
+- [x] 纳秒级时间 API  <!-- F5-M4 批2: hpet::monotonic_ns -->
 
 ### T2: 系统时间 API
 
@@ -125,19 +127,19 @@ extern RTC g_rtc;
 | 0x09 | 年（BCD） |
 | 0x0B | 状态 B（24h 模式、BCD 格式） |
 
-- [ ] CMOS 端口读取
-- [ ] BCD → 二进制转换
-- [ ] 24h/12h 模式检测
-- [ ] 世纪处理（2000+）
-- [ ] epoch_seconds() 转换
-- [ ] RTC 更新完成检测（UIP bit）
+- [x] CMOS 端口读取  <!-- F5-M4 批3 -->
+- [x] BCD → 二进制转换  <!-- F5-M4 批3 -->
+- [x] 24h/12h 模式检测  <!-- F5-M4 批3 -->
+- [x] 世纪处理（2000+）  <!-- F5-M4 批3 -->
+- [x] epoch_seconds() 转换  <!-- F5-M4 批3 -->
+- [x] RTC 更新完成检测（UIP bit）  <!-- F5-M4 批3 -->
 
 ### T4: Syscall 集成
 
-- [ ] clock_gettime(CLOCK_REALTIME) — 基于 HPET + RTC epoch
-- [ ] clock_gettime(CLOCK_MONOTONIC) — 基于 HPET counter
-- [ ] gettimeofday() — clock_gettime 封装
-- [ ] nanosleep() — 基于 HPET 定时器通道
+- [x] clock_gettime(CLOCK_REALTIME) — 基于 HPET + RTC epoch  <!-- F5-M4 批4 -->
+- [x] clock_gettime(CLOCK_MONOTONIC) — 基于 HPET counter  <!-- F5-M4 批4 -->
+- [ ] gettimeofday() — clock_gettime 封装  <!-- follow-up -->
+- [ ] nanosleep() — 基于 HPET 定时器通道  <!-- follow-up: 需周期中断 -->
 
 ### T5: 单元测试
 
