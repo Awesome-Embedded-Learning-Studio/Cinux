@@ -2,7 +2,29 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## ✅ F6-M3 DevFS（/dev 设备文件系统）— 收官 2026-06-30（分支 worktree-f6-m3-devfs 待 PR）
+## 🔄 F10-M3 TTY Phase 2（PTY / 伪终端）— 2026-06-30 立项
+
+> Feature 域 F10 第三里程碑下半。接 Phase 1（已合 main PR#46：行规范 + 阻塞读 + ioctl TCGETS/TCSETS/TIOCGWINSZ/TIOCGPGRP/TIOCSPGRP + 信号 + ConsoleTty 类化）。**Phase 1 显式推迟到 DevFS 的部分**：PTY master/slave 对 + `/dev/ptmx` + `/dev/pts/N` + `/dev/tty` + `TIOCSCTTY` + `/dev/console` 接真 TTY。**解锁条件已满**：DevFS(PR#48) / TTY Phase 1(PR#46) / session-pgrp(F3-M3，`controlling_tty{-1}` 字段 + `setsid` 留缝)全在 main。分支 `feat/f10-m3-pty`（从干净 main `a134cb7`）。**用户决策（2026-06-30）**：全范围 B0-B5 一口气做；B2 ioctl 派发走**低风险加法**（fd>2 走 `fd→inode→ops->ioctl` 派发 + fd≤2 console fallback，行为零变）。
+> 范围栅栏（不投机）：不做 TIOCSTI / 流控（IXON/IXOFF）/ select-poll（F8 epoll 的事）；PTY slave **复用现成 `TTY` 行规范**不重写；用户态真 shell 闭环留 F10-M4，Phase 2 只交**机制 + kernel 侧端到端 smoke**。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF` 关 smoke 防挂死）；B2/B4 改公共接口（InodeOps / process_group）push 前补全量 `cmake --build build`。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F10-M3 Phase2 🔄 + todo `02-tty.md` 更新 + 清 PR#45-49 文档债 | 🔄 | docs-only |
+| 1 | PTY 核心纯逻辑 `pty.{hpp,cpp}`（master/slave 双 ring + slave 复用 `TTY` 行规范；master 写→slave 行规范→slave 读，slave 写→master 读，信号字符经 slave）+ host 单测 | ⏳ | host pty 单测（round-trip / 行规范 / 信号字符 / 满环） |
+| 2 | 接口缝（头号风险）：`InodeOps` 加 `ioctl()`（默认 -ENOTTY）+ `open()`（默认返原 inode）virtual + `sys_ioctl` 改 fd→File→Inode→ops->ioctl 派发（fd≤2 console fallback 保行为零变） | ⏳ | run-kernel-test-all 两 leg + 原 ioctl 测全绿（回归网） |
+| 3 | DevFS PTY 节点：`/dev/ptmx`（open 时 `InodeOps::open` 分配一对 PTY、返 master inode）+ `/dev/pts/N`（lookup 命中 slave ops）+ master/slave InodeOps（走 PTY）+ DevFS 动态节点 | ⏳ | run-kernel-test-all 两 leg + kernel 测（open ptmx → round-trip） |
+| 4 | 控制终端语义：`TIOCSCTTY` 设 `controlling_tty` + 挂 PTY + `/dev/tty` 别名当前控制终端 + session 抢占语义（接 `process_group` 现成 pgid/sid）+ 负测（非 session leader 抢终端 → EPERM） | ⏳ | run-kernel-test-all 两 leg + 负测 |
+| 5 | 端到端 smoke + 收官：kernel 侧 pump master、slave fork+execve 跑 musl 程序证 PTY 真通；`make run` GUI 冒烟（终端驱 PTY 跑程序零 panic）；notes + ROADMAP F10-M3 Phase2 ✅ | ⏳ | dyn smoke ON 两 leg 绿 + 串口见 PTY round-trip |
+
+### 风险 / 陷阱
+- **B2 头号风险**：`InodeOps` 加 virtual 改公共头，牵连所有 FS 后端 mock。缓解：带默认实现（`open` 返原 inode、`ioctl` 返 -ENOTTY），旧子类零改；fd≤2 fallback 保行为零变，现有 console ioctl 测当回归网。**B2 首个动作**：查清 `sys_read fd==0` 是不是真 FDTable 项（决定 fallback 写法）。
+- **PTY 无消费者**：Phase 2 是基建，真用户态 shell 闭环要等 F10-M4——诚实标注，不包装成"立刻有用户可见成果"。
+- **smoke 默认 ON + 本地无 `build/musl/hello` → 挂死**（B5 本地 `CINUX_MUSL_HELLO_SMOKE=OFF`）。
+- **`InodeOps` 改是公共接口**，push 前补全量编译（L5 CI 对等盲区：host mock 不在 run-kernel-test）。
+
+## ✅ F6-M3 DevFS（/dev 设备文件系统）— 收官 2026-06-30（已合 main PR#48 8cb08f4）
 
 > Feature 域 F6 VFS 第三里程碑。**三路并行之一**(另两路 F7-M4 UDP / F10-M2 动态链接)。**并行硬约束**:这条只做 DevFS;严格不改 `fs/inode.hpp` 的 `InodeOps` 虚函数接口(F10-M2 在用),只加 device inode 子类;不做 F6-M1 VFS 增强 / M2 ProcFS / M4 tmpfs / ext4(留 F6 后续单独收)。DevFS = 内存型虚拟 FS(无 ext2 后端,device inode 生命周期跟设备绑定):device inode(`InodeOps` 子类,封装设备驱动 ops)→ `/dev` 虚拟挂载 → 基础节点(`/dev/null` `/dev/zero` `/dev/console`,read/write 走设备)。对齐 Linux DevFS/tmpfs 的 device-inode 模式;新代码类化(`DevFs` FileSystem 子类 + 匿名 namespace 设备 ops 子类 + `CharSink` 抽象,非全局 static + 自由函数,见 memory `classify-c-style-singleton-with-mutable-state`)。F10-M3 TTY Phase2 的 PTY/`/dev/*` 依赖此。分支 `worktree-f6-m3-devfs`(worktree 从干净 main `1cdd507`)。
 > 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)`(关 smoke:`cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`)绿才提交。
@@ -21,7 +43,7 @@
 - **设备号**:`makedev = (major<<8)|minor`(hobby OS 简化),够 `st_rdev` 上报。
 - **栅栏**:不碰 [inode.hpp](../../kernel/fs/inode.hpp) 的 `InodeOps` 虚表(接口+签名一行不动);设备号收进 ops 子类 + `stat()` override 填 `st_rdev`,不加 `Inode` 字段。
 
-## 🔄 F-EXTABLE（Linux 风格 exception table 基建,SMAP follow-up #2 阶段1）— 2026-06-29 立项
+## ✅ F-EXTABLE（Linux 风格 exception table 基建,SMAP follow-up #2 阶段1）— 已合 main PR#45 a44d2b8
 
 > 横切里程碑(与 F-VERIFY/F-CLN 同档),接 SMAP saga follow-up #2。user accessor 现状靠 demand-page 契约(`user_access.hpp:19-25` 注释),无 extable:拷贝中途 fault 被 demand-page 掩盖(静默读 0 返 true)或 panic,accessor 真负测试写不了(kernel violation 必 panic)。建 RIP-based `__ex_table`(Linux uaccess 范式):fault RIP 命中注解 accessor 时 PF handler 改 `frame->rip` 跳 fixup 返 `-EFAULT`,解锁真负测试。**范围栅栏:只阶段 1(extable 基建 + accessor 重写 + 负测试),不改 demand-page 对用户态缺页的宽松逻辑**(F2 lazy-allocation 范式,撤它留 F2-M5 高风险)。分支 `feat/f-extable`(从干净 main `7f846c8`)。详见 plan `~/.claude/plans/lucky-seeking-hamster.md` + note `2026-06-29-f-extable-b1-extable-infra.md`。
 > 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿(基线 960/0);改公共头 push 前补全量 `cmake --build build`。
@@ -62,7 +84,7 @@
 - **smoke 默认 ON + 本地无 /hello → run-kernel-test 挂死**（hello_smoke 20-iter poll 循环撑满 timeout；根因 `build/musl/hello` 未 build，非 CMake target）。本地验证关 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`；CI 有 /hello 不受影响。
 - **类化异味清理（批6 收尾）**：console_tty 批5 已类化(ConsoleTty)；批6 扫同类异味(全局 static + mutable 共享状态 + 自由函数的伪单例)评估类化。无状态 static 工具(Mouse/Keyboard)不动。
 
-## ✅ F10-M2（ELF 动态链接 / musl ldso）— 收官 2026-06-30（4 commit 待 push）
+## ✅ F10-M2（ELF 动态链接 / musl ldso）— 收官 2026-06-30（已合 main PR#49 a134cb7）
 
 > Feature 域里程碑（接 F10-M1 musl 静态移植 ✅）。worktree `worktree-f10-m2-dynlink`（从干净 main `1cdd507`，三路并行之一：另两路 F7-M4 UDP / F6-M3 DevFS；本路碰 `kernel/proc/execve.cpp` + elf_loader + 用户态 loader，与 F7 零冲突，与 F6 只共享 VFS `inode->ops->read` 接口——只用不改，零冲突）。**用户决策**：按需建动态链接（对齐 Linux，不重造）；**不自建动态 loader**——用 musl 自带的 ld-musl(ldso)做符号解析/GOT 填充；libc 解耦(PT_INTERP 是 musl/glibc 切换缝，不写死 libc 名)；ELF base ASLR / PIE 主程序是 follow-up，先 non-PIE 动态跑通。F10-M3 TTY / fork saga 不碰（已合 main）。
 > 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿才提交；批2 host 工具链产物 readelf 验；批3 加 dyn smoke(关本地默认)端到端。
