@@ -2,6 +2,32 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F7-M6 Socket API（BSD socket 系统调用 / Socket=InodeOps 适配器）— 2026-06-30 立项（worktree `worktree-f7-m6-socket`，从干净 main `f1f29aa`）
+
+> Feature 域 F7 最后一里程碑。接 F7-M5 TCP ✅（已合 main PR#53）+ F7-M4 UDP ✅（PR#47）。网络线走到「可用」：用户态程序能用 socket()/connect()/send()/recv() 收发数据。
+> **架构（4-agent 设计面板核实，已读码）**：socket fd 走 **InodeOps 子类**（`SocketOps`），对齐 PTY/pipe——socket fd → File → Inode → SocketOps，`sys_read/write/ioctl/close` **零改动**（对 fd 层 socket fd 就是一个 pipe fd）。`socket()` 装合成 Inode（抄 `sys_pipe::do_pipe_kernel` unique_ptr→release），`accept()` 抄 `PtmxOps::open` cloning 再发一个 fd。TcpModule/UdpModule **保持纯协议层不动**；per-socket RX 环 + 阻塞 + accept 队列放 Socket 适配器，挂 listener 缝（`UdpListener::on_udp` / `TcpListener::on_accept/on_data/on_close`）——回调里**拷贝借来的帧**进环（设备 dispatch 后回收 buffer），send 直接调 module。阻塞用现成 `prepare_to_wait/schedule_blocked/unblock`（F8 pipe 那套），从 `net_poll` kthread 上下文唤醒，**不需 timer**。生产 `net_init.cpp` `add_l4(kIpProtoUdp/...)`+`add_l4(kIpProtoTcp/...)` 注册 + 挂 LoopbackDevice + dev 路由 accessor。
+> **范围栅栏（不投机）**：① TCP 重传/RTO/窗口/拥塞 defer（TcpModule 一个没有，需内核 timer=HPET 周期中断=F5-M4 follow-up，硬前置非 M6 活）② TIME_WAIT/ISN 随机化/乱序重组 ③ IPv6/AF_UNIX（F8）/sendmsg cmsg ④ epoll/select（F8）/第二 NIC/中断驱动 RX（仍 net_poll 轮询）。→ **最小可用 = loopback 端到端干通 + SLIRP 尽力**（loopback 零丢包；SLIRP TCP 无重传可能丢）。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF -DCINUX_BUILD_TESTS=ON` 关 smoke 防挂死 + 编 host 测）；改公共头（`InodeOps` 不动虚表只加子类）push 前补全量 `cmake --build build`。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F7-M6 ⏳→🔄 + todo `05-socket.md` 重写（范围栅栏 + 架构图 + B0-B4） | ✅ | docs-only |
+| 1 | 底座：生产注册（`g_udp`/`g_tcp` + `add_l4` + 挂 loopback + dev 路由 accessor）+ Socket base（端点/proto/per-socket RX 环/等待队列/virtuals，纯逻辑 host 可测）+ SocketOps InodeOps 缝 + `sys_socket/bind/connect/listen/accept/sendto/recvfrom/close` 通用派发（via Socket virtuals）+ syscall 号注册（41-55/288，syscall_nums.hpp 已核实空）。内部可拆 B1a(net_init+base)/B1b(fd+syscall) | ⏳ | host 单测（环 + 阻塞）+ 两 leg |
+| 2 | UDP socket：UdpSocket 适配器（`on_udp`→拷贝进环、bind/sendto/recvfrom、阻塞）+ host 单测 + loopback echo | ⏳ | host net_udp_socket + 两 leg |
+| 3 | TCP socket：TcpSocket 适配器（accept 队列、`on_data`→per-连接环、listen/accept/connect/send/recv、阻塞、remote→socket 路由）+ host 单测 + loopback echo | ⏳ | host net_tcp_socket + 两 leg |
+| 4 | 端到端 demo（内核 loopback TCP/UDP echo 回归门 + musl 静态 socket 程序 over SLIRP）+ 收官（notes + ROADMAP F7-M6 ✅） | ⏳ | loopback echo + musl socket smoke + 两 leg |
+
+### 风险 / 陷阱
+- **borrowed frame 必须拷贝**：`on_udp`/`on_data` 的 FrameView 借自设备 buffer，dispatch 返回后回收；回调里必须 copy 进 per-socket 环，否则 recv 拿到垃圾（udp.hpp/tcp.hpp 注释明示）。
+- **生产 add_l4 容量**：`Ipv4Module::kMaxL4=4`（ICMP ctor 自动注册占 1），UDP+TCP=3 槽放得下。
+- **阻塞 vs sti/hlt（致命 GOTCHA）**：socket recv/accept 在 syscall 上下文**绝不 sti/hlt**（→ #DF，见 memory sys-ping-df-sti-in-syscall）；走 `prepare_to_wait/schedule_blocked`，由 net_poll kthread 唤醒（同 F8 pipe）。
+- **解耦门** `check_net_decoupling.sh`：`kernel/net/` 不能 include driver/dma/irq。Socket 抽象放 kernel/net/（只用 net 模块 + scheduler 等待队列）；实例化 + add_l4 + accessor 放 net_init.cpp（drivers/net/）。
+- **loopback 必挂**：现在生产只挂 e1000/SLIRP，127.0.0.1 不通；B1 挂 LoopbackDevice（确定性测试关键，无 QEMU/SLIRP 时序依赖）。
+- **accept 路由**：TCP 服务端一个 listen 端口多对端；Socket 层须建 remote 4-tuple→per-连接 Socket 映射，`on_data`/`on_close` 据此路由到对的 fd。
+- **smoke 默认 ON + 本地无 build/musl → 挂死**：本地 `CINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10 惯例）。
+- **host ASAN**：Socket 无 release 钩子则 host 测试自释放 per-open 资源（参 F8 test_fifo 教训，CI host-tests CINUX_HOST_ASAN 抓泄漏）。
+
 ## ✅ F8-M1 Pipe 增强 + F8-M2 命名 FIFO — 收官 2026-06-30（worktree `worktree-f8-pipe-fifo`，从干净 main `c0188cd`，7 commit 待 push）
 
 > Feature 域 F8 IPC 扩展前两里程碑。接 F10-M3 PTY(InodeOps::open cloning 扩展点已就位)+ F6-M3 DevFS(add_node/set_dynamic_lookup 已就位)。**M1=匿名 pipe 修齐**:① reader-gone 改返 `Error::BrokenPipe`(现 pipe_ops.cpp:43 返 IOError→kEio,故 sys_write.cpp:53-59 的 EPIPE→SIGPIPE 从未真触发)② 真调度阻塞替 sti/hlt 自旋(致命 GOTCHA:sti-in-syscall→#DF,走 prepare_to_wait/schedule_blocked,对齐 console_tty/Mutex)③ O_NONBLOCK→EAGAIN。**M2=命名 FIFO**:FifoRegistry + FifoOps(open() cloning 首读者建 Pipe)+ sys_mknod/mkfifo。依赖全在 main(SYS_pipe=22、signal_send/killpg、InodeOps::open、DevFs add_node);缺 SYS_mknod(M2 新建)。范围栅栏:不做 Unix Socket(M3)/shm(M4)/epoll(M5);用户态 shell 真闭环留后续;ConditionVariable 抽象留 sync 里程碑(本里程碑复用现成 wait queue)。
