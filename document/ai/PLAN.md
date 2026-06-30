@@ -38,7 +38,6 @@
 > **设计（照抄 DevFs + 适配动态语义）**：`ProcFs`（`FileSystem` 子类，内存型虚拟 FS）。DevFs 根目录是定长节点表；ProcFs 根目录条目是**动态 pid**（Task registry 实时快照），故 readdir 走新增 `signal_enumerate_task_pids` accessor（`g_registry_lock` 下快照，**纯增量**不改 register/unregister/find_by_pid）。叶 inode 身份：`PID_MAX=256` 有界，ProcFs 持 `pid_dir_inodes_[257]`/`stat_inodes_[257]`/`cmdline_inodes_[257]` 定长池（pid 索引），`ino=pid`、`fs_private=this` —— **SMP 安全**（每 pid 稳定 inode，并发 lookup 不竞态）+ **无泄漏**（close 只删 File 不删 Inode，inode 归 ProcFs，对齐 DevFs）。lookup strip `/` 后解析 `<pid>`/`<pid>/stat`/`<pid>/cmdline`，pid 经现有 `signal_find_task_by_pid` 校验存活（非活 → NotFound，对齐 Linux 只露活进程）。
 > **测试边界（诚实）**：procfs.cpp 读 kernel Task registry（非纯逻辑，依赖 `signal.hpp`/`process.hpp`），**不能 host 单测**（DevFs 靠注入 CharSink 才 host-testable；ProcFs 直读 registry 无注入缝）—— 走 kernel harness（QEMU `run_procfs_tests`）。测试自建栈 Task 注册已知 pid（不依赖 registry 残留状态），确定性验证 readdir 枚举 + stat 内容。
 > 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死）；批 1+ 改公共头（signal.hpp）push 前补全量 `cmake --build build`。**⚠️ 根目录无 Makefile——一律 `cmake --build build --target <name>`**。
-
 ### 批表
 | 批 | 范围 | 状态 | Commit | 测试 |
 |----|------|------|--------|------|
@@ -81,6 +80,49 @@
 - **CI 盲区**：run-kernel-test 不编 test/unit/ host 单测；改公共块映射（即便签名不变）push 前补 `cmake --build build -j$(nproc)` 全量 + `test_host`。
 - **double-indirect 双覆盖**：host 单测（批3，算法 round-trip）+ **musl dyn smoke（批5，真内核）**——建 sysroot 开 `CINUX_MUSL_DYN_SMOKE`，822KB ldso 装盘后 execve 读它真走 i_block[13]，两 leg 各 5/5 PASS（无 `segment read failed at offset 274432`）。shell 17KB/motd/hello.txt 都 direct，indirect 路径靠这两层守。
 - **4096→1024 撤 workaround 风险低**：所有现存盘上文件（shell 17KB / motd / hello.txt）远低于 268KB single-indirect 上限，纯 direct 块，零行为变；mount() 早已支持 1024 块。
+## ✅ F5-M4（HPET + RTC 定时器）— 收官 2026-06-30（分支 worktree-f5-m4-hpet-rtc 待 PR）
+
+> Feature 域 F5 第四里程碑。worktree `worktree-f5-m4-hpet-rtc`（从干净 main `c0188cd`）。目标：给内核一个**高精度 monotonic 时间源（HPET）+ 真墙钟（RTC）**，替掉 `sys_clock_gettime` 现在两边都读 PIT uptime、无墙钟的现状（`sys_clock_gettime.cpp:37`）。PIT **不动**——它仍独占 BSP 抢占（`PIT::irq0_handler→Scheduler::tick`）；本里程碑只加新时间源，不抢 PIT 的活。
+> **打法（用户拍板，预批准自主推进）**：ACPI HPET 表解析（`HPETHeader`+`parse_hpet` 照抄 `parse_madt`）→ HPET MMIO 驱动（`@KMEM_MMIO+0x60000`，`FLAG_PCD`，读 free-running counter → monotonic ns）→ RTC 端口 I/O（`0x70/0x71`，BCD→binary，UIP，转 Unix epoch）→ 接 `sys_clock_gettime`（MONOTONIC←HPET，REALTIME←RTC boot base + HPET delta，即「漂移修正」）。
+> **范围栅栏（不投机）**：先做 **free-running 计数器纯读**，不接 HPET 周期中断（留 follow-up，需配 timer comparator + IRQ vector，类比 LAPIC timer）；不做 nanosleep / gettimeofday（todo T4 留后续）；不建 `kernel/lib/time.hpp` 大杂烩（YAGNI，两驱动自持状态，sys_clock_gettime 组合）；RTC 周期重同步（NTP 式）需 IRQ，留 follow-up。
+> **依赖（都在 main）**：`acpi::find_table`（`acpi.hpp:92`，注释已列 HPET）是 HPET 表发现缝；`KMEM_MMIO` 窗 + `FLAG_PCD`（`memory_layout.hpp:47` / `paging_config.hpp:36`，xHCI/e1000/LAPIC 已实证 uncached MMIO 范式）；QEMU 'pc' 默认带 HPET 表 + 设备 @ `0xFED00000`（`cmake/qemu.cmake` 无 `-no-hpet`）。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死）；改公共头（`acpi.hpp`）push 前补全量 `cmake --build build`。
+
+### 批表
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F5 M4 ⏳→🔄 + todo `03-timer.md` 标范围栅栏 | ✅ | `36c0f9a` | docs-only |
+| 1 | ACPI HPET 表解析：`acpi.hpp` 加 `HPETHeader`+`HPETInfo`+`parse_hpet` 声明（增量，照抄 MADT 段）+ `acpi/hpet.cpp`（`parse_hpet` 纯逻辑：校验 + 解 base 地址 GAS）+ QEMU 机制测（`find_table("HPET")` 命中 + `parse_hpet` 解出 `0xFED00000`） | ✅ | `51b968e` | run-kernel-test-all 两 leg 991/0（+5 HPET 表测） |
+| 2 | HPET MMIO 驱动：`hpet/hpet.{hpp,cpp}`（`g_vmm.map @+0x60000 PCD` + 读 General Capabilities 高32位取 period_fs + ENABLE_CNF 置位 + 捕获 boot counter + `monotonic_ns` 溢出安全换算，**全 32-bit 访问**）+ 机制测（period 合法 / 计数器读两次递增证 ENABLE 真生效）+ host 纯算术测（`ticks_to_ns` 溢出安全） | ✅ | `43b6ea8` | 两 leg 995/0（+4 驱动测）+ host hpet_math 5/5 |
+| 3 | RTC 端口 BCD：`rtc/rtc.{hpp,cpp}`（`0x70/0x71` 索引/数据 + reg A UIP 轮询 + BCD→binary + 12/24h 模式自适应 + 世纪 reg 0x32 + `days_from_civil`→Unix epoch + boot 缓存）+ 机制测（sane 日期 + epoch∈[2024,2100)）+ host 纯算术测（bcd/epoch 已知日对照） | ✅ | `74e5bcf` | 两 leg 997/0（+2 RTC 测）+ host rtc_math 6/6；实测 `[RTC] 2026-06-30` |
+| 4 | 接 `sys_clock_gettime` + 漂移修正：`do_clock_gettime_kernel` MONOTONIC←`hpet::monotonic_ns`（HPET 缺席退 PIT）、REALTIME←`rtc::boot_epoch_ns + hpet::monotonic_ns` + `main.cpp` Step11b 插 `hpet::init`+`rtc::init` + 删「无墙钟」过时注释 + 2 例 REALTIME 测 | ✅ | `3c153fc` | 两 leg 999/0（+2 clock_gettime 测）+ production boot smoke 零 panic |
+| 5 | 收官：notes（每批一篇）+ ROADMAP F5 M4 ✅ + PLAN ✅。周期中断 / nanosleep / RTC 重同步 留 follow-up | ✅ | `ead047d` | docs-only |
+
+### ✅ 收官（2026-06-30）
+
+**CinuxOS 有了高精度 monotonic（HPET）+ 真墙钟（RTC）**：`sys_clock_gettime(CLOCK_MONOTONIC)`
+走 HPET free-running 计数器（boot-relative ns），`CLOCK_REALTIME` = RTC boot epoch + HPET
+monotonic delta（漂移修正）。PIT 不动（仍 BSP 抢占），仅 HPET 缺席时当 monotonic 兜底。6 commit
+（B0 docs + B1-B4 实现 + B5 notes），`worktree-f5-m4-hpet-rtc` 待 PR。验证：run-kernel-test-all
+两 leg **999/0**（基线 986 + 13 新测）+ host hpet_math 5/5 + rtc_math 6/6 + production boot
+`[HPET]`/`[RTC]` 零 panic。详见各批 notes。
+
+**两个 GOTCHA（接手 HPET 必读，见 [批2 note](../notes/2026-06-30-f5-m4-b2-hpet-mmio-driver.md)）**：
+① General Config 寄存器在 **0x010 不是 0x008**（HPET 通用寄存器 0x10 间距；QEMU `HPET_CFG=0x010`），
+写 0x008 落 reserved 静默丢弃；② period 在 Capabilities **高 32 位 [63:32]**（低 32 是 vendor/rev），
+且 **QEMU 丢 64-bit MMIO 写**——全用 32-bit 访问，64-bit 计数器两半读 + rollover 保护。
+
+**follow-up（留后续）**：HPET 周期中断（timer comparator + IRQ vector，类比 LAPIC timer，解锁
+nanosleep/high-res 定时）/ RTC 周期重同步（NTP 式，需 IRQ，目前 boot 只读一次长时间会漂）。
+push/PR 归用户。
+
+### 风险 / 陷阱
+- **HPET 计数器默认不跑**：spec 要求 `ENABLE_CNF`（General Config bit0）置位主计数器才递增；QEMU 遵 spec，复位态 `ENABLE_CNF=0`。故 `init` 必须写 General Config=1，否则「读两次递增」机制测必红（对齐 Linux `hpet_enable`）。
+- **ns 换算溢出**：naive `ticks × period_fs / 1e6` 长期运行（年）溢出 uint64。用 hi/lo 拆分法（`ticks/1e6 × period + (ticks%1e6)×period/1e6`）—— host 单测专项守。
+- **RTC 读窗口**：CMOS 更新中（reg A bit7 UIP=1）读会撕裂；UIP 轮询 + 两读一致 + **有界循环**（防挂死，测试内核全程 `cli`）。
+- **REALTIME 诚实**：RTC 仅 boot 读一次，HPET 推进；无周期重同步（需 IRQ），长时间运行 HPET/RTC 会相对漂移——诚实标注，不包装成 NTP 级。
+- **测试内核已就绪**：`main_test.cpp:471` 已 `acpi::init()`、`:509` 已 `g_vmm.init()`——HPET 表发现 + MMIO 映射前置都满足，无需动 harness 启动模型。
+- **共享文件**：`acpi.hpp`（加 `HPETHeader` 增量，push 前全量编）、`drivers/CMakeLists.txt`、`sys_clock_gettime.cpp`、`main.cpp`、`main_test.cpp`。`KMEM_MMIO` 新槽 `+0x60000` 不动既有（AHCI@+0/LAPIC@+0x10000/IOAPIC@+0x11000/MSI-X@+0x40000/xHCI@+0x20000/e1000@+0x50000）。
 
 ## ✅ F10-M3 TTY Phase 2（PTY / 伪终端）— 收官 2026-06-30（分支 feat/f10-m3-pty 待 PR）
 
