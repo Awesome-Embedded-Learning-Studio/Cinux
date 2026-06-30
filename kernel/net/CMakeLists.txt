@@ -21,6 +21,7 @@ if(CINUX_NET)
         ${CMAKE_CURRENT_SOURCE_DIR}/loopback_device.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/socket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/udp_socket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tcp_socket.cpp
     )
 endif()
 

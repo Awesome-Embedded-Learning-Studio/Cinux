@@ -25,6 +25,8 @@
 #include "kernel/net/loopback_device.hpp" // LoopbackDevice
 #include "kernel/net/net_stack.hpp"       // NetStack / InDevice
 #include "kernel/net/socket.hpp"          // Socket / socket_ops / kAfInet / kSock*
+#include "kernel/net/tcp.hpp"             // TcpModule
+#include "kernel/net/tcp_socket.hpp"      // TcpSocket
 #include "kernel/net/udp.hpp"             // UdpModule
 #include "kernel/net/udp_socket.hpp"      // UdpSocket
 #include "kernel/syscall/sys_close.hpp"   // sys_close
@@ -41,11 +43,14 @@ using cinux::net::LoopbackDevice;
 using cinux::net::NetDevice;
 using cinux::net::NetStack;
 using cinux::net::Socket;
+using cinux::net::TcpModule;
+using cinux::net::TcpSocket;
 using cinux::net::UdpModule;
 using cinux::net::UdpSocket;
 using cinux::net::kAfInet;
 using cinux::net::kEtherTypeArp;
 using cinux::net::kEtherTypeIpv4;
+using cinux::net::kIpProtoTcp;
 using cinux::net::kIpProtoUdp;
 using cinux::net::kLoopbackAddr;
 using cinux::net::kSockDgram;
@@ -115,6 +120,11 @@ LoopbackDevice echo_lo;
 NetDevice&     echo_route(Ipv4Addr /*dst*/) {
     return echo_lo;
 }
+// A second loopback for the TCP echo test (a NetDevice is attached to one stack).
+LoopbackDevice tcp_echo_lo;
+NetDevice&     tcp_echo_route(Ipv4Addr /*dst*/) {
+    return tcp_echo_lo;
+}
 }  // namespace
 
 void test_udp_socket_loopback_echo() {
@@ -167,6 +177,75 @@ void test_udp_socket_loopback_echo() {
     TEST_ASSERT_EQ(*cr, static_cast<int64_t>(sizeof(msg)));
 }
 
+// --- B3: TcpSocket end-to-end over a deterministic loopback stack ---
+void test_tcp_socket_loopback_echo() {
+    static ArpModule  arp;
+    static IcmpModule icmp;
+    static Ipv4Module ipv4(icmp, &arp);
+    static TcpModule  tcp;
+    static NetStack   stack;
+    static bool       init = false;
+    if (!init) {
+        stack.add_protocol(kEtherTypeArp, arp);
+        stack.add_protocol(kEtherTypeIpv4, ipv4);
+        ipv4.add_l4(kIpProtoTcp, tcp);
+        InDevice cfg{};
+        cfg.local   = kLoopbackAddr;
+        cfg.gateway = kLoopbackAddr;
+        stack.attach(tcp_echo_lo, cfg);
+        init = true;
+    }
+
+    TcpSocket server(tcp, ipv4, stack, tcp_echo_route);
+    TcpSocket client(tcp, ipv4, stack, tcp_echo_route);
+    TEST_ASSERT_TRUE(server.bind(9999).ok());
+    TEST_ASSERT_TRUE(server.listen(1).ok());
+    TEST_ASSERT_TRUE(client.connect(kLoopbackAddr, 9999).ok());
+
+    // Drain the 3-way handshake (SYN -> SYN-ACK -> ACK); server.on_accept fires.
+    // The poll() budget loop advances the FSM a few rounds each call.
+    for (int i = 0; i < 6; ++i) {
+        stack.poll();
+    }
+
+    Ipv4Addr raddr{};
+    uint16_t rport = 0;
+    auto     acc   = server.accept(&raddr, &rport);
+    TEST_ASSERT_TRUE(acc.ok());
+    TEST_ASSERT_NOT_NULL(*acc);
+    auto* child = static_cast<TcpSocket*>(*acc);
+
+    // client -> server child.
+    static const uint8_t msg[] = {'p', 'i', 'n', 'g'};
+    auto                 sr    = client.send(msg, sizeof(msg));
+    TEST_ASSERT_TRUE(sr.ok());
+    for (int i = 0; i < 4; ++i) {
+        stack.poll();
+    }
+    uint8_t rbuf[8] = {};
+    auto    rr      = child->recv(rbuf, sizeof(rbuf), nullptr, nullptr);
+    TEST_ASSERT_TRUE(rr.ok());
+    TEST_ASSERT_EQ(*rr, static_cast<int64_t>(sizeof(msg)));
+    bool payload_ok = true;
+    for (uint32_t i = 0; i < sizeof(msg); ++i) {
+        if (rbuf[i] != msg[i]) {
+            payload_ok = false;
+        }
+    }
+    TEST_ASSERT_TRUE(payload_ok);
+
+    // echo back: server child -> client.
+    auto er = child->send(rbuf, static_cast<uint32_t>(sizeof(msg)));
+    TEST_ASSERT_TRUE(er.ok());
+    for (int i = 0; i < 4; ++i) {
+        stack.poll();
+    }
+    uint8_t cbuf[8] = {};
+    auto    cr      = client.recv(cbuf, sizeof(cbuf), nullptr, nullptr);
+    TEST_ASSERT_TRUE(cr.ok());
+    TEST_ASSERT_EQ(*cr, static_cast<int64_t>(sizeof(msg)));
+}
+
 }  // namespace test_socket
 
 extern "C" void run_socket_tests() {
@@ -177,5 +256,6 @@ extern "C" void run_socket_tests() {
     RUN_TEST(test_socket::test_socket_rejects_bad_type);
     RUN_TEST(test_socket::test_socket_fd_routes_to_socket_stub);
     RUN_TEST(test_socket::test_udp_socket_loopback_echo);
+    RUN_TEST(test_socket::test_tcp_socket_loopback_echo);
     TEST_SUMMARY();
 }

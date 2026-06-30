@@ -39,6 +39,7 @@
 #include "kernel/net/net_stack.hpp"
 #include "kernel/net/socket.hpp"
 #include "kernel/net/tcp.hpp"
+#include "kernel/net/tcp_socket.hpp"
 #include "kernel/net/udp.hpp"
 #include "kernel/net/udp_socket.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -218,11 +219,17 @@ Socket* create_socket(int domain, int type) {
     if (domain != kAfInet) {
         return nullptr;
     }
-    // SOCK_DGRAM with the production stack up: a real UdpSocket wired to g_udp.
-    // The test kernel (no production net) and SOCK_STREAM (until B3) fall through
-    // to a bare stub Socket so the fd machinery stays exercisable everywhere.
-    if (type == kSockDgram && g_ready) {
-        return new UdpSocket(g_udp, *g_ipv4, g_stack, dev_for);
+    // SOCK_DGRAM/SOCK_STREAM with the production stack up: real adapters wired to
+    // g_udp/g_tcp. The test kernel (no production net) falls through to a bare
+    // stub Socket so the fd machinery stays exercisable there (tests build their
+    // own loopback stack + construct the adapters directly).
+    if (g_ready) {
+        if (type == kSockDgram) {
+            return new UdpSocket(g_udp, *g_ipv4, g_stack, dev_for);
+        }
+        if (type == kSockStream) {
+            return new TcpSocket(g_tcp, *g_ipv4, g_stack, dev_for);
+        }
     }
     return new Socket(domain, type);
 }
