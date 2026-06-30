@@ -35,7 +35,10 @@
 #include "kernel/net/arp.hpp"
 #include "kernel/net/icmp.hpp"
 #include "kernel/net/ipv4.hpp"
+#include "kernel/net/loopback_device.hpp"
 #include "kernel/net/net_stack.hpp"
+#include "kernel/net/tcp.hpp"
+#include "kernel/net/udp.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task_builder.hpp"
 
@@ -53,6 +56,9 @@ namespace {
 ArpModule       g_arp;
 IcmpModule      g_icmp;
 NetStack        g_stack;
+UdpModule       g_udp;     // proto 17 -- registered into the L4 table in init()
+TcpModule       g_tcp;     // proto  6 -- registered into the L4 table in init()
+LoopbackDevice  g_lo;      // 127.0.0.1 software NIC (~12 KB; static, never stack)
 Ipv4Module*     g_ipv4    = nullptr;
 E1000NetDevice* g_adapter = nullptr;
 bool            g_ready   = false;
@@ -114,10 +120,24 @@ void init() {
     cfg.gateway = kSlirpGateway;  // 10.0.2.2 (SLIRP answers ARP + ICMP echo)
     g_stack.attach(*g_adapter, cfg);
 
+    // Register UDP (proto 17) + TCP (proto 6) L4 handlers so inbound segments
+    // reach the modules' handle() instead of a null-slot drop.  ICMP is already
+    // auto-registered by the Ipv4Module ctor; kMaxL4=4 leaves room for all three.
+    g_ipv4->add_l4(kIpProtoUdp, g_udp);
+    g_ipv4->add_l4(kIpProtoTcp, g_tcp);
+
+    // Loopback (127.0.0.1): the deterministic L3 path sockets ride for local
+    // traffic + tests.  No L2 / no gateway -- send_l3 queues and poll() loops it
+    // back on the next round.  kMaxDevs=2 fits the e1000 adapter + loopback.
+    InDevice lo_cfg{};
+    lo_cfg.local = kLoopbackAddr;
+    g_stack.attach(g_lo, lo_cfg);
+
     g_ready = true;
     cinux::lib::kprintf("[net] L3 stack up: %u.%u.%u.%u -> gw %u.%u.%u.%u\n", cfg.local.oct[0],
                         cfg.local.oct[1], cfg.local.oct[2], cfg.local.oct[3], cfg.gateway.oct[0],
                         cfg.gateway.oct[1], cfg.gateway.oct[2], cfg.gateway.oct[3]);
+    cinux::lib::kprintf("[net] loopback 127.0.0.1 attached; L4 registered: ICMP+UDP+TCP\n");
 }
 
 cinux::lib::ErrorOr<PingResult> ping(Ipv4Addr dst, uint16_t id, uint16_t seq, RxPump pump) {
