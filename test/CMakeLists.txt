@@ -306,6 +306,18 @@ add_cinux_integration_test(fork_exec
     ${CMAKE_SOURCE_DIR}/kernel/proc/elf_types.cpp
 )
 
+# F8-M2 batch 3: named FIFO -- links the real fifo.cpp + pipe.cpp + pipe_ops.cpp
+# (pure logic, host-safe blocking) so FifoRegistry + FifoOps cloning open run on
+# host.
+add_cinux_integration_test(fifo
+    unit/test_fifo.cpp
+    unit/host_spinlock.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/ipc/fifo.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/ipc/pipe.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/ipc/pipe_ops.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/inode.cpp
+)
+
 # ============================================================
 # Custom test targets
 # ============================================================
@@ -323,7 +335,7 @@ set(ALL_HOST_TESTS
     test_ext2_inode_ops test_syscall_ext2 test_shell_write test_cwd_stat
     test_canvas test_bitmap_icon test_mouse test_event_queue test_window
     test_window_manager test_desktop test_terminal test_pipe test_sys_pipe
-    test_shell_redirect test_fork_exec test_multi_terminal
+    test_shell_redirect test_fork_exec test_multi_terminal test_fifo
     test_cinux_base_types
     test_refcount
     test_net_udp
