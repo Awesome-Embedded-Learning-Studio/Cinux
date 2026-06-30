@@ -66,9 +66,13 @@ set(MUSL_FORKTEST_ELF "${CMAKE_BINARY_DIR}/musl/forktest")
 # /hello: the script includes them iff the files exist (absent in CI).
 set(MUSL_HELLO_DYN_ELF "${CMAKE_BINARY_DIR}/musl/hello-dyn")
 set(MUSL_LDSO_ELF "${CMAKE_BINARY_DIR}/musl-sysroot/lib/libc.so")
+# F-ECO batch 0: minimal static busybox at /bin/busybox when present (built by
+# clang --target=x86_64-linux-musl, not a CMake target). The ring-3 smoke
+# fork+execves it to run echo/cat/ls applets -- the first ecosystem touchstone.
+set(BUSYBOX_ELF "${CMAKE_BINARY_DIR}/musl/busybox")
 add_custom_command(
     OUTPUT ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF} ${BUSYBOX_ELF}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
     COMMENT "Creating ext2 filesystem image with /bin/sh (+ /hello, /forktest, /hello-dyn if musl built)"
     VERBATIM
@@ -320,7 +324,7 @@ add_custom_target(run-stress-test
 # 每次 run-kernel-test 前强制重建 ext2.img，确保磁盘状态干净
 add_custom_target(regenerate-ext2-image
     COMMAND ${CMAKE_COMMAND} -E remove -f ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF} ${BUSYBOX_ELF}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM

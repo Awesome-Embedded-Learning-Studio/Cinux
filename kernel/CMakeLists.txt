@@ -157,6 +157,13 @@ if(CINUX_MUSL_DYN_SMOKE)
     target_compile_definitions(big_kernel_common PUBLIC CINUX_MUSL_DYN_SMOKE)
 endif()
 
+# F-ECO batch 0: busybox ring-3 ecosystem smoke. fork+execve /bin/busybox to run
+# echo/cat/ls applets -- the first "run a real program" touchstone. Off by
+# default (CI has no busybox build); enable: cmake -DCINUX_BUSYBOX_SMOKE=ON ...
+if(CINUX_BUSYBOX_SMOKE)
+    target_compile_definitions(big_kernel_common PUBLIC CINUX_BUSYBOX_SMOKE)
+endif()
+
 # F-INFRA I-9: opt-in UBSan. -fsanitize=undefined at COMPILE only (the freestanding
 # stubs in kernel/lib/ubsan.cpp resolve the __ubsan_handle_* refs -- no libubsan).
 # Exclude the stub + the diagnostic/panic path so a UB hit cannot recurse.
@@ -320,6 +327,7 @@ endif()
 if(CINUX_NET)
     target_sources(big_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/test_e1000.cpp)
     target_sources(big_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/test_net.cpp)
+    target_sources(big_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/test_socket.cpp)
 endif()
 
 target_sources(big_kernel_test PRIVATE $<TARGET_OBJECTS:big_kernel_common>)

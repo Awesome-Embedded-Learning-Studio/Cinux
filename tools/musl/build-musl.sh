@@ -48,7 +48,13 @@ fi
 cd "$SRC"
 if [ ! -f config.mak ]; then
     echo "[build-musl] configuring..."
-    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT"
+    # F-ECO batch 0: -O1, NOT musl's default -O2. GCC 16 lowers musl mallocng's
+    # __builtin_unreachable / assume paths in alloc_slot() to `hlt` traps under
+    # -O2; any real program that mallocs (busybox) hits one and SIGILLs at once
+    # (hello doesn't malloc, so it never surfaced). -O1 sidesteps the offending
+    # codegen and malloc works. Revisit when musl adapts to GCC 16 (or pin a
+    # known-good GCC).
+    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT" CFLAGS="-O1"
 fi
 
 # 4. Build + install.

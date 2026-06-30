@@ -188,8 +188,28 @@ void handle_gp(InterruptFrame* frame) {
     // before panic()/current() can recurse on a corrupt %gs. See capture_first_gp.
     capture_first_gp(frame);
     const bool from_user = (frame->cs & 0x03) != 0;
+    auto*        task    = cinux::proc::Scheduler::current();
+    if (from_user && task != nullptr) {
+        // User-mode #GP: an illegal/privileged opcode in ring 3 -- e.g. clang
+        // lowering a user-program UB / unreachable path to `hlt` (a 1-byte trap
+        // that #GP's in ring 3), or a bad segment selector. The offending USER
+        // task must die, NOT the kernel: this aligns with Linux (SIGILL) and the
+        // #PF handler's SIGSEGV path below. signal_send queues kSigill; the ISR
+        // stub's signal_check_deliver_isr (invoked right after handle_gp returns)
+        // delivers it -- to a custom handler if installed, else the default
+        // Terminate (its context_switch() abandons this frame). F-ECO batch 0:
+        // without this, every user program UB that clang lowers to `hlt` would
+        // panic the whole kernel (busybox echo hit this on iter 1).
+        klog_error(
+            "#GP user mode: tid=%u '%s' rip=%p rsp=%p err=%p -- sending SIGILL",
+            static_cast<unsigned>(task->tid), task->name ? task->name : "(null)",
+            reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->rsp),
+            reinterpret_cast<void*>(frame->error_code));
+        cinux::proc::signal_send(task, cinux::proc::Signal::kSigill);
+        return;
+    }
     if (from_user) {
-        panic(frame, "#GP", 13, "General Protection Fault from user mode (Ring 3)");
+        panic(frame, "#GP", 13, "General Protection Fault from user mode (no current task)");
     }
     panic(frame, "#GP", 13, "General Protection Fault in kernel mode (error code=%p)",
           reinterpret_cast<void*>(frame->error_code));

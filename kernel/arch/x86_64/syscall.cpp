@@ -43,6 +43,7 @@
 #include "kernel/syscall/sys_pgrp.hpp"
 #include "kernel/syscall/sys_ping.hpp"
 #include "kernel/syscall/sys_pipe.hpp"
+#include "kernel/syscall/sys_socket.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_rmdir.hpp"
 #include "kernel/syscall/sys_set_tid_address.hpp"
@@ -136,6 +137,15 @@ void register_builtin_handlers() {
 
     // F7: ICMP echo (shell ping).
     syscall_register(SyscallNr::SYS_ping, sys_ping);
+
+    // F7-M6: BSD socket API (Linux x86_64 numbers 41-50).
+    syscall_register(SyscallNr::SYS_socket, sys_socket);
+    syscall_register(SyscallNr::SYS_connect, sys_connect);
+    syscall_register(SyscallNr::SYS_accept, sys_accept);
+    syscall_register(SyscallNr::SYS_sendto, sys_sendto);
+    syscall_register(SyscallNr::SYS_recvfrom, sys_recvfrom);
+    syscall_register(SyscallNr::SYS_bind, sys_bind);
+    syscall_register(SyscallNr::SYS_listen, sys_listen);
 }
 
 }  // anonymous namespace
