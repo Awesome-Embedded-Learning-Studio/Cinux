@@ -76,7 +76,7 @@ void test_root_stat_is_directory() {
     TEST_ASSERT_EQ(st.st_nlink, 2u);
 }
 
-void test_root_readdir_dot_dotdot_only() {
+void test_root_readdir_dot_dotdot() {
     ProcFs pf;
     TEST_ASSERT_TRUE(pf.mount().ok());
     Inode* root = lookup_or_null(&pf, "");
@@ -89,9 +89,51 @@ void test_root_readdir_dot_dotdot_only() {
     TEST_ASSERT_EQ(readdir_or_neg1(root, 1, name, sizeof(name)), 1);
     TEST_ASSERT_EQ(name[0], '.');
     TEST_ASSERT_EQ(name[1], '.');
+}
 
-    // Batch 1: no PID entries yet (live-PID enumeration arrives batch 2).
-    TEST_ASSERT_EQ(readdir_or_neg1(root, 2, name, sizeof(name)), 0);
+void test_root_readdir_lists_live_pid() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    int  pid = pick_free_pid();
+    Task t{};
+    t.pid  = pid;
+    t.name = "procfs_test";
+    signal_register_task(&t);
+
+    Inode* root = lookup_or_null(&pf, "");
+    char   name[PROCFS_NAME_MAX];
+    char   expected[16];
+    pid_to_path(expected, pid);
+
+    // Walk past "." / ".." (indices 0/1) and find our PID among the live set.
+    bool found = false;
+    for (uint64_t idx = 2; idx < 64; ++idx) {
+        int64_t r = readdir_or_neg1(root, idx, name, sizeof(name));
+        if (r != 1) {
+            break;  // end of directory
+        }
+        if (strcmp(name, expected) == 0) {
+            found = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found);
+
+    // After unregister, the PID no longer appears.
+    signal_unregister_task(&t);
+    found = false;
+    for (uint64_t idx = 2; idx < 64; ++idx) {
+        int64_t r = readdir_or_neg1(root, idx, name, sizeof(name));
+        if (r != 1) {
+            break;
+        }
+        if (strcmp(name, expected) == 0) {
+            found = true;
+            break;
+        }
+    }
+    TEST_ASSERT_FALSE(found);
 }
 
 // ---------- per-PID directory lookup ----------
@@ -144,7 +186,8 @@ extern "C" void run_procfs_tests() {
     TEST_SECTION("ProcFS (F6-M2)");
     RUN_TEST(test_procfs::test_mount_and_root);
     RUN_TEST(test_procfs::test_root_stat_is_directory);
-    RUN_TEST(test_procfs::test_root_readdir_dot_dotdot_only);
+    RUN_TEST(test_procfs::test_root_readdir_dot_dotdot);
+    RUN_TEST(test_procfs::test_root_readdir_lists_live_pid);
     RUN_TEST(test_procfs::test_lookup_pid_dir_live_then_dead);
     RUN_TEST(test_procfs::test_lookup_rejects_bad_paths);
     TEST_SUMMARY();

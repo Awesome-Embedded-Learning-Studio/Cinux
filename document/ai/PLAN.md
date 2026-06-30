@@ -14,7 +14,7 @@
 |----|------|------|--------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F6-M2 ⏳→🔄 + todo `01-procfs.md` 标范围栅栏 | ✅ | `5fd7e52` | docs-only |
 | 1 | procfs 骨架：`procfs.hpp`/`procfs.cpp`（`ProcFs`+mount/lookup root+`<pid>` 目录，用现有 `signal_find_task_by_pid` 校验存活；`ProcRootDirOps` readdir 暂硬编码 `"."`/`".."`）+ `kernel/fs/CMakeLists.txt` + `kernel/test/test_procfs.cpp`（mount/lookup/stat root+pid-dir）+ `main_test.cpp` 注册 | ✅ | 本次 | run-kernel-test-all 两 leg 991/0（+5 procfs） |
-| 2 | `signal_enumerate_task_pids` accessor（signal.hpp/cpp，纯增量）+ `ProcRootDirOps::readdir` 真枚举 pid（`signal_enumerate_task_pids` 锁内快照）+ 测（readdir 列出注册 pid） | ⏳ | | run-kernel-test-all 两 leg |
+| 2 | `signal_nth_task_pid` accessor（signal.hpp/cpp，纯增量；锁内走到第 n 个 task）+ `ProcRootDirOps::readdir` 真枚举 pid + 测（readdir 列出注册 pid；注销后消失）。**frame-safe**：原 `signal_enumerate_task_pids` 快照版在 readdir 栈上 `int pids[257]`=1028B 超 kernel `-Wframe-larger-than=1024`，改 nth 版（锁内走到 index，无栈数组） | ✅ | 本次 | 全量编绿 + run-kernel-test-all 两 leg 992/0（+1 enumerate） |
 | 3 | `/proc/<pid>/` 子目录：`ProcPidDirOps`（readdir `"stat"`/`"cmdline"`）+ `ProcStatFileOps`/`ProcCmdlineFileOps`（动态伪文件，read 时 `signal_find_task_by_pid`→Task 字段生成内容；`/proc/<pid>/stat` = `pid (name) state ppid tgid uid gid`，`/proc/<pid>/cmdline` = name 尽力）+ lookup `<pid>/stat`/`<pid>/cmdline` + 测（read stat 内容含 pid+name） | ⏳ | | run-kernel-test-all 两 leg |
 | 4 | boot 接线：`procfs_init.cpp`（`procfs::init()` mount+`vfs_mount_add("/proc")`）+ `kernel/fs/CMakeLists.txt`(+procfs_init) + `init.cpp` 挂 procfs::init()（devfs::init 后）+ `make run` 冒烟（/proc 装配零 panic） | ⏳ | | run-kernel-test-all 两 leg 回归 + make run 零 panic |
 | 5 | 收官：note + ROADMAP F6-M2 ✅ + PLAN ✅ + todo `01-procfs.md` 打勾（本批范围） | ⏳ | | docs-only |

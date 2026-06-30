@@ -35,6 +35,7 @@ namespace cinux::fs {
 using cinux::lib::Error;
 using cinux::lib::ErrorOr;
 using cinux::proc::signal_find_task_by_pid;
+using cinux::proc::signal_nth_task_pid;
 
 namespace {
 
@@ -134,15 +135,36 @@ public:
     }
 };
 
-// Batch 1: both directories answer "." / ".." only.  The root readdir is wired
-// to the live-PID snapshot in batch 2; the per-PID readdir lists stat/cmdline
-// in batch 3.  Defining both out-of-line keeps the override shape stable.
+// The root directory lists one entry per live PID.  Indices 0/1 are "." / "..";
+// index i>=2 maps to the (i-2)-th PID in a registry snapshot taken on each call
+// (Linux /proc readdir recomputes the task set per getdents the same way).  The
+// registry is normally stable across one listing, so successive indices see a
+// consistent snapshot.
 ErrorOr<int64_t> ProcRootDirOps::readdir(const Inode* inode, uint64_t index, char* name,
                                          uint64_t name_max) {
     if (inode == nullptr || name == nullptr || name_max == 0) {
         return Error::InvalidArgument;
     }
-    return fill_dot_entry(index, name, name_max);  // index >= 2 -> 0 (end) for now
+
+    auto dot = fill_dot_entry(index, name, name_max);
+    if (!dot.ok() || dot.value() == 1) {
+        return dot;  // "." / ".." handled, or a name_max too small to spell them
+    }
+
+    // index >= 2: the (index-2)-th live PID.  Walking the registry to the index
+    // directly (rather than snapshotting it onto the stack) keeps this frame
+    // under the kernel's 1024-byte limit.  utoa's contract is 11 bytes; readdir
+    // name buffers are PROCFS_NAME_MAX (32), so the guard never trips in
+    // practice but honours the contract for any caller.
+    if (name_max < 11) {
+        return Error::InvalidArgument;
+    }
+    int pid;
+    if (!signal_nth_task_pid(static_cast<uint32_t>(index - 2), &pid)) {
+        return 0;  // past the last live PID
+    }
+    utoa(name, static_cast<uint32_t>(pid));
+    return 1;
 }
 
 ErrorOr<int64_t> ProcPidDirOps::readdir(const Inode* inode, uint64_t index, char* name,
