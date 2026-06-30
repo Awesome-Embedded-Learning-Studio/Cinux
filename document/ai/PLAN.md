@@ -5,7 +5,7 @@
 ## 🔄 F7-M5 TCP（传输层：三次握手 / 序号-ACK / 四次挥手 + 伪首部校验和）— 2026-06-30 立项
 
 > worktree `worktree-f7-m5-tcp`（从干净 main `c0188cd`，接 F7-M4 UDP ✅）。在 IPv4 同层加 TCP：`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l4(kIpProtoTcp, tcp)` 入 L4 proto 表（M4 已立单一分派机制，加协议不疼）。**范围（用户拍板）**：TCP 状态机（三次握手 / 序号-ACK / 四次挥手）+ 伪首部校验和；**最小可用（无内核 timer-wake）——单方向数据 + 无重传**；真重传/RTO/滑动窗口/拥塞控制、TCP Socket（listen/accept/recv）留 follow-up（Socket 进 F7-M6）。**栅栏**：不碰 socket/syscall（M6）、不进 production `net_init.cpp`（无消费者，同 M4 UDP）、test-only（host 单测 + loopback 内核 round-trip + e1000 TX smoke）。
-> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（基线 969/0；**本地必须** `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 防 smoke 挂死）；改公共头（ipv4.hpp 加 `kIpProtoTcp`）push 前补全量 `cmake --build build`。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（基线 **986/0**——main c0188cd 已含 F10-M3 PTY；**本地必须** `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF -DCINUX_BUILD_TESTS=ON` 防 smoke 挂死 + 编 host 测）；改公共头（ipv4.hpp 加 `kIpProtoTcp`）push 前补全量 `cmake --build build`。**并发会话占 VNC :0**：本机多 worktree 会话全用硬编码 `-vnc :0`，本 worktree 验证临时切 `-vnc :5`、跑完 `git checkout -- cmake/qemu.cmake` 还原（验证 hack，非代码改动）。
 
 ### 设计要点（决定打法，已读码核实）
 - **poll() budget loop（64）单次排干 loopback 上整个握手+数据+挥手**：每步 reply 在 dispatch 期间经 `send_l3` 入队、下一 budget 轮排干（[net_stack.cpp:108](../../kernel/net/net_stack.cpp#L108)）。TCP 多包交换因此能在确定性 loopback 上端到端验证，无需 SLIRP/timer。
@@ -16,8 +16,8 @@
 ### 批表
 | 批 | 范围 | 状态 | 测试 |
 |----|------|------|------|
-| 0 | 立项 docs（本段）+ ROADMAP F7-M5 🔄 + todo `04-tcp.md` 范围栅栏 | 🔄 | docs-only |
-| 1 | tcp.hpp wire（TcpHeader 20B + SYN/ACK/FIN/RST/PSH/URG + parse/build + data-off）+ `ipv4.hpp` 加 `kIpProtoTcp=6`（不改 add_l8）+ tcp.cpp 骨架（伪首部校验和门 + handle 诊断）+ CMake + host 单测（头 round-trip/flags/校验和 round-trip/坏校验和 drop） | ⏳ | ctest + run-kernel-test-all 两 leg |
+| 0 | 立项 docs（本段）+ ROADMAP F7-M5 🔄 + todo `04-tcp.md` 范围栅栏 | ✅ `405f445` | docs-only |
+| 1 | tcp.hpp wire（TcpHeader 20B + SYN/ACK/FIN/RST/PSH/URG + parse/build + data-off）+ `ipv4.hpp` 加 `kIpProtoTcp=6`（不改 add_l8）+ tcp.cpp 骨架（伪首部校验和门 + handle 诊断）+ CMake + host 单测（头 round-trip/flags/校验和 round-trip/坏校验和 drop） | ✅ `30a136a` | host net_tcp 4/0 + run-kernel-test-all 两 leg 各 986/0（零回归） |
 | 2 | 连接表 + `listen`/`connect` + 握手 FSM（SYN→SYN-ACK→ACK，序号-ACK 算术）+ RST（SYN 到未监听端口）+ host mock 验时序 | ⏳ | host 单测 + 两 leg |
 | 3 | `send`（数据段 + ACK 推进）+ `close`（FIN）+ 数据/挥手 FSM（4-way）+ host 单测（established 数据 round-trip + 挥手） | ⏳ | host 单测 + 两 leg |
 | 4 | loopback 内核 round-trip（test_net.cpp `test_tcp_loopback`：单 poll 排干握手+数据+挥手）+ e1000 TX smoke（`test_tcp_e1000_tx`：发 TCP 段，ARP resolve+send ok） | ⏳ | run-kernel-test-all 两 leg（+2 测）+ check_net_decoupling |
