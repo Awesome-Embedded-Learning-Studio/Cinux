@@ -25,6 +25,7 @@
 #include "kernel/net/loopback_device.hpp"
 #include "kernel/net/net_init.hpp"
 #include "kernel/net/net_stack.hpp"
+#include "kernel/net/udp.hpp"
 #include "kernel/syscall/sys_ping.hpp"  // B2: call the sys_ping handler directly
 
 using cinux::drivers::net::E1000Controller;
@@ -43,6 +44,9 @@ using cinux::net::kSlirpGateway;
 using cinux::net::kSlirpGuest;
 using cinux::net::LoopbackDevice;
 using cinux::net::NetStack;
+using cinux::net::UdpListener;
+using cinux::net::UdpModule;
+using cinux::net::kIpProtoUdp;
 
 namespace test_net {
 
@@ -205,11 +209,85 @@ void test_syscall_ping() {
     cinux::lib::kprintf("[net] sys_ping(10.0.2.2) -> reply (rc=0)\n");
 }
 
+// ============================================================
+// UDP loopback: a datagram round-trips 127.0.0.1 in one poll.
+// Mirrors test_ping_loopback but for proto 17 -- proves UdpModule rides the L4
+// table + the pseudo-header checksum survives a real round-trip on the in-kernel
+// stack.  Deterministic (no SLIRP).
+// ============================================================
+
+namespace {
+/// Kernel-side UDP capture listener: records the last datagram into a fixed
+/// buffer (freestanding: no std::vector).  Mirrors IcmpModule's reply counters.
+struct UdpCapture : UdpListener {
+    uint32_t calls         = 0;
+    uint16_t last_src_port = 0;
+    uint32_t last_len      = 0;
+    uint8_t  buf[128]      = {};
+    void     on_udp(const cinux::net::Ipv4Header& /*ip*/, uint16_t src_port,
+                    cinux::net::FrameView payload) override {
+        ++calls;
+        last_src_port = src_port;
+        last_len      = payload.size() > sizeof(buf) ? sizeof(buf) : payload.size();
+        for (uint32_t i = 0; i < last_len; ++i) {
+            buf[i] = payload.data()[i];
+        }
+    }
+};
+}  // namespace
+
+void test_udp_loopback() {
+    // Static: each module + the LoopbackDevice (~12 KB) are too large for the
+    // 16 KB kernel stack.
+    static LoopbackDevice lo;
+    static ArpModule      arp;
+    static IcmpModule     icmp;
+    static Ipv4Module     ipv4(icmp, &arp);
+    static UdpModule      udp;
+    static NetStack       stack;
+    static UdpCapture     cap;
+
+    stack.add_protocol(kEtherTypeArp, arp);
+    stack.add_protocol(kEtherTypeIpv4, ipv4);
+    ipv4.add_l4(kIpProtoUdp, udp);  // UDP joins ICMP in the L4 table
+
+    InDevice cfg{};
+    cfg.local   = kLoopbackAddr;  // 127.0.0.1
+    cfg.gateway = kLoopbackAddr;
+    TEST_ASSERT_TRUE(stack.attach(lo, cfg));
+
+    TEST_ASSERT_TRUE(udp.bind(7777, cap));
+
+    static const uint8_t msg[] = {'u', 'd', 'p', '-', 'h', 'i'};
+    auto                 r = udp.send(lo, kLoopbackAddr, 1234, 7777, msg, sizeof(msg), ipv4, stack);
+    TEST_ASSERT_TRUE(r.ok());
+
+    // One poll() drains the full round-trip (budget loop): send enqueues the IP
+    // packet on loopback; poll dispatches it -> IPv4 -> L4 table -> UdpModule ->
+    // listener (the reply path ICMP also uses).
+    stack.poll();
+
+    TEST_ASSERT_EQ(cap.calls, 1u);
+    TEST_ASSERT_EQ(cap.last_src_port, 1234u);
+    TEST_ASSERT_EQ(cap.last_len, static_cast<uint32_t>(sizeof(msg)));
+    bool payload_ok = true;
+    for (uint32_t i = 0; i < sizeof(msg); ++i) {
+        if (cap.buf[i] != msg[i]) {
+            payload_ok = false;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(payload_ok);
+    cinux::lib::kprintf("[net] loopback UDP: %u bytes from port %u (round-trip in one poll)\n",
+                        cap.last_len, static_cast<unsigned>(cap.last_src_port));
+}
+
 }  // namespace test_net
 
 extern "C" void run_net_tests() {
     TEST_SECTION("net");
     RUN_TEST(test_net::test_ping_loopback);
+    RUN_TEST(test_net::test_udp_loopback);
     RUN_TEST(test_net::test_ping_e1000);
     RUN_TEST(test_net::test_production_ping);
     RUN_TEST(test_net::test_syscall_ping);
