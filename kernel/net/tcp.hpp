@@ -97,18 +97,74 @@ inline uint8_t tcp_header_bytes(const TcpHeader& h) {
     return static_cast<uint8_t>(h.data_off * 4);
 }
 
-/// @brief TCP protocol layer.  Batch 1: inbound checksum gate + diagnostics.
-///        Batches 2-3 add the connection table + handshake/data/teardown FSM.
+/// A connection endpoint: an address + port.  The FSM keys connections on the
+/// local/remote endpoint pair (the TCP 4-tuple, minus the local addr which the
+/// device's InDevice already pins).
+struct TcpEndpoint {
+    Ipv4Addr addr;
+    uint16_t port;
+};
+
+/// Connection states the FSM moves through.  Batch 2 covers the handshake half
+/// (Closed/SynSent/SynReceived/Established); the teardown half lands in batch 3.
+enum class TcpState : uint8_t {
+    kClosed      = 0,
+    kSynSent     = 1,
+    kSynReceived = 2,
+    kEstablished = 3,
+};
+
+/// @brief Inbound TCP observer -- the consumer of a connection's lifecycle.
+///
+/// Registered with TcpModule::listen.  Like all net-stack callbacks, @p data is
+/// BORROWED: valid only for the duration of the call -- copy to retain (the
+/// device recycles the buffer after dispatch).
+class TcpListener {
+public:
+    virtual ~TcpListener() = default;
+
+    /// @brief A passive open completed: a SYN to a listened port finished the
+    ///        handshake (the 3rd ACK landed).  @p local is the listened
+    ///        endpoint, @p remote the peer.
+    virtual void on_accept(const TcpEndpoint& local, const TcpEndpoint& remote) = 0;
+    /// @brief Inbound data on an established connection (batch 3).  Default:
+    ///        ignore.  @p data is borrowed.
+    virtual void on_data(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/,
+                         FrameView /*data*/) {}
+    /// @brief The connection ended -- peer FIN or RST (batch 3).  Default: ignore.
+    virtual void on_close(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/) {}
+};
+
+/// @brief TCP protocol layer.  Batch 1: wire + checksum gate.  Batch 2: the
+///        connection table + 3-way handshake.  Batch 3: data + 4-way teardown.
 class TcpModule : public L4Handler {
 public:
-    /// @brief L4Handler: verify the pseudo-header checksum (mandatory for TCP),
-    ///        then record the segment for diagnostics.  FSM dispatch lands in
-    ///        batch 2; a bad checksum is a silent drop (like UDP/ICMP).
+    static constexpr uint32_t kMaxTcpCons = 8;  ///< connection-table size
+
+    /// @brief Open a passive listener on @p local_port (mirrors UDP bind).
+    /// @return false if @p local_port is already listened or the table is full.
+    bool listen(uint16_t local_port, TcpListener& listener);
+    /// @brief Release a passive listener.  No-op if @p local_port is not listened.
+    void stop_listen(uint16_t local_port);
+
+    /// @brief Active open: send SYN to @p remote, enter SYN_SENT.  The handshake
+    ///        completes on the next inbound SYN-ACK (drained by poll).  Fails if a
+    ///        connection on this 4-tuple already exists or the table is full.
+    cinux::lib::ErrorOr<void> connect(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
+                                      uint16_t remote_port, Ipv4Module& ipv4, NetStack& stack);
+
+    /// @brief L4Handler: verify the pseudo-header checksum, then advance the FSM
+    ///        for the matching connection (passive-open a SYN to a listened port,
+    ///        RST an unroutable segment, complete the handshake on SYN-ACK/ACK).
+    ///        A bad checksum is a silent drop (like UDP/ICMP).
     void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
                 NetStack& stack) override;
 
-    // --- diagnostics (the checksum gate's observable, batch 1) ---
-    uint32_t valid_count() const { return valid_count_; }  ///< segments past the gate
+    // --- test observation ---
+    uint32_t connection_count() const;  ///< non-Closed connections in the table
+    TcpState state_of(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port) const;
+    // checksum-gate diagnostics (kept from batch 1 as a lightweight tap)
+    uint32_t valid_count() const { return valid_count_; }
     uint16_t last_src_port() const { return last_src_port_; }
     uint16_t last_dst_port() const { return last_dst_port_; }
     uint32_t last_seq() const { return last_seq_; }
@@ -124,14 +180,45 @@ public:
     }
 
 private:
-    // Prove the checksum gate accepts valid segments and drops corrupt ones.
-    // Kept as a lightweight tap alongside the FSM that arrives in batch 2.
-    uint32_t valid_count_   = 0;
-    uint16_t last_src_port_ = 0;
-    uint16_t last_dst_port_ = 0;
-    uint32_t last_seq_      = 0;
-    uint32_t last_ack_      = 0;
-    uint8_t  last_flags_    = 0;
+    /// One connection record (TCB).  state==kClosed marks a free table slot.
+    struct Connection {
+        TcpState     state      = TcpState::kClosed;
+        uint16_t     local_port = 0;
+        Ipv4Addr     remote_addr{};
+        uint16_t     remote_port = 0;
+        uint32_t     iss         = 0;        ///< our initial send sequence
+        uint32_t     snd_nxt     = 0;        ///< next seq we send
+        uint32_t     rcv_nxt     = 0;        ///< next seq we expect to receive (what we ACK)
+        TcpListener* listener    = nullptr;  ///< set on passive open
+    };
+    struct ListenSlot {
+        uint16_t     port = 0;
+        TcpListener* l    = nullptr;
+    };
+
+    Connection*  find(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port);
+    Connection*  alloc(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port,
+                       TcpListener* listener);
+    TcpListener* find_listener(uint16_t port);
+    uint32_t     next_isn();  ///< deterministic ISN (randomization is a follow-up)
+
+    /// @brief Build + checksum + emit one TCP segment via ipv4.send (proto 6).
+    ///        The pseudo-header is sourced from the device's InDevice (local) +
+    ///        @p dst.  Data is optional (handshake/control segments pass len=0).
+    cinux::lib::ErrorOr<void> send_segment(NetDevice& dev, Ipv4Addr dst, uint16_t src_port,
+                                           uint16_t dst_port, uint32_t seq, uint32_t ack,
+                                           uint8_t flags, const uint8_t* data, uint32_t len,
+                                           Ipv4Module& ipv4, NetStack& stack);
+
+    Connection cons_[kMaxTcpCons]{};
+    ListenSlot listens_[kMaxTcpCons]{};
+    uint32_t   isn_counter_   = 0x00004000;  ///< ISN source; bumped by 64K per connection
+    uint32_t   valid_count_   = 0;           ///< segments past the checksum gate
+    uint16_t   last_src_port_ = 0;           ///< diagnostics tap (last valid segment)
+    uint16_t   last_dst_port_ = 0;
+    uint32_t   last_seq_      = 0;
+    uint32_t   last_ack_      = 0;
+    uint8_t    last_flags_    = 0;
 };
 
 }  // namespace cinux::net

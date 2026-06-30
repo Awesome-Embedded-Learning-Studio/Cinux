@@ -46,11 +46,13 @@ Ipv4Addr ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
     return Ipv4Addr{{a, b, c, d}};
 }
 
-/// No-L2 mock (same shape as test_net_udp): yields queued RX frames.  TX is
-/// unused in batch 1 (no send path yet); batches 2-3 will capture send_l3.
+/// No-L2 mock (same shape as test_net_udp): yields queued RX frames and captures
+/// every send_l3 as an IP packet in `sent`.  Copy device (sink==nullptr) -- frame
+/// bytes live in the vectors for the test's lifetime, so handlers can borrow them.
 class NoL2Dev : public NetDevice {
 public:
     std::vector<std::vector<uint8_t>> rx;
+    std::vector<std::vector<uint8_t>> sent;
     size_t                            idx = 0;
 
     bool mac(cinux::net::EthAddr&) const override { return false; }
@@ -65,8 +67,9 @@ public:
         ++idx;
         return true;
     }
-    cinux::lib::ErrorOr<void> send_l3(const cinux::net::EthAddr&, uint16_t, const uint8_t*,
-                                      uint32_t) override {
+    cinux::lib::ErrorOr<void> send_l3(const cinux::net::EthAddr&, uint16_t, const uint8_t* l3,
+                                      uint32_t len) override {
+        sent.emplace_back(l3, l3 + len);
         return {};
     }
 };
@@ -165,6 +168,39 @@ void deliver(Fixture& f, const std::vector<uint8_t>& pkt) {
     f.stack.poll();
 }
 
+/// Parse the TCP header out of a captured IP packet (skip the 20-byte IPv4
+/// header).  Returns false if @p pkt is too short.
+bool seg_tcp(const std::vector<uint8_t>& pkt, TcpHeader& out) {
+    if (pkt.size() < 20 + 20) {
+        return false;
+    }
+    parse_tcp(pkt.data() + 20, out);
+    return true;
+}
+
+/// Capture listener: records on_accept/on_data/on_close invocations.
+struct Capture : cinux::net::TcpListener {
+    uint32_t                accepts = 0;
+    uint32_t                closes  = 0;
+    uint32_t                datas   = 0;
+    cinux::net::TcpEndpoint last_remote{};
+    std::vector<uint8_t>    last_data;
+    void                    on_accept(const cinux::net::TcpEndpoint& /*local*/,
+                                      const cinux::net::TcpEndpoint& remote) override {
+        ++accepts;
+        last_remote = remote;
+    }
+    void on_data(const cinux::net::TcpEndpoint& /*local*/,
+                 const cinux::net::TcpEndpoint& /*remote*/, cinux::net::FrameView data) override {
+        ++datas;
+        last_data.assign(data.data(), data.data() + data.size());
+    }
+    void on_close(const cinux::net::TcpEndpoint& /*local*/,
+                  const cinux::net::TcpEndpoint& /*remote*/) override {
+        ++closes;
+    }
+};
+
 }  // namespace
 
 // ============================================================
@@ -240,6 +276,79 @@ TEST("tcp_handle: proto 6 reaches TcpModule via the L4 dispatch table") {
 
     ASSERT_EQ(f.tcp.valid_count(), 1u);
     ASSERT_EQ(f.tcp.last_flags(), 0x02u);  // SYN dispatched to TCP, not eaten elsewhere
+}
+
+// ============================================================
+// 3-way handshake (connection table + seq/ACK arithmetic)
+// ============================================================
+
+TEST("tcp_handshake: 3-way handshake -> both ends ESTABLISHED, seq/ack correct") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    ASSERT_TRUE(f.tcp.listen(7777, server_l));
+
+    // Client active open -> SYN (captured as an IP packet).
+    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
+    ASSERT_EQ(f.dev.sent.size(), 1u);
+    ASSERT_EQ(f.tcp.connection_count(), 1u);  // client conn
+    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kSynSent);
+
+    TcpHeader syn;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[0], syn));
+    ASSERT_EQ(syn.flags, 0x02u);  // SYN
+    ASSERT_EQ(syn.src_port, 1234u);
+    ASSERT_EQ(syn.dst_port, 7777u);
+    ASSERT_EQ(syn.ack, 0u);
+    const uint32_t s_c = syn.seq;  // client ISN
+
+    // Deliver the SYN -> server passive open -> SYN-ACK.
+    deliver(f, f.dev.sent[0]);
+    ASSERT_EQ(f.tcp.connection_count(), 2u);  // + server conn
+    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kSynReceived);
+    ASSERT_EQ(f.dev.sent.size(), 2u);
+
+    TcpHeader synack;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[1], synack));
+    ASSERT_EQ(synack.flags, 0x12u);   // SYN|ACK
+    ASSERT_EQ(synack.ack, s_c + 1);   // the peer's SYN consumed one sequence number
+    const uint32_t s_s = synack.seq;  // server ISN
+
+    // Deliver the SYN-ACK -> client ACKs, reaches ESTABLISHED.
+    deliver(f, f.dev.sent[1]);
+    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kEstablished);
+    ASSERT_EQ(f.dev.sent.size(), 3u);
+
+    TcpHeader ack3;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[2], ack3));
+    ASSERT_EQ(ack3.flags, 0x10u);  // ACK
+    ASSERT_EQ(ack3.seq, s_c + 1);  // our SYN consumed one
+    ASSERT_EQ(ack3.ack, s_s + 1);  // the peer's SYN consumed one
+
+    // Deliver the ACK -> server ESTABLISHED + on_accept fires.
+    deliver(f, f.dev.sent[2]);
+    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kEstablished);
+    ASSERT_EQ(server_l.accepts, 1u);
+    ASSERT_EQ(server_l.last_remote.port, 1234u);
+}
+
+TEST("tcp_handshake: SYN to a closed (unlistened) port is answered with RST") {
+    Fixture f{ip(127, 0, 0, 1)};
+    // No listener on 9999 -- hand-build a SYN to it.
+    auto    syn = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 9999, 5000, 0, 0x02);
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, syn));
+
+    ASSERT_EQ(f.dev.sent.size(), 1u);  // the RST
+    TcpHeader rst;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[0], rst));
+    ASSERT_EQ(rst.flags, 0x14u);              // RST|ACK
+    ASSERT_EQ(rst.ack, 5001u);                // ack = SEG.SEQ + 1 (RFC 793)
+    ASSERT_EQ(f.tcp.connection_count(), 0u);  // no connection created
+}
+
+TEST("tcp_connect: a duplicate 4-tuple is rejected") {
+    Fixture f{ip(127, 0, 0, 1)};
+    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
+    ASSERT_FALSE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
 }
 
 int main() {
