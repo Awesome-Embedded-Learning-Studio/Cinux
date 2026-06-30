@@ -32,6 +32,56 @@
 - **loopback 单 poll 多包**：握手 3 包 + 数据 + 挥手靠 budget loop 排干；某步不生成下一段会早停——测试观察 state 推进断言。
 - **栅栏**：不进 production `net_init.cpp`（同 UDP，无消费者）；socket/accept/recv 留 M6；smoke 默认 ON 挂死，本地 OFF。
 
+## ✅ F6-M2 ProcFS（/proc 进程自省虚拟文件系统）— 收官 2026-06-30（分支 worktree-f6-m2-procfs 待 PR）
+
+> Feature 域 F6 VFS 第二里程碑。接 F6-M3 DevFS（已合 main PR#48）—— 照抄 DevFs 范式（`FileSystem` 子类 + 匿名 namespace `InodeOps` 子类 + boot 接线单独 `procfs_init.cpp`），把内核 Task registry 暴露成 `/proc`。**范围栅栏（不投机）**：本里程碑只做**进程自省**——`/proc` 根 readdir 枚举 pid + `/proc/<pid>/` 目录 + `/proc/<pid>/{stat,cmdline}` 动态伪文件。**不做**静态信息节点（`/proc/version`/`meminfo`/`cpuinfo`/`uptime`）、不做 `/proc/<pid>/{maps,fd,status}` —— 留 follow-up（见 todo `01-procfs.md`）。分支 `worktree-f6-m2-procfs`（worktree 从干净 main `c0188cd`）。
+> **设计（照抄 DevFs + 适配动态语义）**：`ProcFs`（`FileSystem` 子类，内存型虚拟 FS）。DevFs 根目录是定长节点表；ProcFs 根目录条目是**动态 pid**（Task registry 实时快照），故 readdir 走新增 `signal_enumerate_task_pids` accessor（`g_registry_lock` 下快照，**纯增量**不改 register/unregister/find_by_pid）。叶 inode 身份：`PID_MAX=256` 有界，ProcFs 持 `pid_dir_inodes_[257]`/`stat_inodes_[257]`/`cmdline_inodes_[257]` 定长池（pid 索引），`ino=pid`、`fs_private=this` —— **SMP 安全**（每 pid 稳定 inode，并发 lookup 不竞态）+ **无泄漏**（close 只删 File 不删 Inode，inode 归 ProcFs，对齐 DevFs）。lookup strip `/` 后解析 `<pid>`/`<pid>/stat`/`<pid>/cmdline`，pid 经现有 `signal_find_task_by_pid` 校验存活（非活 → NotFound，对齐 Linux 只露活进程）。
+> **测试边界（诚实）**：procfs.cpp 读 kernel Task registry（非纯逻辑，依赖 `signal.hpp`/`process.hpp`），**不能 host 单测**（DevFs 靠注入 CharSink 才 host-testable；ProcFs 直读 registry 无注入缝）—— 走 kernel harness（QEMU `run_procfs_tests`）。测试自建栈 Task 注册已知 pid（不依赖 registry 残留状态），确定性验证 readdir 枚举 + stat 内容。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死）；批 1+ 改公共头（signal.hpp）push 前补全量 `cmake --build build`。**⚠️ 根目录无 Makefile——一律 `cmake --build build --target <name>`**。
+
+### 批表
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F6-M2 ⏳→🔄 + todo `01-procfs.md` 标范围栅栏 | ✅ | `5fd7e52` | docs-only |
+| 1 | procfs 骨架：`procfs.hpp`/`procfs.cpp`（`ProcFs`+mount/lookup root+`<pid>` 目录，用现有 `signal_find_task_by_pid` 校验存活；`ProcRootDirOps` readdir 暂硬编码 `"."`/`".."`）+ `kernel/fs/CMakeLists.txt` + `kernel/test/test_procfs.cpp`（mount/lookup/stat root+pid-dir）+ `main_test.cpp` 注册 | ✅ | 本次 | run-kernel-test-all 两 leg 991/0（+5 procfs） |
+| 2 | `signal_nth_task_pid` accessor（signal.hpp/cpp，纯增量；锁内走到第 n 个 task）+ `ProcRootDirOps::readdir` 真枚举 pid + 测（readdir 列出注册 pid；注销后消失）。**frame-safe**：原 `signal_enumerate_task_pids` 快照版在 readdir 栈上 `int pids[257]`=1028B 超 kernel `-Wframe-larger-than=1024`，改 nth 版（锁内走到 index，无栈数组） | ✅ | 本次 | 全量编绿 + run-kernel-test-all 两 leg 992/0（+1 enumerate） |
+| 3 | `/proc/<pid>/` 子目录：`ProcPidDirOps`（readdir `"stat"`/`"cmdline"`）+ `ProcStatFileOps`/`ProcCmdlineFileOps`（动态伪文件，read 时 `signal_find_task_by_pid`→Task 字段生成内容；`/proc/<pid>/stat` = `pid (name) state ppid tgid uid gid`，`/proc/<pid>/cmdline` = name 尽力）+ lookup `<pid>/stat`/`<pid>/cmdline` + 测（read stat 内容含 pid+name；dead pid read→NotFound）。**拆文件**：procfs.cpp 504 行超 500 软限，按职责拆出 `procfs_content.{hpp,cpp}`（Task→文本生成器），procfs.cpp 留 FS plumbing（406 行） | ✅ | 本次 | 全量编绿 + run-kernel-test-all 两 leg 997/0（+5 伪文件测） |
+| 4 | boot 接线：`procfs_init.cpp`（`procfs::init()` mount+`vfs_mount_add("/proc")`）+ `kernel/fs/CMakeLists.txt`(+procfs_init) + `init.cpp` 挂 procfs::init()（devfs::init 后）+ `make run` 冒烟（/proc 装配零 panic） | ✅ | 本次 | run-kernel-test-all 两 leg 997/0 回归 + 生产 boot 冒烟 `[PROCFS] mounted at /proc` 零 panic |
+| 5 | 收官：note + ROADMAP F6-M2 ✅ + PLAN ✅ + todo `01-procfs.md` 打勾（本批范围） | ✅ | 本次 | docs-only |
+
+### 风险 / 陷阱
+- **Inode 身份/生命周期**：close 只删 File 不删 Inode（file.cpp 验证），故 ProcFs 必须自持叶 inode 生命。定长 pid 索引池解决（每 pid 稳定 inode）。若用「单 scratch inode 复用」→ 并发同 kind lookup 竞态覆写 pid → 错读（明确**不**这么做）。
+- **registry TOCTOU（已知，留 follow-up）**：`signal_find_task_by_pid` 返指针后 unlock，read Task 字段时 task 可能已 exit+free（DEBT-002 RCU-safe registry 未修）。窗口极小（find 后立即快照字段），hobby OS 可接受，note 标注；真修随 DEBT-002。
+- **测试内核主线程不经 add_task**（main_test.cpp 在 boot 栈直跑，不进 registry）→ registry 可能空 → readdir 测**自建栈 Task 注册已知 pid**保证确定性（不依赖 registry 残留；参 F3-M4 GOTCHA#22 栈 Task 思路）。
+- **`/proc/<pid>/cmdline` 范围诚实**：CinuxOS Task 不存 argv，cmdline 返 `name`（尽力，非真 argv）；note 标注。
+- **stat 内容是简化版**（非完整 Linux /proc/<pid>/stat 52 字段，CinuxOS 无 accounting）—— 格式 `pid (name) state ppid tgid uid gid`，note 标注简化。
+- **smoke 默认 ON + 本地无 `build/musl/hello` → 挂死**：本地 `CINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10-M2/M3 惯例）。
+- **架构契合**：A.6 无异常（伪文件生成走 ErrorOr，read 返 ErrorOr<int64_t>）；A 子模块边界（用 Cinux-Base ErrorOr，不自建）；对齐 Linux（procfs 动态 pid 目录 + /proc/<pid>/stat 语义，简化字段诚实标注）；§14（procfs_init.cpp 单独文件，CMake 决定编不编，源码零 #ifdef）。
+
+## ✅ F10-M2 follow-up（ext2 double-indirect 块映射）— 收官 2026-06-30（分支 worktree-ext2-indirect 待 PR）
+
+> F10-M2 收官登记的 follow-up（见下「F10-M2」段 follow-up 列表）：ext2 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读写会截断；F10-M2 批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限）。本弧**真修**：`get_or_alloc_block`(写) + `read`(读)补 double-indirect 分支(i_block[13])，撤 `create_ext2_disk.sh` 的 4096 workaround。分支 `worktree-ext2-indirect`（从干净 main `c0188cd`，零文件冲突弧）。
+> 范围栅栏：改动严格圈在 [ext2_common.cpp](../../kernel/fs/ext2_common.cpp)::read + [ext2_inode.cpp](../../kernel/fs/ext2_inode.cpp)::get_or_alloc_block 两函数内；不碰 InodeOps/PageCache；triple-indirect(slot 14) 不做（>16GB 文件，hobby OS 用不到）。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（基线 ~986/0）；本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`；改公共块映射（get_or_alloc_block 签名不变，仅函数体）push 前 host 单测必跑（CI 盲区：run-kernel-test 不编 test/unit/）。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ F10-M2 follow-up bullet 标 in-progress | ✅ `7f27c32` | docs-only |
+| 1 | 写路径：`get_or_alloc_block` 加 i_block[13] double-indirect 分支（offset=file_block-DIRECT-PTRS、idx1=offset/PTRS、idx2=offset%PTRS，三层 lazy alloc，scratch buf 逐层落盘） | ✅ | run-kernel-test-all 两 leg 762/0 零回归（新分支未被现有用例触发） |
+| 2 | 读路径：`read` 加 double else-if（纯读三层，hole 零填）+ 放开 write 的 file_block 门（`>EXT2_DIRECT_BLOCKS` 不再 break，扩到 double-indirect 上限） | ✅ | run-kernel-test-all 两 leg 762/0 零回归 |
+| 3 | host 单测：`test_ext2_ops.cpp` 的 `host_file_write`/`host_file_read` 补 single+double indirect（镜像 kernel 算法）+ >single-indirect-ceiling round-trip 用例 | ✅ | test_ext2_ops 30/0（+1 file_indirect）+ 全 host ctest 65/0 |
+| 4 | 撤 workaround：`create_ext2_disk.sh` BLOCK_SIZE 4096→1024 + 注释更新（double-indirect 已支持）+ 两 leg + boot 冒烟 + note | ✅ | run-kernel-test-all 两 leg 762/0 + make run `block_size=1024` ext2 mounted + shell 提示符零 panic + note |
+| 5 | docs：建 musl sysroot（`build-musl.sh` + `build-hello-dyn.sh`，gcc 16.1.1 编通）开 `CINUX_MUSL_DYN_SMOKE` —— 822KB ldso 装盘读它真走 i_block[13]，double-indirect 真内核覆盖 | ✅ | run-kernel-test-all 两 leg dyn smoke 各 `hello-dyn 5/5 iters PASS` + 串口 5× Hello（无 `segment read failed at offset 274432`） |
+
+> **收官（2026-06-30）**：ext2 块映射补 double-indirect(i_block[13]) 读+写，撤 4096 workaround（盘改回 1024-byte 块）。6 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1` / 批4 撤 workaround / 批5 docs dyn smoke 真内核覆盖）。验证：run-kernel-test-all 两 leg 762/0 + host ctest 65/65（+1 double-indirect round-trip）+ make run 真 boot `block_size=1024` 零 panic + **musl dyn smoke 两 leg 各 5/5 PASS（822KB ldso 真走 i_block[13]，无 segment read fail）**。triple(slot 14) 显式不做（>16 GB 文件）。详见 [note](../notes/2026-06-30-f10-m2-followup-ext2-double-indirect.md)。**push/PR 归用户**。
+
+### 风险 / 陷阱
+- **block_buf_ 单 scratch（头号 GOTCHA）**：多层遍历 read_block 反复覆盖同一 4KB buf。double 写须严格顺序——alloc+写盘下层后，**读回上层再填指针**（write_block 已把 buf 改成下层内容），逐层落盘再下钻。仿现有 single-indirect read-modify-write（[ext2_inode.cpp:354-361](../../kernel/fs/ext2_inode.cpp) 二次 `read_block(indirect_blk)` 即此模式）。错则毁 inode 元数据。
+- **CI 盲区**：run-kernel-test 不编 test/unit/ host 单测；改公共块映射（即便签名不变）push 前补 `cmake --build build -j$(nproc)` 全量 + `test_host`。
+- **double-indirect 双覆盖**：host 单测（批3，算法 round-trip）+ **musl dyn smoke（批5，真内核）**——建 sysroot 开 `CINUX_MUSL_DYN_SMOKE`，822KB ldso 装盘后 execve 读它真走 i_block[13]，两 leg 各 5/5 PASS（无 `segment read failed at offset 274432`）。shell 17KB/motd/hello.txt 都 direct，indirect 路径靠这两层守。
+- **4096→1024 撤 workaround 风险低**：所有现存盘上文件（shell 17KB / motd / hello.txt）远低于 268KB single-indirect 上限，纯 direct 块，零行为变；mount() 早已支持 1024 块。
+
 ## ✅ F10-M3 TTY Phase 2（PTY / 伪终端）— 收官 2026-06-30（分支 feat/f10-m3-pty 待 PR）
 
 > Feature 域 F10 第三里程碑下半。接 Phase 1（已合 main PR#46：行规范 + 阻塞读 + ioctl TCGETS/TCSETS/TIOCGWINSZ/TIOCGPGRP/TIOCSPGRP + 信号 + ConsoleTty 类化）。**Phase 1 显式推迟到 DevFS 的部分**：PTY master/slave 对 + `/dev/ptmx` + `/dev/pts/N` + `/dev/tty` + `TIOCSCTTY` + `/dev/console` 接真 TTY。**解锁条件已满**：DevFS(PR#48) / TTY Phase 1(PR#46) / session-pgrp(F3-M3，`controlling_tty{-1}` 字段 + `setsid` 留缝)全在 main。分支 `feat/f10-m3-pty`（从干净 main `a134cb7`）。**用户决策（2026-06-30）**：全范围 B0-B5 一口气做；B2 ioctl 派发走**低风险加法**（fd>2 走 `fd→inode→ops->ioctl` 派发 + fd≤2 console fallback，行为零变）。
@@ -147,7 +197,7 @@
 **CinuxOS 能跑 musl 动态用户程序**：execve 识别 PT_INTERP → 加载 interp(ldso)到 USER_INTERP_BASE → entry=interp 入口、auxv 喂 AT_BASE/AT_ENTRY/AT_PHDR → musl ldso 在用户态做 GOT/PLT 重定位 + DT_NEEDED + 符号解析 → 跳 AT_ENTRY → write() 经 libc.so 输出。4 commit（批0 docs `bcfebf8` / 批1 kernel `b55615e`+note `6c4309d` / 批2 toolchain `33e6bfe` / 批3 smoke+收官），`worktree-f10-m2-dynlink` 待 push。验证：dyn smoke ON 单核 + -smp2 两 leg 968/0 + 串口 `Hello from musl on CinuxOS!` ×5 + hello-dyn 5/5 PASS；默认 OFF 零回归。详见 notes `2026-06-30-f10-m2-b{1,2,3}-*.md`。
 
 **follow-up（批3 发现 + 历史）**：
-- **ext2 double-indirect / triple-indirect 缺失**：`ext2_common.cpp` 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读会截断。批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限），真修在 ext2 块映射补双/三重间接（留 F2-M6/F6）。
+- **ext2 double-indirect / triple-indirect 缺失**：`ext2_common.cpp` 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读会截断。批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限）。**✅ 真修完成（顶部「F10-M2 follow-up ext2 double-indirect」段，分支 `worktree-ext2-indirect` 待 PR）**：补 double-indirect(i_block[13]) 读+写 + 撤 4096 workaround（盘改回 1024）；triple(slot 14) 不做。
 - ELF base ASLR / PIE 主程序（批1 ET_DYN 接受已铺路，R_X86_64_RELATIVE 重定位留后）+ interp base ASLR（现固定 USER_INTERP_BASE）。
 - glibc 动态二进制（PT_INTERP=/lib64/ld-linux-x86-64.so.2 天然支持，按需验）。
 
