@@ -48,8 +48,14 @@ if ! command -v debugfs &>/dev/null; then
     exit 1
 fi
 
-IMAGE_SIZE=4  # MB
-BLOCK_SIZE=1024
+IMAGE_SIZE=8  # MB (F10-M2: bumped from 4 -- holds the 822 KB musl ldso)
+# F10-M2: 4096-byte blocks. The kernel ext2 reader handles only direct +
+# single-indirect blocks (double-indirect truncates, see ext2_common.cpp).
+# At 1024-byte blocks that caps a file at ~268 KB -- too small for the musl
+# ldso (822 KB). 4096-byte blocks push the single-indirect ceiling to ~4 MB,
+# so the ldso fits without needing double-indirect support (follow-up).
+# block_buf_[4096] in ext2.hpp already accommodates the max ext2 block size.
+BLOCK_SIZE=4096
 
 # Create a zero-filled image
 dd if=/dev/zero of="$OUTPUT" bs=1M count="$IMAGE_SIZE" 2>/dev/null

@@ -62,7 +62,7 @@
 - **smoke 默认 ON + 本地无 /hello → run-kernel-test 挂死**（hello_smoke 20-iter poll 循环撑满 timeout；根因 `build/musl/hello` 未 build，非 CMake target）。本地验证关 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`；CI 有 /hello 不受影响。
 - **类化异味清理（批6 收尾）**：console_tty 批5 已类化(ConsoleTty)；批6 扫同类异味(全局 static + mutable 共享状态 + 自由函数的伪单例)评估类化。无状态 static 工具(Mouse/Keyboard)不动。
 
-## 🔄 F10-M2（ELF 动态链接 / musl ldso）— 2026-06-30 立项
+## ✅ F10-M2（ELF 动态链接 / musl ldso）— 收官 2026-06-30（4 commit 待 push）
 
 > Feature 域里程碑（接 F10-M1 musl 静态移植 ✅）。worktree `worktree-f10-m2-dynlink`（从干净 main `1cdd507`，三路并行之一：另两路 F7-M4 UDP / F6-M3 DevFS；本路碰 `kernel/proc/execve.cpp` + elf_loader + 用户态 loader，与 F7 零冲突，与 F6 只共享 VFS `inode->ops->read` 接口——只用不改，零冲突）。**用户决策**：按需建动态链接（对齐 Linux，不重造）；**不自建动态 loader**——用 musl 自带的 ld-musl(ldso)做符号解析/GOT 填充；libc 解耦(PT_INTERP 是 musl/glibc 切换缝，不写死 libc 名)；ELF base ASLR / PIE 主程序是 follow-up，先 non-PIE 动态跑通。F10-M3 TTY / fork saga 不碰（已合 main）。
 > 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿才提交；批2 host 工具链产物 readelf 验；批3 加 dyn smoke(关本地默认)端到端。
@@ -79,9 +79,9 @@
 | 批 | 范围 | 状态 | 测试 |
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F10 M2 ⏳→🔄 + 重写 todo `f10-userspace/01-elf-dynamic.md`（从旧"自建 ld-cinux"改成"用 musl ldso + kernel 只做 PT_INTERP/interp/auxv"） | ✅ | docs-only |
-| 1 | kernel 核心：`elf_types`{+ET_DYN/PT_INTERP/PT_DYNAMIC/PT_PHDR} + `validate` 收 ET_EXEC∨ET_DYN(+单测) + `memory_layout`{+USER_INTERP_BASE} + `ElfAuxInfo`{+at_base,has_interp} + `execve` 抽 `load_elf_image(inode,base,is_dyn)` helper(主+interp 共用) + 扫 PT_INTERP→读路径→vfs lookup interp→映到 USER_INTERP_BASE→entry=interp 入口 + `enter_loaded_program` 发 AT_BASE。**静态路径行为不变** | ⏳ | run-kernel-test-all(关 smoke)两 leg 绿(零回归静态)+ ET_DYN 单测 + 全量 host |
-| 2 | 工具链：`tools/musl/build-hello-dyn.sh`(-no-pie + `-dynamic-linker /lib/ld-musl-x86_64.so.1`，产 `build/musl/hello-dyn`，readelf 验 ET_EXEC+PT_INTERP+PT_PHDR) + README 补动态说明 + `create_ext2_disk.sh`{+hello-dyn + ldso 两可选 arg；`mkdir lib`+`write libc.so lib/ld-musl-x86_64.so.1`} + `qemu.cmake` 穿 artifact(条件 include，同 /hello 模式) | ⏳ | host 跑 hello-dyn 输出对 + readelf 段/interp 对 |
-| 3 | 端到端 smoke + 收官：`main_test.cpp` smoke entry 加 /hello-dyn fork+execve+waitpid 相(`CINUX_MUSL_DYN_SMOKE` gate，默认 OFF 本地/CI ON)，串口捕输出 + exit 0 + smoke PASS；notes(批1/2/3 各一篇) + ROADMAP/PLAN F10-M2 ✅ | ⏳ | run-kernel-test-all(dyn smoke ON)两 leg 绿 + 动态 hello 真输出 + 默认 OFF 仍绿 |
+| 1 | kernel 核心：`elf_types`{+ET_DYN/PT_INTERP/PT_DYNAMIC/PT_PHDR} + `validate` 收 ET_EXEC∨ET_DYN(+ET_DYN 单测) + `memory_layout`{+USER_INTERP_BASE=256MB} + `ElfAuxInfo`{+at_base,has_interp} + 新 `elf_load.{hpp,cpp}`:`load_elf_image`(主+interp 共用 PT_LOAD 映射)+ `load_interpreter`(resolve+读+映) + execve 扫 PT_INTERP→加载 interp→entry=interp 入口 + `enter_loaded_program` 发 AT_BASE。**静态路径行为不变** | ✅ `b55615e` | 单核 968/0(+1 ET_DYN)+ -smp2 ALL PASSED + AP readback + host 54/54。零静态回归 |
+| 2 | 工具链：`tools/musl/build-hello-dyn.sh`(-no-pie + `-dynamic-linker /lib/ld-musl-x86_64.so.1`，产 `build/musl/hello-dyn`，readelf 验 ET_EXEC+PT_INTERP+PT_PHDR+DYNAMIC) + README 补动态说明 + `create_ext2_disk.sh`{+hello-dyn + ldso 两可选 arg；`mkdir lib`+`write libc.so lib/ld-musl-x86_64.so.1`} + `qemu.cmake` 穿 artifact(条件 include) | ✅ `33e6bfe` | readelf 段/interp 正确 + debugfs 确认 ext2 装 /hello-dyn + /lib/ld-musl-x86_64.so.1(CMake 集成两路) |
+| 3 | 端到端 smoke + 收官：`main_test.cpp` smoke entry 加 /hello-dyn fork+execve+waitpid 相(`CINUX_MUSL_DYN_SMOKE` gate 默认 OFF；harness 外层 gate 改任一开则编，静态/动态相独立 gate)+ `ap_test_selfcheck`/注册段 gate 同步；**ext2 image 改 4096-byte 块**(避 double-indirect 截断，interp 822KB 落进 single-indirect)；notes + ROADMAP/PLAN F10-M2 ✅ | ✅ | dyn smoke ON：单核 + -smp2 两 leg 968/0 + 串口 5× `Hello from musl on CinuxOS!` + interp base=0x10000000 + hello-dyn 5/5 PASS；默认 OFF 仍绿 |
 
 ### 风险 / 陷阱
 - **批1 抽 helper** 是改启动核心路径(execve)：保静态路径行为不变（无 PT_INTERP 走原路），用既有 musl 静态 smoke + ET_DYN 单测兜回归。
@@ -90,6 +90,14 @@
 - **smoke 默认 ON + 本地无 `build/musl/hello-dyn` → 挂死**，本地验证关 `-DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10-M1 hello smoke 惯例）。
 - **musl-gcc wrapper 在 GCC≥14 坏**（README gotcha #2），hello-dyn 也手动 `-nostdlib` 链。
 - auxv 的 AT_PHDR 必须是主程序 phdr VA（现状 execve 已算 `phdr_va`，对动态主程序也成立——ldso 据它+PT_PHDR 算 base）。
+
+### ✅ 收官（2026-06-30）
+**CinuxOS 能跑 musl 动态用户程序**：execve 识别 PT_INTERP → 加载 interp(ldso)到 USER_INTERP_BASE → entry=interp 入口、auxv 喂 AT_BASE/AT_ENTRY/AT_PHDR → musl ldso 在用户态做 GOT/PLT 重定位 + DT_NEEDED + 符号解析 → 跳 AT_ENTRY → write() 经 libc.so 输出。4 commit（批0 docs `bcfebf8` / 批1 kernel `b55615e`+note `6c4309d` / 批2 toolchain `33e6bfe` / 批3 smoke+收官），`worktree-f10-m2-dynlink` 待 push。验证：dyn smoke ON 单核 + -smp2 两 leg 968/0 + 串口 `Hello from musl on CinuxOS!` ×5 + hello-dyn 5/5 PASS；默认 OFF 零回归。详见 notes `2026-06-30-f10-m2-b{1,2,3}-*.md`。
+
+**follow-up（批3 发现 + 历史）**：
+- **ext2 double-indirect / triple-indirect 缺失**：`ext2_common.cpp` 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读会截断。批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限），真修在 ext2 块映射补双/三重间接（留 F2-M6/F6）。
+- ELF base ASLR / PIE 主程序（批1 ET_DYN 接受已铺路，R_X86_64_RELATIVE 重定位留后）+ interp base ASLR（现固定 USER_INTERP_BASE）。
+- glibc 动态二进制（PT_INTERP=/lib64/ld-linux-x86-64.so.2 天然支持，按需验）。
 
 ## 🔄 F-VERIFY（动态验证与并发检测基建）— 2026-06-27 立项
 

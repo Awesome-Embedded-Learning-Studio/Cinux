@@ -19,7 +19,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F7 | 网络协议栈 | M1 以太网✅ M2 ARP✅ M3 IPv4/ICMP✅（2026-06-26 真 ping 10.0.2.2 干通,底子优先 L0-L3:netdev 抽象+loopback 确定性打底→e1000 收尾） M4 UDP✅（2026-06-30,协议层+端口多路复用+Ipv4Module L4 proto 表(ICMP 迁入);host 单测+loopback round-trip+e1000 TX smoke,feat/f7-m4-udp 待 PR） M5 TCP⏳ M6 Socket⏳ | TCP/IP+Socket API |
 | F8 | IPC 扩展 | M1 Pipe增强⏳ M2 FIFO⏳ M3 Unix Socket⏳ M4 共享内存⏳ M5 epoll⏳ | CV/PTY/shm/epoll |
 | F9 | 安全机制 | M1 NX/SMEP/SMAP✅(2026-06-25;NXE+SMEP+SMAP 均真生效并验证:修 3 bug—CPUID.07H 子叶 ecx=0 / test harness 调 enable_smep_smap / test 读用户 stac;-cpu host 透传 932/0+test_f9 验证 CR4 设;默认 -cpu max WSL2 KVM 隐藏 leaf 7 故 CPUID-gated 跳过) M2 ASLR✅ M3 UID/GID✅ M4 Stack Canary✅（批6 -fstack-protector-strong + TSC canary + __stack_chk_fail kpanic，932/0）| 硬件保护/ASLR/权限;详见 PLAN「🔄 F9」 |
-| F10 | 用户态运行时 | **M1 musl 静态移植🔄（2026-06-26 立项，砍自建 libc，直接移植 musl）** M2 ELF动态链接🔄（2026-06-30 立项，用 musl ldso，kernel 只做 PT_INTERP/interp 加载/auxv，不自建 loader） M3 TTY✅（Phase 1：行规范+阻塞读+ioctl TCGETS/TCSETS/TIOCGWINSZ+信号,feat/f10-m3-tty 待 PR） M4 CFBox+init⏳ | musl libc/sysroot/musl-gcc/CFBox；详见 PLAN「🔄 F10-M1」 |
+| F10 | 用户态运行时 | **M1 musl 静态移植🔄（2026-06-26 立项，砍自建 libc，直接移植 musl）** M2 ELF动态链接✅（2026-06-30 收官，用 musl ldso，kernel 做 PT_INTERP/interp 加载/auxv，不自建 loader；CinuxOS 跑通 musl 动态 hello） M3 TTY✅（Phase 1：行规范+阻塞读+ioctl TCGETS/TCSETS/TIOCGWINSZ+信号,feat/f10-m3-tty 待 PR） M4 CFBox+init⏳ | musl libc/sysroot/musl-gcc/CFBox；详见 PLAN「🔄 F10-M1」 |
 | F11 | 启动与平台 | M1 FAT32⏳ M2 UEFI启动⏳ | BIOS+UEFI 双启动 |
 | F12 | 开发者生态 | M1 GDB/KALLSYMS⏳ M2 Lua⏳ M3 TinyCC⏳ M4 编辑器+包管理⏳ | 自举开发环境 |
 | F13 | GUI 分离 → **visor 跨平台库** | 立项调研✅(DRAFT 2026-06-21):visor 七层架构 + profile ceiling;M0-M9 待确认启动 | 独立 visor 仓库(submodule)+ Cinux host adapter;详见 `document/todo/f13-gui/` + `document/notes/2026-06-21-f13-visor-*.md` |
