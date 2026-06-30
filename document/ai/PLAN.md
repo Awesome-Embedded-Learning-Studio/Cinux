@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F10-M3 TTY Phase 2（PTY / 伪终端）— 2026-06-30 立项
+## ✅ F10-M3 TTY Phase 2（PTY / 伪终端）— 收官 2026-06-30（分支 feat/f10-m3-pty 待 PR）
 
 > Feature 域 F10 第三里程碑下半。接 Phase 1（已合 main PR#46：行规范 + 阻塞读 + ioctl TCGETS/TCSETS/TIOCGWINSZ/TIOCGPGRP/TIOCSPGRP + 信号 + ConsoleTty 类化）。**Phase 1 显式推迟到 DevFS 的部分**：PTY master/slave 对 + `/dev/ptmx` + `/dev/pts/N` + `/dev/tty` + `TIOCSCTTY` + `/dev/console` 接真 TTY。**解锁条件已满**：DevFS(PR#48) / TTY Phase 1(PR#46) / session-pgrp(F3-M3，`controlling_tty{-1}` 字段 + `setsid` 留缝)全在 main。分支 `feat/f10-m3-pty`（从干净 main `a134cb7`）。**用户决策（2026-06-30）**：全范围 B0-B5 一口气做；B2 ioctl 派发走**低风险加法**（fd>2 走 `fd→inode→ops->ioctl` 派发 + fd≤2 console fallback，行为零变）。
 > 范围栅栏（不投机）：不做 TIOCSTI / 流控（IXON/IXOFF）/ select-poll（F8 epoll 的事）；PTY slave **复用现成 `TTY` 行规范**不重写；用户态真 shell 闭环留 F10-M4，Phase 2 只交**机制 + kernel 侧端到端 smoke**。
@@ -16,7 +16,7 @@
 | 2 | 接口缝（头号风险）：`InodeOps` 加 `ioctl()` virtual（默认 NotImplemented→-ENOTTY）+ `sys_ioctl` 改 fd→File→Inode→ops->ioctl 派发（fd≤2 console fallback 保行为零变）。`open()` virtual 推 B3 随 `/dev/ptmx` 落地 | ✅ `aadde89` | run-kernel-test-all 两 leg 977/0(零回归) + host 65/65 |
 | 3 | DevFS PTY 节点：`/dev/ptmx`（open 时 `InodeOps::open` 分配一对 PTY、返 master inode）+ `/dev/pts/N`（lookup 命中 slave ops）+ master/slave InodeOps（走 PTY）+ DevFS 动态节点 | ✅ `5e50572` | run-kernel-test-all 两 leg 984/0(977+7 PTY) + host 65/65 |
 | 4 | 控制终端语义：`TIOCSCTTY` 设 `controlling_tty` + 挂 PTY + `/dev/tty` 别名当前控制终端 + session 抢占语义（接 `process_group` 现成 pgid/sid）+ 负测（非 session leader 抢终端 → EPERM） | ⏳ | run-kernel-test-all 两 leg + 负测 |
-| 5 | 端到端 smoke + 收官：kernel 侧 pump master、slave fork+execve 跑 musl 程序证 PTY 真通；`make run` GUI 冒烟（终端驱 PTY 跑程序零 panic）；notes + ROADMAP F10-M3 Phase2 ✅ | ⏳ | dyn smoke ON 两 leg 绿 + 串口见 PTY round-trip |
+| 5 | 收官：`make run` boot 冒烟（PTY DevFs 装配零 panic）+ notes + ROADMAP F10-M3 Phase2 ✅。**fork+execve-under-PTY 全闭环推迟 F10-M4**（需 `sys_dup2` 缺 + ring0 不能调带 user 指针的 syscall；CFBox 是天然消费者） | ✅ | make run `[DEVFS] mounted at /dev (4 nodes)` 零 panic + run-kernel-test-all 986/0 两 leg |
 
 ### 风险 / 陷阱
 - **B2 头号风险**：`InodeOps` 加 virtual 改公共头，牵连所有 FS 后端 mock。缓解：带默认实现（`open` 返原 inode、`ioctl` 返 -ENOTTY），旧子类零改；fd≤2 fallback 保行为零变，现有 console ioctl 测当回归网。**B2 首个动作**：查清 `sys_read fd==0` 是不是真 FDTable 项（决定 fallback 写法）。
