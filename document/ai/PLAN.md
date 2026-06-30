@@ -2,6 +2,25 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F6-M3 DevFS（/dev 设备文件系统）— 收官 2026-06-30（分支 worktree-f6-m3-devfs 待 PR）
+
+> Feature 域 F6 VFS 第三里程碑。**三路并行之一**(另两路 F7-M4 UDP / F10-M2 动态链接)。**并行硬约束**:这条只做 DevFS;严格不改 `fs/inode.hpp` 的 `InodeOps` 虚函数接口(F10-M2 在用),只加 device inode 子类;不做 F6-M1 VFS 增强 / M2 ProcFS / M4 tmpfs / ext4(留 F6 后续单独收)。DevFS = 内存型虚拟 FS(无 ext2 后端,device inode 生命周期跟设备绑定):device inode(`InodeOps` 子类,封装设备驱动 ops)→ `/dev` 虚拟挂载 → 基础节点(`/dev/null` `/dev/zero` `/dev/console`,read/write 走设备)。对齐 Linux DevFS/tmpfs 的 device-inode 模式;新代码类化(`DevFs` FileSystem 子类 + 匿名 namespace 设备 ops 子类 + `CharSink` 抽象,非全局 static + 自由函数,见 memory `classify-c-style-singleton-with-mutable-state`)。F10-M3 TTY Phase2 的 PTY/`/dev/*` 依赖此。分支 `worktree-f6-m3-devfs`(worktree 从干净 main `1cdd507`)。
+> 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)`(关 smoke:`cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`)绿才提交。
+
+### 批表
+| 批 | 范围 | 状态 | 测试 |
+|----|------|------|------|
+| 0 | 立项 docs(本段)+ ROADMAP F6-M3 🔄 + todo `02-devfs.md` 标范围栅栏 | ✅ | docs-only |
+| 1 | DevFS 核心(`devfs.hpp`/`devfs.cpp`:`DevFs`+4 设备 ops 子类+`CharSink`,纯逻辑)+ host 单测(mock sink)+ kernel 单测(`run_devfs_tests`)+ CMakeLists(fs/test) | ✅ | host 19/0 + run-kernel-test-all 两 leg 974/0(`bb7310e`) |
+| 2 | boot 接线(`devfs_init.cpp` SerialConsoleSink + init.cpp 挂 `/dev`)+ `make run` 冒烟 + notes | ✅ | run-kernel-test-all 两 leg 回归 + make run `[DEVFS] mounted at /dev (3 nodes)` 零 panic(`84cd8cb`) |
+
+### 风险/陷阱
+- **smoke 默认 ON + 无 build/musl/hello → run-kernel-test 挂死**:本地一律先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`。
+- **协调点**:三路并行唯一碰面 CMakeLists(加 source 行);init.cpp 只加一行 devfs 装配(ext2 挂载段之后),F7-M4/F10-M2 不动该段,低冲突。
+- **`/dev/console` 范围诚实**:本批 write→serial 输出(基础节点);接 ConsoleTty 真 stdin/PTY 是 TTY Phase2,显式推迟不欠债。
+- **设备号**:`makedev = (major<<8)|minor`(hobby OS 简化),够 `st_rdev` 上报。
+- **栅栏**:不碰 [inode.hpp](../../kernel/fs/inode.hpp) 的 `InodeOps` 虚表(接口+签名一行不动);设备号收进 ops 子类 + `stat()` override 填 `st_rdev`,不加 `Inode` 字段。
+
 ## 🔄 F-EXTABLE（Linux 风格 exception table 基建,SMAP follow-up #2 阶段1）— 2026-06-29 立项
 
 > 横切里程碑(与 F-VERIFY/F-CLN 同档),接 SMAP saga follow-up #2。user accessor 现状靠 demand-page 契约(`user_access.hpp:19-25` 注释),无 extable:拷贝中途 fault 被 demand-page 掩盖(静默读 0 返 true)或 panic,accessor 真负测试写不了(kernel violation 必 panic)。建 RIP-based `__ex_table`(Linux uaccess 范式):fault RIP 命中注解 accessor 时 PF handler 改 `frame->rip` 跳 fixup 返 `-EFAULT`,解锁真负测试。**范围栅栏:只阶段 1(extable 基建 + accessor 重写 + 负测试),不改 demand-page 对用户态缺页的宽松逻辑**(F2 lazy-allocation 范式,撤它留 F2-M5 高风险)。分支 `feat/f-extable`(从干净 main `7f846c8`)。详见 plan `~/.claude/plans/lucky-seeking-hamster.md` + note `2026-06-29-f-extable-b1-extable-infra.md`。
