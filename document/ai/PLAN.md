@@ -40,7 +40,7 @@
 | 0 | 立项 docs（本段）+ F10-M2 follow-up bullet 标 in-progress | ✅ `7f27c32` | docs-only |
 | 1 | 写路径：`get_or_alloc_block` 加 i_block[13] double-indirect 分支（offset=file_block-DIRECT-PTRS、idx1=offset/PTRS、idx2=offset%PTRS，三层 lazy alloc，scratch buf 逐层落盘） | ✅ | run-kernel-test-all 两 leg 762/0 零回归（新分支未被现有用例触发） |
 | 2 | 读路径：`read` 加 double else-if（纯读三层，hole 零填）+ 放开 write 的 file_block 门（`>EXT2_DIRECT_BLOCKS` 不再 break，扩到 double-indirect 上限） | ✅ | run-kernel-test-all 两 leg 762/0 零回归 |
-| 3 | host 单测：`test_ext2_ops.cpp` 的 `host_file_write`/`host_file_read` 补 single+double indirect（镜像 kernel 算法）+ >single-indirect-ceiling round-trip 用例 | ⏳ | test_host 新增用例 PASS + 全量绿 |
+| 3 | host 单测：`test_ext2_ops.cpp` 的 `host_file_write`/`host_file_read` 补 single+double indirect（镜像 kernel 算法）+ >single-indirect-ceiling round-trip 用例 | ✅ | test_ext2_ops 30/0（+1 file_indirect）+ 全 host ctest 65/0 |
 | 4 | 撤 workaround：`create_ext2_disk.sh` BLOCK_SIZE 4096→1024 + 注释更新（double-indirect 已支持）+ 两 leg + boot 冒烟 + note | ⏳ | run-kernel-test-all 两 leg + make run 零 panic |
 
 ### 风险 / 陷阱
