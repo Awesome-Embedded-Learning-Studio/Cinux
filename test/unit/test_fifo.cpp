@@ -37,6 +37,19 @@ static Inode make_fifo_node(Fifo* fifo) {
     return node;
 }
 
+// Free a per-open inode returned by FifoOps::open.  The inode and its bound
+// PipeOps are heap-allocated; the kernel has no InodeOps::release hook yet (a
+// documented hobby-OS limitation), so host tests clean up explicitly to stay
+// LeakSanitizer-clean.  The shared Pipe is owned by the Fifo and freed by
+// FifoRegistry::remove, not here.
+static void release_open_end(Inode* end) {
+    if (end == nullptr) {
+        return;
+    }
+    delete end->ops;
+    delete end;
+}
+
 // ============================================================
 // 1. FifoRegistry: create / lookup / remove
 // ============================================================
@@ -96,7 +109,12 @@ TEST("fifo: first open creates shared pipe; read/write round-trip") {
     ASSERT_EQ(r.value(), 5);
     ASSERT_TRUE(memcmp(buf, msg, 5) == 0);
 
-    reg.remove("rt1");  // leaks per-open ops/inodes (hobby-OS limitation)
+    // Per-open ends are heap-allocated; free them so the host test stays
+    // LeakSanitizer-clean (the kernel has no release hook -- production paths
+    // accept this leak as a known hobby-OS limitation).
+    release_open_end(winode);
+    release_open_end(rinode);
+    reg.remove("rt1");  // frees the shared Pipe
 }
 
 // ============================================================
@@ -128,6 +146,7 @@ TEST("fifo: O_NONBLOCK propagates (full pipe -> WouldBlock)") {
     ASSERT_TRUE(!w.ok());
     ASSERT_TRUE(w.error() == Error::WouldBlock);
 
+    release_open_end(winode);
     reg.remove("nb1");
 }
 
