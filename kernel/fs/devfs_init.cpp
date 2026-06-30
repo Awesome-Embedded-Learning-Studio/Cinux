@@ -21,6 +21,8 @@
 #include "kernel/fs/devfs.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/proc/process.hpp"    // Task::controlling_tty (for /dev/tty)
+#include "kernel/proc/scheduler.hpp"  // Scheduler::current()
 
 namespace cinux::fs {
 namespace {
@@ -61,10 +63,18 @@ cinux::lib::ErrorOr<Inode*> pty_dynamic_lookup(const char* name) {
     if (name == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-    // DevFs::lookup already stripped a leading '/', so expect "pts/<N>".
+    // DevFs::lookup already stripped a leading '/', so expect "tty" or "pts/<N>".
     const char* p = name;
     if (p[0] == '/') {
         ++p;
+    }
+    // /dev/tty -> the caller's controlling terminal (the slave side of its PTY).
+    if (p[0] == 't' && p[1] == 't' && p[2] == 'y' && p[3] == '\0') {
+        cinux::proc::Task* task = cinux::proc::Scheduler::current();
+        if (task == nullptr || task->controlling_tty < 0) {
+            return cinux::lib::Error::NotFound;  // no controlling terminal
+        }
+        return cinux::drivers::pty_slave_inode(task->controlling_tty);
     }
     if (p[0] != 'p' || p[1] != 't' || p[2] != 's' || p[3] != '/') {
         return cinux::lib::Error::NotFound;

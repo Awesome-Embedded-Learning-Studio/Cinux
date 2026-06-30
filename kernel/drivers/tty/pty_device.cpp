@@ -17,10 +17,12 @@
 
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (slave ioctl)
 #include "kernel/drivers/tty/pty.hpp"
-#include "kernel/drivers/tty/tty.hpp"  // Termios/Winsize/kTcgets...
+#include "kernel/drivers/tty/tty.hpp"  // Termios/Winsize/kTcgets/kTiocsctty...
 #include "kernel/fs/devfs.hpp"         // kSIfChr / devfs_makedev
 #include "kernel/fs/inode.hpp"
-#include "kernel/lib/string.hpp"  // memset for stat
+#include "kernel/lib/string.hpp"      // memset for stat
+#include "kernel/proc/process.hpp"    // Task::session_leader / controlling_tty
+#include "kernel/proc/scheduler.hpp"  // Scheduler::current()
 
 // `struct stat` lives in cinux::fs; pull it into view so the unqualified
 // `struct stat` in these InodeOps overrides (parsed in cinux::drivers) matches
@@ -164,8 +166,31 @@ public:
             }
             return 0;
         }
+        case cinux::drivers::kTiocsctty: {
+            // Acquire this PTY slave as the caller's controlling terminal.
+            // Non-forcing (arg == 0): caller must be a session leader (setsid
+            // first) and not already control a tty.  arg == 1 forces a steal.
+            // Refusal maps to EACCES (Linux returns EPERM; the Cinux-Base Error
+            // enum has no EPERM variant -- PermissionDenied -> EACCES is the
+            // closest approximation; the refuse behaviour is what matters).
+            cinux::proc::Task* task = cinux::proc::Scheduler::current();
+            if (task == nullptr) {
+                return cinux::lib::Error::InvalidArgument;
+            }
+            int  index = static_cast<int>(inode->ino - kPtyInoBase);
+            bool steal = (arg != 0);
+            if (!steal) {
+                if (task->session_leader != task) {
+                    return cinux::lib::Error::PermissionDenied;  // not a session leader
+                }
+                if (task->controlling_tty >= 0) {
+                    return cinux::lib::Error::PermissionDenied;  // already controls a tty
+                }
+            }
+            task->controlling_tty = index;
+            return 0;
+        }
         default:
-            // TIOCSCTTY + job-control ioctls land in batch 4.
             return cinux::lib::Error::NotImplemented;  // -> -ENOTTY
         }
     }

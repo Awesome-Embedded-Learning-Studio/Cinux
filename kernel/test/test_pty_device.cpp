@@ -16,14 +16,19 @@
 
 #include "kernel/drivers/tty/pty.hpp"         // Pty (white-box slave wiring check)
 #include "kernel/drivers/tty/pty_device.hpp"  // pty_alloc/release/master/slave, kTiocgptn
-#include "kernel/drivers/tty/tty.hpp"         // kIcanon
+#include "kernel/drivers/tty/tty.hpp"         // kIcanon, kTiocsctty
 #include "kernel/fs/inode.hpp"
+#include "kernel/proc/process.hpp"    // Task (TIOCSCTTY controlling-tty test)
+#include "kernel/proc/scheduler.hpp"  // Scheduler::set_current/current
 #include "kernel/test/big_kernel_test.h"
 
 using namespace cinux::drivers;
 using cinux::fs::Inode;
+using cinux::proc::Scheduler;
+using cinux::proc::Task;
 using cinux::drivers::Pty;
 using cinux::drivers::kIcanon;
+using cinux::drivers::kTiocsctty;
 
 namespace test_pty_device {
 
@@ -114,6 +119,42 @@ void test_release_lets_slot_reuse() {
     pty_release(*b);
 }
 
+// ---- TIOCSCTTY / controlling terminal (batch 4) ----
+//
+// These install a stack Task as current via Scheduler::set_current (mirrors
+// test_clone / test_brk).  arg to TIOCSCTTY is the steal flag, carried inline in
+// the ioctl word (no user pointer), so the path is testable in ring0.
+
+void test_tiocsctty_refused_for_non_leader() {
+    // A task that is not a session leader (session_leader == nullptr) is refused.
+    auto idx = pty_alloc();
+    TEST_ASSERT_TRUE(idx.ok());
+    Inode* slave = pty_slave_inode(*idx).value();
+    Task   t{};  // session_leader defaults to nullptr -> not a leader
+    auto*  prev = Scheduler::current();
+    Scheduler::set_current(&t);
+    auto r = slave->ops->ioctl(slave, kTiocsctty, 0);
+    Scheduler::set_current(prev);
+    TEST_ASSERT_FALSE(r.ok());
+    TEST_ASSERT_EQ(t.controlling_tty, -1);  // unchanged
+    pty_release(*idx);
+}
+
+void test_tiocsctty_acquired_when_session_leader() {
+    auto idx = pty_alloc();
+    TEST_ASSERT_TRUE(idx.ok());
+    Inode* slave = pty_slave_inode(*idx).value();
+    Task   t{};
+    t.session_leader = &t;  // a session leader may acquire
+    auto* prev       = Scheduler::current();
+    Scheduler::set_current(&t);
+    auto r = slave->ops->ioctl(slave, kTiocsctty, 0);
+    Scheduler::set_current(prev);
+    TEST_ASSERT_TRUE(r.ok());
+    TEST_ASSERT_EQ(t.controlling_tty, *idx);  // acquired the pty index
+    pty_release(*idx);
+}
+
 }  // namespace test_pty_device
 
 extern "C" void run_pty_device_tests() {
@@ -125,5 +166,7 @@ extern "C" void run_pty_device_tests() {
     RUN_TEST(test_pty_device::test_slave_wired_to_cooked_termios);
     RUN_TEST(test_pty_device::test_unknown_slave_ioctl_refused);
     RUN_TEST(test_pty_device::test_release_lets_slot_reuse);
+    RUN_TEST(test_pty_device::test_tiocsctty_refused_for_non_leader);
+    RUN_TEST(test_pty_device::test_tiocsctty_acquired_when_session_leader);
     TEST_SUMMARY();
 }
