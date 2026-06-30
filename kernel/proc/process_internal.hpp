@@ -64,8 +64,9 @@ void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level);
  * the production shell command-fork path (sys_fork) and user pthreads (sys_clone).
  * The child gets a CLEAN kernel stack -- only the parent's 128-byte syscall
  * pt_regs frame is copied to the top -- and ctx.rip = ret_from_fork.  When first
- * scheduled the child reads user RIP/RSP/RFLAGS + callee-saved out of that frame
- * and SYSRETQs to Ring 3 with rax=0, exactly like syscall_entry's return tail.
+ * scheduled the child reads user RIP/RSP/RFLAGS + syscall-preserved registers
+ * out of that frame and SYSRETQs to Ring 3 with rax=0, exactly like
+ * syscall_entry's return tail.
  *
  * This is the Linux ret_from_fork style: the child does NOT run on a copy of the
  * parent's kernel stack and does NOT unwind a copied RBP chain, so it is immune
