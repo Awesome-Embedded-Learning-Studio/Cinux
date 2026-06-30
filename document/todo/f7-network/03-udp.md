@@ -15,9 +15,9 @@ struct UDPHeader {
 } __attribute__((packed));
 ```
 
-- [ ] UDP 发送：构建头部 + payload → IPv4 发送
-- [ ] UDP 接收：校验和验证 + 端口分发到 socket
-- [ ] 端口管理（绑定/查找）
+- [x] UDP 发送：构建头部 + payload → IPv4 发送  <!-- F7-M4: UdpModule::send + 伪首部校验和连续缓冲区法 -->
+- [x] UDP 接收：校验和验证 + 端口分发  <!-- F7-M4: UdpModule::handle 校验 + 端口→UdpListener demux（socket 留 M6） -->
+- [x] 端口管理（绑定/查找）  <!-- F7-M4: UdpModule::bind/unbind, kMaxUdpPorts=16 协议层表（socket 层 M6 扩 256） -->
 
 ### T2: UDP Socket（基础）
 

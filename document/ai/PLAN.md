@@ -205,6 +205,21 @@
 
 > **架构**：两轴分离（NetDevice 设备轴 / ProtocolHandler 协议轴）+ FOLD-A（mac 可选 / 设备自决 L2 帧）+ FOLD-B（设备表 kMaxDevs=2 / `on_frame` 透传 `NetDevice&`，栈无 singleton）。e1000 copy adapter **不碰 E1000Controller**；loopback 零拷贝 RX 证明借用通路；virtio 零拷贝 future（`supports_zerocopy()` 诚实声明）。buffer 三红队：UAF = copy-to-retain 契约 / drop = scope_guard 全出口 recycle / 重入 = loopback send 只入队下轮派发。
 
+### 🔄 F7-M4 UDP（协议层 + 端口多路复用）— 2026-06-30 立项
+
+> worktree `worktree-f7-m4-udp`（从干净 main `1cdd507`，三路并行之一，只碰 `kernel/net/`）。接 M1/M2/M3：在 IPv4 同层加 UDP。**用户拍板两决策**：① IPv4 接 UDP 用 proto 表（加 `L4Handler` 缝 + `Ipv4Module` 内部 proto→handler 表，**ICMP 自动迁入表**还掉 [ipv4.cpp:75](../../kernel/net/ipv4.cpp) 的 TODO，单一 L4 分派机制）；② e1000 UDP 做 TX-only smoke（SLIRP 无 UDP echo，不期望 reply）。底子优先：host 单测 → loopback 确定性 round-trip → e1000 TX 收尾。范围栅栏：socket API(sys_socket/bind/recvfrom) 留 F7-M6、TCP 留 F7-M5、ring3 ping #DF 是另一条线不碰、不进生产 `net::init()`（无消费者）。详见 [批1 note](../notes/2026-06-30-f7-m4-b1-udp-protocol-layer.md)。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（基线 967/0；**本地必须** `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_BUILD_TESTS=ON`，否则 smoke 挂死 + test target 缺）；改公共头（ipv4.hpp）push 前补全量 `cmake --build build`。
+
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 1 | UDP 协议核心：`udp.{hpp,cpp}`（UdpHeader parse/build + UdpModule send/handle/bind/unbind + 伪首部校验和连续缓冲区法）+ `L4Handler` 缝进 ipv4.hpp + `Ipv4Module` proto 表（ICMP 迁入 ctor 注册，删 TODO）+ `kIpProtoUdp=17` + host 单测 `test_net_udp`（9 例：头/线序/round-trip/校验和损坏/checksum=0/无 listener/双端口/unbind/重复 bind） | ✅ | 本次 | ctest 63/63（+net_udp）+ run-kernel-test-all 两 leg 967/0（ICMP 走表实证 loopback+e1000+production+sys_ping ping reply 全通） |
+| 2 | loopback UDP round-trip 内核测：`test_net.cpp` 加 `test_udp_loopback`（127.0.0.1 UDP send→单次 poll→listener 收到 payload+端口，确定性躲 SLIRP） | ✅ | 本次 | run-kernel-test-all 两 leg 968/0（+1 UDP）+ `[net] loopback UDP: 6 bytes` 两 leg实证 |
+| 3 | e1000 UDP TX smoke（发 UDP 到 10.0.2.2，断言 ARP resolve + send ok，不期望 reply）+ ROADMAP F7-M4✅ + todo 03-udp 打勾 + note + PLAN 收官 | ✅ | 本次 | run-kernel-test-all 两 leg 969/0（+1 UDP TX）+ `[net] e1000 UDP TX -> 10.0.2.2: ARP resolved + send ok` 两 leg实证；check_net_decoupling 绿 |
+
+> **F7-M4 收官**（2026-06-30,feat/f7-m4-udp 3 commit 待 PR）:UDP 协议层(封装/解析/端口多路复用) + Ipv4Module L4 proto 表(ICMP 迁入,还掉 TODO)。三批:协议核心+host 单测(63/63) → loopback 内核 round-trip(968/0) → e1000 TX smoke(969/0)。**架构**:L4 分派单一机制(proto→handler 表),加 TCP 不疼。范围栅栏:socket API/M6、TCP/M5、不进生产 net::init(无消费者)。GOTCHA(过程):会话续接 cwd 重置回主仓,build 跑错仓库一度误判——ELF grep UDP 字符串 + pwd 排破,重进 worktree 重验。详见各批 note。**push/PR 归用户**。
+
+> **GOTCHA**：① ctor 里 `add_l4(kIpProtoIcmp, icmp)` 需 `IcmpModule&→L4Handler&` 转换，但 ipv4.hpp 只前向声明 IcmpModule（include icmp.hpp 会循环）→ **ctor 定义挪到 ipv4.cpp**（.cpp include icmp.hpp 完整类型）；② UDP 校验和用连续缓冲区 [伪首部 12 | UDP 头 8 | payload] 一把 `internet_checksum`，避开 partial+手搓拼接；③ `h.length`（非 delivered 字节数）重建伪首部 + 求和匹配 sender；checksum=0 跳过验证，TX 算出 0 发 0xFFFF。
+
 ## ✅ F-GUI-DECOUPLE（GUI 模块独立化 / 消源码 #ifdef）— 收官 2026-06-26（PR#35 8be32d4；促修 SMP 迁移竞态 PR#34）
 
 > 横切里程碑（接 F-CLN）。目标：消 main/init/irq 的源码 `#ifdef CINUX_GUI/CINUX_USB` 读半截路（§14 真违规），让开关全归 CMake。CMake 文件级 gate 框架已就位（F-CLN 清了 keyboard/pit），只剩抽象 + stub 化的机械活。来源：2026-06-25 用户「考虑 GUI 分离」+ memory `gui-decouple-milestone`（独立里程碑，不混 #ifdef 清理批）。
