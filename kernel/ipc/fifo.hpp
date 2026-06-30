@@ -56,6 +56,10 @@ static constexpr uint32_t FIFO_NAME_MAX = 32;
 /// Maximum number of concurrently registered FIFOs.
 static constexpr uint32_t FIFO_REGISTRY_MAX = 16;
 
+/// Inode-number base for FIFO inodes (kept clear of DevFS's small 1-based node
+/// inos and PTY's kPtyInoBase range so stat() inos are distinguishable).
+static constexpr uint64_t kFifoInoBase = 0xF1F00000ULL;
+
 /// Linux x86_64 open() flag bits the FIFO cloning open() consults.
 static constexpr uint64_t kOAccessMask = 0x3;  ///< access mode: 0=RDONLY,1=WRONLY,2=RDWR
 static constexpr uint64_t kOWronly     = 0x1;
@@ -95,19 +99,24 @@ public:
     static FifoRegistry& instance();
 
     /// Register a new FIFO name.  AlreadyExists if taken, OutOfMemory if full.
-    cinux::lib::ErrorOr<void>  create(const char* name);
+    cinux::lib::ErrorOr<void>              create(const char* name);
     /// Look up a registered FIFO by name (no creation).  NotFound if absent.
-    cinux::lib::ErrorOr<Fifo*> lookup(const char* name);
+    cinux::lib::ErrorOr<Fifo*>             lookup(const char* name);
+    /// Look up the stable FIFO inode for DevFS dynamic resolution.  The inode's
+    /// ops is the shared FifoOps and fs_private points at the entry's Fifo.
+    /// NotFound if the name is absent.
+    cinux::lib::ErrorOr<cinux::fs::Inode*> lookup_inode(const char* name);
     /// Unregister a name and free its pipe.  No-op if absent.
-    void                       remove(const char* name);
+    void                                   remove(const char* name);
 
 private:
     FifoRegistry() = default;
 
     struct Entry {
-        char name[FIFO_NAME_MAX];
-        bool used{false};
-        Fifo fifo;
+        char             name[FIFO_NAME_MAX];
+        bool             used{false};
+        Fifo             fifo;
+        cinux::fs::Inode inode;  // stable FIFO inode for DevFS lookup (ops=FifoOps)
     };
 
     Entry                 entries_[FIFO_REGISTRY_MAX];

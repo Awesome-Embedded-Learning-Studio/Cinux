@@ -14,7 +14,7 @@
 | 1 | BrokenPipe 修(`PipeWriteOps::write` reader-gone→`Error::BrokenPipe`,零新接口,`reader_alive()` 区分)+ 负测验 SIGPIPE 真触发(CurrentTaskGuard + do_write_kernel → -kEpipe + sig_pending 含 kSigpipe) | ✅ | run-kernel-test-all 两 leg 987/0 + host sys_pipe 断言 BrokenPipe |
 | 2 | 真调度阻塞替 spin(Pipe 加 read/write 等待队列 + prepare_to_wait/schedule_blocked/unblock;host `#ifndef CINUX_HOST_TEST` 不阻塞)+ O_NONBLOCK(Pipe::read/write `nonblock` 参 + kWouldBlock→WouldBlock→kEagain) | ✅ | run-kernel-test-all 两 leg 990/0(+3 nonblock 负测) + host pipe/sys_pipe 零警告 |
 | 3 | FIFO 核心 `fifo.{hpp,cpp}`(FifoRegistry + FifoOps open() cloning 首读者建 Pipe + fs_private 存 Fifo*)+ host 单测 | ✅ | host test_fifo 4/0 + 两 leg 990/0(open() 签名 +flags 零回归,PTY 全绿) |
-| 4 | mknod/mkfifo syscall(`SYS_mknod=133` + S_IFIFO→FifoRegistry + 注册) | ⏳ | run-kernel-test-all 两 leg |
+| 4 | mknod/mkfifo syscall(`SYS_mknod=133` + S_IFIFO→FifoRegistry + 注册) | ✅ | run-kernel-test-all 两 leg 990/0(DevFS dynamic_lookup 加 FIFO 先查零回归) |
 | 5 | 跨 fd round-trip + mkfifo 真测 + 两 leg + note + ROADMAP F8-M1/M2 ✅ | ⏳ | run-kernel-test-all 两 leg + note |
 
 ### 风险 / 陷阱

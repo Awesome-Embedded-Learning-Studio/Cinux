@@ -77,9 +77,17 @@ cinux::lib::ErrorOr<void> FifoRegistry::create(const char* name) {
                 entries_[i].name[j] = name[j];
                 ++j;
             }
-            entries_[i].name[j]   = '\0';
-            entries_[i].used      = true;
-            entries_[i].fifo.pipe = nullptr;  // lazy: created on first open
+            entries_[i].name[j]          = '\0';
+            entries_[i].used             = true;
+            entries_[i].fifo.pipe        = nullptr;  // lazy: created on first open
+            // Stable FIFO inode for DevFS lookup: shared FifoOps + the entry's
+            // Fifo as per-FIFO state (fs_private).
+            entries_[i].inode            = cinux::fs::Inode{};
+            entries_[i].inode.ino        = kFifoInoBase + i;
+            entries_[i].inode.type       = cinux::fs::InodeType::Regular;
+            entries_[i].inode.ops        = &fifo_ops();
+            entries_[i].inode.fs_private = &entries_[i].fifo;
+            entries_[i].inode.mode       = kSIfFifo | 0666;
             return {};
         }
     }
@@ -96,6 +104,18 @@ cinux::lib::ErrorOr<Fifo*> FifoRegistry::lookup(const char* name) {
         return cinux::lib::Error::NotFound;
     }
     return &entries_[i].fifo;
+}
+
+cinux::lib::ErrorOr<cinux::fs::Inode*> FifoRegistry::lookup_inode(const char* name) {
+    if (name == nullptr) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    auto g = lock_.guard();
+    int  i = find_locked(name);
+    if (i < 0) {
+        return cinux::lib::Error::NotFound;
+    }
+    return &entries_[i].inode;
 }
 
 void FifoRegistry::remove(const char* name) {
