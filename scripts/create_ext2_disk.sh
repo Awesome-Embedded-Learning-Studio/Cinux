@@ -31,6 +31,7 @@ MUSL_HELLO_ELF="$3"
 MUSL_FORKTEST_ELF="$4"
 MUSL_HELLO_DYN_ELF="$5"
 MUSL_LDSO_ELF="$6"
+BUSYBOX_ELF="$7"
 
 if [ -z "$OUTPUT" ]; then
     echo "Usage: $0 <output_image> [shell_elf]" >&2
@@ -84,11 +85,11 @@ HELLO_EOF
 # Build the debugfs command script
 DEBUGFS_CMDS=""
 DEBUGFS_CMDS+="mkdir etc\n"
+DEBUGFS_CMDS+="mkdir bin\n"
 DEBUGFS_CMDS+="write $TMPDIR/etc/motd etc/motd\n"
 DEBUGFS_CMDS+="write $TMPDIR/hello.txt hello.txt\n"
 
 if [ -n "$SHELL_ELF" ] && [ -f "$SHELL_ELF" ]; then
-    DEBUGFS_CMDS+="mkdir bin\n"
     DEBUGFS_CMDS+="write $SHELL_ELF bin/sh\n"
 fi
 
@@ -120,6 +121,14 @@ if { [ -n "$MUSL_HELLO_DYN_ELF" ] && [ -f "$MUSL_HELLO_DYN_ELF" ]; } && \
     # (not a symlink) -- fine, the kernel reads it via inode->ops->read.
     DEBUGFS_CMDS+="write $MUSL_LDSO_ELF lib/ld-musl-x86_64.so.1\n"
     DEBUGFS_CMDS+="write $MUSL_HELLO_DYN_ELF hello-dyn\n"
+fi
+
+# F-ECO batch 0: optional minimal busybox at /bin/busybox (static musl; built
+# by clang --target=x86_64-linux-musl, allnoconfig + echo/cat/ls/true/false).
+# The ring-3 smoke fork+execves it to run applets -- the first ecosystem
+# touchstone. Absent in CI (no busybox build) -> skipped.
+if [ -n "$BUSYBOX_ELF" ] && [ -f "$BUSYBOX_ELF" ]; then
+    DEBUGFS_CMDS+="write $BUSYBOX_ELF bin/busybox\n"
 fi
 
 
