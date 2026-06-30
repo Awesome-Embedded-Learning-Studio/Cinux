@@ -26,6 +26,7 @@
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/sync.hpp"           // Spinlock (F-QA Q4c-2 / DEBT-001 registry lock)
 #include "kernel/proc/task_snapshot.hpp"  // TaskSnapshot (DEBT-022)
+#include "kernel/syscall/sys_exit.hpp"  // F-ECO: default-kill routes through sys_exit (Zombie+notify)
 
 namespace cinux::proc {
 
@@ -276,10 +277,17 @@ void signal_exec_default(Task* task, Signal sig) {
     switch (signal_default_action(sig)) {
     case SigDefault::kTerminate:
     case SigDefault::kCoreDump:
-        task->exit_status = static_cast<int>(sig);
+        // F-ECO batch 0: a signal-default-killed task must become a Zombie the
+        // parent can waitpid-reap (WIFSIGNALED), NOT vanish via exit_current()'s
+        // Dead+deferred-free path -- that orphaned the child so waitpid spun
+        // forever (busybox SIGILL hit this on echo iter 1). Route through
+        // sys_exit(): sets exit_status=sig, sends SIGCHLD, flips state to Zombie,
+        // dequeues, unblocks a wait()ing parent, then yields (does not return).
+        // Same path as a normal user exit(). (sigreturn_handler's bad-frame kill
+        // further down is the same class -- left as follow-up, off the smoke path.)
         cinux::lib::kprintf("[SIGNAL] default kill: tid=%u '%s' by SIG%d\n",
                             static_cast<unsigned>(task->tid), task->name, static_cast<int>(sig));
-        Scheduler::exit_current();  // does not return
+        cinux::syscall::sys_exit(static_cast<uint64_t>(sig), 0, 0, 0, 0, 0);  // does not return
         break;
     case SigDefault::kIgnore:
         break;
