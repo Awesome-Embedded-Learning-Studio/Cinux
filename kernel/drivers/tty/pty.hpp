@@ -73,6 +73,13 @@ public:
     TTY&       slave_tty();
     const TTY& slave_tty() const;
 
+    /// Reset to a freshly-constructed state (clear the master ring and give the
+    /// slave a clean line discipline).  Used when a PTY table slot is reused --
+    /// re-constructing in place keeps the echo sink anchored to this object (a
+    /// plain `Pty p{};` move-assignment would dangle the echo context at the
+    /// temporary).
+    void reset();
+
     /// Signal requested by a slave line-discipline char (^C/^\/^Z typed on the
     /// master).  pending_signal() peeks; take_pending_signal() clears it.
     TtySignal pending_signal() const;

@@ -71,6 +71,13 @@ public:
     /// boundary themselves (copy_to/from_user).
     virtual cinux::lib::ErrorOr<int64_t> ioctl(const Inode* inode, uint32_t request, uint64_t arg);
 
+    /// Called by sys_open after lookup resolves this inode.  The default returns
+    /// the same inode (bind the fd to what lookup found).  A cloning device --
+    /// Linux /dev/ptmx is the classic case -- overrides this to allocate a fresh
+    /// per-open resource (a PTY pair) and return a distinct inode (the master
+    /// end) for the new fd.  Returning an error fails the open.
+    virtual cinux::lib::ErrorOr<Inode*> open(Inode* inode);
+
     /// Whether reads against this inode should be served through the file-backed
     /// PageCache.  Disk-backed filesystems (ext2) override to true so that
     /// sys_read and demand paging share one cache; transient inode-ops shims

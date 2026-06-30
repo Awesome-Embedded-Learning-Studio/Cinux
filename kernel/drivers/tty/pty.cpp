@@ -128,6 +128,17 @@ const TTY& Pty::slave_tty() const {
     return slave_tty_;
 }
 
+void Pty::reset() {
+    master_head_ = 0;
+    master_tail_ = 0;
+    master_full_ = false;
+    // Fresh line discipline (default termios, empty line/cooked buffers).
+    slave_tty_   = TTY{};
+    // The echo sink must keep routing to this object: re-wire it after the
+    // re-assignment above (which left the new TTY's echo callback null).
+    slave_tty_.set_echo_sink(&Pty::echo_thunk, this);
+}
+
 TtySignal Pty::pending_signal() const {
     return slave_tty_.pending_signal();
 }

@@ -44,6 +44,12 @@ cinux::lib::ErrorOr<int64_t> InodeOps::ioctl(const Inode*, uint32_t, uint64_t) {
     return cinux::lib::Error::NotImplemented;
 }
 
+cinux::lib::ErrorOr<Inode*> InodeOps::open(Inode* inode) {
+    // Bind the fd to the inode lookup resolved -- no per-open clone.  A cloning
+    // device (/dev/ptmx) overrides this to hand back a fresh resource.
+    return inode;
+}
+
 bool InodeOps::is_page_cacheable() const {
     return false;
 }
