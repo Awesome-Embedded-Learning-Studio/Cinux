@@ -20,7 +20,7 @@
 | 1 | tcp.hpp wire（TcpHeader 20B + SYN/ACK/FIN/RST/PSH/URG + parse/build + data-off）+ `ipv4.hpp` 加 `kIpProtoTcp=6`（不改 add_l8）+ tcp.cpp 骨架（伪首部校验和门 + handle 诊断）+ CMake + host 单测（头 round-trip/flags/校验和 round-trip/坏校验和 drop） | ✅ `30a136a` | host net_tcp 4/0 + run-kernel-test-all 两 leg 各 986/0（零回归） |
 | 2 | 连接表 + `listen`/`connect` + 握手 FSM（SYN→SYN-ACK→ACK，序号-ACK 算术）+ RST（SYN 到未监听端口）+ host mock 验时序 | ✅ `fb9f4b8` | host net_tcp 7/0（+3）+ run-kernel-test-all 两 leg 各 986/0 |
 | 3 | `send`（数据段 + ACK 推进）+ `close`（FIN）+ 数据/挥手 FSM（4-way）+ host 单测（established 数据 round-trip + 挥手） | ✅ `ec0aa78` | host net_tcp 9/0（+2）+ run-kernel-test-all 两 leg 各 986/0 |
-| 4 | loopback 内核 round-trip（test_net.cpp `test_tcp_loopback`：单 poll 排干握手+数据+挥手）+ e1000 TX smoke（`test_tcp_e1000_tx`：发 TCP 段，ARP resolve+send ok） | ⏳ | run-kernel-test-all 两 leg（+2 测）+ check_net_decoupling |
+| 4 | loopback 内核 round-trip（test_net.cpp `test_tcp_loopback`：单 poll 排干握手+数据+挥手）+ e1000 TX smoke（`test_tcp_e1000_tx`：发 TCP 段，ARP resolve+send ok） | ✅ `cf0db3e` | run-kernel-test-all 两 leg 各 988/0（+2 TCP）+ check_net_decoupling 绿 |
 | 5 | note + ROADMAP F7-M5 ✅ + PLAN 收官 | ⏳ | docs-only |
 
 ### 风险 / 陷阱
