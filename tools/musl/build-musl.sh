@@ -48,13 +48,13 @@ fi
 cd "$SRC"
 if [ ! -f config.mak ]; then
     echo "[build-musl] configuring..."
-    # F-ECO batch 0: -O1, NOT musl's default -O2. GCC 16 lowers musl mallocng's
-    # __builtin_unreachable / assume paths in alloc_slot() to `hlt` traps under
-    # -O2; any real program that mallocs (busybox) hits one and SIGILLs at once
-    # (hello doesn't malloc, so it never surfaced). -O1 sidesteps the offending
-    # codegen and malloc works. Revisit when musl adapts to GCC 16 (or pin a
-    # known-good GCC).
-    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT" CFLAGS="-O1"
+    # F-ECO: -O0, NOT musl's default -O2. GCC 16 + -O2 lowers musl mallocng's
+    # __builtin_unreachable / assume paths in alloc_slot() to `hlt` traps (any
+    # program that mallocs SIGILLs). -O1 fixes that BUT breaks opendir/readdir:
+    # the fd stored in DIR reaches getdents64 as garbage (ls lists nothing).
+    # -O0 avoids BOTH codegen bugs. Revisit when musl adapts to GCC 16 (or pin a
+    # known-good GCC). Debuggability > perf (hobby OS, not a perf target).
+    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT" CFLAGS="-O0"
 fi
 
 # 4. Build + install.
