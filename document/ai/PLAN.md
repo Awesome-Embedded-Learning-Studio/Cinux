@@ -13,7 +13,7 @@
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F10-M3 Phase2 🔄 + todo `02-tty.md` 更新 + 清 PR#45-49 文档债 | 🔄 | docs-only |
 | 1 | PTY 核心纯逻辑 `pty.{hpp,cpp}`（master/slave 双 ring + slave 复用 `TTY` 行规范；master 写→slave 行规范→slave 读，slave 写→master 读，信号字符经 slave）+ host 单测 | ✅ `bab9caf` | host pty 单测 10 例 + test_host 65/65 + run-kernel-test-all 两 leg 977/0 |
-| 2 | 接口缝（头号风险）：`InodeOps` 加 `ioctl()`（默认 -ENOTTY）+ `open()`（默认返原 inode）virtual + `sys_ioctl` 改 fd→File→Inode→ops->ioctl 派发（fd≤2 console fallback 保行为零变） | ⏳ | run-kernel-test-all 两 leg + 原 ioctl 测全绿（回归网） |
+| 2 | 接口缝（头号风险）：`InodeOps` 加 `ioctl()` virtual（默认 NotImplemented→-ENOTTY）+ `sys_ioctl` 改 fd→File→Inode→ops->ioctl 派发（fd≤2 console fallback 保行为零变）。`open()` virtual 推 B3 随 `/dev/ptmx` 落地 | ✅ `aadde89` | run-kernel-test-all 两 leg 977/0(零回归) + host 65/65 |
 | 3 | DevFS PTY 节点：`/dev/ptmx`（open 时 `InodeOps::open` 分配一对 PTY、返 master inode）+ `/dev/pts/N`（lookup 命中 slave ops）+ master/slave InodeOps（走 PTY）+ DevFS 动态节点 | ⏳ | run-kernel-test-all 两 leg + kernel 测（open ptmx → round-trip） |
 | 4 | 控制终端语义：`TIOCSCTTY` 设 `controlling_tty` + 挂 PTY + `/dev/tty` 别名当前控制终端 + session 抢占语义（接 `process_group` 现成 pgid/sid）+ 负测（非 session leader 抢终端 → EPERM） | ⏳ | run-kernel-test-all 两 leg + 负测 |
 | 5 | 端到端 smoke + 收官：kernel 侧 pump master、slave fork+execve 跑 musl 程序证 PTY 真通；`make run` GUI 冒烟（终端驱 PTY 跑程序零 panic）；notes + ROADMAP F10-M3 Phase2 ✅ | ⏳ | dyn smoke ON 两 leg 绿 + 串口见 PTY round-trip |
