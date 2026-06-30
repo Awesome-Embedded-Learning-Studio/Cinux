@@ -15,8 +15,8 @@ CLOSED → SYN_SENT → ESTABLISHED → FIN_WAIT_1 → FIN_WAIT_2 → TIME_WAIT
 LISTEN → SYN_RCVD → ESTABLISHED
 ```
 
-- [ ] TcpState enum + 状态转换表
-- [ ] TCP 控制块 (TCB) 结构体
+- [x] TcpState enum + 状态转换表（F7-M5：Closed/SynSent/SynReceived/Established/FinWait1/FinWait2/CloseWait/LastAck；TIME_WAIT 略——无 timer）
+- [x] TCP 控制块 (TCB) 结构体（F7-M5：`Connection` —— state/local/remote/iss/snd_nxt/rcv_nxt/listener）
 
 ### T2: TCP 段处理
 
@@ -33,11 +33,11 @@ struct TCPHeader {
 } __attribute__((packed));
 ```
 
-- [ ] SYN 处理（新建连接）
-- [ ] ACK 处理（确认收到的数据）
-- [ ] FIN 处理（关闭连接）
-- [ ] RST 处理（异常终止）
-- [ ] 数据段收发
+- [x] SYN 处理（新建连接）（F7-M5：被动开 SYN-ACK / 主动开 connect）
+- [x] ACK 处理（确认收到的数据）（F7-M5：握手第 3 ACK + 数据 ACK 推进 rcv_nxt）
+- [x] FIN 处理（关闭连接）（F7-M5：四次挥手 FinWait1/2/CloseWait/LastAck）
+- [x] RST 处理（异常终止）（F7-M5：SYN 到未监听端口回 RST + 入站 RST 拆连接）
+- [x] 数据段收发（F7-M5：send/close，严格按序，无重传）
 
 ### T3: 滑动窗口
 

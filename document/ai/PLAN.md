@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F7-M5 TCP（传输层：三次握手 / 序号-ACK / 四次挥手 + 伪首部校验和）— 2026-06-30 立项
+## ✅ F7-M5 TCP（传输层：三次握手 / 序号-ACK / 四次挥手 + 伪首部校验和）— 收官 2026-06-30（分支 worktree-f7-m5-tcp 待 PR）
 
 > worktree `worktree-f7-m5-tcp`（从干净 main `c0188cd`，接 F7-M4 UDP ✅）。在 IPv4 同层加 TCP：`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l4(kIpProtoTcp, tcp)` 入 L4 proto 表（M4 已立单一分派机制，加协议不疼）。**范围（用户拍板）**：TCP 状态机（三次握手 / 序号-ACK / 四次挥手）+ 伪首部校验和；**最小可用（无内核 timer-wake）——单方向数据 + 无重传**；真重传/RTO/滑动窗口/拥塞控制、TCP Socket（listen/accept/recv）留 follow-up（Socket 进 F7-M6）。**栅栏**：不碰 socket/syscall（M6）、不进 production `net_init.cpp`（无消费者，同 M4 UDP）、test-only（host 单测 + loopback 内核 round-trip + e1000 TX smoke）。
 > 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（基线 **986/0**——main c0188cd 已含 F10-M3 PTY；**本地必须** `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF -DCINUX_BUILD_TESTS=ON` 防 smoke 挂死 + 编 host 测）；改公共头（ipv4.hpp 加 `kIpProtoTcp`）push 前补全量 `cmake --build build`。**并发会话占 VNC :0**：本机多 worktree 会话全用硬编码 `-vnc :0`，本 worktree 验证临时切 `-vnc :5`、跑完 `git checkout -- cmake/qemu.cmake` 还原（验证 hack，非代码改动）。
@@ -21,7 +21,9 @@
 | 2 | 连接表 + `listen`/`connect` + 握手 FSM（SYN→SYN-ACK→ACK，序号-ACK 算术）+ RST（SYN 到未监听端口）+ host mock 验时序 | ✅ `fb9f4b8` | host net_tcp 7/0（+3）+ run-kernel-test-all 两 leg 各 986/0 |
 | 3 | `send`（数据段 + ACK 推进）+ `close`（FIN）+ 数据/挥手 FSM（4-way）+ host 单测（established 数据 round-trip + 挥手） | ✅ `ec0aa78` | host net_tcp 9/0（+2）+ run-kernel-test-all 两 leg 各 986/0 |
 | 4 | loopback 内核 round-trip（test_net.cpp `test_tcp_loopback`：单 poll 排干握手+数据+挥手）+ e1000 TX smoke（`test_tcp_e1000_tx`：发 TCP 段，ARP resolve+send ok） | ✅ `cf0db3e` | run-kernel-test-all 两 leg 各 988/0（+2 TCP）+ check_net_decoupling 绿 |
-| 5 | note + ROADMAP F7-M5 ✅ + PLAN 收官 | ⏳ | docs-only |
+| 5 | note + ROADMAP F7-M5 ✅ + PLAN 收官 | ✅ | docs-only |
+
+> **F7-M5 收官**（2026-06-30,worktree-f7-m5-tcp 11 commit 待 PR）：TCP 协议层——`TcpModule : L4Handler`（proto=6）经 `ipv4.add_l8` 入 L4 表。5 批:wire+校验和门(批1)→握手 FSM+RST(批2)→数据+四次挥手(批3)→内核 loopback 端到端+e1000 TX smoke(批4)→收官(批5)。**架构**:沿用 UDP 范式(L4Handler 缝 + 连续缓冲区伪首部校验和),加协议不疼。**最小可用诚实标注**:无重传/RTO/滑动窗口/拥塞控制(需 timer 基建)、ISN 随机化(安全,follow-up)、TCP Socket(listen/accept/recv 进 F7-M6)。范围栅栏:不进 production net_init(无消费者)、test-only。验证:host net_tcp 9/0 + run-kernel-test-all 两 leg 各 988/0 + check_net_decoupling 绿。详见各批 notes。**push/PR 归用户**。
 
 ### 风险 / 陷阱
 - **状态机复杂度**：TCP 是网络层最复杂协议。缓解：按批递进（wire→握手→数据/挥手），每批独立绿；最小可用（无重传/窗口/拥塞）诚实标注，不包装成完整 TCP。
