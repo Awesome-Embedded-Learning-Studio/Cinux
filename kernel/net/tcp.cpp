@@ -294,6 +294,16 @@ void TcpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, 
     last_ack_      = h.ack;
     last_flags_    = h.flags;
 
+    // Malformed-header hardening: reject segments whose declared header length
+    // is insane -- data_off < 5 (under 20 bytes) or claiming more header than
+    // was delivered.  Without this a data_off of 0 would re-interpret the
+    // header bytes as payload, and a data_off past the buffer would mis-anchor
+    // the data pointer.  Relevant once M6 makes TCP reachable on real traffic.
+    const uint8_t hdrlen = tcp_header_bytes(h);
+    if (hdrlen < sizeof(TcpHeader) || hdrlen > payload.size()) {
+        return;  // malformed data offset -> drop
+    }
+
     Connection* c = find(h.dst_port, ip.src, h.src_port);
 
     if (c == nullptr) {
@@ -358,10 +368,8 @@ void TcpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, 
         // In-order data at the front of the receive window only -- no
         // reassembly / out-of-order (follow-up).  A segment whose SEQ is not
         // RCV.NXT is dropped (a real stack would re-ACK to elicit a retransmit).
-        const uint8_t hdrlen = tcp_header_bytes(h);
-        if (hdrlen > payload.size()) {
-            break;  // insane data offset
-        }
+        // (hdrlen was validated sane at the top of handle: data_off in
+        // [20, payload.size()].)
         if (h.seq != c->rcv_nxt) {
             break;  // out of order -> drop
         }

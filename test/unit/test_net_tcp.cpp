@@ -432,6 +432,86 @@ TEST("tcp_close: 4-way teardown -> both connections CLOSED") {
     ASSERT_EQ(f.tcp.connection_count(), 0u);
 }
 
+// ============================================================
+// Adversarial input -- malformed segments are safely dropped (no crash, no
+// spurious state).  Confidence for when M6 makes TCP reachable on real traffic.
+// ============================================================
+
+TEST("tcp_adversarial: a truncated header (< 20 bytes) is dropped") {
+    Fixture                    f{ip(127, 0, 0, 1)};
+    const std::vector<uint8_t> short_seg(10, 0);  // too short for a TCP header
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, short_seg));
+    ASSERT_EQ(f.tcp.valid_count(), 0u);  // never passed the size gate
+    ASSERT_EQ(f.tcp.connection_count(), 0u);
+}
+
+TEST("tcp_adversarial: data_off claiming more than delivered is dropped") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    f.tcp.listen(7777, server_l);
+    // SYN with data_off = 15 (claims a 60-byte header) but only 20 bytes on the
+    // wire.  Must drop, not allocate a connection from the SYN.
+    auto seg = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 100, 0, 0x02);
+    seg[12]  = static_cast<uint8_t>(15 << 4);  // data_off = 15 -> 60 bytes (> 20 delivered)
+    seg[16]  = 0;
+    seg[17]  = 0;  // re-checksum over the modified 20 real bytes
+    embed_tcp_checksum(seg, ip(127, 0, 0, 1), ip(127, 0, 0, 1));
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
+    ASSERT_EQ(f.tcp.connection_count(), 0u);  // malformed -> dropped
+    ASSERT_EQ(server_l.accepts, 0u);
+}
+
+TEST("tcp_adversarial: data_off < 5 (under-min header) is dropped") {
+    Fixture f{ip(127, 0, 0, 1)};
+    auto seg = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 100, 200, 0x10 /*ACK*/);
+    seg[12]  = static_cast<uint8_t>(0 << 4);  // data_off = 0 -- impossible (< 20 bytes)
+    seg[16]  = 0;
+    seg[17]  = 0;
+    embed_tcp_checksum(seg, ip(127, 0, 0, 1), ip(127, 0, 0, 1));
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
+    ASSERT_EQ(f.tcp.connection_count(), 0u);  // would have mis-read header as payload
+}
+
+TEST("tcp_adversarial: connection-table overflow drops the 9th SYN (no crash)") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    ASSERT_TRUE(f.tcp.listen(7777, server_l));
+    // 8 SYNs from distinct remotes fill the table (kMaxTcpCons = 8).
+    for (uint16_t i = 0; i < 8; ++i) {
+        auto syn = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), static_cast<uint16_t>(1000 + i),
+                               7777, static_cast<uint32_t>(1000 + i), 0, 0x02);
+        deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, syn));
+    }
+    ASSERT_EQ(f.tcp.connection_count(), 8u);
+    // 9th SYN from yet another remote -> table full -> dropped, no crash.
+    auto syn9 = tcp_segment(ip(10, 1, 2, 3), ip(127, 0, 0, 1), 9999, 7777, 999, 0, 0x02);
+    deliver(f, ip_packet(ip(10, 1, 2, 3), ip(127, 0, 0, 1), 6, syn9));
+    ASSERT_EQ(f.tcp.connection_count(), 8u);  // 9th not added
+}
+
+TEST("tcp_adversarial: a stray ACK to no connection is silently dropped") {
+    Fixture f{ip(127, 0, 0, 1)};
+    auto    ack = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 9999, 100, 200, 0x10);
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, ack));
+    ASSERT_EQ(f.tcp.connection_count(), 0u);
+    ASSERT_EQ(f.dev.sent.size(), 0u);  // not a SYN -> no RST, just a silent drop
+}
+
+TEST("tcp_adversarial: out-of-order data on an established conn is dropped") {
+    Fixture f{ip(127, 0, 0, 1)};
+    Capture server_l;
+    do_handshake(f, server_l);
+    // The client ISN is in the captured SYN (dev.sent[0]); craft data with a SEQ
+    // far from the server's RCV.NXT.
+    TcpHeader syn;
+    ASSERT_TRUE(seg_tcp(f.dev.sent[0], syn));
+    const uint32_t bad_seq = syn.seq + 1000;
+    auto           data =
+        tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, bad_seq, 0, 0x18, {'x'});
+    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, data));
+    ASSERT_EQ(server_l.datas, 0u);  // out of order -> no on_data
+}
+
 int main() {
     RUN_ALL_TESTS();
     return _tests_failed > 0 ? 1 : 0;
