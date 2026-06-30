@@ -28,7 +28,7 @@
 - **smoke 默认 ON + 本地无 `build/musl/hello` → 挂死**：本地 `CINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10-M2/M3 惯例）。
 - **架构契合**：A.6 无异常（伪文件生成走 ErrorOr，read 返 ErrorOr<int64_t>）；A 子模块边界（用 Cinux-Base ErrorOr，不自建）；对齐 Linux（procfs 动态 pid 目录 + /proc/<pid>/stat 语义，简化字段诚实标注）；§14（procfs_init.cpp 单独文件，CMake 决定编不编，源码零 #ifdef）。
 
-## 🔄 F10-M2 follow-up（ext2 double-indirect 块映射）— 2026-06-30 立项
+## ✅ F10-M2 follow-up（ext2 double-indirect 块映射）— 收官 2026-06-30（分支 worktree-ext2-indirect 待 PR）
 
 > F10-M2 收官登记的 follow-up（见下「F10-M2」段 follow-up 列表）：ext2 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读写会截断；F10-M2 批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限）。本弧**真修**：`get_or_alloc_block`(写) + `read`(读)补 double-indirect 分支(i_block[13])，撤 `create_ext2_disk.sh` 的 4096 workaround。分支 `worktree-ext2-indirect`（从干净 main `c0188cd`，零文件冲突弧）。
 > 范围栅栏：改动严格圈在 [ext2_common.cpp](../../kernel/fs/ext2_common.cpp)::read + [ext2_inode.cpp](../../kernel/fs/ext2_inode.cpp)::get_or_alloc_block 两函数内；不碰 InodeOps/PageCache；triple-indirect(slot 14) 不做（>16GB 文件，hobby OS 用不到）。
@@ -41,7 +41,9 @@
 | 1 | 写路径：`get_or_alloc_block` 加 i_block[13] double-indirect 分支（offset=file_block-DIRECT-PTRS、idx1=offset/PTRS、idx2=offset%PTRS，三层 lazy alloc，scratch buf 逐层落盘） | ✅ | run-kernel-test-all 两 leg 762/0 零回归（新分支未被现有用例触发） |
 | 2 | 读路径：`read` 加 double else-if（纯读三层，hole 零填）+ 放开 write 的 file_block 门（`>EXT2_DIRECT_BLOCKS` 不再 break，扩到 double-indirect 上限） | ✅ | run-kernel-test-all 两 leg 762/0 零回归 |
 | 3 | host 单测：`test_ext2_ops.cpp` 的 `host_file_write`/`host_file_read` 补 single+double indirect（镜像 kernel 算法）+ >single-indirect-ceiling round-trip 用例 | ✅ | test_ext2_ops 30/0（+1 file_indirect）+ 全 host ctest 65/0 |
-| 4 | 撤 workaround：`create_ext2_disk.sh` BLOCK_SIZE 4096→1024 + 注释更新（double-indirect 已支持）+ 两 leg + boot 冒烟 + note | ⏳ | run-kernel-test-all 两 leg + make run 零 panic |
+| 4 | 撤 workaround：`create_ext2_disk.sh` BLOCK_SIZE 4096→1024 + 注释更新（double-indirect 已支持）+ 两 leg + boot 冒烟 + note | ✅ | run-kernel-test-all 两 leg 762/0 + make run `block_size=1024` ext2 mounted + shell 提示符零 panic + note |
+
+> **收官（2026-06-30）**：ext2 块映射补 double-indirect(i_block[13]) 读+写，撤 4096 workaround（盘改回 1024-byte 块）。4 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1`）+ 本批撤 workaround。验证：run-kernel-test-all 两 leg 762/0 + host ctest 65/65（+1 double-indirect round-trip）+ make run 真 boot `block_size=1024` 零 panic。triple(slot 14) 显式不做（>16 GB 文件）。详见 [note](../notes/2026-06-30-f10-m2-followup-ext2-double-indirect.md)。**push/PR 归用户**。
 
 ### 风险 / 陷阱
 - **block_buf_ 单 scratch（头号 GOTCHA）**：多层遍历 read_block 反复覆盖同一 4KB buf。double 写须严格顺序——alloc+写盘下层后，**读回上层再填指针**（write_block 已把 buf 改成下层内容），逐层落盘再下钻。仿现有 single-indirect read-modify-write（[ext2_inode.cpp:354-361](../../kernel/fs/ext2_inode.cpp) 二次 `read_block(indirect_blk)` 即此模式）。错则毁 inode 元数据。
@@ -164,7 +166,7 @@
 **CinuxOS 能跑 musl 动态用户程序**：execve 识别 PT_INTERP → 加载 interp(ldso)到 USER_INTERP_BASE → entry=interp 入口、auxv 喂 AT_BASE/AT_ENTRY/AT_PHDR → musl ldso 在用户态做 GOT/PLT 重定位 + DT_NEEDED + 符号解析 → 跳 AT_ENTRY → write() 经 libc.so 输出。4 commit（批0 docs `bcfebf8` / 批1 kernel `b55615e`+note `6c4309d` / 批2 toolchain `33e6bfe` / 批3 smoke+收官），`worktree-f10-m2-dynlink` 待 push。验证：dyn smoke ON 单核 + -smp2 两 leg 968/0 + 串口 `Hello from musl on CinuxOS!` ×5 + hello-dyn 5/5 PASS；默认 OFF 零回归。详见 notes `2026-06-30-f10-m2-b{1,2,3}-*.md`。
 
 **follow-up（批3 发现 + 历史）**：
-- **ext2 double-indirect / triple-indirect 缺失**：`ext2_common.cpp` 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读会截断。批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限）。**🔄 真修中（本弧，见顶部「F10-M2 follow-up ext2 double-indirect」段，分支 `worktree-ext2-indirect`）**：补 double-indirect(i_block[13]) + 撤 4096 workaround；triple(slot 14) 不做。
+- **ext2 double-indirect / triple-indirect 缺失**：`ext2_common.cpp` 块映射只处理 direct + single-indirect，>268KB(1024 块)/>4MB(4096 块)文件读会截断。批3 把 QEMU ext2 image 改 4096-byte 块规避（interp 822KB 落进 single-indirect 4MB 上限）。**✅ 真修完成（顶部「F10-M2 follow-up ext2 double-indirect」段，分支 `worktree-ext2-indirect` 待 PR）**：补 double-indirect(i_block[13]) 读+写 + 撤 4096 workaround（盘改回 1024）；triple(slot 14) 不做。
 - ELF base ASLR / PIE 主程序（批1 ET_DYN 接受已铺路，R_X86_64_RELATIVE 重定位留后）+ interp base ASLR（现固定 USER_INTERP_BASE）。
 - glibc 动态二进制（PT_INTERP=/lib64/ld-linux-x86-64.so.2 天然支持，按需验）。
 
