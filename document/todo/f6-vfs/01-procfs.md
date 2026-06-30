@@ -3,6 +3,16 @@
 > /proc 虚拟文件系统。暴露内核状态给用户态。
 > 进程信息、内存统计、内核参数。
 
+## 本里程碑范围（2026-06-30 立项，分支 worktree-f6-m2-procfs）
+
+**只做进程自省（第一刀）**，照抄 F6-M3 DevFs 范式（`FileSystem` 子类 + 匿名 namespace `InodeOps` 子类 + boot 接线单独 `procfs_init.cpp`）：
+- `/proc` 根 readdir 枚举 pid（新增 `signal_enumerate_task_pids` accessor，`g_registry_lock` 下快照，纯增量）。
+- `/proc/<pid>/` 目录（lookup 经 `signal_find_task_by_pid` 校验存活，对齐 Linux 只露活进程）。
+- `/proc/<pid>/stat`（简化：`pid (name) state ppid tgid uid gid`）+ `/proc/<pid>/cmdline`（返 `name` 尽力，CinuxOS Task 不存 argv）。
+- 叶 inode 身份用 `PID_MAX=256` 定长 pid 索引池（`ino=pid`/`fs_private=this`），SMP 安全 + 无泄漏。
+
+**范围栅栏（留 follow-up，本里程碑不做）**：T2 静态信息节点（version/meminfo/cpuinfo/uptime/loadavg/cmdline）、T3 的 maps/fd/status、完整 Linux /proc/<pid>/stat 52 字段（CinuxOS 无 accounting）。详见 PLAN「🔄 F6-M2」段。
+
 ## 目标
 
 实现 ProcFS，提供系统自省能力。类似 Linux /proc。

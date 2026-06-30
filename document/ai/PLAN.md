@@ -2,6 +2,32 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F6-M2 ProcFS（/proc 进程自省虚拟文件系统）— 2026-06-30 立项
+
+> Feature 域 F6 VFS 第二里程碑。接 F6-M3 DevFS（已合 main PR#48）—— 照抄 DevFs 范式（`FileSystem` 子类 + 匿名 namespace `InodeOps` 子类 + boot 接线单独 `procfs_init.cpp`），把内核 Task registry 暴露成 `/proc`。**范围栅栏（不投机）**：本里程碑只做**进程自省**——`/proc` 根 readdir 枚举 pid + `/proc/<pid>/` 目录 + `/proc/<pid>/{stat,cmdline}` 动态伪文件。**不做**静态信息节点（`/proc/version`/`meminfo`/`cpuinfo`/`uptime`）、不做 `/proc/<pid>/{maps,fd,status}` —— 留 follow-up（见 todo `01-procfs.md`）。分支 `worktree-f6-m2-procfs`（worktree 从干净 main `c0188cd`）。
+> **设计（照抄 DevFs + 适配动态语义）**：`ProcFs`（`FileSystem` 子类，内存型虚拟 FS）。DevFs 根目录是定长节点表；ProcFs 根目录条目是**动态 pid**（Task registry 实时快照），故 readdir 走新增 `signal_enumerate_task_pids` accessor（`g_registry_lock` 下快照，**纯增量**不改 register/unregister/find_by_pid）。叶 inode 身份：`PID_MAX=256` 有界，ProcFs 持 `pid_dir_inodes_[257]`/`stat_inodes_[257]`/`cmdline_inodes_[257]` 定长池（pid 索引），`ino=pid`、`fs_private=this` —— **SMP 安全**（每 pid 稳定 inode，并发 lookup 不竞态）+ **无泄漏**（close 只删 File 不删 Inode，inode 归 ProcFs，对齐 DevFs）。lookup strip `/` 后解析 `<pid>`/`<pid>/stat`/`<pid>/cmdline`，pid 经现有 `signal_find_task_by_pid` 校验存活（非活 → NotFound，对齐 Linux 只露活进程）。
+> **测试边界（诚实）**：procfs.cpp 读 kernel Task registry（非纯逻辑，依赖 `signal.hpp`/`process.hpp`），**不能 host 单测**（DevFs 靠注入 CharSink 才 host-testable；ProcFs 直读 registry 无注入缝）—— 走 kernel harness（QEMU `run_procfs_tests`）。测试自建栈 Task 注册已知 pid（不依赖 registry 残留状态），确定性验证 readdir 枚举 + stat 内容。
+> 验证：每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 两 leg 绿（本地先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF` 关 smoke 防挂死）；批 1+ 改公共头（signal.hpp）push 前补全量 `cmake --build build`。**⚠️ 根目录无 Makefile——一律 `cmake --build build --target <name>`**。
+
+### 批表
+| 批 | 范围 | 状态 | Commit | 测试 |
+|----|------|------|--------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F6-M2 ⏳→🔄 + todo `01-procfs.md` 标范围栅栏 | 🔄 | | docs-only |
+| 1 | procfs 骨架：`procfs.hpp`/`procfs.cpp`（`ProcFs`+mount/lookup root+`<pid>` 目录，用现有 `signal_find_task_by_pid` 校验存活；`ProcRootDirOps` readdir 暂硬编码 `"."`/`".."`）+ `kernel/fs/CMakeLists.txt` + `kernel/test/test_procfs.cpp`（mount/lookup/stat root+pid-dir）+ `main_test.cpp` 注册 | ⏳ | | run-kernel-test-all 两 leg |
+| 2 | `signal_enumerate_task_pids` accessor（signal.hpp/cpp，纯增量）+ `ProcRootDirOps::readdir` 真枚举 pid（`signal_enumerate_task_pids` 锁内快照）+ 测（readdir 列出注册 pid） | ⏳ | | run-kernel-test-all 两 leg |
+| 3 | `/proc/<pid>/` 子目录：`ProcPidDirOps`（readdir `"stat"`/`"cmdline"`）+ `ProcStatFileOps`/`ProcCmdlineFileOps`（动态伪文件，read 时 `signal_find_task_by_pid`→Task 字段生成内容；`/proc/<pid>/stat` = `pid (name) state ppid tgid uid gid`，`/proc/<pid>/cmdline` = name 尽力）+ lookup `<pid>/stat`/`<pid>/cmdline` + 测（read stat 内容含 pid+name） | ⏳ | | run-kernel-test-all 两 leg |
+| 4 | boot 接线：`procfs_init.cpp`（`procfs::init()` mount+`vfs_mount_add("/proc")`）+ `kernel/fs/CMakeLists.txt`(+procfs_init) + `init.cpp` 挂 procfs::init()（devfs::init 后）+ `make run` 冒烟（/proc 装配零 panic） | ⏳ | | run-kernel-test-all 两 leg 回归 + make run 零 panic |
+| 5 | 收官：note + ROADMAP F6-M2 ✅ + PLAN ✅ + todo `01-procfs.md` 打勾（本批范围） | ⏳ | | docs-only |
+
+### 风险 / 陷阱
+- **Inode 身份/生命周期**：close 只删 File 不删 Inode（file.cpp 验证），故 ProcFs 必须自持叶 inode 生命。定长 pid 索引池解决（每 pid 稳定 inode）。若用「单 scratch inode 复用」→ 并发同 kind lookup 竞态覆写 pid → 错读（明确**不**这么做）。
+- **registry TOCTOU（已知，留 follow-up）**：`signal_find_task_by_pid` 返指针后 unlock，read Task 字段时 task 可能已 exit+free（DEBT-002 RCU-safe registry 未修）。窗口极小（find 后立即快照字段），hobby OS 可接受，note 标注；真修随 DEBT-002。
+- **测试内核主线程不经 add_task**（main_test.cpp 在 boot 栈直跑，不进 registry）→ registry 可能空 → readdir 测**自建栈 Task 注册已知 pid**保证确定性（不依赖 registry 残留；参 F3-M4 GOTCHA#22 栈 Task 思路）。
+- **`/proc/<pid>/cmdline` 范围诚实**：CinuxOS Task 不存 argv，cmdline 返 `name`（尽力，非真 argv）；note 标注。
+- **stat 内容是简化版**（非完整 Linux /proc/<pid>/stat 52 字段，CinuxOS 无 accounting）—— 格式 `pid (name) state ppid tgid uid gid`，note 标注简化。
+- **smoke 默认 ON + 本地无 `build/musl/hello` → 挂死**：本地 `CINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10-M2/M3 惯例）。
+- **架构契合**：A.6 无异常（伪文件生成走 ErrorOr，read 返 ErrorOr<int64_t>）；A 子模块边界（用 Cinux-Base ErrorOr，不自建）；对齐 Linux（procfs 动态 pid 目录 + /proc/<pid>/stat 语义，简化字段诚实标注）；§14（procfs_init.cpp 单独文件，CMake 决定编不编，源码零 #ifdef）。
+
 ## ✅ F10-M3 TTY Phase 2（PTY / 伪终端）— 收官 2026-06-30（分支 feat/f10-m3-pty 待 PR）
 
 > Feature 域 F10 第三里程碑下半。接 Phase 1（已合 main PR#46：行规范 + 阻塞读 + ioctl TCGETS/TCSETS/TIOCGWINSZ/TIOCGPGRP/TIOCSPGRP + 信号 + ConsoleTty 类化）。**Phase 1 显式推迟到 DevFS 的部分**：PTY master/slave 对 + `/dev/ptmx` + `/dev/pts/N` + `/dev/tty` + `TIOCSCTTY` + `/dev/console` 接真 TTY。**解锁条件已满**：DevFS(PR#48) / TTY Phase 1(PR#46) / session-pgrp(F3-M3，`controlling_tty{-1}` 字段 + `setsid` 留缝)全在 main。分支 `feat/f10-m3-pty`（从干净 main `a134cb7`）。**用户决策（2026-06-30）**：全范围 B0-B5 一口气做；B2 ioctl 派发走**低风险加法**（fd>2 走 `fd→inode→ops->ioctl` 派发 + fd≤2 console fallback，行为零变）。
