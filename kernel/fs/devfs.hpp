@@ -123,4 +123,15 @@ private:
     CharSink* console_sink_;
 };
 
+/**
+ * @brief Boot hook: construct DevFs with a serial console sink and mount it at
+ *        /dev.  Kernel-only implementation in devfs_init.cpp (linked into the
+ *        kernel, not the host tests).
+ *
+ * @return true on success, false if mount() or vfs_mount_add(/dev) fails.
+ */
+namespace devfs {
+bool init();
+}  // namespace devfs
+
 }  // namespace cinux::fs
