@@ -12,12 +12,13 @@
 # Gotchas baked in (see tools/musl/README.md):
 #   * Do NOT pass --target to configure: musl prefixes AR/RANLIB with it
 #     (x86_64-ar), which the host lacks.  Pass CC=gcc AR=ar RANLIB=ranlib.
-#   * musl-gcc wrapper is unusable on GCC>=14: the host specs inject
-#     -latomic_asneeded, which musl's specs don't suppress.  We link user
-#     programs manually instead (build-hello.sh).
+#   * GCC>=14 host specs inject -latomic_asneeded on static links; the musl
+#     sysroot has no libatomic_asneeded.a.  musl doesn't need libatomic (uses
+#     inline __atomic), so the "Patch musl-gcc" step adds -fno-link-libatomic to
+#     the wrapper -- musl-gcc is then usable on GCC16 (busybox links clean).
 set -euo pipefail
 
-MUSL_VER=1.2.5
+MUSL_VER=1.2.6
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 SYSROOT="${MUSL_SYSROOT:-$REPO/build/musl-sysroot}"
@@ -48,19 +49,26 @@ fi
 cd "$SRC"
 if [ ! -f config.mak ]; then
     echo "[build-musl] configuring..."
-    # F-ECO: -O0, NOT musl's default -O2. GCC 16 + -O2 lowers musl mallocng's
-    # __builtin_unreachable / assume paths in alloc_slot() to `hlt` traps (any
-    # program that mallocs SIGILLs). -O1 fixes that BUT breaks opendir/readdir:
-    # the fd stored in DIR reaches getdents64 as garbage (ls lists nothing).
-    # -O0 avoids BOTH codegen bugs. Revisit when musl adapts to GCC 16 (or pin a
-    # known-good GCC). Debuggability > perf (hobby OS, not a perf target).
-    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT" CFLAGS="-O0"
+    # musl default -O2. The earlier -O0 workaround is no longer needed: the real
+    # root cause was CinuxOS syscall/ISR clobbering Linux-ABI-preserved user
+    # state. Fixed by restoring caller-saved arg registers (a90cc4a) AND
+    # saving/restoring user SIMD/FPU via FXSAVE (57e2664) -- musl -O2 uses XMM,
+    # and the kernel's own C/C++ code was corrupting user SIMD -> heap damage
+    # -> mallocng a_crash.
+    CC=gcc AR=ar RANLIB=ranlib ./configure --prefix="$SYSROOT" CFLAGS="-O2"
 fi
 
 # 4. Build + install.
 echo "[build-musl] building with $(nproc) jobs..."
 make -j"$(nproc)"
 make install
+
+# 5. Patch musl-gcc: GCC>=14 host specs inject -latomic_asneeded on static
+#    links, but the musl sysroot has no libatomic_asneeded.a (and musl doesn't
+#    need it -- inline __atomic).  -fno-link-libatomic suppresses it so musl-gcc
+#    works on GCC16 for static user programs (busybox, CFBox, ...).
+sed -i 's|-specs|-fno-link-libatomic -specs|' "$SYSROOT/bin/musl-gcc"
+echo "[build-musl] patched musl-gcc with -fno-link-libatomic (GCC16 fix)"
 
 echo "[build-musl] done. sysroot at $SYSROOT"
 ls -la "$SYSROOT/lib/libc.a" "$SYSROOT/lib/crt1.o" "$SYSROOT/lib/Scrt1.o"
