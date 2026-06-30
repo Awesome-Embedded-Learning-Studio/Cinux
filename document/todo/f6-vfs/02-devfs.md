@@ -3,6 +3,8 @@
 > /dev 设备文件系统。统一字符/块设备访问接口。
 > 设备节点自动创建，用户程序通过 open/read/write 访问硬件。
 
+> ✅ **F6-M3 收官（2026-06-30,batch 1+2,分支 `worktree-f6-m3-devfs` 待 PR）** — null/zero/console 基础节点 + `/dev` 挂载全绿:host 单测 19/0 + run-kernel-test-all 两 leg 974/0 + `make run` 冒烟 `[DEVFS] mounted at /dev (3 nodes)` 零 panic。详见 notes `2026-06-30-f6-m3-b{1,2}-*.md`。
+>
 > ⚠️ **范围栅栏（F6-M3 实施批,2026-06-30 立项；三路并行之一,另两路 F7-M4 UDP / F10-M2 动态链接）**
 >
 > **本批做**:`DevFs`（`FileSystem` 子类,内存型虚拟 FS,无 ext2 后端)+ device inode（`InodeOps` 子类:`NullDevOps`/`ZeroDevOps`/`ConsoleDevOps`/`DevDirOps`,封装设备 ops)+ `CharSink` 抽象(console 写槽,kernel 注入 Serial / host 注入 mock)→ 挂 `/dev` → 基础节点 `/dev/null`(1:3) `/dev/zero`(1:5) `/dev/console`(5:1),read/write 走设备;`stat()` override 填 `st_rdev`。新代码类化(非全局 static + 自由函数)。

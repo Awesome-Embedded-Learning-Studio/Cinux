@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F6-M3 DevFS（/dev 设备文件系统）— 2026-06-30 立项
+## ✅ F6-M3 DevFS（/dev 设备文件系统）— 收官 2026-06-30（分支 worktree-f6-m3-devfs 待 PR）
 
 > Feature 域 F6 VFS 第三里程碑。**三路并行之一**(另两路 F7-M4 UDP / F10-M2 动态链接)。**并行硬约束**:这条只做 DevFS;严格不改 `fs/inode.hpp` 的 `InodeOps` 虚函数接口(F10-M2 在用),只加 device inode 子类;不做 F6-M1 VFS 增强 / M2 ProcFS / M4 tmpfs / ext4(留 F6 后续单独收)。DevFS = 内存型虚拟 FS(无 ext2 后端,device inode 生命周期跟设备绑定):device inode(`InodeOps` 子类,封装设备驱动 ops)→ `/dev` 虚拟挂载 → 基础节点(`/dev/null` `/dev/zero` `/dev/console`,read/write 走设备)。对齐 Linux DevFS/tmpfs 的 device-inode 模式;新代码类化(`DevFs` FileSystem 子类 + 匿名 namespace 设备 ops 子类 + `CharSink` 抽象,非全局 static + 自由函数,见 memory `classify-c-style-singleton-with-mutable-state`)。F10-M3 TTY Phase2 的 PTY/`/dev/*` 依赖此。分支 `worktree-f6-m3-devfs`(worktree 从干净 main `1cdd507`)。
 > 验证:每批 `timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)`(关 smoke:`cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`)绿才提交。
@@ -11,8 +11,8 @@
 | 批 | 范围 | 状态 | 测试 |
 |----|------|------|------|
 | 0 | 立项 docs(本段)+ ROADMAP F6-M3 🔄 + todo `02-devfs.md` 标范围栅栏 | ✅ | docs-only |
-| 1 | DevFS 核心(`devfs.hpp`/`devfs.cpp`:`DevFs`+4 设备 ops 子类+`CharSink`,纯逻辑)+ host 单测(mock sink)+ kernel 单测(`run_devfs_tests`)+ CMakeLists(fs/test) | ⏳ | run-kernel-test-all(smoke OFF)+ host devfs 绿 |
-| 2 | boot 接线(`devfs_init.cpp` SerialConsoleSink + init.cpp 挂 `/dev`)+ stat `st_rdev` + `make run` 冒烟 + notes/memory | ⏳ | run-kernel-test-all(smoke OFF)+ make run 冒烟零 panic |
+| 1 | DevFS 核心(`devfs.hpp`/`devfs.cpp`:`DevFs`+4 设备 ops 子类+`CharSink`,纯逻辑)+ host 单测(mock sink)+ kernel 单测(`run_devfs_tests`)+ CMakeLists(fs/test) | ✅ | host 19/0 + run-kernel-test-all 两 leg 974/0(`bb7310e`) |
+| 2 | boot 接线(`devfs_init.cpp` SerialConsoleSink + init.cpp 挂 `/dev`)+ `make run` 冒烟 + notes | ✅ | run-kernel-test-all 两 leg 回归 + make run `[DEVFS] mounted at /dev (3 nodes)` 零 panic(`84cd8cb`) |
 
 ### 风险/陷阱
 - **smoke 默认 ON + 无 build/musl/hello → run-kernel-test 挂死**:本地一律先 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF`。
