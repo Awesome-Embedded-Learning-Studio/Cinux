@@ -23,6 +23,7 @@ F10-M2 端到端跑 musl 动态 hello 时撞上的铁证：interp（`/lib/ld-mus
 - **scratch buffer 顺序（头号 GOTCHA）**：`block_buf_` 是单块 4 KB 缓冲，每次 `write_block()` 都把它覆盖。所以 double 写的每一层：alloc + 写盘下层后，必须**重新 `read_block()` 上层**再改它的指针（仿现有 single-indirect 的二次 read-modify-write，[ext2_inode.cpp:354-361](../../kernel/fs/ext2_inode.cpp)）。三层逐层下钻、逐层落盘。错则毁 inode 元数据。
 - **读路径镜像写路径**：纯读三层，`disk_block == 0`（hole）落到公共零填路径；外/中层块缺（`i_block[13]==0` 或 child==0）才 `break`（与 single-indirect 一致语义）。
 - **host 单测是算法真门**：现有没有 in-kernel 测试锻炼 indirect（shell 17 KB、motd/hello.txt 都 direct），CI 也不跑 musl smoke。所以 [test_ext2_ops.cpp](../../test/unit/test_ext2_ops.cpp) 的 `host_file_write`/`host_file_read` 补 single+double（镜像 kernel 算法，抽 `host_resolve_data_block(disk, inode, file_block, alloc)` 共用 resolver），加一条 >single-indirect-ceiling 的 write→read round-trip 用例（4 group = 512 block 模拟盘，写 276 块 = 268 直/单 + 8 双）。host sim 直访 `data_blocks[]`，没有 kernel 的 scratch-dance，但**三层算术与盘上布局与 kernel 完全一致** —— 这正是它能守算法不变量的价值。
+- **dyn smoke 真内核覆盖**（补，见下验证段）：host 单测守算法之外，建 musl sysroot 开 `CINUX_MUSL_DYN_SMOKE` —— 822 KB ldso 装盘后 execve 读它真走 i_block[13]，5/5 PASS 实证 double-indirect 在 QEMU 真内核工作。**double-indirect 现在是 host 单测（算法）+ dyn smoke（真内核）双覆盖**，不再只是 opportunistic。
 - **撤 workaround**：`create_ext2_disk.sh` `BLOCK_SIZE 4096→1024`，注释从「workaround：double-indirect 截断」改成「double-indirect 已支持，1024 块是 ext2 默认」。所有现存盘上文件（shell 17 KB / motd / hello.txt）远低于 268 KB single-indirect 上限，纯 direct，零行为变；822 KB ldso（仅本地 musl sysroot 装盘时）现走 double-indirect —— 那是 opportunistic 端到端验证。
 
 ## 关键坑
@@ -39,7 +40,8 @@ F10-M2 端到端跑 musl 动态 hello 时撞上的铁证：interp（`/lib/ld-mus
 - **run-kernel-test-all 两 leg（4096→1024 撤 workaround 后）**：单核 + -smp 2 各 **762 passed, 0 failed**，`ALL TESTS PASSED`。零回归。
 - **host 单测**：`test_ext2_ops` **30/0**（+1 `file_indirect: write into double-indirect range round-trips`：全量 round-trip + 三层 spot-read direct/single/double + 断言 i_block[12]/[13] 头指针已置）；全 host `ctest` **65/65**（100%）。
 - **`make run` boot 冒烟**（timeout 40）：生产 kernel 起，`[EXT2] block_size=1024 blocks=8192 groups=1`、`[VFS] ext2 mounted at /`、`[DEVFS] mounted at /dev (4 nodes)`、`/bin/sh` execve + 跳用户态、`cinux>` shell 提示符，零 panic（仅 timeout 信号杀进程）。
+- **musl dyn smoke（double-indirect 真内核验证）**：建 musl sysroot（`tools/musl/build-musl.sh`，musl 1.2.5 在本机 gcc 16.1.1 编通）+ `build-hello-dyn.sh`，`cmake -DCINUX_MUSL_DYN_SMOKE=ON`。盘装 `/lib/ld-musl-x86_64.so.1`（**822368 B = 803 个 1024-byte 块**，远超 single-indirect 上限 268）→ execve("/hello-dyn") 内核读 ldso 的 PT_LOAD segment，offset 274432(268×1024)+ **全部走新写的 i_block[13] double-indirect**。run-kernel-test-all 两 leg（单核 + -smp 2）各 `[F10-M2] smoke: hello-dyn 5/5 iters PASS -> PASS` + 串口 5× `Hello from musl on CinuxOS!`；**无** `[ELF] segment read failed at offset 274432`（那是 double-indirect 坏的现象，F10-M2 没修前就是它）。这是 double-indirect 在 QEMU 真内核被走到且工作正常的铁证 —— 不再只靠 host 单测。
 
 ## 收官
 
-5 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1` / 批4 撤 workaround + 本 note）。F10-M2 follow-up「ext2 double-indirect/triple-indirect 缺失」关闭；triple（slot 14）显式不做，留作 >16 GB 文件的远期项。分支 `worktree-ext2-indirect` 待 push。**push/PR 归用户**。
+5 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1` / 批4 撤 workaround + 本 note）+ 批5 docs（dyn smoke 真内核覆盖实证，本段更新）。F10-M2 follow-up「ext2 double-indirect/triple-indirect 缺失」关闭；triple（slot 14）显式不做，留作 >16 GB 文件的远期项。**覆盖**：host 单测（算法 round-trip）+ musl dyn smoke（真内核读 822 KB ldso 走 i_block[13]）+ run-kernel-test-all 两 leg 762/0 + make run boot 冒烟。分支 `worktree-ext2-indirect` 待 push。**push/PR 归用户**。

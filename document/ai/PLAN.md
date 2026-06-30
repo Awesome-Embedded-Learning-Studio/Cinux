@@ -42,13 +42,14 @@
 | 2 | 读路径：`read` 加 double else-if（纯读三层，hole 零填）+ 放开 write 的 file_block 门（`>EXT2_DIRECT_BLOCKS` 不再 break，扩到 double-indirect 上限） | ✅ | run-kernel-test-all 两 leg 762/0 零回归 |
 | 3 | host 单测：`test_ext2_ops.cpp` 的 `host_file_write`/`host_file_read` 补 single+double indirect（镜像 kernel 算法）+ >single-indirect-ceiling round-trip 用例 | ✅ | test_ext2_ops 30/0（+1 file_indirect）+ 全 host ctest 65/0 |
 | 4 | 撤 workaround：`create_ext2_disk.sh` BLOCK_SIZE 4096→1024 + 注释更新（double-indirect 已支持）+ 两 leg + boot 冒烟 + note | ✅ | run-kernel-test-all 两 leg 762/0 + make run `block_size=1024` ext2 mounted + shell 提示符零 panic + note |
+| 5 | docs：建 musl sysroot（`build-musl.sh` + `build-hello-dyn.sh`，gcc 16.1.1 编通）开 `CINUX_MUSL_DYN_SMOKE` —— 822KB ldso 装盘读它真走 i_block[13]，double-indirect 真内核覆盖 | ✅ | run-kernel-test-all 两 leg dyn smoke 各 `hello-dyn 5/5 iters PASS` + 串口 5× Hello（无 `segment read failed at offset 274432`） |
 
-> **收官（2026-06-30）**：ext2 块映射补 double-indirect(i_block[13]) 读+写，撤 4096 workaround（盘改回 1024-byte 块）。4 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1`）+ 本批撤 workaround。验证：run-kernel-test-all 两 leg 762/0 + host ctest 65/65（+1 double-indirect round-trip）+ make run 真 boot `block_size=1024` 零 panic。triple(slot 14) 显式不做（>16 GB 文件）。详见 [note](../notes/2026-06-30-f10-m2-followup-ext2-double-indirect.md)。**push/PR 归用户**。
+> **收官（2026-06-30）**：ext2 块映射补 double-indirect(i_block[13]) 读+写，撤 4096 workaround（盘改回 1024-byte 块）。6 commit（批0 docs `7f27c32` / 批1 写路径 `8683efd` / 批2 读路径+门 `fd6008f` / 批3 host 单测 `cff0cb1` / 批4 撤 workaround / 批5 docs dyn smoke 真内核覆盖）。验证：run-kernel-test-all 两 leg 762/0 + host ctest 65/65（+1 double-indirect round-trip）+ make run 真 boot `block_size=1024` 零 panic + **musl dyn smoke 两 leg 各 5/5 PASS（822KB ldso 真走 i_block[13]，无 segment read fail）**。triple(slot 14) 显式不做（>16 GB 文件）。详见 [note](../notes/2026-06-30-f10-m2-followup-ext2-double-indirect.md)。**push/PR 归用户**。
 
 ### 风险 / 陷阱
 - **block_buf_ 单 scratch（头号 GOTCHA）**：多层遍历 read_block 反复覆盖同一 4KB buf。double 写须严格顺序——alloc+写盘下层后，**读回上层再填指针**（write_block 已把 buf 改成下层内容），逐层落盘再下钻。仿现有 single-indirect read-modify-write（[ext2_inode.cpp:354-361](../../kernel/fs/ext2_inode.cpp) 二次 `read_block(indirect_blk)` 即此模式）。错则毁 inode 元数据。
 - **CI 盲区**：run-kernel-test 不编 test/unit/ host 单测；改公共块映射（即便签名不变）push 前补 `cmake --build build -j$(nproc)` 全量 + `test_host`。
-- **host 单测是算法真门**：无现成 in-kernel 测试锻炼 indirect（shell 17KB、motd/hello.txt 都 direct）；double-indirect 路径靠 host 单测（批3）确定性覆盖 + 4096→1024 后 musl ldso(822KB) opportunistic 端到端（需 sysroot，CI 无）。
+- **double-indirect 双覆盖**：host 单测（批3，算法 round-trip）+ **musl dyn smoke（批5，真内核）**——建 sysroot 开 `CINUX_MUSL_DYN_SMOKE`，822KB ldso 装盘后 execve 读它真走 i_block[13]，两 leg 各 5/5 PASS（无 `segment read failed at offset 274432`）。shell 17KB/motd/hello.txt 都 direct，indirect 路径靠这两层守。
 - **4096→1024 撤 workaround 风险低**：所有现存盘上文件（shell 17KB / motd / hello.txt）远低于 268KB single-indirect 上限，纯 direct 块，零行为变；mount() 早已支持 1024 块。
 
 ## ✅ F10-M3 TTY Phase 2（PTY / 伪终端）— 收官 2026-06-30（分支 feat/f10-m3-pty 待 PR）
