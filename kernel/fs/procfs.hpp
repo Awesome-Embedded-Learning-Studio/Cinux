@@ -84,6 +84,8 @@ private:
     // as DevFs shares one DevDirOps across the root.
     InodeOps* root_dir_ops_{nullptr};
     InodeOps* pid_dir_ops_{nullptr};
+    InodeOps* stat_file_ops_{nullptr};
+    InodeOps* cmdline_file_ops_{nullptr};
 
     /// /proc root directory inode.  readdir snapshots the live PID registry.
     Inode root_inode_{};
@@ -92,6 +94,13 @@ private:
     /// fs_private = this ProcFs.  Stamped eagerly in mount(); lookup still
     /// validates liveness via signal_find_task_by_pid before handing one out.
     Inode pid_dir_inodes_[kProcPidMax + 1]{};
+
+    /// /proc/<pid>/stat pseudo-file inodes, indexed [pid].  ino = pid; read
+    /// regenerates the line from the live Task fields.
+    Inode stat_inodes_[kProcPidMax + 1]{};
+
+    /// /proc/<pid>/cmdline pseudo-file inodes, indexed [pid].  ino = pid.
+    Inode cmdline_inodes_[kProcPidMax + 1]{};
 
     bool mounted_{false};
 };

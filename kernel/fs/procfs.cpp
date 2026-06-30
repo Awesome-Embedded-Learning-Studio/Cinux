@@ -1,19 +1,15 @@
 /**
  * @file kernel/fs/procfs.cpp
- * @brief ProcFS implementation: directory InodeOps + ProcFs FileSystem backend
+ * @brief ProcFS implementation: directory + pseudo-file InodeOps + ProcFs backend
  *
- * Defines the directory behaviour as InodeOps subclasses (ProcRootDirOps,
- * ProcPidDirOps) in an anonymous namespace, then the ProcFs FileSystem backend
- * that owns the per-PID inode pools.  procfs.cpp reads the kernel task registry
- * (signal_find_task_by_pid / signal_enumerate_task_pids) and is therefore
- * kernel-linked -- it is NOT part of the host unit tests (DevFS stays
- * host-testable by injecting a CharSink; ProcFS has no such injection seam, so
- * it is exercised via the in-QEMU run_procfs_tests).
- *
- * Batch 1 (this file): ProcFs skeleton -- mount, root + per-PID directory
- * lookup, directory stat, and readdir hardcoded to the "." / ".." entries.
- * Batch 2 wires the root readdir to the live-PID snapshot; batch 3 adds the
- * stat/cmdline pseudo-files.
+ * Defines the inode behaviour as InodeOps subclasses (ProcRootDirOps,
+ * ProcPidDirOps, ProcStatFileOps, ProcCmdlineFileOps) in an anonymous namespace,
+ * then the ProcFs FileSystem backend that owns the per-PID inode pools.
+ * procfs.cpp reads the kernel task registry (signal_find_task_by_pid /
+ * signal_nth_task_pid) and the live Task fields, and is therefore kernel-linked
+ * -- it is NOT part of the host unit tests (DevFS stays host-testable by
+ * injecting a CharSink; ProcFS has no such injection seam, so it is exercised
+ * via the in-QEMU run_procfs_tests).
  */
 
 #include "procfs.hpp"
@@ -23,7 +19,8 @@
 
 #include "kernel/lib/string.hpp"
 #include "kernel/proc/pid.hpp"     // PidAllocator::PID_MAX (static_assert drift guard)
-#include "kernel/proc/signal.hpp"  // signal_find_task_by_pid (liveness check)
+#include "kernel/proc/signal.hpp"  // signal_find_task_by_pid / signal_nth_task_pid
+#include "procfs_content.hpp"      // format_proc_stat / format_proc_cmdline
 
 // ProcFs's fixed PID-indexed pools assume the PID bound matches the allocator.
 // If PidAllocator::PID_MAX ever changes, this fires at compile time.
@@ -102,6 +99,34 @@ bool parse_pid(const char* s, int* pid, const char** rest) {
 }
 
 // ============================================================
+// Pseudo-file stat/copy helpers (content itself is in procfs_content.cpp)
+// ============================================================
+
+/// Fill a struct stat for a ProcFS regular pseudo-file (stat / cmdline).
+/// Read-only (0444); st_ino echoes the PID.  Zeroed first -- no leak.
+void fill_file_stat(const Inode* inode, struct stat* st) {
+    memset(st, 0, sizeof(*st));
+    st->st_ino     = inode->ino;
+    st->st_nlink   = 1;
+    st->st_mode    = kProcSIfReg | 0444;
+    st->st_blksize = 4096;
+}
+
+/// Copy min(count, len-offset) bytes of generated pseudo-file content into the
+/// caller's buffer.  Returns the byte count (0 once past the end = EOF).  Lets
+/// the read ops share one offset/EOF handling path.
+ErrorOr<int64_t> copy_pseudo(const char* content, uint32_t len, uint64_t offset, void* buf,
+                             uint64_t count) {
+    if (offset >= len) {
+        return 0;  // EOF
+    }
+    uint64_t avail = static_cast<uint64_t>(len) - offset;
+    uint64_t n     = count < avail ? count : avail;
+    memcpy(buf, content + offset, n);
+    return static_cast<int64_t>(n);
+}
+
+// ============================================================
 // /proc root directory -- readdir snapshots the live PID registry (batch 2)
 // ============================================================
 
@@ -167,12 +192,93 @@ ErrorOr<int64_t> ProcRootDirOps::readdir(const Inode* inode, uint64_t index, cha
     return 1;
 }
 
+// ============================================================
+// /proc/<pid>/stat and /proc/<pid>/cmdline -- read-only pseudo-files
+// ============================================================
+
+class ProcStatFileOps : public InodeOps {
+public:
+    ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count) override;
+    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
+        if (inode == nullptr || st == nullptr) {
+            return Error::InvalidArgument;
+        }
+        fill_file_stat(inode, st);
+        return {};
+    }
+};
+
+class ProcCmdlineFileOps : public InodeOps {
+public:
+    ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count) override;
+    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
+        if (inode == nullptr || st == nullptr) {
+            return Error::InvalidArgument;
+        }
+        fill_file_stat(inode, st);
+        return {};
+    }
+};
+
 ErrorOr<int64_t> ProcPidDirOps::readdir(const Inode* inode, uint64_t index, char* name,
                                         uint64_t name_max) {
     if (inode == nullptr || name == nullptr || name_max == 0) {
         return Error::InvalidArgument;
     }
-    return fill_dot_entry(index, name, name_max);  // index >= 2 -> 0 (end) for now
+    auto dot = fill_dot_entry(index, name, name_max);
+    if (!dot.ok() || dot.value() == 1) {
+        return dot;
+    }
+    // index 2 -> "stat", index 3 -> "cmdline"; anything beyond is end-of-dir.
+    switch (index) {
+    case 2:
+        if (name_max < 5) {
+            return Error::InvalidArgument;  // "stat" + NUL
+        }
+        memcpy(name, "stat", 5);
+        return 1;
+    case 3:
+        if (name_max < 8) {
+            return Error::InvalidArgument;  // "cmdline" + NUL
+        }
+        memcpy(name, "cmdline", 8);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+// Generate the stat line fresh on each read from the live Task.  A task that
+// exits between lookup and read yields NotFound (the inode existed, the task no
+// longer does) -- the documented registry TOCTOU window.
+ErrorOr<int64_t> ProcStatFileOps::read(const Inode* inode, uint64_t offset, void* buf,
+                                       uint64_t count) {
+    if (inode == nullptr || buf == nullptr) {
+        return Error::InvalidArgument;
+    }
+    int  pid = static_cast<int>(inode->ino);
+    auto t   = signal_find_task_by_pid(pid);
+    if (t == nullptr) {
+        return Error::NotFound;
+    }
+    char     line[kProcStatLineMax];
+    uint32_t len = format_proc_stat(t, line, sizeof(line));
+    return copy_pseudo(line, len, offset, buf, count);
+}
+
+ErrorOr<int64_t> ProcCmdlineFileOps::read(const Inode* inode, uint64_t offset, void* buf,
+                                          uint64_t count) {
+    if (inode == nullptr || buf == nullptr) {
+        return Error::InvalidArgument;
+    }
+    int  pid = static_cast<int>(inode->ino);
+    auto t   = signal_find_task_by_pid(pid);
+    if (t == nullptr) {
+        return Error::NotFound;
+    }
+    char     content[kProcCmdlineMax];
+    uint32_t len = format_proc_cmdline(t, content, sizeof(content));
+    return copy_pseudo(content, len, offset, buf, count);
 }
 
 }  // anonymous namespace
@@ -186,6 +292,8 @@ ProcFs::ProcFs() = default;
 ProcFs::~ProcFs() {
     delete root_dir_ops_;
     delete pid_dir_ops_;
+    delete stat_file_ops_;
+    delete cmdline_file_ops_;
 }
 
 ErrorOr<void> ProcFs::mount() {
@@ -194,8 +302,10 @@ ErrorOr<void> ProcFs::mount() {
         return {};
     }
 
-    root_dir_ops_ = new ProcRootDirOps();
-    pid_dir_ops_  = new ProcPidDirOps();
+    root_dir_ops_     = new ProcRootDirOps();
+    pid_dir_ops_      = new ProcPidDirOps();
+    stat_file_ops_    = new ProcStatFileOps();
+    cmdline_file_ops_ = new ProcCmdlineFileOps();
 
     // Root directory inode: readdir snapshots the live PID registry.
     root_inode_.ino        = 1;
@@ -205,9 +315,9 @@ ErrorOr<void> ProcFs::mount() {
     root_inode_.mode       = kProcSIfDir | 0555;
     root_inode_.nlink      = 2;
 
-    // Per-PID directory inodes, stamped eagerly.  Existing as an inode does not
-    // imply the PID is live -- lookup() gates every hand-out on
-    // signal_find_task_by_pid, so /proc only ever exposes live tasks.
+    // Per-PID inodes, stamped eagerly.  Existing as an inode does not imply the
+    // PID is live -- lookup() gates every hand-out on signal_find_task_by_pid,
+    // so /proc only ever exposes live tasks.
     for (int pid = 1; pid <= kProcPidMax; ++pid) {
         Inode& d     = pid_dir_inodes_[pid];
         d.ino        = static_cast<uint64_t>(pid);
@@ -216,6 +326,22 @@ ErrorOr<void> ProcFs::mount() {
         d.fs_private = this;
         d.mode       = kProcSIfDir | 0555;
         d.nlink      = 2;
+
+        Inode& s     = stat_inodes_[pid];
+        s.ino        = static_cast<uint64_t>(pid);
+        s.type       = InodeType::Regular;
+        s.ops        = stat_file_ops_;
+        s.fs_private = this;
+        s.mode       = kProcSIfReg | 0444;
+        s.nlink      = 1;
+
+        Inode& c     = cmdline_inodes_[pid];
+        c.ino        = static_cast<uint64_t>(pid);
+        c.type       = InodeType::Regular;
+        c.ops        = cmdline_file_ops_;
+        c.fs_private = this;
+        c.mode       = kProcSIfReg | 0444;
+        c.nlink      = 1;
     }
 
     mounted_ = true;
@@ -258,7 +384,22 @@ ErrorOr<Inode*> ProcFs::lookup(const char* path) {
         return &pid_dir_inodes_[pid];
     }
 
-    // "<pid>/..." (stat, cmdline) is resolved in batch 3.
+    // "<pid>/<leaf>" -- the per-process pseudo-files.  Re-check liveness so a
+    // file under a dead PID is NotFound (the dir may exist as an inode, the task
+    // no longer does).
+    if (rest[0] != '/') {
+        return Error::NotFound;  // "<pid>junk" -- not a path separator
+    }
+    const char* leaf = rest + 1;
+    if (signal_find_task_by_pid(pid) == nullptr) {
+        return Error::NotFound;
+    }
+    if (strcmp(leaf, "stat") == 0) {
+        return &stat_inodes_[pid];
+    }
+    if (strcmp(leaf, "cmdline") == 0) {
+        return &cmdline_inodes_[pid];
+    }
     return Error::NotFound;
 }
 

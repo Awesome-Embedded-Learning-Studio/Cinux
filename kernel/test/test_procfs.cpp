@@ -50,6 +50,18 @@ void pid_to_path(char* buf, int pid) {
     utoa(buf, static_cast<uint32_t>(pid));
 }
 
+/// Substring search (kernel lib has no strstr).  @p hay_len lets the caller pass
+/// a buffer that is not NUL-terminated (procfs reads return raw bytes).
+bool contains(const char* hay, int hay_len, const char* needle) {
+    int nl = static_cast<int>(strlen(needle));
+    for (int i = 0; i + nl <= hay_len; ++i) {
+        if (memcmp(hay + i, needle, static_cast<uint32_t>(nl)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 namespace test_procfs {
@@ -176,6 +188,161 @@ void test_lookup_rejects_bad_paths() {
     TEST_ASSERT_NULL(lookup_or_null(&pf, nullptr));    // null path
 }
 
+// ---------- /proc/<pid>/ pseudo-files ----------
+
+/// Register a stack task with a known free PID + name; return it via @p out so
+/// the caller can unregister.  Keeps the per-file tests DRY.
+int register_named_task(Task* out) {
+    int pid   = pick_free_pid();
+    out->pid  = pid;
+    out->name = "procfs_test";
+    out->ppid = 1;
+    out->tgid = pid;
+    out->uid  = 0;
+    out->gid  = 0;
+    signal_register_task(out);
+    return pid;
+}
+
+void test_pid_dir_readdir_lists_stat_and_cmdline() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    Task t{};
+    int  pid = register_named_task(&t);
+    char dir_path[16];
+    pid_to_path(dir_path, pid);
+
+    Inode* dir = lookup_or_null(&pf, dir_path);
+    TEST_ASSERT_NOT_NULL(dir);
+    char name[PROCFS_NAME_MAX];
+
+    TEST_ASSERT_EQ(readdir_or_neg1(dir, 0, name, sizeof(name)), 1);  // "."
+    TEST_ASSERT_EQ(readdir_or_neg1(dir, 1, name, sizeof(name)), 1);  // ".."
+    TEST_ASSERT_EQ(readdir_or_neg1(dir, 2, name, sizeof(name)), 1);
+    TEST_ASSERT_EQ(strcmp(name, "stat"), 0);
+    TEST_ASSERT_EQ(readdir_or_neg1(dir, 3, name, sizeof(name)), 1);
+    TEST_ASSERT_EQ(strcmp(name, "cmdline"), 0);
+    TEST_ASSERT_EQ(readdir_or_neg1(dir, 4, name, sizeof(name)), 0);  // end
+
+    signal_unregister_task(&t);
+}
+
+void test_lookup_resolves_pseudo_files() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    Task t{};
+    int  pid = register_named_task(&t);
+    char stat_path[24];
+    char cmd_path[24];
+    char bogus_path[24];
+    // build "<pid>/stat" etc.
+    {
+        char pid_s[16];
+        pid_to_path(pid_s, pid);
+        strcpy(stat_path, pid_s);
+        strcpy(stat_path + strlen(pid_s), "/stat");
+        strcpy(cmd_path, pid_s);
+        strcpy(cmd_path + strlen(pid_s), "/cmdline");
+        strcpy(bogus_path, pid_s);
+        strcpy(bogus_path + strlen(pid_s), "/bogus");
+    }
+
+    Inode* st = lookup_or_null(&pf, stat_path);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQ(static_cast<int>(st->type), static_cast<int>(InodeType::Regular));
+    struct stat sst;
+    TEST_ASSERT_TRUE(st->ops->stat(st, &sst).ok());
+    TEST_ASSERT_EQ(sst.st_mode, static_cast<uint32_t>(kProcSIfReg | 0444));
+
+    Inode* cm = lookup_or_null(&pf, cmd_path);
+    TEST_ASSERT_NOT_NULL(cm);
+
+    TEST_ASSERT_NULL(lookup_or_null(&pf, bogus_path));  // unknown leaf
+
+    signal_unregister_task(&t);
+}
+
+void test_stat_read_contains_pid_and_name() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    Task t{};
+    int  pid = register_named_task(&t);
+    char stat_path[24];
+    {
+        char pid_s[16];
+        pid_to_path(pid_s, pid);
+        strcpy(stat_path, pid_s);
+        strcpy(stat_path + strlen(pid_s), "/stat");
+    }
+
+    Inode* st = lookup_or_null(&pf, stat_path);
+    TEST_ASSERT_NOT_NULL(st);
+    char    buf[128];
+    int64_t n = read_or_neg1(st, 0, buf, sizeof(buf) - 1);
+    TEST_ASSERT_GT(n, 0);
+    buf[n] = '\0';
+
+    char pid_s[16];
+    pid_to_path(pid_s, pid);
+    TEST_ASSERT_TRUE(contains(buf, static_cast<int>(n), pid_s));             // pid present
+    TEST_ASSERT_TRUE(contains(buf, static_cast<int>(n), "procfs_test"));     // name present
+    TEST_ASSERT_TRUE(contains(buf, static_cast<int>(n), "(procfs_test) "));  // "(name) " layout
+
+    signal_unregister_task(&t);
+}
+
+void test_cmdline_read_contains_name() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    Task t{};
+    int  pid = register_named_task(&t);
+    char cmd_path[24];
+    {
+        char pid_s[16];
+        pid_to_path(pid_s, pid);
+        strcpy(cmd_path, pid_s);
+        strcpy(cmd_path + strlen(pid_s), "/cmdline");
+    }
+
+    Inode* cm = lookup_or_null(&pf, cmd_path);
+    TEST_ASSERT_NOT_NULL(cm);
+    char    buf[64];
+    int64_t n = read_or_neg1(cm, 0, buf, sizeof(buf));
+    TEST_ASSERT_GT(n, 0);
+    TEST_ASSERT_TRUE(contains(buf, static_cast<int>(n), "procfs_test"));
+
+    signal_unregister_task(&t);
+}
+
+void test_stat_read_dead_pid_is_not_found() {
+    ProcFs pf;
+    TEST_ASSERT_TRUE(pf.mount().ok());
+
+    Task t{};
+    int  pid = register_named_task(&t);
+    char stat_path[24];
+    {
+        char pid_s[16];
+        pid_to_path(pid_s, pid);
+        strcpy(stat_path, pid_s);
+        strcpy(stat_path + strlen(pid_s), "/stat");
+    }
+
+    Inode* st = lookup_or_null(&pf, stat_path);
+    TEST_ASSERT_NOT_NULL(st);
+    char buf[64];
+    TEST_ASSERT_GT(read_or_neg1(st, 0, buf, sizeof(buf)), 0);  // live: reads
+
+    // After unregister the task is gone; reading the same inode now fails
+    // (registry TOCTOU window -- documented behaviour).
+    signal_unregister_task(&t);
+    TEST_ASSERT_EQ(read_or_neg1(st, 0, buf, sizeof(buf)), -1);
+}
+
 }  // namespace test_procfs
 
 // ============================================================
@@ -190,5 +357,10 @@ extern "C" void run_procfs_tests() {
     RUN_TEST(test_procfs::test_root_readdir_lists_live_pid);
     RUN_TEST(test_procfs::test_lookup_pid_dir_live_then_dead);
     RUN_TEST(test_procfs::test_lookup_rejects_bad_paths);
+    RUN_TEST(test_procfs::test_pid_dir_readdir_lists_stat_and_cmdline);
+    RUN_TEST(test_procfs::test_lookup_resolves_pseudo_files);
+    RUN_TEST(test_procfs::test_stat_read_contains_pid_and_name);
+    RUN_TEST(test_procfs::test_cmdline_read_contains_name);
+    RUN_TEST(test_procfs::test_stat_read_dead_pid_is_not_found);
     TEST_SUMMARY();
 }
