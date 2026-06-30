@@ -40,6 +40,7 @@
 #include "kernel/net/socket.hpp"
 #include "kernel/net/tcp.hpp"
 #include "kernel/net/udp.hpp"
+#include "kernel/net/udp_socket.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task_builder.hpp"
 
@@ -204,13 +205,25 @@ void set_default_rx_pump(RxPump pump) {
     g_default_pump = (pump != nullptr) ? pump : pump_yield;
 }
 
+// Route resolver for sockets: 127/8 -> loopback, else -> the e1000 adapter.
+// g_ready guarantees g_adapter is non-null on the non-loopback path.
+static NetDevice& dev_for(Ipv4Addr dst) {
+    if (dst.oct[0] == 127) {
+        return g_lo;
+    }
+    return *g_adapter;
+}
+
 Socket* create_socket(int domain, int type) {
-    // B1b: a bare stub Socket (no module refs needed, so no g_ready gate -- the
-    // fd machinery is exercisable even in the test kernel, which does not bring
-    // up the production stack). B2 switches SOCK_DGRAM -> UdpSocket (drives
-    // g_udp), B3 SOCK_STREAM -> TcpSocket (drives g_tcp); both override the
-    // stub virtuals to do real work.
-    (void)g_ready;
+    if (domain != kAfInet) {
+        return nullptr;
+    }
+    // SOCK_DGRAM with the production stack up: a real UdpSocket wired to g_udp.
+    // The test kernel (no production net) and SOCK_STREAM (until B3) fall through
+    // to a bare stub Socket so the fd machinery stays exercisable everywhere.
+    if (type == kSockDgram && g_ready) {
+        return new UdpSocket(g_udp, *g_ipv4, g_stack, dev_for);
+    }
     return new Socket(domain, type);
 }
 
