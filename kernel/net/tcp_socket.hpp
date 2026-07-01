@@ -28,11 +28,11 @@
 #include <cinux/ring_buffer.hpp>
 #include <cstdint>
 
-#include "kernel/net/net_device.hpp"    // NetDevice
-#include "kernel/net/net_stack.hpp"     // NetStack
-#include "kernel/net/socket.hpp"        // Socket
-#include "kernel/net/tcp.hpp"           // TcpListener, TcpModule, TcpEndpoint
-#include "kernel/proc/sync.hpp"         // Spinlock
+#include "kernel/net/net_device.hpp"  // NetDevice
+#include "kernel/net/net_stack.hpp"   // NetStack
+#include "kernel/net/socket.hpp"      // Socket
+#include "kernel/net/tcp.hpp"         // TcpListener, TcpModule, TcpEndpoint
+#include "kernel/proc/sync.hpp"       // Spinlock
 
 namespace cinux::proc {
 struct Task;  // forward -- wait queues hold blocked recv'ers / accept'ers
@@ -53,18 +53,22 @@ public:
 
     /// Connected socket (an accepted child): same module refs + a known peer.
     /// Public so the parent's accept() can construct one.
-    TcpSocket(TcpModule& tcp, Ipv4Module& ipv4, NetStack& stack, DevRoute route, uint16_t local_port,
-              Ipv4Addr remote_addr, uint16_t remote_port);
+    TcpSocket(TcpModule& tcp, Ipv4Module& ipv4, NetStack& stack, DevRoute route,
+              uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port);
 
     // --- Socket overrides ---
-    cinux::lib::ErrorOr<void>     bind(uint16_t local_port) override;
-    cinux::lib::ErrorOr<void>     connect(Ipv4Addr remote, uint16_t remote_port) override;
-    cinux::lib::ErrorOr<void>     listen(int backlog) override;
-    cinux::lib::ErrorOr<Socket*>  accept(Ipv4Addr* out_remote, uint16_t* out_port) override;
-    cinux::lib::ErrorOr<int64_t>  send(const uint8_t* buf, uint32_t len) override;
-    cinux::lib::ErrorOr<int64_t>  recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
-                                       uint16_t* out_port) override;
-    void                          close() override;
+    cinux::lib::ErrorOr<void>    bind(uint16_t local_port) override;
+    cinux::lib::ErrorOr<void>    connect(Ipv4Addr remote, uint16_t remote_port) override;
+    cinux::lib::ErrorOr<void>    listen(int backlog) override;
+    cinux::lib::ErrorOr<Socket*> accept(Ipv4Addr* out_remote, uint16_t* out_port) override;
+    cinux::lib::ErrorOr<int64_t> send(const uint8_t* buf, uint32_t len) override;
+    cinux::lib::ErrorOr<int64_t> recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
+                                      uint16_t* out_port) override;
+    void                         close() override;
+
+    // --- F-ECO batch 7b: address retrieval (getsockname/getpeername) ---
+    bool get_local_addr(SockAddrStorage* out) const override;
+    bool get_peer_addr(SockAddrStorage* out) const override;
 
     // --- TcpListener: the module pushes connection lifecycle + data in here ---
     void on_accept(const TcpEndpoint& local, const TcpEndpoint& remote) override;
@@ -72,17 +76,17 @@ public:
     void on_close(const TcpEndpoint& local, const TcpEndpoint& remote) override;
 
 private:
-    static constexpr uint32_t kRxSize           = 4096;  ///< per-connection byte-stream ring
-    static constexpr uint32_t kAcceptMax        = 4;     ///< pending-accept queue depth
-    static constexpr uint16_t kEphemeralBase    = 32768;
-    static constexpr uint16_t kEphemeralRange   = 16;
+    static constexpr uint32_t kRxSize         = 4096;  ///< per-connection byte-stream ring
+    static constexpr uint32_t kAcceptMax      = 4;     ///< pending-accept queue depth
+    static constexpr uint16_t kEphemeralBase  = 32768;
+    static constexpr uint16_t kEphemeralRange = 16;
 
     TcpModule&  tcp_;
     Ipv4Module& ipv4_;
     NetStack&   stack_;
     DevRoute    route_;
 
-    uint16_t local_port_  = 0;
+    uint16_t local_port_ = 0;
     Ipv4Addr remote_addr_{};
     uint16_t remote_port_ = 0;
     bool     bound_       = false;

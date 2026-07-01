@@ -35,6 +35,7 @@
 #include "kernel/syscall/sys_getsockopt.hpp"  // sys_getsockopt / do_getsockopt_kernel (F-ECO batch 7a)
 #include "kernel/syscall/sys_setsockopt.hpp"  // sys_setsockopt (F-ECO batch 7a)
 #include "kernel/syscall/sys_socket.hpp"      // sys_socket
+#include "kernel/syscall/sys_socketpair.hpp"  // do_socketpair_kernel (F-ECO batch 7b)
 #include "kernel/test/big_kernel_test.h"
 
 using cinux::fs::current_fd_table;
@@ -68,6 +69,7 @@ using cinux::syscall::sys_accept4;           // F-ECO batch 7a
 using cinux::syscall::sys_setsockopt;        // F-ECO batch 7a
 using cinux::syscall::sys_getsockopt;        // F-ECO batch 7a
 using cinux::syscall::do_getsockopt_kernel;  // F-ECO batch 7a
+using cinux::syscall::do_socketpair_kernel;  // F-ECO batch 7b
 
 namespace test_socket {
 
@@ -438,6 +440,85 @@ void test_accept4_cloexec_flag() {
     sys_close(static_cast<uint64_t>(nfd2), kFiller, kFiller, kFiller, kFiller, kFiller);
 }
 
+// --- F-ECO batch 7b: getsockname/getpeername + shutdown + socketpair ---
+// These exercise the Socket virtuals / pair_with directly (the sys_getsockname
+// etc. user-boundary shims just copy_to_user the same bytes -- is_user_vaddr
+// keeps the ring0 test kernel off that path, same as every other batch).
+void test_unix_getsockname_local_addr() {
+    static UnixSocket s(kSockStream);
+    TEST_ASSERT_TRUE(s.bind_path("/un_gsn").ok());
+    cinux::net::SockAddrStorage st;
+    TEST_ASSERT_TRUE(s.get_local_addr(&st));
+    auto* sa = reinterpret_cast<cinux::net::SockAddrUn*>(st.bytes);
+    TEST_ASSERT_EQ(sa->family, kAfUnix);
+    const char* expected = "/un_gsn";
+    bool        path_ok  = true;
+    for (uint32_t i = 0; expected[i] != '\0' || sa->path[i] != '\0'; ++i) {
+        if (expected[i] != sa->path[i]) {
+            path_ok = false;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(path_ok);
+}
+
+void test_unix_getpeer_addr_connected() {
+    static UnixSocket a(kSockStream);
+    static UnixSocket b(kSockStream);
+    a.pair_with(&b);  // wire a<->b as peers
+    cinux::net::SockAddrStorage st;
+    TEST_ASSERT_TRUE(a.get_peer_addr(&st));  // connected -> peer name exists
+    auto* sa = reinterpret_cast<cinux::net::SockAddrUn*>(st.bytes);
+    TEST_ASSERT_EQ(sa->family, kAfUnix);  // anonymous peer: family set, empty path
+    // An unconnected socket reports no peer.
+    static UnixSocket c(kSockStream);
+    TEST_ASSERT_FALSE(c.get_peer_addr(&st));
+}
+
+void test_shutdown_directions() {
+    static UnixSocket a(kSockStream);
+    static UnixSocket b(kSockStream);
+    a.pair_with(&b);
+    // SHUT_WR -> further send is EPIPE-shaped (BrokenPipe).
+    a.do_shutdown(cinux::net::kShutWr);
+    uint8_t msg = 'x';
+    auto    sr  = a.send(&msg, 1);
+    TEST_ASSERT_FALSE(sr.ok());
+    TEST_ASSERT_EQ(sr.error(), cinux::lib::Error::BrokenPipe);
+    // SHUT_RD -> further recv is EOF (0).
+    b.do_shutdown(cinux::net::kShutRd);
+    uint8_t buf = 0;
+    auto    rr  = b.recv(&buf, 1, nullptr, nullptr);
+    TEST_ASSERT_TRUE(rr.ok());
+    TEST_ASSERT_EQ(*rr, 0);
+}
+
+void test_socketpair_roundtrip() {
+    int     sv[2] = {-1, -1};
+    int64_t r     = do_socketpair_kernel(kAfUnix, kSockStream, sv);
+    TEST_ASSERT_EQ(r, 0);
+    TEST_ASSERT_GE(sv[0], 0);
+    TEST_ASSERT_NE(sv[0], sv[1]);
+    // The two fds are wired as peers: write via sv[0] -> read via sv[1].  Drive
+    // the pipe via the inode ops with a KERNEL buffer (sys_write needs a user
+    // ptr the ring0 test kernel cannot supply).
+    cinux::fs::File* f0 = current_fd_table().get(sv[0]);
+    cinux::fs::File* f1 = current_fd_table().get(sv[1]);
+    TEST_ASSERT_NOT_NULL(f0);
+    TEST_ASSERT_NOT_NULL(f1);
+    uint8_t m  = 'P';
+    auto    wr = f0->inode->ops->write(f0->inode, 0, &m, 1);
+    TEST_ASSERT_TRUE(wr.ok());
+    TEST_ASSERT_EQ(*wr, 1);
+    uint8_t got = 0;
+    auto    rd  = f1->inode->ops->read(f1->inode, 0, &got, 1);
+    TEST_ASSERT_TRUE(rd.ok());
+    TEST_ASSERT_EQ(*rd, 1);
+    TEST_ASSERT_EQ(got, 'P');
+    sys_close(static_cast<uint64_t>(sv[0]), kFiller, kFiller, kFiller, kFiller, kFiller);
+    sys_close(static_cast<uint64_t>(sv[1]), kFiller, kFiller, kFiller, kFiller, kFiller);
+}
+
 }  // namespace test_socket
 
 extern "C" void run_socket_tests() {
@@ -459,5 +540,10 @@ extern "C" void run_socket_tests() {
     RUN_TEST(test_socket::test_getsockopt_so_type);
     RUN_TEST(test_socket::test_getsockopt_bad_level_and_fd);
     RUN_TEST(test_socket::test_accept4_cloexec_flag);
+    TEST_SECTION("F-ECO batch 7b getsockname/getpeername + shutdown + socketpair");
+    RUN_TEST(test_socket::test_unix_getsockname_local_addr);
+    RUN_TEST(test_socket::test_unix_getpeer_addr_connected);
+    RUN_TEST(test_socket::test_shutdown_directions);
+    RUN_TEST(test_socket::test_socketpair_roundtrip);
     TEST_SUMMARY();
 }

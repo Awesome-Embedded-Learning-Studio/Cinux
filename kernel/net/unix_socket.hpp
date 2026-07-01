@@ -126,6 +126,19 @@ public:
                                       uint16_t* out_port) override;
     void                         close() override;
 
+    // --- F-ECO batch 7b: address retrieval (getsockname/getpeername) ---
+    // getsockname returns the bound path (or false if unbound/unnamed);
+    // getpeername returns an anonymous AF_UNIX sockaddr (Linux fills an empty
+    // path for an unbound peer) once connected, else false.
+    bool get_local_addr(SockAddrStorage* out) const override;
+    bool get_peer_addr(SockAddrStorage* out) const override;
+
+    /// Wire TWO unconnected UnixSockets as each other's peer (socketpair(2)).
+    /// Sets connected_ on both ends under each socket's own lock (NEVER both at
+    /// once) -- the connect_path peer wiring minus registry/accept-queue.  Public
+    /// so the socketpair syscall handler can reach across to both ends.
+    void pair_with(UnixSocket* other);
+
     /// Called by a client's connect_path() on the SERVER: enqueue a connected
     /// child for a later accept() + wake a blocked accept'er.  Public because
     /// connect_path runs on the client and must reach across to the server.
@@ -155,9 +168,11 @@ private:
     /// Connected role: inbound byte stream (peer's send pushes, recv drains).
     cinux::lib::RingBuffer<uint8_t, kRxSize> rx_;
 
-    cinux::proc::Spinlock lock_;
-    cinux::proc::Task*    recv_waiters_   = nullptr;  ///< blocked in recv()
-    cinux::proc::Task*    accept_waiters_ = nullptr;  ///< blocked in accept()
+    // mutable: const address getters (get_local_addr/get_peer_addr) lock to take
+    // a consistent snapshot of bound_/path_/peer_ (the rest of the API is non-const).
+    mutable cinux::proc::Spinlock lock_;
+    cinux::proc::Task*            recv_waiters_   = nullptr;  ///< blocked in recv()
+    cinux::proc::Task*            accept_waiters_ = nullptr;  ///< blocked in accept()
 };
 
 }  // namespace cinux::net

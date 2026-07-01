@@ -59,4 +59,9 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_accept4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_setsockopt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_getsockopt.cpp
+    # F-ECO batch 7b: getsockname / getpeername / shutdown / socketpair.
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_getsockname.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_getpeername.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_shutdown.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_socketpair.cpp
 )

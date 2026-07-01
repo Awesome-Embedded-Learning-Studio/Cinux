@@ -55,6 +55,24 @@ cinux::lib::ErrorOr<int64_t> Socket::recv(uint8_t* /*buf*/, uint32_t /*len*/, Ip
 }
 void Socket::close() {}
 
+// F-ECO batch 7b: address retrieval + shutdown state.  Defaults: no name.  The
+// do_shutdown bits live here (base); subclass send()/recv() consult shut_read()/
+// shut_write() at entry.
+bool Socket::get_local_addr(SockAddrStorage* /*out*/) const {
+    return false;
+}
+bool Socket::get_peer_addr(SockAddrStorage* /*out*/) const {
+    return false;
+}
+void Socket::do_shutdown(int how) {
+    if (how == kShutRd || how == kShutRdwr) {
+        shut_ |= kShutRdBit;
+    }
+    if (how == kShutWr || how == kShutRdwr) {
+        shut_ |= kShutWrBit;
+    }
+}
+
 // ============================================================
 // SocketOps -- the InodeOps shim (one shared, stateless instance).
 // ============================================================

@@ -69,6 +69,21 @@ static_assert(sizeof(SockAddrUn) == 110, "sockaddr_un is family(2) + path[108]")
 /// bound (the syscall handler + tests loop path bytes up to this length).
 static constexpr uint32_t kUnixPathMax = 108;
 
+/// Generic socket-address storage (F-ECO batch 7b).  getsockname/getpeername
+/// ask the Socket to fill this with a COMPLETE sockaddr (sockaddr_in for AF_INET
+/// or sockaddr_un for AF_UNIX -- family is the first 2 bytes either way).  The
+/// syscall handler then copies sizeof(sockaddr_in)/sizeof(sockaddr_un) bytes to
+/// user space, picking the size from Socket::domain().  112 bytes holds the
+/// largest (sockaddr_un = 110).
+struct SockAddrStorage {
+    char bytes[112];  ///< a full sockaddr_in (16) or sockaddr_un (110)
+};
+
+/// shutdown(2) "how" values (Linux).
+constexpr int kShutRd   = 0;  ///< further recv -> EOF
+constexpr int kShutWr   = 1;  ///< further send -> EPIPE
+constexpr int kShutRdwr = 2;  ///< both
+
 class Socket;
 
 /// @brief Socket base -- the per-fd connection state + protocol-agnostic API.
@@ -119,12 +134,28 @@ public:
     virtual void                         close();
     ///@}
 
+    /// @name F-ECO batch 7b: address retrieval (getsockname/getpeername) +
+    /// shutdown.  Default get_*_addr return false (unnamed); subclasses with
+    /// bound/peer state override.  do_shutdown records direction bits that the
+    /// subclass send/recv check at entry (SHUT_WR -> send EPIPE, SHUT_RD -> EOF).
+    ///@{
+    virtual bool get_local_addr(SockAddrStorage* out) const;
+    virtual bool get_peer_addr(SockAddrStorage* out) const;
+    void         do_shutdown(int how);
+    bool         shut_read() const { return (shut_ & kShutRdBit) != 0; }
+    bool         shut_write() const { return (shut_ & kShutWrBit) != 0; }
+    ///@}
+
     int domain() const { return domain_; }  ///< AF_INET
     int type() const { return type_; }      ///< SOCK_STREAM / SOCK_DGRAM
 
 protected:
-    int domain_;  ///< AF_INET
-    int type_;    ///< SOCK_STREAM / SOCK_DGRAM
+    static constexpr uint8_t kShutRdBit = 1u;  ///< SHUT_RD recorded
+    static constexpr uint8_t kShutWrBit = 2u;  ///< SHUT_WR recorded
+
+    int     domain_;    ///< AF_INET
+    int     type_;      ///< SOCK_STREAM / SOCK_DGRAM
+    uint8_t shut_ = 0;  ///< shutdown direction bits (do_shutdown)
 };
 
 /// @brief InodeOps shim -- makes a socket fd indistinguishable from a pipe fd to

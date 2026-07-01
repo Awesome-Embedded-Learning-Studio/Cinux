@@ -91,6 +91,7 @@ enum class SyscallNr : uint64_t {
     SYS_recvfrom = 45,  ///< receive a message (blocking; addr-aware)
     SYS_bind     = 49,  ///< bind to a local address/port
     SYS_listen   = 50,  ///< mark passive (TCP)
+    SYS_shutdown    = 48,  ///< shut down send/recv/both (F-ECO batch 7b)
     SYS_getsockname = 51,  ///< retrieve local addr (F-ECO batch 7b)
     SYS_getpeername = 52,  ///< retrieve peer addr (F-ECO batch 7b)
     SYS_socketpair  = 53,  ///< create a pair of connected sockets (F-ECO batch 7b)

@@ -304,6 +304,10 @@ cinux::lib::ErrorOr<int64_t> UnixSocket::send(const uint8_t* buf, uint32_t len) 
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
+    // SHUT_WR (shutdown(SHUT_WR)) recorded: further sends -> EPIPE-shaped.
+    if (shut_write()) {
+        return cinux::lib::Error::BrokenPipe;
+    }
     UnixSocket* peer = nullptr;
     {
         auto g = lock_.irq_guard();
@@ -341,6 +345,10 @@ cinux::lib::ErrorOr<int64_t> UnixSocket::recv(uint8_t* buf, uint32_t len, Ipv4Ad
                                               uint16_t* /*out_port*/) {
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
+    }
+    // SHUT_RD (shutdown(SHUT_RD)) recorded: further recvs return 0 (EOF).
+    if (shut_read()) {
+        return static_cast<int64_t>(0);
     }
     for (;;) {
 #ifndef CINUX_HOST_TEST
@@ -409,6 +417,63 @@ void UnixSocket::close() {
     if (was_listening && bound_) {
         UnixRegistry::instance().unregister(path_);
         bound_ = false;
+    }
+}
+
+// ============================================================
+// F-ECO batch 7b: address retrieval + socketpair peer wiring
+// ============================================================
+
+bool UnixSocket::get_local_addr(SockAddrStorage* out) const {
+    if (out == nullptr) {
+        return false;
+    }
+    auto g = lock_.irq_guard();
+    if (!bound_) {
+        return false;  // unnamed / unbound -> getsockname returns ENOTCONN-shaped
+    }
+    SockAddrUn sa{};
+    sa.family = kAfUnix;
+    // path_ is already NUL-terminated and bounded at kUnixPathMax; copy all 108
+    // bytes so the user buffer matches a full sockaddr_un layout.
+    for (uint32_t i = 0; i < kUnixPathMax; ++i) {
+        sa.path[i] = path_[i];
+    }
+    __builtin_memcpy(out->bytes, &sa, sizeof(SockAddrUn));
+    return true;
+}
+
+bool UnixSocket::get_peer_addr(SockAddrStorage* out) const {
+    if (out == nullptr) {
+        return false;
+    }
+    auto g = lock_.irq_guard();
+    if (peer_ == nullptr) {
+        return false;  // not connected -> getpeername returns ENOTCONN-shaped
+    }
+    // The peer of a connect_path/socketpair end is anonymous (an unbound
+    // UnixSocket); Linux fills an empty-path sockaddr_un for such a peer.
+    SockAddrUn sa{};
+    sa.family = kAfUnix;
+    // path[] already zero-initialised (anonymous).
+    __builtin_memcpy(out->bytes, &sa, sizeof(SockAddrUn));
+    return true;
+}
+
+void UnixSocket::pair_with(UnixSocket* other) {
+    if (other == nullptr) {
+        return;
+    }
+    // Lock each socket on its own -- NEVER two at once (mirrors connect_path).
+    {
+        auto g     = lock_.irq_guard();
+        connected_ = true;
+        peer_      = other;
+    }
+    {
+        auto g            = other->lock_.irq_guard();
+        other->connected_ = true;
+        other->peer_      = this;
     }
 }
 

@@ -53,6 +53,10 @@
 #include "kernel/syscall/sys_accept4.hpp"   // F-ECO batch 7a
 #include "kernel/syscall/sys_getsockopt.hpp"  // F-ECO batch 7a
 #include "kernel/syscall/sys_setsockopt.hpp"  // F-ECO batch 7a
+#include "kernel/syscall/sys_getsockname.hpp"  // F-ECO batch 7b
+#include "kernel/syscall/sys_getpeername.hpp"  // F-ECO batch 7b
+#include "kernel/syscall/sys_shutdown.hpp"     // F-ECO batch 7b
+#include "kernel/syscall/sys_socketpair.hpp"   // F-ECO batch 7b
 // F-ECO batch 2: VFS metadata + dirent syscalls.
 #include "kernel/syscall/sys_chmod.hpp"
 #include "kernel/syscall/sys_chown.hpp"
@@ -175,6 +179,10 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_accept4, sys_accept4);      // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_setsockopt, sys_setsockopt);  // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_getsockopt, sys_getsockopt);  // F-ECO batch 7a
+    syscall_register(SyscallNr::SYS_shutdown, sys_shutdown);          // F-ECO batch 7b
+    syscall_register(SyscallNr::SYS_getsockname, sys_getsockname);    // F-ECO batch 7b
+    syscall_register(SyscallNr::SYS_getpeername, sys_getpeername);    // F-ECO batch 7b
+    syscall_register(SyscallNr::SYS_socketpair, sys_socketpair);      // F-ECO batch 7b
 
     // F-ECO batch 2: VFS metadata + dirent syscalls.
     syscall_register(SyscallNr::SYS_rename, sys_rename);
