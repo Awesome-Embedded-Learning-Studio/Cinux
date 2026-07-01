@@ -201,9 +201,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            build/musl/busybox-*
+            build/busybox-src/busybox-*
             build/musl/busybox
-          key: busybox-${{ runner.os }}-${{ hashFiles('tools/musl/build-busybox.sh') }}
+          key: busybox-${{ runner.os }}-${{ hashFiles('tools/musl/build-busybox.sh', 'tools/musl/busybox-1.36.0.config') }}
 
       - name: Build musl + BusyBox user binaries
         run: |

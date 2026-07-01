@@ -34,10 +34,11 @@ tools/musl/build-busybox.sh
 # -> build/musl/busybox
 ```
 
-The script pins BusyBox by `BUSYBOX_VER` (default `1.36.1`) and enables the
-applets used by `CINUX_BUSYBOX_SMOKE` plus the GUI `/bin/sh` path.  The ext2
-image builder installs the binary as `/bin/busybox`, `/bin/sh`, and hard links
-for common applets when `build/musl/busybox` exists.
+The script pins BusyBox by `BUSYBOX_VER` (default `1.36.0`) and copies
+`tools/musl/busybox-1.36.0.config`, the known-good config used for the F-ECO
+BusyBox applet work.  The ext2 image builder installs the binary as
+`/bin/busybox`, `/bin/sh`, and hard links for common applets when
+`build/musl/busybox` exists.
 
 CI keeps this as a dedicated `busybox-smoke` job: it builds musl + BusyBox,
 configures with `-DCINUX_BUSYBOX_SMOKE=ON`, then runs `run-kernel-test-all`.
