@@ -152,6 +152,8 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_getegid, sys_getegid);
     syscall_register(SyscallNr::SYS_setuid, sys_setuid);
     syscall_register(SyscallNr::SYS_setgid, sys_setgid);
+    syscall_register(SyscallNr::SYS_getgroups, sys_getgroups);  // F-ECO batch 8
+    syscall_register(SyscallNr::SYS_setgroups, sys_setgroups);  // F-ECO batch 8
 
     // F10-M1 batch 4: musl-required syscalls (startup, vector I/O, *at, time).
     syscall_register(SyscallNr::SYS_lseek, sys_lseek);

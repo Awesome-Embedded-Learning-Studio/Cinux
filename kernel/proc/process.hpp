@@ -298,6 +298,15 @@ struct Task {
     /** FPU/SSE state (512 bytes, 16-byte aligned for fxsave/fxrstor). */
     alignas(16) uint8_t fpu_state[512];
 
+    // F-ECO batch 8: supplementary groups (getgroups/setgroups -- `id`/`newgrp`).
+    // Placed AFTER fpu_state so the fpu_state offset (pinned by the static_assert
+    // below for the syscall/interrupt FXSAVE path) is unchanged.  A fixed-size
+    // table (freestanding: no <vector>); inherited across fork()/clone() via the
+    // whole-Task memcpy (same as uid/gid/umask).  32 is the classic NGROUPS_MAX.
+    static constexpr uint32_t kNGroupsMax = 32;       ///< NGROUPS_MAX
+    uint32_t                  groups[kNGroupsMax]{};  ///< supplementary group IDs
+    uint32_t                  ngroups{0};             ///< number of valid entries
+
     /** Per-process current working directory (refcounted; F3-M2 batch 3). */
     SharedCwd* cwd{nullptr};
 

@@ -106,6 +106,8 @@ enum class SyscallNr : uint64_t {
     SYS_chmod    = 90,    ///< change file permissions
     SYS_chown    = 92,    ///< change owner (uid/gid; 0xFFFFFFFF = unchanged)
     SYS_umask    = 95,    ///< set/get the file-creation mode mask
+    SYS_getgroups = 115,  ///< list supplementary groups (F-ECO batch 8)
+    SYS_setgroups = 116,  ///< set supplementary groups (root-only) (F-ECO batch 8)
     SYS_utimensat = 312,  ///< set access / modification times (touch)
 };
 

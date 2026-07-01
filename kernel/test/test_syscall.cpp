@@ -39,7 +39,8 @@
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/signal.hpp"
 #include "kernel/syscall/sys_clock_gettime.hpp"
-#include "kernel/syscall/sys_dup.hpp"  // F-ECO batch 4
+#include "kernel/syscall/sys_creds.hpp"  // do_getgroups/do_setgroups_kernel (F-ECO batch 8)
+#include "kernel/syscall/sys_dup.hpp"    // F-ECO batch 4
 #include "kernel/syscall/sys_exit.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"      // F-ECO batch 4
 #include "kernel/syscall/sys_getrusage.hpp"  // F-ECO batch 5
@@ -715,6 +716,48 @@ void test_sys_getrusage_bad_who() {
 }  // namespace test_feco_b5
 
 // ============================================================
+// F-ECO batch 8: getgroups / setgroups (supplementary groups)
+// ============================================================
+
+namespace test_feco_b8 {
+
+// do_*_kernel take an explicit Task* (the test kernel's boot thread has
+// Scheduler::current()==null), so a stack Task exercises the getgroups/setgroups
+// logic directly.  Default Task is euid==0 (root) + ngroups==0.
+
+void test_getgroups_count_and_array() {
+    cinux::proc::Task t;  // root, no groups
+    const uint32_t    g[3] = {10, 20, 30};
+    TEST_ASSERT_EQ(cinux::syscall::do_setgroups_kernel(&t, g, 3), 0);
+    // Count query (nullptr out / cap 0).
+    TEST_ASSERT_EQ(cinux::syscall::do_getgroups_kernel(&t, nullptr, 0), 3);
+    // Fill a kernel buffer.
+    uint32_t buf[32] = {0};
+    TEST_ASSERT_EQ(cinux::syscall::do_getgroups_kernel(&t, buf, 32), 3);
+    TEST_ASSERT_EQ(buf[0], 10u);
+    TEST_ASSERT_EQ(buf[1], 20u);
+    TEST_ASSERT_EQ(buf[2], 30u);
+    // Buffer too small -> -EINVAL.
+    TEST_ASSERT_EQ(cinux::syscall::do_getgroups_kernel(&t, buf, 2), -cinux::kEinval);
+}
+
+void test_setgroups_too_many() {
+    cinux::proc::Task t;
+    uint32_t          g[2] = {0};
+    // count > NGROUPS_MAX (32) -> -EINVAL (root, so passes the perm check first).
+    TEST_ASSERT_EQ(cinux::syscall::do_setgroups_kernel(&t, g, 99), -cinux::kEinval);
+}
+
+void test_setgroups_nonroot_eperm() {
+    cinux::proc::Task t;
+    t.euid        = 1;  // non-root
+    uint32_t g[1] = {5};
+    TEST_ASSERT_EQ(cinux::syscall::do_setgroups_kernel(&t, g, 1), -cinux::kEperm);
+}
+
+}  // namespace test_feco_b8
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -784,6 +827,11 @@ extern "C" void run_syscall_tests() {
     RUN_TEST(test_feco_b5::test_sys_sysinfo_bad_ptr);
     RUN_TEST(test_feco_b5::test_sys_getrusage_zeros);
     RUN_TEST(test_feco_b5::test_sys_getrusage_bad_who);
+
+    // F-ECO batch 8: getgroups / setgroups (supplementary groups).
+    RUN_TEST(test_feco_b8::test_getgroups_count_and_array);
+    RUN_TEST(test_feco_b8::test_setgroups_too_many);
+    RUN_TEST(test_feco_b8::test_setgroups_nonroot_eperm);
 
     TEST_SUMMARY();
 }
