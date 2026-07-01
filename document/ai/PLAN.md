@@ -2,6 +2,14 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F-ECO 批3 + 批4（nanosleep + dup/dup2/fcntl）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b3-b4`，从集成线 `9ef98e0`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`3be9859`+`b271439`）零冲突，两 leg 1047/0）
+
+> busybox 试金石第三、四刀的**内核件**：批3 `sleep`（nanosleep 35）+ 批4 `sh`+管道+重定向质变点（dup 32 / dup2 33 / fcntl 72）。busybox applet 端到端负载验收留 CI build。
+> **批3 nanosleep**：`sys_nanosleep`/`do_nanosleep_kernel` 复用 clock_gettime 的 HPET monotonic（PIT 兜底）；`while(now<deadline) yield()`——**不 sti/hlt**（sti-in-syscall→#DF，yield 经 Task::ctx 安全）、**不 IRQ wake**（HPET 周期中断是 F5-M4 follow-up，现 poll+yield 正确不高效）；信号 -EINTR 不做（睡满，rem 清零）。do_ 内核变体供测试直调（is_user_vaddr 拒内核栈地址，sys_ 在测试内核过不了 copy_from_user）。
+> **批4 dup/dup2/fcntl**：FDTable +dup/dup2（每次复制 = new File 独立描述，拷 inode+offset+flags+cloexec——hobby 简化避 File 引用计数；新 fd 达同 inode，pipe/重定向够用；Linux 共享描述符留 follow-up）；File +cloexec；sys_fcntl 子集 F_DUPFD/F_GETFD/F_SETFD/F_GETFL（F_SETFL/O_NONBLOCK 运行时改留 follow-up）。
+> **机制测试防假绿（10 测）**：nanosleep duration(HPET delta≥5ms)+zero+bad-nsec；dup inode 共享+byte round-trip（InodeOps 内核缓冲直驱）+ dup2 redirect round-trip(fd42→pipe)+ dup2 same-fd no-op + fcntl cloexec round-trip + F_DUPFD + F_GETFL + bad-fd。
+> **GOTCHA（测间 fd 表污染）**：第一轮批4 测全 PASS 但 test_vfs_close_invalid_fd 红——测试内核 current_fd_table() 全 suite 共享，批4 dup2 占了 fd42 没清 → 后续 close(42) 返 0≠-1。修法：每测结束 cleanup_fds() close 全部创建的 fd。启示：**ring0 测共享全局 fd 表，凡开 fd 的测须收尾 close**。详见 [note](../notes/2026-07-01-f-eco-b3-b4-nanosleep-dup-fcntl.md)。push/PR 归用户。
+
 ## ✅ F8-M3 AF_UNIX socket — 收官 2026-07-01（外包 worktree `feat/outsource-f8-unix-socket`，从集成线 `47573bc`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls` 零冲突，两 leg 1037/0）
 
 > F8 IPC 第三里程碑（M1 Pipe + M2 FIFO 已在主线待 push）。AF_UNIX socket 收进 F7-M6 的 **Socket=InodeOps 适配器**——socket fd 仍是 `File→Inode→SocketOps`，`sys_read/write/close` 零改。
