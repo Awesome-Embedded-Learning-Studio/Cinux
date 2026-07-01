@@ -95,7 +95,7 @@ void Terminal::on_key(KeyEvent& ev) {
 
     // PTY master connected: type into the terminal.  master_write feeds the
     // slave's TTY line discipline, which echoes the char back onto the master
-    // read side + cooks the line for the
+    // read side (poll_output picks it up next pump) + cooks the line for the
     // shell.  No local echo here -- the PTY's TTY does the echo (a real
     // terminal model), so busybox ash sees isatty(slave)==true + interactive mode
     // + musl line-buffers stdout (output flushes per line, not stuck in stdio).
@@ -105,9 +105,7 @@ void Terminal::on_key(KeyEvent& ev) {
             ch = '\n';
         }
         auto wr = master_inode_->ops->write(master_inode_, 0, &ch, 1);
-        if (wr.ok() && *wr > 0 && poll_output()) {
-            content_dirty_ = true;
-        }
+        (void)wr;  // echo arrives via poll_output (master_read); no local display
         return;
     }
 
