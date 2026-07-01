@@ -2,6 +2,13 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F-ECO 批2（VFS metadata + dirent 8 syscall）— 收官 2026-07-01（分支 `feat/f-eco-b2-vfs-syscalls`，从 main `470e9c8`，两 leg 1033/0）
+
+> busybox 试金石第二刀（[todo f-eco/00-busybox-touchstone](../todo/f-eco/00-busybox-touchstone.md) 批2）：为 `cp/mv/rm/touch/ln/mkdir/chmod/chown` 普及 8 个 Linux syscall —— `rename`(82)/`symlink`(88)/`link`(86)/`readlink`(89)/`chmod`(90)/`chown`(92)/`umask`(95)/`utimensat`(312)。
+> **严密分身并行（用户决策，对治"prompt 不全→分身改乱"）**：阶段0 主控独占铺公共契约（`InodeOps` 7 default virtual + Ext2 方法/override 声明 + ext2 NotImplemented 桩 + 8 完整 sys handler 走 lookup→派发 + syscall 号/注册/CMake）；阶段1 两分身填 ext2 方法体（块A 独占 `ext2_common.cpp` setattr+readlink / 块B 独占 `ext2_directory.cpp` symlink+link+rename，零文件交叉）。先读全签名模式再铺契约；分身 prompt 注入完整契约 + Ext2 原语清单 + 严格单文件边界 + 禁碰公共头 + 不跑 cmake（主控统一编译）。
+> **机制测试防假绿（价值实证）**：`run_syscall_ext2_tests` 加 6 测（chmod/chown/utimensat/symlink+readlink/link/rename 验语义）抓出两类真 bug——① stat 读 inode cache 不读盘，setattr 写盘须 `invalidate_cached_inode`；② `populate_vfs_inode` 不认 `S_IFLNK` → 符号链接 ops=nullptr → readlink -EIO。分身编绿 + 基线零回归，但 stat 假失败——"绿≠对"。修后两 leg 1033/0（1027+6）。
+> **follow-up**：busybox -O2 真实测（本地无 build，留 CI）/ rename overwrite + 目录 nlink / umask 应用到 create / symlink follow / chown 16 位 / utimensat nsec+wall-clock。详见 [note](../notes/2026-07-01-f-eco-b2-vfs-syscalls.md)。push/PR 归用户。
+
 ## ✅ F7-M6 Socket API 收官（BSD socket 系统调用 / Socket=InodeOps 适配器）— 2026-06-30（worktree `worktree-f7-m6-socket`，从干净 main `f1f29aa`，两 leg 1027/0）
 
 > Feature 域 F7 最后一里程碑。接 F7-M5 TCP ✅（已合 main PR#53）+ F7-M4 UDP ✅（PR#47）。网络线走到「可用」：用户态程序能用 socket()/connect()/send()/recv() 收发数据。
