@@ -99,6 +99,7 @@ void run_gui_dirty_tests();
 void run_pipe_tests();
 void run_sys_pipe_tests();
 void run_fifo_tests();
+void run_poll_tests();
 void run_terminal_shell_tests();
 void run_fork_exec_tests();
 void run_process_group_tests();
@@ -745,6 +746,10 @@ extern "C" void kernel_main() {
     run_futex_tests();
     run_sync_concurrent_tests();
     run_concurrent_ring_buffer_tests();
+    // F8-M5 poll/select: runs late because its wait-mechanism test builds a Task
+    // via TaskBuilder (consuming a global tid); the tid-sensitive scheduler tests
+    // above (test_build_basic_task expects tid==1) must run first (GOTCHA #22).
+    run_poll_tests();
     run_klog_tests();
     run_sys_dmesg_tests();
     run_user_ptr_tests();

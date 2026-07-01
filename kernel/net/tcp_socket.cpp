@@ -71,6 +71,26 @@ void wake_all(Task*& head) {
         Scheduler::unblock(t);
     }
 }
+
+/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
+void wait_remove(Task*& head, Task* t) {
+    if (head == nullptr || t == nullptr) {
+        return;
+    }
+    if (head == t) {
+        head         = t->wait_next;
+        t->wait_next = nullptr;
+        return;
+    }
+    Task* prev = head;
+    while (prev->wait_next != nullptr && prev->wait_next != t) {
+        prev = prev->wait_next;
+    }
+    if (prev->wait_next == t) {
+        prev->wait_next = t->wait_next;
+        t->wait_next    = nullptr;
+    }
+}
 }  // namespace
 #endif  // CINUX_HOST_TEST
 
@@ -305,6 +325,52 @@ void TcpSocket::close() {
 #ifndef CINUX_HOST_TEST
     wake_all(recv_waiters_);
     wake_all(accept_waiters_);
+#endif
+}
+
+uint32_t TcpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+    auto g = lock_.irq_guard();
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    uint32_t mask = 0;
+    if (listening_) {
+        // Server: readable when a completed connection is pending accept().
+        if (accept_count_ > 0) {
+            mask |= cinux::fs::kPollIn;
+        }
+#ifndef CINUX_HOST_TEST
+        if (waiter != nullptr) {
+            wait_enqueue(accept_waiters_, waiter);
+        }
+    } else if (connected_) {
+        // Client: readable while bytes are buffered; POLLHUP once the peer closes.
+        if (rx_.size() > 0) {
+            mask |= cinux::fs::kPollIn;
+        }
+        if (peer_closed_) {
+            mask |= cinux::fs::kPollHup;
+        }
+        mask |= cinux::fs::kPollOut;  // connected -> writable
+        if (waiter != nullptr) {
+            wait_enqueue(recv_waiters_, waiter);
+        }
+    }
+#else
+        (void)waiter;
+#endif
+    return mask;
+}
+
+void TcpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    // A poller parks on at most one of the two queues (per listening/connected
+    // state); removing from both is a harmless no-op on the empty one.
+    wait_remove(recv_waiters_, waiter);
+    wait_remove(accept_waiters_, waiter);
+#else
+        (void)waiter;
 #endif
 }
 

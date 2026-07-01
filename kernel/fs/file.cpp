@@ -89,17 +89,28 @@ int FDTable::alloc(Inode* inode, OpenFlags flags) {
 // ============================================================
 
 int FDTable::close(int fd) {
-    auto g = lock_.guard();
-    (void)g;
+    Inode* inode = nullptr;
+    {
+        auto g = lock_.guard();
+        (void)g;
 
-    if (fd < 0 || fd >= static_cast<int>(FD_TABLE_SIZE)) {
-        return -1;
+        if (fd < 0 || fd >= static_cast<int>(FD_TABLE_SIZE)) {
+            return -1;
+        }
+        if (fds_[fd] == nullptr) {
+            return -1;
+        }
+        // Snapshot the inode before freeing the File; release() runs below,
+        // OUTSIDE lock_ (driver work like a socket FIN should not block the
+        // fd table).  Default release() is a no-op, so regular files / pipes
+        // / FIFOs are unchanged; only fd types that override it act.
+        inode = fds_[fd]->inode;
+        delete fds_[fd];
+        fds_[fd] = nullptr;
     }
-    if (fds_[fd] == nullptr) {
-        return -1;
+    if (inode != nullptr && inode->ops != nullptr) {
+        inode->ops->release(inode);
     }
-    delete fds_[fd];
-    fds_[fd] = nullptr;
     return 0;
 }
 

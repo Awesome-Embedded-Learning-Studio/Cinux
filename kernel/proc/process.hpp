@@ -162,6 +162,14 @@ struct Task {
     /** Current lifecycle state. */
     TaskState state;
 
+    /** Whether this task is currently on its scheduling class's run queue.
+     *  Guarded by the run-queue lock.  Makes RoundRobin::enqueue idempotent: a
+     *  task already queued is not re-added, so the classic prepare_to_wait lost-
+     *  wakeup race (a producer unblocks a Blocked task -> Ready + enqueued, then
+     *  schedule() re-enqueues the same Ready prev) cannot leave a duplicate entry
+     *  in the queue (F8-M5). */
+    bool on_runq{false};
+
     /** Unique task identifier (monotonically increasing). */
     uint64_t tid;
 

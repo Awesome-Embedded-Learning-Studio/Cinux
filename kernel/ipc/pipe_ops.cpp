@@ -37,6 +37,20 @@ cinux::lib::ErrorOr<int64_t> PipeReadOps::read(const cinux::fs::Inode*, uint64_t
     return cinux::lib::Error::IOError;  // n == -1: invalid argument
 }
 
+uint32_t PipeReadOps::poll_events(const cinux::fs::Inode*, cinux::proc::Task* waiter,
+                                  bool* registered) {
+    // The poller is registered iff it asked to be parked (waiter != null); a
+    // pipe is a blocking fd type, so poll may sleep on it.
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    return pipe_->poll_read_events(waiter);
+}
+
+void PipeReadOps::poll_detach_waiter(const cinux::fs::Inode*, cinux::proc::Task* waiter) {
+    pipe_->remove_read_waiter(waiter);
+}
+
 // ============================================================
 // PipeWriteOps
 // ============================================================
@@ -62,6 +76,18 @@ cinux::lib::ErrorOr<int64_t> PipeWriteOps::write(cinux::fs::Inode*, uint64_t, co
     // (which maps to -EIO and never triggers SIGPIPE).
     return pipe_->reader_alive() ? cinux::lib::Error::InvalidArgument
                                  : cinux::lib::Error::BrokenPipe;
+}
+
+uint32_t PipeWriteOps::poll_events(const cinux::fs::Inode*, cinux::proc::Task* waiter,
+                                   bool* registered) {
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    return pipe_->poll_write_events(waiter);
+}
+
+void PipeWriteOps::poll_detach_waiter(const cinux::fs::Inode*, cinux::proc::Task* waiter) {
+    pipe_->remove_write_waiter(waiter);
 }
 
 }  // namespace cinux::ipc

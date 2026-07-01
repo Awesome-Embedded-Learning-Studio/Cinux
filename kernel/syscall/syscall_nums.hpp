@@ -40,6 +40,7 @@ enum class SyscallNr : uint64_t {
     SYS_readv          = 19,  ///< read into multiple buffers (musl __stdio_read)
     SYS_writev         = 20,  ///< write from multiple buffers (musl __stdio_write)
     SYS_pipe           = 22,
+    SYS_select         = 23,  ///< select (F8-M5 real poll/select)
     SYS_yield          = 24,  ///< sched_yield
     SYS_dup            = 32,  ///< duplicate a file descriptor (F-ECO batch 4)
     SYS_dup2           = 33,  ///< duplicate to a specific fd (F-ECO batch 4)

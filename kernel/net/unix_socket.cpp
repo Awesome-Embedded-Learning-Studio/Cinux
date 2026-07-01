@@ -67,6 +67,26 @@ void wake_all(Task*& head) {
         Scheduler::unblock(t);
     }
 }
+
+/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
+void wait_remove(Task*& head, Task* t) {
+    if (head == nullptr || t == nullptr) {
+        return;
+    }
+    if (head == t) {
+        head         = t->wait_next;
+        t->wait_next = nullptr;
+        return;
+    }
+    Task* prev = head;
+    while (prev->wait_next != nullptr && prev->wait_next != t) {
+        prev = prev->wait_next;
+    }
+    if (prev->wait_next == t) {
+        prev->wait_next = t->wait_next;
+        t->wait_next    = nullptr;
+    }
+}
 }  // namespace
 #endif  // CINUX_HOST_TEST
 
@@ -475,6 +495,52 @@ void UnixSocket::pair_with(UnixSocket* other) {
         other->connected_ = true;
         other->peer_      = this;
     }
+}
+
+// ============================================================
+// F8-M5 poll readiness (mirrors TcpSocket)
+// ============================================================
+
+uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+    auto g = lock_.irq_guard();
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    uint32_t mask = 0;
+    if (listening_) {
+        if (accept_count_ > 0) {
+            mask |= cinux::fs::kPollIn;  // a connection is pending accept()
+        }
+#ifndef CINUX_HOST_TEST
+        if (waiter != nullptr) {
+            wait_enqueue(accept_waiters_, waiter);
+        }
+    } else if (connected_) {
+        if (rx_.size() > 0) {
+            mask |= cinux::fs::kPollIn;  // buffered bytes -> readable
+        }
+        if (peer_eof_) {
+            mask |= cinux::fs::kPollHup;  // peer closed -> EOF once drained
+        }
+        mask |= cinux::fs::kPollOut;  // connected -> writable
+        if (waiter != nullptr) {
+            wait_enqueue(recv_waiters_, waiter);
+        }
+    }
+#else
+        (void)waiter;
+#endif
+    return mask;
+}
+
+void UnixSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    wait_remove(recv_waiters_, waiter);
+    wait_remove(accept_waiters_, waiter);
+#else
+        (void)waiter;
+#endif
 }
 
 }  // namespace cinux::net

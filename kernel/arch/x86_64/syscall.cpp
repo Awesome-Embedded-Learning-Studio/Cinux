@@ -67,6 +67,7 @@
 #include "kernel/syscall/sys_readlink.hpp"
 #include "kernel/syscall/sys_rename.hpp"
 #include "kernel/syscall/sys_rmdir.hpp"
+#include "kernel/syscall/sys_select.hpp"  // F8-M5 real poll/select
 #include "kernel/syscall/sys_set_tid_address.hpp"
 #include "kernel/syscall/sys_signal.hpp"
 #include "kernel/syscall/sys_stat.hpp"
@@ -154,7 +155,8 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_getegid, sys_getegid);
     syscall_register(SyscallNr::SYS_setuid, sys_setuid);
     syscall_register(SyscallNr::SYS_setgid, sys_setgid);
-    syscall_register(SyscallNr::SYS_poll, sys_poll);            // F-ECO busybox sh smoke
+    syscall_register(SyscallNr::SYS_poll, sys_poll);            // F8-M5 real poll
+    syscall_register(SyscallNr::SYS_select, sys_select);        // F8-M5 real select
     syscall_register(SyscallNr::SYS_uname, sys_uname);          // F-ECO busybox sh smoke
     syscall_register(SyscallNr::SYS_getgroups, sys_getgroups);  // F-ECO batch 8
     syscall_register(SyscallNr::SYS_setgroups, sys_setgroups);  // F-ECO batch 8

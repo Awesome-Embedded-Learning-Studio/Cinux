@@ -67,4 +67,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_getpeername.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_shutdown.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_socketpair.cpp
+    # F8-M5: real poll/select (shared do_poll_core engine).
+    ${CMAKE_CURRENT_SOURCE_DIR}/poll_core.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_select.cpp
 )

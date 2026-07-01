@@ -52,6 +52,30 @@ Task* wait_dequeue(Task*& head) {
     return t;
 }
 
+/// Unlink @p t from the wait queue (F8-M5 poll).  A poller registers on a pipe's
+/// queue, then -- after it is woken by ANY fd -- detaches from every queue it
+/// touched so it is not left linked here (a stale link would spuriously wake a
+/// later, unrelated block, or dangle after the task dies).  No-op if @p t is not
+/// queued.  Caller holds lock_.
+void wait_remove(Task*& head, Task* t) {
+    if (head == nullptr || t == nullptr) {
+        return;
+    }
+    if (head == t) {
+        head         = t->wait_next;
+        t->wait_next = nullptr;
+        return;
+    }
+    Task* prev = head;
+    while (prev->wait_next != nullptr && prev->wait_next != t) {
+        prev = prev->wait_next;
+    }
+    if (prev->wait_next == t) {
+        prev->wait_next = t->wait_next;
+        t->wait_next    = nullptr;
+    }
+}
+
 /// Wake one waiter (FIFO head).  Called under lock_; this is safe because,
 /// unlike a mutex, the pipe hands no ownership to the woken task -- it simply
 /// re-acquires the pipe lock fresh when the scheduler runs it (after we drop
@@ -265,6 +289,74 @@ bool Pipe::is_full() const {
 
 uint32_t Pipe::available() const {
     return static_cast<uint32_t>(buf_.size());
+}
+
+// ============================================================
+// poll(2) / select(2) readiness (F8-M5)
+// ============================================================
+
+uint32_t Pipe::poll_read_events(cinux::proc::Task* waiter) {
+    auto     g    = lock_.irq_guard();
+    uint32_t mask = 0;
+    // POLLIN whenever bytes are buffered; POLLHUP once the writer closes (Linux
+    // reports both when unread data remains after close).
+    if (!buf_.empty()) {
+        mask |= cinux::fs::kPollIn;
+    }
+    if (!writer_open_) {
+        mask |= cinux::fs::kPollHup;
+    }
+#ifndef CINUX_HOST_TEST
+    // Register the poller so a later write / close wakes it.  Done under lock_
+    // (and IRQs off) atomically with the readiness check -- the prepare_to_wait
+    // contract: a write that lands in the window is either seen as POLLIN here
+    // or finds the waiter already queued and wakes it, never lost.
+    if (waiter != nullptr) {
+        wait_enqueue(read_waiters_, waiter);
+    }
+#else
+    (void)waiter;  // host: no scheduler / wait queues -- readiness only
+#endif
+    return mask;
+}
+
+uint32_t Pipe::poll_write_events(cinux::proc::Task* waiter) {
+    auto     g    = lock_.irq_guard();
+    uint32_t mask = 0;
+    // POLLOUT while there is space; POLLERR once the reader closes (a further
+    // write would SIGPIPE).  A closed reader is an error, not a hangup.
+    if (!buf_.full()) {
+        mask |= cinux::fs::kPollOut;
+    }
+    if (!reader_open_) {
+        mask |= cinux::fs::kPollErr;
+    }
+#ifndef CINUX_HOST_TEST
+    if (waiter != nullptr) {
+        wait_enqueue(write_waiters_, waiter);
+    }
+#else
+    (void)waiter;
+#endif
+    return mask;
+}
+
+void Pipe::remove_read_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    wait_remove(read_waiters_, waiter);
+#else
+    (void)waiter;
+#endif
+}
+
+void Pipe::remove_write_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    wait_remove(write_waiters_, waiter);
+#else
+    (void)waiter;
+#endif
 }
 
 // ============================================================
