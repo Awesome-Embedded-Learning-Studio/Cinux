@@ -47,6 +47,7 @@
 #include "kernel/syscall/sys_mkdir.hpp"
 #include "kernel/syscall/sys_mknod.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
+#include "kernel/syscall/sys_mount.hpp"      // F6-M1
 #include "kernel/syscall/sys_nanosleep.hpp"  // F-ECO batch 3
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
@@ -54,11 +55,12 @@
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
 #include "kernel/syscall/sys_setsockopt.hpp"  // F-ECO batch 7a
-#include "kernel/syscall/sys_shm.hpp"        // F8-M4
+#include "kernel/syscall/sys_shm.hpp"         // F8-M4
 #include "kernel/syscall/sys_shutdown.hpp"    // F-ECO batch 7b
 #include "kernel/syscall/sys_socket.hpp"
 #include "kernel/syscall/sys_socketpair.hpp"  // F-ECO batch 7b
 #include "kernel/syscall/sys_sysinfo.hpp"     // F-ECO batch 5
+#include "kernel/syscall/sys_umount2.hpp"     // F6-M1
 #include "kernel/syscall/sys_uname.hpp"       // F-ECO busybox sh smoke
 // F-ECO batch 2: VFS metadata + dirent syscalls.
 #include "kernel/syscall/sys_chmod.hpp"
@@ -206,6 +208,10 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_shmat, sys_shmat);
     syscall_register(SyscallNr::SYS_shmctl, sys_shmctl);
     syscall_register(SyscallNr::SYS_shmdt, sys_shmdt);
+
+    // F6-M1: mount / umount2 (runtime fstype-driven; boot /tmp uses tmpfs::init).
+    syscall_register(SyscallNr::SYS_mount, sys_mount);
+    syscall_register(SyscallNr::SYS_umount2, sys_umount2);
 }
 
 }  // anonymous namespace

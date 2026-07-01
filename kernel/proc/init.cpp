@@ -9,6 +9,7 @@
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
+#include "kernel/fs/tmpfs/tmpfs.hpp"  // F6-M4: tmpfs::init (/tmp)
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -52,6 +53,10 @@ void kernel_init_thread() {
     // ProcFS: /proc process introspection -- root lists live PIDs,
     // /proc/<pid>/{stat,cmdline} pseudo-files (F6-M2).
     cinux::fs::procfs::init();
+
+    // TmpFS: /tmp writable in-memory filesystem -- where GCC / cc1 / as / ld
+    // write intermediate *.o / *.s during a compile (F6-M4, GCC self-host).
+    cinux::fs::tmpfs::init();
 
     // Bring up userspace.  GUI build: desktop + gui_worker thread
     // (kernel/gui/desktop_launch.cpp).  Non-GUI build: fork + exec /bin/sh

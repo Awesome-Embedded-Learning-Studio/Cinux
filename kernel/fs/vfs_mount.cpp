@@ -41,7 +41,7 @@ void vfs_mount_init() {
 // Add
 // ============================================================
 
-bool vfs_mount_add(const char* path, FileSystem* fs) {
+bool vfs_mount_add(const char* path, FileSystem* fs, bool owned) {
     if (path == nullptr || fs == nullptr) {
         return false;
     }
@@ -64,6 +64,7 @@ bool vfs_mount_add(const char* path, FileSystem* fs) {
             memcpy(g_mount_table[i].path, path, len + 1);
             g_mount_table[i].fs     = fs;
             g_mount_table[i].in_use = true;
+            g_mount_table[i].owned  = owned;
             return true;
         }
     }
@@ -86,7 +87,17 @@ bool vfs_mount_remove(const char* path) {
 
     for (uint32_t i = 0; i < MOUNT_TABLE_SIZE; ++i) {
         if (g_mount_table[i].in_use && strncmp(g_mount_table[i].path, path, MOUNT_PATH_MAX) == 0) {
+            // Ownership-aware teardown: a sys_mount-created backend (owned=true)
+            // is heap-allocated and has no other owner, so delete it here.  A
+            // boot/static mount (owned=false) wires a static object and is left
+            // alone -- its lifetime exceeds the table.  The TmpFs / ProcFs / DevFs
+            // destructors never touch g_mount_lock, so this is safe under it.
+            if (g_mount_table[i].owned) {
+                delete g_mount_table[i].fs;
+            }
             g_mount_table[i].in_use = false;
+            g_mount_table[i].fs     = nullptr;
+            g_mount_table[i].owned  = false;
             return true;
         }
     }

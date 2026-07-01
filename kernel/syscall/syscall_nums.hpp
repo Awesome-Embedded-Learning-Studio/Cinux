@@ -66,6 +66,8 @@ enum class SyscallNr : uint64_t {
     SYS_rmdir           = 84,
     SYS_creat           = 85,
     SYS_mknod           = 133,  ///< create a filesystem node (FIFO via S_IFIFO; F8-M2)
+    SYS_mount           = 165,  ///< mount a filesystem (F6-M1: fstype-driven, tmpfs)
+    SYS_umount2         = 166,  ///< unmount a filesystem (F6-M1: path-based, frees if owned)
     SYS_uname           = 63,   ///< system identity (F-ECO busybox sh smoke)
     SYS_unlink          = 87,
     SYS_getuid          = 102,  ///< get real user id (F9 M3)

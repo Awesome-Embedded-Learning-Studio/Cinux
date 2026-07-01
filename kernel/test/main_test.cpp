@@ -75,6 +75,7 @@ void run_devfs_tests();
 void run_pty_device_tests();
 void run_procfs_tests();
 void run_tmpfs_tests();
+void run_mount_tests();
 void run_ahci_write_tests();
 void run_ahci_block_device_tests();
 void run_ext2_allocator_tests();
@@ -841,6 +842,10 @@ extern "C" void kernel_main() {
     // TmpFs tests (F6-M4): in-memory FS -- create/write/read round-trip, mkdir,
     // nested lookup, readdir, stat, unlink, growth past 4 KiB.
     run_tmpfs_tests();
+
+    // mount/umount2 tests (F6-M1): tmpfs-via-sys_mount, resolve, umount detach,
+    // unknown fstype, remount-after-umount (owned backend freed).
+    run_mount_tests();
 
     // PTY device tests (F10-M3 Phase 2): alloc, master<->slave round-trip,
     // echo, termios ioctl, TIOCGPTN.

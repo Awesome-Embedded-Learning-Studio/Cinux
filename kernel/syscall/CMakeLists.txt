@@ -26,6 +26,8 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_dmesg.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_mmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_shm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_mount.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_umount2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_brk.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_signal.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_futex.cpp
