@@ -2,6 +2,14 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F-ECO 批7（socket syscall 全对齐）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b7-socket`，从集成线 `9683e38`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`ec5ced6` 批7a + `2d2c9cc` 批7b）零冲突，两 leg 1059/0）
+
+> busybox 试金石第七刀：socket(2) 族 14 个 syscall 全对齐（F7-M6 的 7 + 批7a 的 accept4/setsockopt/getsockopt + 批7b 的 getsockname/getpeername/shutdown/socketpair）。applet 端到端验收留 CI。
+> **批7a（主控独占，handler-only）**：共享 helper 重构（socket_from_fd/install_socket_fd 移出匿名 ns + 提取 do_accept，sys_accept 退化、accept4 复用）；setsockopt 全选项 no-op accept；getsockopt SO_TYPE/SO_ERROR；accept4 SOCK_CLOEXEC→File::cloexec。
+> **批7b（主控铺契约 + 3 分身并发，用户决策对治串行手撸）**：socket.hpp +SockAddrStorage +get_local/peer_addr 虚 +do_shutdown/shut_；3 分身零文件交叉填 Unix（+pair_with+socketpair）/ Udp / Tcp 子类 override + send/recv shutdown 检查；主控合并**一次编绿**。getsockname/getpeername 按 domain 拷 sockaddr；shutdown 记方向位子类入口检查。
+> **机制测 8**：setsockopt/getsockopt/accept4-cloexec（批7a）+ getsockname path 精确匹配/getpeer_addr/shutdown 双向/socketpair round-trip（批7b）。
+> **教训**：识别零文件交叉的并行面就并发分身（[[parallel-agents-rigorous-methodology]]），别手撸——批7b 三子类并发一次编绿。follow-up：socket-option 存储（setsockopt 真语义）/ SOCK_NONBLOCK / shutdown 对端传播 / DGRAM socketpair。详见 [note](../notes/2026-07-01-f-eco-b7-socket-alignment.md)。push/PR 归用户。
+
 ## ✅ F-ECO 批5（sysinfo + getrusage）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b5`，从集成线 `e2a7d70`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`b4fa398`）零冲突，两 leg 1051/0）
 
 > busybox 试金石第五刀内核件：`ps`/`free`/`uptime`/`top`/`time`。ps 走已有 ProcFS；free/uptime 用 sysinfo；time/top 用 getrusage。applet 端到端验收留 CI。
