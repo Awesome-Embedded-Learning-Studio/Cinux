@@ -276,6 +276,7 @@ add_executable(big_kernel_test
     test/test_pipe.cpp
     test/test_sys_pipe.cpp
     test/test_fifo.cpp
+    test/test_shm.cpp
     test/test_terminal_shell.cpp
     test/test_fork_exec.cpp
     test/test_multi_terminal.cpp

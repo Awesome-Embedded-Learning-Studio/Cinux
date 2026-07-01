@@ -41,6 +41,9 @@ enum class SyscallNr : uint64_t {
     SYS_writev         = 20,  ///< write from multiple buffers (musl __stdio_write)
     SYS_pipe           = 22,
     SYS_yield          = 24,  ///< sched_yield
+    SYS_shmget         = 29,  ///< get a shared memory segment (F8-M4)
+    SYS_shmat          = 30,  ///< attach a shared memory segment (F8-M4)
+    SYS_shmctl         = 31,  ///< shared memory control: IPC_STAT / IPC_RMID (F8-M4)
     SYS_dup            = 32,  ///< duplicate a file descriptor (F-ECO batch 4)
     SYS_dup2           = 33,  ///< duplicate to a specific fd (F-ECO batch 4)
     SYS_nanosleep      = 35,  ///< sleep for a duration (F-ECO batch 3)
@@ -54,6 +57,7 @@ enum class SyscallNr : uint64_t {
     SYS_exit           = 60,
     SYS_waitpid  = 61,  ///< Linux x86_64 slot 61 is wait4 (4-arg; musl waitpid passes rusage=NULL)
     SYS_kill     = 62,  ///< send a signal to a process (F3-M1)
+    SYS_shmdt    = 67,  ///< detach a shared memory segment (F8-M4)
     SYS_getdents = 78,
     SYS_getdents64      = 217,  ///< F-ECO batch 1: musl opendir/readdir use this (not legacy 78)
     SYS_getcwd          = 79,

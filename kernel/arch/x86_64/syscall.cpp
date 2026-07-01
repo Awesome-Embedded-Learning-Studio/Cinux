@@ -54,6 +54,7 @@
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
 #include "kernel/syscall/sys_setsockopt.hpp"  // F-ECO batch 7a
+#include "kernel/syscall/sys_shm.hpp"        // F8-M4
 #include "kernel/syscall/sys_shutdown.hpp"    // F-ECO batch 7b
 #include "kernel/syscall/sys_socket.hpp"
 #include "kernel/syscall/sys_socketpair.hpp"  // F-ECO batch 7b
@@ -199,6 +200,12 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_chown, sys_chown);
     syscall_register(SyscallNr::SYS_umask, sys_umask);
     syscall_register(SyscallNr::SYS_utimensat, sys_utimensat);
+
+    // F8-M4: SysV shared memory.
+    syscall_register(SyscallNr::SYS_shmget, sys_shmget);
+    syscall_register(SyscallNr::SYS_shmat, sys_shmat);
+    syscall_register(SyscallNr::SYS_shmctl, sys_shmctl);
+    syscall_register(SyscallNr::SYS_shmdt, sys_shmdt);
 }
 
 }  // anonymous namespace

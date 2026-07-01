@@ -99,6 +99,7 @@ void run_gui_dirty_tests();
 void run_pipe_tests();
 void run_sys_pipe_tests();
 void run_fifo_tests();
+void run_shm_tests();
 void run_terminal_shell_tests();
 void run_fork_exec_tests();
 void run_process_group_tests();
@@ -736,6 +737,7 @@ extern "C" void kernel_main() {
     run_tls_tests();
     run_page_cache_tests();
     run_file_mmap_tests();
+    run_shm_tests();
 
     // FO batch 4: memory diagnostics dump (all MM subsystems are up by here).
     run_memory_stats_tests();
