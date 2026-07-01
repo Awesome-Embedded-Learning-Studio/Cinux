@@ -6,7 +6,7 @@
 
 namespace cinux::debug {
 
-constexpr bool kEchoTrace = true;
+constexpr bool kEchoTrace = false;
 
 inline void trace_char(const char* tag, char ch) {
     if (!kEchoTrace) {
