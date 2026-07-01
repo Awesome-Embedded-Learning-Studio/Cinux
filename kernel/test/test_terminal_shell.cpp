@@ -4,6 +4,7 @@
  *
  * Test coverage:
  *   - Terminal set_stdin_pipe / set_stdout_pipe
+ *   - Terminal set_master immediate PTY echo drain
  *   - Terminal poll_output reads from stdout pipe and updates screen buffer
  *   - Terminal on_key writes to stdin pipe when connected
  *   - Pipe-backed fd 0/1 round-trip through FDTable + InodeOps
@@ -25,6 +26,7 @@
 
 #    include "boot/boot_info.h"
 #    include "kernel/drivers/canvas.hpp"
+#    include "kernel/drivers/tty/pty_device.hpp"
 #    include "kernel/drivers/video/font.hpp"
 #    include "kernel/drivers/video/framebuffer.hpp"
 #    include "kernel/fs/file.hpp"
@@ -333,7 +335,35 @@ void test_terminal_both_pipes_no_direct_echo() {
 }
 
 // ============================================================
-// 6. Close button / EOF propagation (Phase 6)
+// 6. PTY master immediate echo
+// ============================================================
+
+/// Verify PTY local echo is drained during on_key, not delayed until the next pump.
+void test_terminal_pty_key_echo_is_immediate() {
+    auto idx = cinux::drivers::pty_alloc();
+    TEST_ASSERT_TRUE(idx.ok());
+
+    auto* master = cinux::drivers::pty_master_inode(*idx);
+    TEST_ASSERT_NOT_NULL(master);
+
+    auto* term = new Terminal(0, 0);
+    term->set_master(master, *idx);
+
+    cinux::gui::KeyEvent ev;
+    ev.pressed = true;
+    ev.ascii   = 'L';
+    term->on_key(ev);
+
+    TEST_ASSERT_EQ(term->cell(0, 0).ch, 'L');
+    TEST_ASSERT_EQ(term->cursor_x(), 1u);
+    TEST_ASSERT_TRUE(term->consume_content_dirty());
+    TEST_ASSERT_FALSE(term->consume_content_dirty());
+
+    delete term;  // releases the PTY slot bound by set_master()
+}
+
+// ============================================================
+// 7. Close button / EOF propagation (Phase 6)
 // ============================================================
 
 /// Verify Terminal destructor closes stdin pipe write end (EOF to shell)
@@ -482,6 +512,7 @@ extern "C" void run_terminal_shell_tests() {
     RUN_TEST(test_terminal_shell_full_roundtrip);
     RUN_TEST(test_terminal_pipe_fd_table_binding);
     RUN_TEST(test_terminal_both_pipes_no_direct_echo);
+    RUN_TEST(test_terminal_pty_key_echo_is_immediate);
 
     // Phase 6: close button / EOF propagation
     RUN_TEST(test_terminal_destructor_closes_stdin_pipe);

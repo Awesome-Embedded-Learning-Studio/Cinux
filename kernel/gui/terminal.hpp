@@ -221,12 +221,11 @@ public:
     /**
      * @brief Consume the "content changed outside the stdout pipe" flag
      *
-     * on_key() with no stdin pipe mutates the screen buffer directly (process_char)
-     * instead of through the stdout pipe, so poll_output() does not signal it. This
-     * returns (and clears) a flag set on that path so the pump can invalidate the
-     * frame -- otherwise a direct key echo would never reach the screen under the
-     * §4c dirty-gated composite (the live desktop always wires pipes, so this only
-     * matters for a pipe-less / direct-echo terminal).
+     * Some input paths mutate the screen before the GUI pump's regular
+     * poll_output() pass: direct pipe-less input writes the buffer itself, and
+     * PTY input drains the slave TTY's echo immediately after master_write().
+     * This returns (and clears) that flag so the pump invalidates the frame
+     * under the §4c dirty-gated composite.
      *
      * @return true if content changed via a non-stdout path since the last call
      */
@@ -316,7 +315,7 @@ private:
     uint32_t     bg_             = 0x00000000;
     bool         cursor_visible_ = true;
 
-    /// Set when content mutates via a non-stdout path (on_key with no stdin pipe).
+    /// Set when content mutates outside the GUI pump's regular poll pass.
     /// The pump consumes it to invalidate the frame (§4c dirty-gating).
     bool                     content_dirty_ = false;
     cinux::drivers::PSFFont* font_          = nullptr;
