@@ -74,12 +74,16 @@ void run_ext2_tests();
 void run_devfs_tests();
 void run_pty_device_tests();
 void run_procfs_tests();
+void run_tmpfs_tests();
+void run_mount_tests();
+void run_access_tests();
 void run_ahci_write_tests();
 void run_ahci_block_device_tests();
 void run_ext2_allocator_tests();
 void run_ext2_ops_tests();
 void run_ext2_inode_ops_tests();
 void run_syscall_ext2_tests();
+void run_ext4_extents_tests();
 void run_shell_write_tests();
 void run_cwd_stat_tests();
 void run_shared_resources_tests();
@@ -99,6 +103,8 @@ void run_gui_dirty_tests();
 void run_pipe_tests();
 void run_sys_pipe_tests();
 void run_fifo_tests();
+void run_shm_tests();
+void run_poll_tests();
 void run_terminal_shell_tests();
 void run_fork_exec_tests();
 void run_process_group_tests();
@@ -736,6 +742,7 @@ extern "C" void kernel_main() {
     run_tls_tests();
     run_page_cache_tests();
     run_file_mmap_tests();
+    run_shm_tests();
 
     // FO batch 4: memory diagnostics dump (all MM subsystems are up by here).
     run_memory_stats_tests();
@@ -745,6 +752,10 @@ extern "C" void kernel_main() {
     run_futex_tests();
     run_sync_concurrent_tests();
     run_concurrent_ring_buffer_tests();
+    // F8-M5 poll/select: runs late because its wait-mechanism test builds a Task
+    // via TaskBuilder (consuming a global tid); the tid-sensitive scheduler tests
+    // above (test_build_basic_task expects tid==1) must run first (GOTCHA #22).
+    run_poll_tests();
     run_klog_tests();
     run_sys_dmesg_tests();
     run_user_ptr_tests();
@@ -835,6 +846,18 @@ extern "C" void kernel_main() {
     // stat/cmdline pseudo-files.
     run_procfs_tests();
 
+    // TmpFs tests (F6-M4): in-memory FS -- create/write/read round-trip, mkdir,
+    // nested lookup, readdir, stat, unlink, growth past 4 KiB.
+    run_tmpfs_tests();
+
+    // mount/umount2 tests (F6-M1): tmpfs-via-sys_mount, resolve, umount detach,
+    // unknown fstype, remount-after-umount (owned backend freed).
+    run_mount_tests();
+
+    // access tests (F6 batch 3a): root bypass R/W, X denied on non-exec file,
+    // missing -> ENOENT, bad mode -> EINVAL.
+    run_access_tests();
+
     // PTY device tests (F10-M3 Phase 2): alloc, master<->slave round-trip,
     // echo, termios ioctl, TIOCGPTN.
     run_pty_device_tests();
@@ -853,6 +876,10 @@ extern "C" void kernel_main() {
 
     // Ext2 InodeOps virtual class tests (028b)
     run_ext2_inode_ops_tests();
+
+    // Ext4 extents read-path tests (F6-M5): mount ext4 volume, read extent-mapped
+    // big/small files byte-exact through the depth-0 leaf extent tree.
+    run_ext4_extents_tests();
 
     // Syscall ext2 integration tests (028b): sys_creat/mkdir/unlink/rmdir
     run_syscall_ext2_tests();

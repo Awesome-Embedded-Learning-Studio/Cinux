@@ -2,6 +2,29 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅(分支 `feat/f12-gcc-selfhost` 从 main `5c03f85`，**主 checkout 串行**，未 push)
+
+> **进度**：批1 tmpfs `6656096` ✅ ＋ shm merge `2a86b13` ✅ ＋ 批2 mount/umount2+/tmp `b078fef` ✅ ＋ 批3a sys_access `25271b3` ✅。目标 `gcc hello.c -o hello && ./hello`。4 批串行：批1 ✅ → 批2 ✅ → **批3 sys_access✅ + init PID1(focus)** → 批4 GCC 工具链装盘 + gcc hello.c。
+> **批3a（✅ `25271b3`）**：sys_access(21) 文件权限检查。`access_granted()` 标准 Unix 判定(owner/group/other 三元 + root 旁路:R/W 直通、X 需 exec 位)→ 可复用给 F6 check_permission / login。机制测 2:root 旁路 R/W + 0644 文件 X_OK 拒(-EACCES)+ 缺路径→ENOENT + 坏 mode→EINVAL。
+> **批3b(🔄 focus,用户拍板 busybox init)**:busybox init 作 PID1。**已探明风险点**:① `start_poll_driver()` 在 `init_task` 前创 kthread([main.cpp:282](../../kernel/main.cpp#L282)),PID 从 1 顺序分配 → kernel_init_thread **大概率 PID2 非 PID1**;busybox init 须 PID1 才正确收孤儿(gcc fork 链关键)→ 需**重排 boot task 创序**(init 先于 poll driver)或专留 PID1;② `launch_user_program` 替换调用者(init 线程可直 execve busybox 不 fork,但 usb::init 须挪到 launch_userspace 前);③ ext2 盘要 `/etc/inittab`(最小: `::respawn:/bin/sh`)+ `/bin/sh`(现 user/shell;busybox sh 要 symlink);④ busybox CONFIG_INIT/GETTY/LOGIN/ASH 全 =y(applet 齐)。**login/getty 暂缓**(staged):先做到 init PID1→respawn sh,getty/login+/etc/passwd 留 follow-up。
+> 验证(批1/2/3a):两 leg run-kernel-test-all 全绿(tmpfs 9×2 + mount 5×2 + access 2×2 + shm 6×2,busybox 14/14,零 FAIL)+ `make run` 冒烟 `[TMPFS] mounted at /tmp`。详见批1/批2 note。push/PR 归用户。
+
+> 目标：`gcc hello.c -o hello && ./hello` 在 CinuxOS 跑通——从「能跑别人二进制」到「能编自己二进制」。ABI 底子已验（busybox -O2 14/14 试金石过）。4 批串行：批1 tmpfs ✅ → 批2 mount/umount2+挂 /tmp ✅ → 批3 sys_access+init PID1 → 批4 GCC 工具链装盘 + gcc hello.c。
+> **批1（✅ `6656096`）**：TmpFs 内存型虚拟 FS（[tmpfs.hpp](../../kernel/fs/tmpfs/tmpfs.hpp) / [tmpfs.cpp](../../kernel/fs/tmpfs/tmpfs.cpp)）——第一个**运行时改写自身目录结构**的 FS（DevFS/ProcFS mount 时定死）。`TmpNode` 堆分配内嵌 Inode（`fs_private` 指回 node，延用 DevFs 招）+ 单向兄弟链表子节点（无上限）+ 可扩容堆缓冲（4KB 对齐增长 + gap 零填）+ 单 per-FS Spinlock。`TmpFileOps`(read/write/stat) + `TmpDirOps`(readdir/create/mkdir/unlink/stat)。lookup 多段 walk（仿 ext2，syscall `split_pathname` 拆 `sub/file` 故 tmpfs 须自 walk）。`is_page_cacheable` 默认 false → 内容直连 `ops->read/write`，不进磁盘 PageCache（已核实 sys_read/sys_write 路由）。
+> **shm merge（✅ `2a86b13`）**：并入 F8-M4 SysV 共享内存（`feat/f8-m4-shm` 2 commit 保留无 squash，ort 自动合并两测试登记文件）。
+> **批2（✅ `b078fef`）**：sys_mount(165)/umount2(166) + boot 自动挂 /tmp。fstype 工厂（tmpfs→堆 TmpFs，他→ENODEV）+ `do_mount/umount2_kernel` 内核变体（ring0 测直驱，sys_ 包 SMAP user-ptr）。**MountPoint +`owned` 字段** + `vfs_mount_add(,,owned=false)` 默认参 + `vfs_mount_remove` 变 **ownership-aware**（sys_mount 堆 FS umount 时 delete，boot 静态/测 mock 不释放）——现有 13 处 remove 全 owned=false，**零行为变**。`tmpfs::init()` boot hook（procfs::init 后挂 /tmp，静态 unowned）。
+> **机制测**：批1 tmpfs 9（直驱 InodeOps）＋ 批2 mount 5（mount+resolve / mount→create-write-read / 未知 fstype→ENODEV / umount 缺失→ENOENT / remount-after-umount 验 owned 真释放）。
+> **GOTCHA**：① 头 `class TmpNode;` vs cpp 匿名 ns `struct TmpNode`（-Wmismatched-tags）→ 定义放 cinux::fs 非匿名 ns；② ring0 测不能走 sys_ 的 user-ptr 路径（is_user_vaddr 拒内核地址）→ 直驱 do_；③ ownership-aware remove 零行为变靠 `owned` 默认 false（boot/测全 false，唯 sys_mount true）；④ 测试内核无 /tmp（跑 big_kernel_test 不走 init.cpp）→ 生产 /tmp 由 `make run` 验。⭐**VNC 避让**：多 AI 会话共用 `-vnc :0` 互杀 QEMU，验证切 `-vnc :5` 跑完还原。
+> 验证：批1 两 leg 绿（TmpFs 9/9）；批2 **`make run` boot 冒烟 `[TMPFS] mounted at /tmp`** + 两 leg 绿（mount 5×2 + tmpfs 9×2 + shm 6×2，busybox 14/14，零 FAIL）。详见批1 [note](../notes/2026-07-01-f6-m4-b1-tmpfs.md) / 批2 [note](../notes/2026-07-01-f6-m1-b2-mount-tmpfs-boot.md)。push/PR 归用户。
+
+## ✅ F6-M5 ext4 extents（读路径）— 收官 2026-07-01（分支 `feat/f6-m5-ext4`，worktree `.claude/worktrees/wt-ext4`，从干净 main `5c03f85`，两 leg 1066/0 + host 绿）
+
+> Feature 域 F6 VFS 第五里程碑。ext2 驱动扩展支持 ext4 extent tree（depth-0 leaf）读：inode 置 `EXT4_EXTENTS_FL` 时 `i_block[0..14]` 是 extent tree 而非块指针。**新增 `ext2_extent.{hpp,cpp}`**（resolver 独立文件——`ext2_common.cpp` 已 483 行撞 500 软上限）：`extent_lookup_block` 解析 leaf extent 算逻辑→物理块映射 + `inode_read_block` 共用读侧解析。**接线**：`Ext2FileOps::read` 加 extent 分支；`lookup_in_dir`/`readdir` 改用 `inode_read_block`（**目录在 ext4 也是 extent-mapped**，否则 lookup 全 NotFound——本批头号坑）。**范围栅栏**：depth-0 leaf；depth>0 index / extent 写 / journal 留续。**测试**：独立 ext4 盘挂 AHCI port 2（`create_ext4_disk.sh`，`mkfs.ext4 -O extents,^64bit,^metadata_csum` 强制 32 字节 BGDT——驱动按 32 字节定步长不看 `s_desc_size`）+ `test_ext4_extents.cpp`（mount ext4 卷 / 大文件 1 MiB 全 pattern byte-exact / 跨块读 / 小文件）。详见 `document/notes/2026-07-01-f6-m5-ext4-extents.md`。
+
+| 批 | 内容 | 状态 | 验证 |
+|----|------|------|------|
+| 1 | ext4 类型 + extent resolver + read/dir 接线 + ext4 镜像脚本/QEMU 接线 + 机制测 | ✅ | 两 leg 1066/0 + host 绿 |
+
 ## ✅ F-ECO 批8 小件（getgroups + setgroups）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b8-groups`，从集成线 `9208751`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`dc3fdc1`）零冲突，两 leg 1062/0）
 
 > busybox 试金石第八刀小件：`id`/`newgrp` 的补充组。login/su 复杂件留后续。

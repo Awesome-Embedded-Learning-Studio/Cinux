@@ -9,6 +9,7 @@
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/process_internal.hpp"  // Q4e-3: free_kernel_stack
 #include "kernel/proc/sync.hpp"              // Q4e-3: Spinlock (deferred list)
+#include "kernel/proc/timer_queue.hpp"       // F8-M5: timer-wake in tick()
 
 namespace cinux::proc {
 
@@ -373,6 +374,12 @@ void Scheduler::tick() {
     }
 
     tick_count_.fetch_add(1, lib::MemoryOrder::Relaxed);
+
+    // F8-M5 timer-wake: unblock any parked poll/select/nanosleep whose deadline
+    // passed since the last tick.  Cheap no-op when nothing is armed (one locked
+    // scan of a small table); runs before preemption so a woken task is runnable
+    // for the pick below.
+    timer_queue_tick();
 
     // Preemption policy is owned by the task's scheduling class.  The class
     // returns true when the running task should yield its time slice.

@@ -128,6 +128,12 @@ public:
     /// in ~ICANON).  Returns the count copied; 0 if nothing is ready.
     size_t read_cooked(char* buf, size_t maxlen);
 
+    /// Non-destructive "is data ready to read" for poll/select (F8-M5).  True
+    /// when a committed line / raw bytes are buffered OR an EOF is pending (EOF
+    /// is readable: the app polls, then read returns 0).  Mirrors what
+    /// read_cooked + take_eof would surface, without consuming it.
+    bool has_cooked_data() const;
+
     /// Consume a pending EOF (VEOF/^D on an empty line).  Returns true once per
     /// EOF so the caller (sys_read) can return 0 to the application exactly
     /// once, distinct from "no line yet" (which blocks).

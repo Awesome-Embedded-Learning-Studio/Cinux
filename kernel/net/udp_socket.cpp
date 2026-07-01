@@ -79,6 +79,26 @@ void wake_all(Task*& head) {
         Scheduler::unblock(t);
     }
 }
+
+/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
+void wait_remove(Task*& head, Task* t) {
+    if (head == nullptr || t == nullptr) {
+        return;
+    }
+    if (head == t) {
+        head         = t->wait_next;
+        t->wait_next = nullptr;
+        return;
+    }
+    Task* prev = head;
+    while (prev->wait_next != nullptr && prev->wait_next != t) {
+        prev = prev->wait_next;
+    }
+    if (prev->wait_next == t) {
+        prev->wait_next = t->wait_next;
+        t->wait_next    = nullptr;
+    }
+}
 }  // namespace
 #endif  // CINUX_HOST_TEST
 
@@ -233,6 +253,38 @@ void UdpSocket::close() {
     }
 #ifndef CINUX_HOST_TEST
     wake_all(recv_waiters_);  // blocked recv'ers retry -> empty ring -> WouldBlock
+#endif
+}
+
+uint32_t UdpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+    auto g = lock_.irq_guard();
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    uint32_t mask = 0;
+    if (rx_count_ > 0) {
+        mask |= cinux::fs::kPollIn;  // a datagram is queued -> readable
+    }
+    mask |= cinux::fs::kPollOut;  // UDP can generally send (no send-block yet)
+#ifndef CINUX_HOST_TEST
+    // Park on the same queue a blocked recv uses, so an incoming datagram
+    // (on_udp -> wake_one) wakes the poller too.  Atomic under lock_ with the
+    // readiness check (the prepare_to_wait contract).
+    if (waiter != nullptr) {
+        wait_enqueue(recv_waiters_, waiter);
+    }
+#else
+    (void)waiter;
+#endif
+    return mask;
+}
+
+void UdpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    wait_remove(recv_waiters_, waiter);
+#else
+    (void)waiter;
 #endif
 }
 

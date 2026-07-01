@@ -67,87 +67,31 @@ void wake_all(Task*& head) {
         Scheduler::unblock(t);
     }
 }
+
+/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
+void wait_remove(Task*& head, Task* t) {
+    if (head == nullptr || t == nullptr) {
+        return;
+    }
+    if (head == t) {
+        head         = t->wait_next;
+        t->wait_next = nullptr;
+        return;
+    }
+    Task* prev = head;
+    while (prev->wait_next != nullptr && prev->wait_next != t) {
+        prev = prev->wait_next;
+    }
+    if (prev->wait_next == t) {
+        prev->wait_next = t->wait_next;
+        t->wait_next    = nullptr;
+    }
+}
 }  // namespace
 #endif  // CINUX_HOST_TEST
 
-// ============================================================
-// UnixRegistry -- in-memory path -> listening-socket map
-// ============================================================
-
-UnixRegistry& UnixRegistry::instance() {
-    static UnixRegistry reg;
-    return reg;
-}
-
-int UnixRegistry::find_locked(const char* path) const {
-    if (path == nullptr) {
-        return -1;
-    }
-    for (uint32_t i = 0; i < kUnixRegistryMax; ++i) {
-        if (!entries_[i].used) {
-            continue;
-        }
-        const char* a = entries_[i].path;
-        uint32_t    j = 0;
-        while (a[j] != '\0' && path[j] != '\0') {
-            if (a[j] != path[j]) {
-                break;
-            }
-            ++j;
-        }
-        if (a[j] == '\0' && path[j] == '\0') {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
-}
-
-cinux::lib::ErrorOr<void> UnixRegistry::register_listener(const char* path, UnixSocket* sock) {
-    if (path == nullptr || path[0] == '\0' || sock == nullptr) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    auto g = lock_.guard();
-    if (find_locked(path) >= 0) {
-        return cinux::lib::Error::AlreadyExists;
-    }
-    for (uint32_t i = 0; i < kUnixRegistryMax; ++i) {
-        if (!entries_[i].used) {
-            uint32_t j = 0;
-            while (j + 1 < kUnixPathMax && path[j] != '\0') {
-                entries_[i].path[j] = path[j];
-                ++j;
-            }
-            entries_[i].path[j] = '\0';
-            entries_[i].used    = true;
-            entries_[i].sock    = sock;
-            return {};
-        }
-    }
-    return cinux::lib::Error::OutOfMemory;  // table full
-}
-
-cinux::lib::ErrorOr<UnixSocket*> UnixRegistry::lookup(const char* path) {
-    if (path == nullptr) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    auto g = lock_.guard();
-    int  i = find_locked(path);
-    if (i < 0) {
-        return cinux::lib::Error::NotFound;
-    }
-    return entries_[i].sock;
-}
-
-void UnixRegistry::unregister(const char* path) {
-    auto g = lock_.guard();
-    int  i = find_locked(path);
-    if (i < 0) {
-        return;
-    }
-    entries_[i].used    = false;
-    entries_[i].path[0] = '\0';
-    entries_[i].sock    = nullptr;
-}
+// UnixRegistry (in-memory path -> listener map) lives in unix_registry.cpp --
+// split out to keep this file under the 500-line limit.
 
 // ============================================================
 // UnixSocket
@@ -475,6 +419,52 @@ void UnixSocket::pair_with(UnixSocket* other) {
         other->connected_ = true;
         other->peer_      = this;
     }
+}
+
+// ============================================================
+// F8-M5 poll readiness (mirrors TcpSocket)
+// ============================================================
+
+uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+    auto g = lock_.irq_guard();
+    if (registered != nullptr) {
+        *registered = (waiter != nullptr);
+    }
+    uint32_t mask = 0;
+    if (listening_) {
+        if (accept_count_ > 0) {
+            mask |= cinux::fs::kPollIn;  // a connection is pending accept()
+        }
+#ifndef CINUX_HOST_TEST
+        if (waiter != nullptr) {
+            wait_enqueue(accept_waiters_, waiter);
+        }
+    } else if (connected_) {
+        if (rx_.size() > 0) {
+            mask |= cinux::fs::kPollIn;  // buffered bytes -> readable
+        }
+        if (peer_eof_) {
+            mask |= cinux::fs::kPollHup;  // peer closed -> EOF once drained
+        }
+        mask |= cinux::fs::kPollOut;  // connected -> writable
+        if (waiter != nullptr) {
+            wait_enqueue(recv_waiters_, waiter);
+        }
+    }
+#else
+        (void)waiter;
+#endif
+    return mask;
+}
+
+void UnixSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+#ifndef CINUX_HOST_TEST
+    auto g = lock_.irq_guard();
+    wait_remove(recv_waiters_, waiter);
+    wait_remove(accept_waiters_, waiter);
+#else
+        (void)waiter;
+#endif
 }
 
 }  // namespace cinux::net

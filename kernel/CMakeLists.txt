@@ -262,6 +262,7 @@ add_executable(big_kernel_test
     test/test_ext2_allocator.cpp
     test/test_ext2_ops.cpp
     test/test_ext2_inode_ops.cpp
+    test/test_ext4_extents.cpp
     test/test_syscall_ext2.cpp
     test/test_shell_write.cpp
     test/test_cwd_stat.cpp
@@ -276,6 +277,8 @@ add_executable(big_kernel_test
     test/test_pipe.cpp
     test/test_sys_pipe.cpp
     test/test_fifo.cpp
+    test/test_shm.cpp
+    test/test_poll.cpp
     test/test_terminal_shell.cpp
     test/test_fork_exec.cpp
     test/test_multi_terminal.cpp
@@ -314,6 +317,9 @@ add_executable(big_kernel_test
     test/test_devfs.cpp
     test/test_pty_device.cpp
     test/test_procfs.cpp
+    test/test_tmpfs.cpp
+    test/test_mount.cpp
+    test/test_access.cpp
 )
 
 # F5-M5 xHCI: gate the USB test on CINUX_USB so a CINUX_USB=OFF build links

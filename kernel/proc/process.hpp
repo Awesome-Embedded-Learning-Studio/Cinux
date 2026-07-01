@@ -32,6 +32,7 @@
 
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/slab.hpp"
+#include "kernel/proc/cpu_context.hpp"  // CpuContext (split out for the 500-line limit)
 #include "kernel/proc/elf_types.hpp"
 #include "kernel/proc/execve.hpp"
 #include "kernel/proc/pid.hpp"
@@ -60,53 +61,8 @@ enum class TaskState : uint8_t {
     Dead
 };
 
-// ============================================================
-// CPU context for context switching
-// ============================================================
-
-/**
- * @brief Callee-saved register snapshot for cooperative context switch
- *
- * Only the callee-saved registers (r15-r12, rbp, rbx) plus rsp and
- * rip need to be saved/restored because the switch happens at known
- * call boundaries where caller-saved registers are already clobbered.
- *
- * Only FS base is saved per task (per-thread TLS, MSR_FS_BASE).  The
- * gs_base/kgs_base fields are RESERVED (unused) since F4-M3 P1-2: GS is
- * per-CPU, maintained by the swapgs discipline rather than per-task
- * save/restore.  The fields are kept (and the offset static_asserts below)
- * so the CpuContext layout is unchanged.
- *
- * Layout must match the offsets used in context_switch.S exactly.
- * Note: alignas(16) pads the explicit 88-byte payload to 96 bytes;
- * bytes 88..95 are unused alignment padding (never accessed by asm).
- */
-struct alignas(16) CpuContext {
-    uint64_t r15;
-    uint64_t r14;
-    uint64_t r13;
-    uint64_t r12;
-    uint64_t rbp;
-    uint64_t rbx;
-    uint64_t rsp;
-    uint64_t rip;
-    uint64_t gs_base;
-    uint64_t kgs_base;
-    uint64_t fs_base;  ///< Per-thread TLS base (MSR_FS_BASE 0xC0000100), F3-M2
-};
-
-static_assert(offsetof(CpuContext, r15) == 0, "r15 at offset 0");
-static_assert(offsetof(CpuContext, r14) == 8, "r14 at offset 8");
-static_assert(offsetof(CpuContext, r13) == 16, "r13 at offset 16");
-static_assert(offsetof(CpuContext, r12) == 24, "r12 at offset 24");
-static_assert(offsetof(CpuContext, rbp) == 32, "rbp at offset 32");
-static_assert(offsetof(CpuContext, rbx) == 40, "rbx at offset 40");
-static_assert(offsetof(CpuContext, rsp) == 48, "rsp at offset 48");
-static_assert(offsetof(CpuContext, rip) == 56, "rip at offset 56");
-static_assert(offsetof(CpuContext, gs_base) == 64, "gs_base at offset 64");
-static_assert(offsetof(CpuContext, kgs_base) == 72, "kgs_base at offset 72");
-static_assert(offsetof(CpuContext, fs_base) == 80, "fs_base at offset 80");
-static_assert(sizeof(CpuContext) == 96, "CpuContext must be 96 bytes (alignas(16) pads 88->96)");
+// CpuContext (callee-saved register snapshot, matches context_switch.S) lives
+// in cpu_context.hpp -- split out to keep this file under the 500-line limit.
 
 // SharedCwd (reference-counted cwd) lives in shared_cwd.hpp; included below.
 
@@ -161,6 +117,14 @@ struct Task {
 
     /** Current lifecycle state. */
     TaskState state;
+
+    /** Whether this task is currently on its scheduling class's run queue.
+     *  Guarded by the run-queue lock.  Makes RoundRobin::enqueue idempotent: a
+     *  task already queued is not re-added, so the classic prepare_to_wait lost-
+     *  wakeup race (a producer unblocks a Blocked task -> Ready + enqueued, then
+     *  schedule() re-enqueues the same Ready prev) cannot leave a duplicate entry
+     *  in the queue (F8-M5). */
+    bool on_runq{false};
 
     /** Unique task identifier (monotonically increasing). */
     uint64_t tid;

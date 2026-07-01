@@ -23,6 +23,7 @@ if(CINUX_NET)
         ${CMAKE_CURRENT_SOURCE_DIR}/udp_socket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tcp_socket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unix_socket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/unix_registry.cpp
     )
 endif()
 

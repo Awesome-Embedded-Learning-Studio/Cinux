@@ -199,6 +199,13 @@ bool TTY::take_eof() {
     return was;
 }
 
+bool TTY::has_cooked_data() const {
+    // Ready when the cooked ring holds bytes (a committed line / raw bytes) OR
+    // an EOF is pending (read returns 0 once).  Ring-empty is head==tail && not
+    // full (see cooked_pop); invert that.
+    return (cooked_head_ != cooked_tail_ || cooked_full_) || eof_pending_;
+}
+
 const Termios& TTY::termios() const {
     return termios_;
 }

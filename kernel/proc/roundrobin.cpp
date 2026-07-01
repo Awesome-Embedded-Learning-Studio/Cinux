@@ -46,6 +46,9 @@ RoundRobin::RoundRobin() : head_(0), tail_(0), count_(0) {
 void RoundRobin::enqueue(Task* task) {
     auto g = lock_.irq_guard();
     (void)g;
+    if (task->on_runq) {
+        return;  // already queued -- idempotent (F8-M5 lost-wakeup dedup)
+    }
     if (count_ >= MAX_TASKS) {
         cinux::lib::kprintf("[SCHED] RoundRobin: run queue full\n");
         return;
@@ -53,10 +56,15 @@ void RoundRobin::enqueue(Task* task) {
     run_queue_[tail_] = task;
     tail_             = (tail_ + 1) % MAX_TASKS;
     count_++;
-    task->state = TaskState::Ready;
+    task->state   = TaskState::Ready;
+    task->on_runq = true;
 }
 
 void RoundRobin::remove_at_locked(int i) {
+    Task* doomed = run_queue_[(head_ + i) % MAX_TASKS];
+    if (doomed != nullptr) {
+        doomed->on_runq = false;
+    }
     for (int j = i; j < count_ - 1; j++) {
         int cur         = (head_ + j) % MAX_TASKS;
         int nxt         = (head_ + j + 1) % MAX_TASKS;
@@ -151,6 +159,9 @@ void RoundRobin::clear() {
     auto g = lock_.irq_guard();
     (void)g;
     for (int i = 0; i < MAX_TASKS; i++) {
+        if (run_queue_[i] != nullptr) {
+            run_queue_[i]->on_runq = false;  // drop stale flag on ejected tasks
+        }
         run_queue_[i] = nullptr;
     }
     head_  = 0;

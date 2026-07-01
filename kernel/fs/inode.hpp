@@ -21,7 +21,26 @@
 
 #include "fs/stat.hpp"
 
+namespace cinux::proc {
+struct Task;  // forward -- poll_events() parks a poller on a fd's wait queue
+}
+
 namespace cinux::fs {
+
+// ============================================================
+// poll(2) / select(2) event bits (Linux UAPI values)
+// ============================================================
+// Returned by InodeOps::poll_events() and masked against each pollfd's
+// requested @c events to form @c revents.  POLLERR / POLLHUP / POLLNVAL are
+// always reported in revents regardless of what the caller requested.
+constexpr uint16_t kPollIn     = 0x0001;  ///< POLLIN  (readable: data available)
+constexpr uint16_t kPollPri    = 0x0002;  ///< POLLPRI (priority / out-of-band data)
+constexpr uint16_t kPollOut    = 0x0004;  ///< POLLOUT (writable: space available)
+constexpr uint16_t kPollErr    = 0x0008;  ///< POLLERR (error condition; always reported)
+constexpr uint16_t kPollHup    = 0x0010;  ///< POLLHUP (peer hung up; always reported)
+constexpr uint16_t kPollNval   = 0x0020;  ///< POLLNVAL (invalid fd; always reported)
+constexpr uint16_t kPollRdNorm = 0x0040;  ///< POLLRDNORM (normal data readable == POLLIN)
+constexpr uint16_t kPollWrNorm = 0x0100;  ///< POLLWRNORM (normal data writable == POLLOUT)
 
 // ============================================================
 // Inode Type Enumeration
@@ -108,8 +127,7 @@ public:
 
     /// Read a symbolic link's target into @p buf (sys_readlink). Returns the
     /// number of bytes written to @p buf (NOT counting a trailing NUL).
-    virtual cinux::lib::ErrorOr<int64_t> readlink(const Inode* inode, char* buf,
-                                                  uint64_t buf_size);
+    virtual cinux::lib::ErrorOr<int64_t> readlink(const Inode* inode, char* buf, uint64_t buf_size);
 
     /// Create a symbolic link named @p name in directory @p dir pointing at the
     /// NUL-terminated @p target string (sys_symlink).
@@ -135,6 +153,54 @@ public:
     /// must never be cached).  Default false keeps every legacy/mock backend
     /// unchanged.
     virtual bool is_page_cacheable() const;
+
+    // ============================================================
+    // F8-M5: poll(2) / select(2) readiness.  Added in one shot (with a safe
+    // default) so the ~20 existing InodeOps subclasses need no change: only the
+    // blocking fd types (pipe/FIFO via PipeReadOps/PipeWriteOps, sockets via
+    // SocketOps) override it.  Mirrors Linux file_operations->poll as the
+    // uniform readiness + wait-registration seam consumed by sys_poll/select.
+    // ============================================================
+
+    /// poll/select readiness for this open file.
+    ///
+    /// Returns the ready event mask (a subset of the @c kPoll* bits above).
+    /// sys_poll masks it against each pollfd's requested @c events to form
+    /// @c revents (POLLERR/POLLHUP/POLLNVAL are always passed through).
+    ///
+    /// Wait registration: if @p waiter is non-null, ALSO enqueue it on this fd's
+    /// internal wait queue -- atomically with the readiness check, under this
+    /// fd's own lock (the prepare_to_wait contract).  A later state change
+    /// (bytes arrive / peer closes) then wakes it via Scheduler::unblock.  The
+    /// caller follows with poll_detach_waiter() once it no longer waits.
+    ///
+    /// @param inode     The open file's inode.
+    /// @param waiter    The polling task to park (nullptr = readiness check only).
+    /// @param registered Out: set true iff @p waiter was actually queued (i.e.
+    ///                   this fd is a blocking type that can later wake the
+    ///                   poller).  Regular files never register.
+    /// @return The ready event mask.
+    ///
+    /// Default: a regular file is always ready (kPollIn|kPollOut) and never
+    /// registers a waiter -- it never blocks, so poll returns immediately.
+    virtual uint32_t poll_events(const Inode* inode, cinux::proc::Task* waiter, bool* registered);
+
+    /// Remove a previously-registered @p waiter from this fd's wait queue.
+    /// poll calls this for every fd after it wakes (event or timeout) so the
+    /// waiter is not left linked in a queue it no longer waits on (which would
+    /// spuriously wake a later, unrelated block, or dangle after the task dies).
+    /// Default: no-op (regular files never register).
+    virtual void poll_detach_waiter(const Inode* inode, cinux::proc::Task* waiter);
+
+    /// Called by FDTable::close when a File bound to this inode is closed -- the
+    /// "release" / last-close hook (Linux file_operations->release).  Used to
+    /// free per-open protocol resources: a socket unbinds / sends FIN, a pipe
+    /// end signals EOF to its peer.  Default: no-op, so regular files, pipes and
+    /// FIFOs (whose close-propagation needs end-refcounting -- a separate DEBT)
+    /// are unchanged; only fd types that need it override this.  @p inode is
+    /// non-null; the inode itself is owned by its filesystem and is NOT freed
+    /// here (release only signals "an open description went away").
+    virtual void release(Inode* inode);
 };
 
 // ============================================================
@@ -155,10 +221,18 @@ struct Inode {
     InodeOps* ops{nullptr};              ///< Operation function table (may be nullptr)
     void*     fs_private{nullptr};       ///< Opaque pointer for filesystem-specific data
 
-    uint32_t mode{0};    ///< File mode (type + permissions)
-    uint32_t uid{0};     ///< Owner user ID
-    uint32_t gid{0};     ///< Owner group ID
-    uint32_t nlink{1};   ///< Hard link count
+    uint32_t mode{0};   ///< File mode (type + permissions)
+    uint32_t uid{0};    ///< Owner user ID
+    uint32_t gid{0};    ///< Owner group ID
+    uint32_t nlink{1};  ///< Hard link count
+    /// Open-description reference count (DEBT-023). Bumped once per File that
+    /// points at this inode (alloc / dup / dup2 / fork-copy), dropped when such
+    /// a File is destroyed. Reaching 0 = last close -> InodeOps::release fires.
+    /// Accessed via __atomic_* because File objects in different FDTables (after
+    /// fork) on different CPUs share one inode. This is what lets a pipe/FIFO
+    /// end emit POLLHUP/EOF only when the LAST referring fd closes -- a dup no
+    /// longer trips an early EOF (the bug that broke `ls|grep` pipelines).
+    uint32_t refcount{0};
     uint64_t atime{0};   ///< Time of last access
     uint64_t ctime{0};   ///< Time of last status change
     uint64_t mtime{0};   ///< Time of last modification

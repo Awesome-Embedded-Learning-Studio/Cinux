@@ -88,6 +88,11 @@ public:
      */
     bool is_mounted() const;
 
+    /// @brief Whether the volume advertises the ext4 extents incompat feature
+    /// (s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS).  Per-inode reads
+    /// still gate on EXT4_EXTENTS_FL; this surfaces the volume-level flag.
+    bool has_ext4_extents_feature() const;
+
     /**
      * @brief Get the scratch block buffer (populated by read_block())
      *

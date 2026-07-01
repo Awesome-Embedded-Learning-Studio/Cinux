@@ -34,6 +34,16 @@ public:
     /// Returns the byte count, or 0 on EOF.
     size_t read(char* buf, size_t len);
 
+    /// poll/select readiness for stdin (F8-M5).  Returns POLLIN when a cooked
+    /// line / EOF is ready; otherwise parks @p waiter in the single reader slot
+    /// (the same one read() uses) so the keyboard feeder wakes it on the next
+    /// committed line.  *@p registered is set iff a waiter was parked.
+    uint32_t poll_events(cinux::proc::Task* waiter, bool* registered);
+
+    /// Remove a poll waiter parked by poll_events() (no-op if @p waiter is not
+    /// the parked reader).  poll calls this after it wakes.
+    void poll_detach(cinux::proc::Task* waiter);
+
     /// Feed one keyboard byte: line discipline + echo + cooked buffer, and on
     /// a signal char (interrupt/quit/suspend) deliver the corresponding signal
     /// to the foreground process group.  Called from the keyboard IRQ handler;

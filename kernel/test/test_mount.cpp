@@ -1,0 +1,132 @@
+/**
+ * @file kernel/test/test_mount.cpp
+ * @brief In-kernel mechanism tests for sys_mount / sys_umount2 (F6-M1)
+ *
+ * Runs inside QEMU via run-kernel-test.  Drives the kernel-internal do_mount_kernel
+ * / do_umount2_kernel directly (the sys_ wrappers only add SMAP user-pointer
+ * reads, which a ring-0 test cannot route through is_user_vaddr).  Each test
+ * mounts a tmpfs at a unique /tmp_t* path, exercises it, and umounts in cleanup
+ * -- the global mount table is shared across test sections (like the fd table),
+ * so leaving a mount behind would poison later sections.
+ *
+ * Coverage: mount + resolve, mount -> create/write/read through the mounted FS,
+ * umount detaches, unknown fstype -> -ENODEV, umount missing -> -ENOENT, and
+ * mount/umount/remount (slot reused + owned backend freed).
+ */
+
+#include <stdint.h>
+
+#include "kernel/errno.hpp"
+#include "kernel/fs/vfs_mount.hpp"
+#include "kernel/lib/string.hpp"  // memcmp / strlen
+#include "kernel/syscall/sys_mount.hpp"
+#include "kernel/syscall/sys_umount2.hpp"
+#include "kernel/test/big_kernel_test.h"
+
+using cinux::fs::FileSystem;
+using cinux::fs::vfs_resolve;
+using cinux::syscall::do_mount_kernel;
+using cinux::syscall::do_umount2_kernel;
+
+namespace {
+
+/// A unique mount path per test so concurrent test sections never collide on a
+/// slot, and so a forgotten umount is easy to spot in the boot log.
+constexpr const char* kPathA = "/tmp_t_a";
+constexpr const char* kPathB = "/tmp_t_b";
+
+uint32_t nlen(const char* s) {
+    return static_cast<uint32_t>(strlen(s));
+}
+
+/// Resolve @p path to its mounted FileSystem, or nullptr.
+FileSystem* fs_at(const char* path) {
+    const char* rel = nullptr;
+    FileSystem* fs  = vfs_resolve(path, &rel);
+    return fs;
+}
+
+}  // namespace
+
+namespace test_mount {
+
+void test_mount_tmpfs_resolves() {
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "tmpfs", 0), 0);
+    TEST_ASSERT_NOT_NULL(fs_at(kPathA));
+    TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);
+    TEST_ASSERT_NULL(fs_at(kPathA));  // detached
+}
+
+void test_mount_then_create_write_read() {
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathB, "tmpfs", 0), 0);
+    const char* rel = nullptr;
+    auto*       fs  = vfs_resolve(kPathB, &rel);
+    TEST_ASSERT_NOT_NULL(fs);
+
+    auto* root = lookup_or_null(fs, "");
+    TEST_ASSERT_NOT_NULL(root);
+    auto* f = create_or_null(root, "gcc_out.o", nlen("gcc_out.o"));
+    TEST_ASSERT_NOT_NULL(f);
+
+    const char payload[] = "ELF tmp";
+    TEST_ASSERT_EQ(write_or_neg1(f, 0, payload, sizeof(payload) - 1),
+                   static_cast<int64_t>(sizeof(payload) - 1));
+    char buf[16];
+    TEST_ASSERT_EQ(read_or_neg1(f, 0, buf, sizeof(buf)), static_cast<int64_t>(sizeof(payload) - 1));
+    TEST_ASSERT_EQ(memcmp(buf, payload, sizeof(payload) - 1), 0);
+
+    // The file is reachable by relative path through the mounted FS too.
+    TEST_ASSERT_EQ(lookup_or_null(fs, "gcc_out.o"), f);
+
+    TEST_ASSERT_EQ(do_umount2_kernel(kPathB, 0), 0);
+}
+
+void test_mount_unknown_fstype_is_enodev() {
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "ext2", 0), -cinux::kEnodev);
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "nonsense", 0), -cinux::kEnodev);
+    TEST_ASSERT_NULL(fs_at(kPathA));  // nothing mounted on failure
+}
+
+void test_umount_missing_is_enoent() {
+    TEST_ASSERT_EQ(do_umount2_kernel("/tmp_t_never_mounted", 0), -cinux::kEnoent);
+    // Empty/null target is EINVAL.
+    TEST_ASSERT_EQ(do_umount2_kernel("", 0), -cinux::kEinval);
+}
+
+/// Mount, umount, then mount again at the same path: the slot is reused and the
+/// first (owned) backend was freed by the umount -- a second mount of the same
+/// kind must still succeed and behave like a fresh empty filesystem.
+void test_remount_after_umount_is_fresh() {
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "tmpfs", 0), 0);
+    {
+        const char* rel  = nullptr;
+        auto*       fs   = vfs_resolve(kPathA, &rel);
+        auto*       root = lookup_or_null(fs, "");
+        create_or_null(root, "stale", 5);  // leave a file behind
+    }
+    TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);  // frees the owned backend + its tree
+
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "tmpfs", 0), 0);
+    {
+        const char* rel  = nullptr;
+        auto*       fs   = vfs_resolve(kPathA, &rel);
+        auto*       root = lookup_or_null(fs, "");
+        TEST_ASSERT_NOT_NULL(root);
+        // Fresh mount: the "stale" file from the first mount is gone (the tree
+        // was freed on umount, not leaked into the new backend).
+        TEST_ASSERT_NULL(lookup_or_null(fs, "stale"));
+    }
+    TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);
+}
+
+}  // namespace test_mount
+
+extern "C" void run_mount_tests() {
+    TEST_SECTION("mount/umount2 (F6-M1)");
+    RUN_TEST(test_mount::test_mount_tmpfs_resolves);
+    RUN_TEST(test_mount::test_mount_then_create_write_read);
+    RUN_TEST(test_mount::test_mount_unknown_fstype_is_enodev);
+    RUN_TEST(test_mount::test_umount_missing_is_enoent);
+    RUN_TEST(test_mount::test_remount_after_umount_is_fresh);
+    TEST_SUMMARY();
+}

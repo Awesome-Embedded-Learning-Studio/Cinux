@@ -5,6 +5,7 @@
 
 #include "kernel/drivers/tty/console_tty.hpp"
 
+#include "kernel/fs/inode.hpp"  // kPollIn
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/process.hpp"  // Task::pgid
 #include "kernel/proc/scheduler.hpp"
@@ -57,6 +58,31 @@ size_t ConsoleTty::read(char* buf, size_t len) {
         }  // IRQs restored BEFORE switching out
         cinux::proc::Scheduler::schedule_blocked();
         // Woken by the feeder (reader_ cleared); loop and re-read.
+    }
+}
+
+uint32_t ConsoleTty::poll_events(cinux::proc::Task* waiter, bool* registered) {
+    // IRQs off: the readiness check + park-as-reader must be atomic vs the
+    // keyboard feeder (same window read() closes).  A line arriving in the
+    // window is either seen as POLLIN here or finds the waiter already parked
+    // and wakes it via input() -- no lost wakeup.
+    cinux::proc::InterruptGuard guard;
+    bool                        ready = tty_.has_cooked_data();
+    if (waiter != nullptr) {
+        reader_ = waiter;  // single reader slot (shared with read())
+        if (registered != nullptr) {
+            *registered = true;
+        }
+    } else if (registered != nullptr) {
+        *registered = false;
+    }
+    return ready ? cinux::fs::kPollIn : 0u;
+}
+
+void ConsoleTty::poll_detach(cinux::proc::Task* waiter) {
+    cinux::proc::InterruptGuard guard;
+    if (reader_ == waiter) {
+        reader_ = nullptr;
     }
 }
 

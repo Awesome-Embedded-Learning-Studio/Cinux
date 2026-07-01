@@ -219,6 +219,15 @@
 - **残留异味**（登记，非本债）: `test/unit/test_shell_redirect.cpp` `~PipeRedirect` 的 `delete stdin_file` 侥幸安全——构造函数局部变量 shadow 同名私有成员（成员恒 nullptr），析构 delete nullptr no-op；消除 shadow 即 double-free。备查。
 - **关联 GOTCHA**: 无
 
+### DEBT-023 Pipe/FIFO 的 fd-close 不传到 Pipe（无端引用计数 → POLLHUP/EOF 漏）✅
+- **维度**: 资源生命周期(D4) + 正确性(C)　**优先级**: P2　**状态**: ✅ 已修（GCC 自举线，2026-07-01）　**核验**: ✅ 两 leg 1098/0 + host 69/69 + 机制测 dup-last-close
+- **位置**: `kernel/fs/file.cpp`(FDTable::close 已调 `inode->ops->release`) / `kernel/ipc/pipe_ops.cpp`(PipeReadOps/PipeWriteOps 未 override release) / `kernel/ipc/pipe.hpp`(Pipe 无 read/write 端引用计数)
+- **现象**: F8-M5 给 `InodeOps` 加了 `release`(FDTable::close 关 fd 时调),socket 正确释放(`SocketOps::release → Socket::close`)。但 **Pipe/FIFO 未 override release**(默认 no-op)——关 pipe 的写端 fd 不会调 `Pipe::close_writer()`,故 reader 测不到 POLLHUP/EOF;shell pipeline(`ls|grep`)靠"最后 writer 关 fd 才 EOF"的语义不成立。pre-existing(F8-M1 起即如此),本批只是登记。
+- **根因**: 正确的 last-close 需要 **Pipe 端引用计数**——一个 Pipe 的读/写端可能被多个 File 引用(dup/fork 各拷一份 File→同 inode),fork 后跨 FDTable 共享。Per-FDTable 扫描不够(漏跨表引用)。需:File 构造 bump inode refcount,析构 dec,到 0 才 release;再由 Pipe 跟踪"几个读端/写端 inode 活着"(FIFO 多 open 共享一 Pipe)。两层计数。仓促做会压垮 pipeline EOF(第一个 dup-close 就发 EOF)。
+- **修复建议**: ① Inode 加 `refcount`,`File` 构造/析构 bump/dec,到 0 调 release;② Pipe 加 `read_refs_/write_refs_`,PipeReadOps/PipeWriteOps `open`/release 各 ±1,到 0 才 `close_reader/close_writer`;③ 验证:`ls|grep` grep 收 EOF 退出、POLLHUP-on-fd-close 测、fork 后 pipeline 不早 EOF。
+- **✅ 已修（GCC 自举线，2026-07-01）**: 两层计数落地。外层 `Inode::refcount`（`inode.hpp`）+ `inode_ref/inode_unref` helper（`file.cpp`：File 进出 FDTable 时 bump/dec，到 0 调 release；**File 退回纯 struct 不碰 inode**——避 test use-after-free，由 fd 点 alloc/set/dup/dup2 + close/displace 管 refcount，锁外 release）。内层 `Pipe::read_refs_/write_refs_`（`pipe.hpp`）+ add/release（`pipe.cpp`：irq_guard 内联 close 逻辑避重入）+ `PipeReadOps/PipeWriteOps` 构造 add / release override（`pipe_ops.cpp`：每端一 inode，FIFO cloning 自动覆盖）。机制测 `test_sys_pipe_dup_last_close_eof`（dup 后首个 close 不 EOF，last 才 BrokenPipe）。`ls|grep` pipeline EOF 语义正确。
+- **关联 GOTCHA**: 详见 `document/notes/2026-07-01-f8-m5-real-poll.md` follow-up。
+
 ---
 
 ## 🟢 Low

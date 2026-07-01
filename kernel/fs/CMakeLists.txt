@@ -19,6 +19,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_directory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_links.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_metadata.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_extent.cpp
     # --- devfs ---
     ${CMAKE_CURRENT_SOURCE_DIR}/devfs/devfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/devfs/devfs_init.cpp
@@ -26,4 +27,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/procfs/procfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/procfs/procfs_content.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/procfs/procfs_init.cpp
+    # --- tmpfs (F6-M4) ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/tmpfs/tmpfs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tmpfs/tmpfs_init.cpp
 )

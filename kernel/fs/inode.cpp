@@ -7,6 +7,8 @@
 
 #include "inode.hpp"
 
+#include <stdint.h>
+
 namespace cinux::fs {
 
 cinux::lib::ErrorOr<int64_t> InodeOps::read(const Inode*, uint64_t, void*, uint64_t) {
@@ -84,6 +86,24 @@ cinux::lib::ErrorOr<void> InodeOps::rename(Inode*, const char*, uint32_t, Inode*
 
 bool InodeOps::is_page_cacheable() const {
     return false;
+}
+
+// F8-M5: a regular file (and every other non-blocking backend) is always ready
+// and never registers a poll waiter, so poll() on it returns immediately.
+uint32_t InodeOps::poll_events(const Inode*, cinux::proc::Task*, bool* registered) {
+    if (registered != nullptr) {
+        *registered = false;
+    }
+    return kPollIn | kPollOut;
+}
+
+void InodeOps::poll_detach_waiter(const Inode*, cinux::proc::Task*) {
+    // Regular files never register a waiter; nothing to remove.
+}
+
+void InodeOps::release(Inode*) {
+    // Default: nothing to clean up.  Overridden by fd types with per-open
+    // protocol state (SocketOps -> Socket::close).
 }
 
 }  // namespace cinux::fs

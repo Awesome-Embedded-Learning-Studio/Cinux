@@ -32,6 +32,7 @@
 
 #include <cinux/ring_buffer.hpp>
 
+#include "kernel/fs/inode.hpp"  // kPoll* event bits (poll readiness helpers)
 #include "kernel/proc/sync.hpp"
 
 namespace cinux::proc {
@@ -120,6 +121,19 @@ public:
      */
     void close_writer();
 
+    // -- Open-description refcount (DEBT-023) -----------------------------
+    // Each PipeReadOps / PipeWriteOps inode -- one per pipe() end, or per FIFO
+    // open() direction (FIFO clones a fresh end inode) -- holds one ref on the
+    // matching end.  Reaching 0 = the LAST referring fd closed -> emit EOF /
+    // BrokenPipe to the peer.  Without this a dup (or a 2nd FIFO open) trips an
+    // early EOF on its first close, breaking `ls|grep`.  Bumped in the ops ctor,
+    // dropped from InodeOps::release (the File's last close).  close_reader /
+    // close_writer above remain for direct (non-fd) users (GUI terminal, tests).
+    void add_read_ref();
+    void add_write_ref();
+    void release_read_ref();
+    void release_write_ref();
+
     /** @brief True if the reader end has not been closed. */
     bool reader_alive() const;
 
@@ -134,6 +148,37 @@ public:
 
     /** @brief Number of bytes currently available to read. */
     uint32_t available() const;
+
+    // -- poll(2) / select(2) readiness (F8-M5) -----------------------------
+    // These register a poller on this pipe's wait queue (atomically with the
+    // readiness check, under lock_) so sys_poll can block until the peer makes
+    // progress.  The poller follows with remove_*_waiter() after it wakes.
+
+    /**
+     * @brief Read-end readiness for poll/select.
+     *
+     * Returns @c kPollIn if bytes are buffered and @c kPollHup if the writer
+     * end has closed (Linux reports both when data remains after close).  If
+     * @p waiter is non-null, also enqueues it on the read wait queue so a later
+     * write/close wakes it.
+     */
+    uint32_t poll_read_events(cinux::proc::Task* waiter);
+
+    /**
+     * @brief Write-end readiness for poll/select.
+     *
+     * Returns @c kPollOut if the buffer has space and @c kPollErr if the reader
+     * end has closed (further writes would raise SIGPIPE).  If @p waiter is
+     * non-null, also enqueues it on the write wait queue so a later drain/close
+     * wakes it.
+     */
+    uint32_t poll_write_events(cinux::proc::Task* waiter);
+
+    /** Remove a poll waiter from the read wait queue (no-op if not queued). */
+    void remove_read_waiter(cinux::proc::Task* waiter);
+
+    /** Remove a poll waiter from the write wait queue (no-op if not queued). */
+    void remove_write_waiter(cinux::proc::Task* waiter);
 
     /**
      * @brief Non-blocking read (ignores wait queues)
@@ -159,6 +204,10 @@ private:
     // -- Endpoint state ----------------------------------------------------
     bool reader_open_;
     bool writer_open_;
+
+    // Open-description refcounts per end (DEBT-023). Guarded by lock_.
+    uint32_t read_refs_{0};
+    uint32_t write_refs_{0};
 
     // -- Synchronisation ---------------------------------------------------
     /// Protects buf_, the open flags, and the wait queues; irq_guard closes the
