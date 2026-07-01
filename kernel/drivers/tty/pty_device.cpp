@@ -20,6 +20,7 @@
 #include "kernel/drivers/tty/tty.hpp"  // Termios/Winsize/kTcgets/kTiocsctty...
 #include "kernel/fs/devfs/devfs.hpp"   // kSIfChr / devfs_makedev
 #include "kernel/fs/inode.hpp"
+#include "kernel/lib/echo_trace.hpp"
 #include "kernel/lib/string.hpp"      // memset for stat
 #include "kernel/proc/process.hpp"    // Task::session_leader / controlling_tty
 #include "kernel/proc/scheduler.hpp"  // Scheduler::current()
@@ -122,7 +123,11 @@ public:
             return cinux::lib::Error::InvalidArgument;
         }
         auto guard = slot->lock.irq_guard();
-        return slot->pty.master_read(buf, count);
+        auto r     = slot->pty.master_read(buf, count);
+        if (r.ok() && *r > 0) {
+            cinux::debug::trace_bytes("pty.master_read to_terminal", buf, *r);
+        }
+        return r;
     }
     cinux::lib::ErrorOr<int64_t> write(cinux::fs::Inode* inode, uint64_t, const void* buf,
                                        uint64_t count) override {
@@ -136,7 +141,9 @@ public:
         auto r = cinux::lib::ErrorOr<int64_t>(cinux::lib::Error::InvalidArgument);
         {
             auto guard = slot->lock.irq_guard();
-            r          = slot->pty.master_write(buf, count);
+            cinux::debug::trace_bytes("pty.master_write from_terminal", buf,
+                                      static_cast<int64_t>(count));
+            r = slot->pty.master_write(buf, count);
             if (r.ok() && *r > 0) {
                 wake_all(slot->slave_read_waiters);
             }
@@ -195,6 +202,7 @@ public:
                     return r.error();
                 }
                 if (*r > 0) {
+                    cinux::debug::trace_bytes("pty.slave_read to_shell", buf, *r);
                     return r;
                 }
                 if (slot->pty.slave_tty().take_eof()) {
@@ -225,7 +233,11 @@ public:
             return cinux::lib::Error::InvalidArgument;
         }
         auto guard = slot->lock.irq_guard();
-        return slot->pty.slave_write(buf, count);
+        auto r     = slot->pty.slave_write(buf, count);
+        if (r.ok() && *r > 0) {
+            cinux::debug::trace_bytes("pty.slave_write from_shell", buf, *r);
+        }
+        return r;
     }
     cinux::lib::ErrorOr<int64_t> ioctl(const cinux::fs::Inode* inode, uint32_t request,
                                        uint64_t arg) override {

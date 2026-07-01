@@ -9,7 +9,7 @@
 #include "kernel/drivers/video/font.hpp"
 #include "kernel/fs/inode.hpp"  // Inode::ops->read/write on the PTY master
 #include "kernel/ipc/pipe.hpp"  // legacy pipe (test path)
-#include "kernel/lib/kprintf.hpp"
+#include "kernel/lib/echo_trace.hpp"
 #include "kernel/proc/pid.hpp"
 #include "kernel/proc/process.hpp"
 
@@ -104,7 +104,12 @@ void Terminal::on_key(KeyEvent& ev) {
         if (ch == '\r') {
             ch = '\n';
         }
+        cinux::debug::trace_char("terminal.on_key before master_write", ch);
         auto wr = master_inode_->ops->write(master_inode_, 0, &ch, 1);
+        if (cinux::debug::kEchoTrace) {
+            cinux::lib::kprintf("[ECHO_TRACE] terminal.on_key master_write ok=%d n=%d\n",
+                                wr.ok() ? 1 : 0, wr.ok() ? static_cast<int>(*wr) : -1);
+        }
         (void)wr;  // echo arrives via poll_output (master_read); no local display
         return;
     }
@@ -242,6 +247,7 @@ bool Terminal::poll_output() {
         if (n <= 0) {
             break;
         }
+        cinux::debug::trace_bytes("terminal.poll_output master_read", buf, n);
         write(buf, static_cast<uint64_t>(n));
         got_any = true;
     }
