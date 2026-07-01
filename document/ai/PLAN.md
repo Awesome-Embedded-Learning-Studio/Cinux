@@ -2,6 +2,14 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F6-M5 ext4 extents（读路径）— 收官 2026-07-01（分支 `feat/f6-m5-ext4`，worktree `.claude/worktrees/wt-ext4`，从干净 main `5c03f85`，两 leg 1066/0 + host 绿）
+
+> Feature 域 F6 VFS 第五里程碑。ext2 驱动扩展支持 ext4 extent tree（depth-0 leaf）读：inode 置 `EXT4_EXTENTS_FL` 时 `i_block[0..14]` 是 extent tree 而非块指针。**新增 `ext2_extent.{hpp,cpp}`**（resolver 独立文件——`ext2_common.cpp` 已 483 行撞 500 软上限）：`extent_lookup_block` 解析 leaf extent 算逻辑→物理块映射 + `inode_read_block` 共用读侧解析。**接线**：`Ext2FileOps::read` 加 extent 分支；`lookup_in_dir`/`readdir` 改用 `inode_read_block`（**目录在 ext4 也是 extent-mapped**，否则 lookup 全 NotFound——本批头号坑）。**范围栅栏**：depth-0 leaf；depth>0 index / extent 写 / journal 留续。**测试**：独立 ext4 盘挂 AHCI port 2（`create_ext4_disk.sh`，`mkfs.ext4 -O extents,^64bit,^metadata_csum` 强制 32 字节 BGDT——驱动按 32 字节定步长不看 `s_desc_size`）+ `test_ext4_extents.cpp`（mount ext4 卷 / 大文件 1 MiB 全 pattern byte-exact / 跨块读 / 小文件）。详见 `document/notes/2026-07-01-f6-m5-ext4-extents.md`。
+
+| 批 | 内容 | 状态 | 验证 |
+|----|------|------|------|
+| 1 | ext4 类型 + extent resolver + read/dir 接线 + ext4 镜像脚本/QEMU 接线 + 机制测 | ✅ | 两 leg 1066/0 + host 绿 |
+
 ## ✅ F-ECO 批8 小件（getgroups + setgroups）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b8-groups`，从集成线 `9208751`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`dc3fdc1`）零冲突，两 leg 1062/0）
 
 > busybox 试金石第八刀小件：`id`/`newgrp` 的补充组。login/su 复杂件留后续。

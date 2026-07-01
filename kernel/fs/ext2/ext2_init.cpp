@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "ext2.hpp"
+#include "ext2_extent.hpp"
 #include "kernel/drivers/block_device.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
@@ -59,6 +60,10 @@ uint32_t Ext2::block_size() const {
 
 bool Ext2::is_mounted() const {
     return mounted_;
+}
+
+bool Ext2::has_ext4_extents_feature() const {
+    return (sb_.s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS) != 0;
 }
 
 uint8_t* Ext2::block_buf() {
@@ -221,7 +226,9 @@ uint32_t Ext2::lookup_in_dir(uint32_t dir_ino, const char* name, uint32_t name_l
     }
 
     for (uint32_t b = 0; b < total_blocks; ++b) {
-        uint32_t blk = dir_disk.i_block[b];
+        // Resolve the directory data block via the extent tree (ext4 dirs are
+        // extent-mapped too) or the classic direct pointer.
+        uint32_t blk = inode_read_block(dir_disk, b);
         if (blk == 0) {
             continue;
         }

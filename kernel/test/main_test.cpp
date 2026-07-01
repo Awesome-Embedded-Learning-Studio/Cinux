@@ -80,6 +80,7 @@ void run_ext2_allocator_tests();
 void run_ext2_ops_tests();
 void run_ext2_inode_ops_tests();
 void run_syscall_ext2_tests();
+void run_ext4_extents_tests();
 void run_shell_write_tests();
 void run_cwd_stat_tests();
 void run_shared_resources_tests();
@@ -853,6 +854,10 @@ extern "C" void kernel_main() {
 
     // Ext2 InodeOps virtual class tests (028b)
     run_ext2_inode_ops_tests();
+
+    // Ext4 extents read-path tests (F6-M5): mount ext4 volume, read extent-mapped
+    // big/small files byte-exact through the depth-0 leaf extent tree.
+    run_ext4_extents_tests();
 
     // Syscall ext2 integration tests (028b): sys_creat/mkdir/unlink/rmdir
     run_syscall_ext2_tests();

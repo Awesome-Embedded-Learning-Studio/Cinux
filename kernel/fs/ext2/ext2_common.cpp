@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "ext2.hpp"
+#include "ext2_extent.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 
@@ -61,7 +62,17 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
 
         uint32_t disk_block = 0;
 
-        if (file_block < EXT2_DIRECT_BLOCKS) {
+        // ext4 extent-mapped inode: resolve the logical block through the
+        // extent tree in i_block[0..14] instead of the classic indirect path.
+        if (inode_has_extent_tree(disk)) {
+            uint32_t           extent_block = 0;
+            ExtentLookupResult r =
+                extent_lookup_block(disk, static_cast<uint32_t>(file_block), extent_block);
+            if (r == ExtentLookupResult::Unsupported) {
+                break;  // depth>0 index tree -- follow-up; stop the read.
+            }
+            disk_block = (r == ExtentLookupResult::Mapped) ? extent_block : 0;
+        } else if (file_block < EXT2_DIRECT_BLOCKS) {
             disk_block = disk.i_block[file_block];
         } else if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
             uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
@@ -329,7 +340,9 @@ cinux::lib::ErrorOr<int64_t> Ext2DirOps::readdir(const Inode* inode, uint64_t in
     }
 
     for (uint32_t b = 0; b < total_blocks; ++b) {
-        uint32_t blk = disk.i_block[b];
+        // Resolve the directory data block via the extent tree (ext4 dirs are
+        // extent-mapped too) or the classic direct pointer.
+        uint32_t blk = inode_read_block(disk, b);
         if (blk == 0) {
             continue;
         }

@@ -262,6 +262,7 @@ add_executable(big_kernel_test
     test/test_ext2_allocator.cpp
     test/test_ext2_ops.cpp
     test/test_ext2_inode_ops.cpp
+    test/test_ext4_extents.cpp
     test/test_syscall_ext2.cpp
     test/test_shell_write.cpp
     test/test_cwd_stat.cpp
