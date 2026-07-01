@@ -29,7 +29,7 @@
 #include "kernel/drivers/ahci/ahci_block_device.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pit/pit.hpp"
-#include "kernel/fs/ext2.hpp"
+#include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/string.hpp"
 #include "kernel/mm/page_cache.hpp"
@@ -521,7 +521,7 @@ void test_chmod_changes_mode() {
     TEST_ASSERT_NOT_NULL(pair.ext2);
     char name[32];
     gen_name(name, 32, "chm");
-    char     path[64];
+    char path[64];
     path[0]    = '/';
     uint32_t i = 0;
     while (name[i]) {
@@ -549,7 +549,7 @@ void test_chown_changes_owner() {
     TEST_ASSERT_NOT_NULL(pair.ext2);
     char name[32];
     gen_name(name, 32, "cho");
-    char     path[64];
+    char path[64];
     path[0]    = '/';
     uint32_t i = 0;
     while (name[i]) {
@@ -578,7 +578,7 @@ void test_utimensat_changes_times() {
     TEST_ASSERT_NOT_NULL(pair.ext2);
     char name[32];
     gen_name(name, 32, "uti");
-    char     path[64];
+    char path[64];
     path[0]    = '/';
     uint32_t i = 0;
     while (name[i]) {
@@ -609,7 +609,7 @@ void test_symlink_readlink_roundtrip() {
     TEST_ASSERT_NOT_NULL(pair.ext2);
     char name[32];
     gen_name(name, 32, "sym");
-    char     path[64];
+    char path[64];
     path[0]    = '/';
     uint32_t i = 0;
     while (name[i]) {
@@ -626,8 +626,7 @@ void test_symlink_readlink_roundtrip() {
     TEST_ASSERT_EQ(static_cast<uint64_t>(n), 11u);  // strlen("/target_str")
     TEST_ASSERT_EQ(memcmp(buf, "/target_str", 11), 0);
 
-    cinux::lib::kprintf("[B2] symlink+readlink /%s -> '%.*s' OK\n", name, static_cast<int>(n),
-                        buf);
+    cinux::lib::kprintf("[B2] symlink+readlink /%s -> '%.*s' OK\n", name, static_cast<int>(n), buf);
     cinux::syscall::do_unlink_kernel(path);  // remove the symlink (target need not exist)
     teardown_syscall_ext2(pair);
 }
@@ -641,8 +640,8 @@ void test_link_bumps_nlink() {
 
     char n1[32];
     gen_name(n1, 32, "lk1");
-    char     p1[64];
-    p1[0]     = '/';
+    char p1[64];
+    p1[0]      = '/';
     uint32_t i = 0;
     while (n1[i]) {
         p1[i + 1] = n1[i];
@@ -652,8 +651,8 @@ void test_link_bumps_nlink() {
 
     char n2[32];
     gen_name(n2, 32, "lk2");
-    char     p2[64];
-    p2[0]     = '/';
+    char p2[64];
+    p2[0]      = '/';
     uint32_t j = 0;
     while (n2[j]) {
         p2[j + 1] = n2[j];
@@ -686,8 +685,8 @@ void test_rename_moves_entry() {
 
     char n1[32];
     gen_name(n1, 32, "rn1");
-    char     p1[64];
-    p1[0]     = '/';
+    char p1[64];
+    p1[0]      = '/';
     uint32_t i = 0;
     while (n1[i]) {
         p1[i + 1] = n1[i];
@@ -697,8 +696,8 @@ void test_rename_moves_entry() {
 
     char n2[32];
     gen_name(n2, 32, "rn2");
-    char     p2[64];
-    p2[0]     = '/';
+    char p2[64];
+    p2[0]      = '/';
     uint32_t j = 0;
     while (n2[j]) {
         p2[j + 1] = n2[j];

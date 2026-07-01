@@ -460,7 +460,7 @@ int Ext2::unlink(uint32_t parent_ino, const char* name, uint32_t name_len) {
 // ============================================================
 
 cinux::lib::ErrorOr<void> Ext2DirOps::symlink(Inode* dir, const char* name, uint32_t namelen,
-                                               const char* target) {
+                                              const char* target) {
     if (dir == nullptr || name == nullptr || target == nullptr || namelen == 0) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -473,7 +473,7 @@ cinux::lib::ErrorOr<void> Ext2DirOps::symlink(Inode* dir, const char* name, uint
 }
 
 cinux::lib::ErrorOr<void> Ext2DirOps::link(Inode* dir, const char* name, uint32_t namelen,
-                                            const Inode* target) {
+                                           const Inode* target) {
     if (dir == nullptr || name == nullptr || target == nullptr || namelen == 0) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -486,10 +486,10 @@ cinux::lib::ErrorOr<void> Ext2DirOps::link(Inode* dir, const char* name, uint32_
 }
 
 cinux::lib::ErrorOr<void> Ext2DirOps::rename(Inode* src_dir, const char* src_name, uint32_t src_len,
-                                              Inode* dst_dir, const char* dst_name,
-                                              uint32_t dst_len) {
-    if (src_dir == nullptr || src_name == nullptr || dst_dir == nullptr || dst_name == nullptr
-        || src_len == 0 || dst_len == 0) {
+                                             Inode* dst_dir, const char* dst_name,
+                                             uint32_t dst_len) {
+    if (src_dir == nullptr || src_name == nullptr || dst_dir == nullptr || dst_name == nullptr ||
+        src_len == 0 || dst_len == 0) {
         return cinux::lib::Error::InvalidArgument;
     }
 
@@ -622,7 +622,7 @@ bool Ext2::link(uint32_t parent_ino, const char* name, uint32_t name_len, uint32
     // (regular files, symlinks, fifos, sockets) -> Regular. Matches the
     // directory-entry convention used elsewhere in this driver.
     Ext2FileType ft = ((target_disk.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR) ? Ext2FileType::Directory
-                                                                            : Ext2FileType::Regular;
+                                                                           : Ext2FileType::Regular;
 
     if (!add_dir_entry(parent_ino, dir_disk, target_ino, name, name_len, ft)) {
         // Roll back the link count bump so we don't leak a reference.
@@ -680,7 +680,7 @@ bool Ext2::rename(uint32_t src_dir_ino, const char* src_name, uint32_t src_len,
     }
 
     Ext2FileType ft = ((target_disk.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR) ? Ext2FileType::Directory
-                                                                            : Ext2FileType::Regular;
+                                                                           : Ext2FileType::Regular;
 
     if (!add_dir_entry(dst_dir_ino, dst_disk, ino, dst_name, dst_len, ft)) {
         return false;

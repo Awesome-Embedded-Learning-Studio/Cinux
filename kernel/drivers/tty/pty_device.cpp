@@ -18,7 +18,7 @@
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (slave ioctl)
 #include "kernel/drivers/tty/pty.hpp"
 #include "kernel/drivers/tty/tty.hpp"  // Termios/Winsize/kTcgets/kTiocsctty...
-#include "kernel/fs/devfs.hpp"         // kSIfChr / devfs_makedev
+#include "kernel/fs/devfs/devfs.hpp"   // kSIfChr / devfs_makedev
 #include "kernel/fs/inode.hpp"
 #include "kernel/lib/string.hpp"      // memset for stat
 #include "kernel/proc/process.hpp"    // Task::session_leader / controlling_tty

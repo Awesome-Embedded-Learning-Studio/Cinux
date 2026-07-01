@@ -260,17 +260,20 @@ cinux::lib::ErrorOr<void> Ext2FileOps::chown(Inode* inode, uint32_t uid, uint32_
                                                                     : cinux::lib::Error::IOError;
 }
 
-cinux::lib::ErrorOr<void> Ext2FileOps::utimensat(Inode* inode, uint64_t atime_sec, uint32_t atime_nsec,
-                                                  uint64_t mtime_sec, uint32_t mtime_nsec) {
+cinux::lib::ErrorOr<void> Ext2FileOps::utimensat(Inode* inode, uint64_t atime_sec,
+                                                 uint32_t atime_nsec, uint64_t mtime_sec,
+                                                 uint32_t mtime_nsec) {
     if (inode == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-    return ext2_.utimensat(static_cast<uint32_t>(inode->ino), atime_sec, atime_nsec, mtime_sec, mtime_nsec)
+    return ext2_.utimensat(static_cast<uint32_t>(inode->ino), atime_sec, atime_nsec, mtime_sec,
+                           mtime_nsec)
                ? cinux::lib::ErrorOr<void>{}
                : cinux::lib::Error::IOError;
 }
 
-cinux::lib::ErrorOr<int64_t> Ext2FileOps::readlink(const Inode* inode, char* buf, uint64_t buf_size) {
+cinux::lib::ErrorOr<int64_t> Ext2FileOps::readlink(const Inode* inode, char* buf,
+                                                   uint64_t buf_size) {
     if (inode == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -465,12 +468,14 @@ cinux::lib::ErrorOr<void> Ext2DirOps::chown(Inode* inode, uint32_t uid, uint32_t
                                                                     : cinux::lib::Error::IOError;
 }
 
-cinux::lib::ErrorOr<void> Ext2DirOps::utimensat(Inode* inode, uint64_t atime_sec, uint32_t atime_nsec,
-                                                 uint64_t mtime_sec, uint32_t mtime_nsec) {
+cinux::lib::ErrorOr<void> Ext2DirOps::utimensat(Inode* inode, uint64_t atime_sec,
+                                                uint32_t atime_nsec, uint64_t mtime_sec,
+                                                uint32_t mtime_nsec) {
     if (inode == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-    return ext2_.utimensat(static_cast<uint32_t>(inode->ino), atime_sec, atime_nsec, mtime_sec, mtime_nsec)
+    return ext2_.utimensat(static_cast<uint32_t>(inode->ino), atime_sec, atime_nsec, mtime_sec,
+                           mtime_nsec)
                ? cinux::lib::ErrorOr<void>{}
                : cinux::lib::Error::IOError;
 }
@@ -554,7 +559,8 @@ int64_t Ext2::readlink(uint32_t ino, char* buf, uint64_t buf_size) {
         return -1;
     }
     // Copy up to min(i_size, buf_size) bytes; no NUL terminator (Linux readlink).
-    uint64_t n = (static_cast<uint64_t>(d.i_size) < buf_size) ? static_cast<uint64_t>(d.i_size) : buf_size;
+    uint64_t n =
+        (static_cast<uint64_t>(d.i_size) < buf_size) ? static_cast<uint64_t>(d.i_size) : buf_size;
     const uint8_t* src = block_buf();
     for (uint64_t i = 0; i < n; ++i) {
         buf[i] = static_cast<char>(src[i]);

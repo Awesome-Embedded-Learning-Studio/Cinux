@@ -20,8 +20,8 @@
 
 #include <stdint.h>
 
-#include "fs/ext2_common.hpp"
-#include "fs/ext2_types.hpp"
+#include "fs/ext2/ext2_common.hpp"
+#include "fs/ext2/ext2_types.hpp"
 #include "fs/vfs_filesystem.hpp"
 #include "kernel/drivers/block_device.hpp"
 
@@ -199,8 +199,8 @@ public:
     /// Rename (sys_rename): remove @p src_name from @p src_dir_ino and add
     /// @p dst_name referring to the same inode in @p dst_dir_ino. The two
     /// directories may be the same.
-    bool rename(uint32_t src_dir_ino, const char* src_name, uint32_t src_len,
-                uint32_t dst_dir_ino, const char* dst_name, uint32_t dst_len);
+    bool rename(uint32_t src_dir_ino, const char* src_name, uint32_t src_len, uint32_t dst_dir_ino,
+                const char* dst_name, uint32_t dst_len);
 
     // ============================================================
     // Block allocator
