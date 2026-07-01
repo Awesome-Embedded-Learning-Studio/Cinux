@@ -314,6 +314,7 @@ add_executable(big_kernel_test
     test/test_devfs.cpp
     test/test_pty_device.cpp
     test/test_procfs.cpp
+    test/test_tmpfs.cpp
 )
 
 # F5-M5 xHCI: gate the USB test on CINUX_USB so a CINUX_USB=OFF build links
