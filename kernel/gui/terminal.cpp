@@ -84,14 +84,21 @@ void Terminal::on_key(KeyEvent& ev) {
         return;
     }
 
-    // When a stdin pipe is connected, forward the character to the pipe
-    // instead of writing to the screen buffer (the shell echoes via stdout)
+    // When a stdin pipe is connected, forward the character to the shell AND
+    // echo it locally.  The shell's stdin is a pipe (not a tty), so there is no
+    // TTY driver to echo typed chars -- busybox ash on a pipe does not self-echo
+    // either.  The terminal therefore acts as the cooked-mode TTY would: display
+    // each typed char (local echo) so the user sees what they type, in addition
+    // to forwarding it to the shell.  (A real fix is a PTY with its own echo;
+    // this local-echo unblocks the busybox smoke test.)
     if (stdin_pipe_ != nullptr) {
         char ch = ev.ascii;
         if (ch == '\r') {
             ch = '\n';
         }
         stdin_pipe_->try_write(&ch, 1);
+        write(&ch, 1);  // local echo (write() handles \n -> newline, not just printable)
+        content_dirty_ = true;
         return;
     }
 
