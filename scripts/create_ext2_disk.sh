@@ -140,12 +140,47 @@ if { [ -n "$MUSL_HELLO_DYN_ELF" ] && [ -f "$MUSL_HELLO_DYN_ELF" ]; } && \
     DEBUGFS_CMDS+="write $MUSL_HELLO_DYN_ELF hello-dyn\n"
 fi
 
-# F-ECO batch 0: optional minimal busybox at /bin/busybox (static musl; built
-# by clang --target=x86_64-linux-musl, allnoconfig + echo/cat/ls/true/false).
-# The ring-3 smoke fork+execves it to run applets -- the first ecosystem
-# touchstone. Absent in CI (no busybox build) -> skipped.
+# F-ECO batch 0: optional busybox at /bin/busybox (static musl).  Install common
+# applet hard links too: interactive ash resolves "ls" via PATH=/bin to
+# /bin/ls, not to "/bin/busybox ls".  Hard links keep the image small and mirror
+# the normal BusyBox deployment model.
 if [ -n "$BUSYBOX_ELF" ] && [ -f "$BUSYBOX_ELF" ]; then
     DEBUGFS_CMDS+="write $BUSYBOX_ELF bin/busybox\n"
+    BUSYBOX_APPLETS="
+ash
+ls
+clear
+cat
+echo
+pwd
+uname
+id
+whoami
+true
+false
+sleep
+env
+hostname
+wc
+free
+ps
+mkdir
+rmdir
+touch
+ln
+chmod
+chown
+rm
+cp
+mv
+readlink
+"
+    busybox_links=1
+    for applet in $BUSYBOX_APPLETS; do
+        DEBUGFS_CMDS+="ln /bin/busybox /bin/$applet\n"
+        busybox_links=$((busybox_links + 1))
+    done
+    DEBUGFS_CMDS+="sif /bin/busybox links_count $busybox_links\n"
 fi
 
 
