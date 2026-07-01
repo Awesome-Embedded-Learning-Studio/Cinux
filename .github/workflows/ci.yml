@@ -174,3 +174,62 @@ jobs:
           name: kernel-test-serial-log-${{ matrix.build_type }}-${{ matrix.sanitizer }}
           path: build/serial.log
           if-no-files-found: ignore
+
+  busybox-smoke:
+    # F-ECO: keep the real userland ecosystem gate as a dedicated job instead
+    # of multiplying BusyBox build/download cost across the Debug/Release x
+    # sanitizer kernel matrix.  This job builds the static BusyBox artifact,
+    # enables CINUX_BUSYBOX_SMOKE, and runs both single-CPU and -smp 2 legs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3 curl bzip2
+
+      - name: Cache musl sysroot
+        uses: actions/cache@v4
+        with:
+          path: build/musl-sysroot
+          key: musl-${{ runner.os }}-${{ hashFiles('tools/musl/build-musl.sh') }}
+
+      - name: Cache BusyBox source/build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/musl/busybox-*
+            build/musl/busybox
+          key: busybox-${{ runner.os }}-${{ hashFiles('tools/musl/build-busybox.sh') }}
+
+      - name: Build musl + BusyBox user binaries
+        run: |
+          tools/musl/build-musl.sh
+          tools/musl/build-hello.sh
+          tools/musl/build-forktest.sh
+          tools/musl/build-busybox.sh
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_BUSYBOX_SMOKE=ON -S .
+
+      - name: Build
+        run: |
+          cmake --build build -j$(nproc)
+          cmake --build build -j$(nproc)
+
+      - name: Run BusyBox smoke (single-CPU + -smp 2)
+        working-directory: build
+        run: |
+          set -o pipefail
+          timeout 300 make run-kernel-test-all 2>&1 | tee busybox-serial.log
+
+      - name: Upload BusyBox serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: busybox-smoke-serial-log
+          path: build/busybox-serial.log
+          if-no-files-found: ignore
