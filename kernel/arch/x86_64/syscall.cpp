@@ -50,6 +50,9 @@
 #include "kernel/syscall/sys_ping.hpp"
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_socket.hpp"
+#include "kernel/syscall/sys_accept4.hpp"   // F-ECO batch 7a
+#include "kernel/syscall/sys_getsockopt.hpp"  // F-ECO batch 7a
+#include "kernel/syscall/sys_setsockopt.hpp"  // F-ECO batch 7a
 // F-ECO batch 2: VFS metadata + dirent syscalls.
 #include "kernel/syscall/sys_chmod.hpp"
 #include "kernel/syscall/sys_chown.hpp"
@@ -169,6 +172,9 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_recvfrom, sys_recvfrom);
     syscall_register(SyscallNr::SYS_bind, sys_bind);
     syscall_register(SyscallNr::SYS_listen, sys_listen);
+    syscall_register(SyscallNr::SYS_accept4, sys_accept4);      // F-ECO batch 7a
+    syscall_register(SyscallNr::SYS_setsockopt, sys_setsockopt);  // F-ECO batch 7a
+    syscall_register(SyscallNr::SYS_getsockopt, sys_getsockopt);  // F-ECO batch 7a
 
     // F-ECO batch 2: VFS metadata + dirent syscalls.
     syscall_register(SyscallNr::SYS_rename, sys_rename);

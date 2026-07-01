@@ -91,6 +91,12 @@ enum class SyscallNr : uint64_t {
     SYS_recvfrom = 45,  ///< receive a message (blocking; addr-aware)
     SYS_bind     = 49,  ///< bind to a local address/port
     SYS_listen   = 50,  ///< mark passive (TCP)
+    SYS_getsockname = 51,  ///< retrieve local addr (F-ECO batch 7b)
+    SYS_getpeername = 52,  ///< retrieve peer addr (F-ECO batch 7b)
+    SYS_socketpair  = 53,  ///< create a pair of connected sockets (F-ECO batch 7b)
+    SYS_setsockopt  = 54,  ///< set a socket option (no-op accept) (F-ECO batch 7a)
+    SYS_getsockopt  = 55,  ///< get a socket option (SO_TYPE/SO_ERROR) (F-ECO batch 7a)
+    SYS_accept4     = 288, ///< accept + flags (SOCK_CLOEXEC) (F-ECO batch 7a)
     // --- F-ECO batch 2: VFS metadata + dirent syscalls (Linux x86_64 numbers) ---
     SYS_rename   = 82,    ///< rename a file (mv)
     SYS_link     = 86,    ///< create a hard link (ln)

@@ -63,15 +63,6 @@ inline uint16_t byte_swap16(uint16_t v) {
     return static_cast<uint16_t>((v >> 8) | (v << 8));
 }
 
-/// Recover the Socket* behind @p fd, or nullptr if it is not a socket fd.
-Socket* socket_from_fd(uint64_t fd) {
-    File* file = current_fd_table().get(static_cast<int>(fd));
-    if (file == nullptr || file->inode == nullptr || file->inode->ops != &socket_ops()) {
-        return nullptr;
-    }
-    return static_cast<Socket*>(file->inode->fs_private);
-}
-
 /// Parse a user sockaddr_in (addr + VALUE addrlen) into host-order addr+port.
 /// @return true on a valid AF_INET address; false on bad ptr / short len / wrong family.
 bool parse_sockaddr_in(uint64_t addr_virt, uint64_t addrlen, Ipv4Addr* out_addr,
@@ -140,11 +131,23 @@ bool parse_sockaddr_un(uint64_t addr_virt, uint64_t addrlen, char* out_path) {
     return out_path[0] != '\0';  // Linux allows empty (abstract) paths; we do not yet
 }
 
-/// Install @p sock under a fresh fd: build a synthetic Inode whose ops is the
-/// shared SocketOps + whose fs_private is @p sock, then FDTable::alloc RDWR.
-/// On success ownership of @p sock + the Inode transfers to the FDTable's File
-/// (closing the fd frees the File; the Socket/Inode share the pipe-style
-/// hobby-OS release-without-hook limitation).  Returns the fd or -errno.
+}  // namespace
+
+// ============================================================
+// Shared helpers (F-ECO batch 7): exposed in sys_socket.hpp so the accept4 /
+// setsockopt / getsockopt / shutdown / getsockname / getpeername / socketpair
+// handlers reuse the SAME fd->Socket resolution + fd install, not a copy.
+// Bodies are unchanged from their original anonymous-namespace definitions.
+// ============================================================
+
+Socket* socket_from_fd(uint64_t fd) {
+    File* file = current_fd_table().get(static_cast<int>(fd));
+    if (file == nullptr || file->inode == nullptr || file->inode->ops != &socket_ops()) {
+        return nullptr;
+    }
+    return static_cast<Socket*>(file->inode->fs_private);
+}
+
 int64_t install_socket_fd(Socket* sock) {
     // Manual RAII (freestanding: no <memory>/unique_ptr). On error free both;
     // on success ownership of sock + inode transfers to the FDTable's File
@@ -165,7 +168,37 @@ int64_t install_socket_fd(Socket* sock) {
     return fd;
 }
 
-}  // namespace
+int64_t do_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t flags) {
+    Socket* s = socket_from_fd(fd);
+    if (s == nullptr) {
+        return -cinux::kEbadf;
+    }
+    Ipv4Addr remote{};
+    uint16_t rport = 0;
+    auto     r     = s->accept(&remote, &rport);
+    if (!r.ok()) {
+        return -cinux::to_errno(r.error());
+    }
+    int64_t new_fd = install_socket_fd(*r);
+    if (new_fd < 0) {
+        (*r)->close();  // free the accepted socket the fd table could not hold
+        return new_fd;
+    }
+    // SOCK_CLOEXEC (Linux 02000000) -> mark the new fd close-on-exec.  SOCK_NONBLOCK
+    // is accepted but not plumbed (no per-fd nonblock flag yet -- follow-up).
+    constexpr uint64_t kSockCloexec = 02000000;
+    if ((flags & kSockCloexec) != 0) {
+        File* nf = current_fd_table().get(static_cast<int>(new_fd));
+        if (nf != nullptr) {
+            nf->cloexec = true;
+        }
+    }
+    // AF_UNIX peers carry no address/port -- leave the caller's sockaddr untouched.
+    if (s->domain() != kAfUnix) {
+        fill_sockaddr_in(addr, addrlen_ptr, remote, rport);
+    }
+    return new_fd;
+}
 
 int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t /*protocol*/, uint64_t, uint64_t,
                    uint64_t) {
@@ -245,26 +278,7 @@ int64_t sys_listen(uint64_t fd, uint64_t backlog, uint64_t, uint64_t, uint64_t, 
 }
 
 int64_t sys_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t, uint64_t, uint64_t) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
-    }
-    Ipv4Addr remote{};
-    uint16_t rport = 0;
-    auto     r     = s->accept(&remote, &rport);
-    if (!r.ok()) {
-        return -cinux::to_errno(r.error());
-    }
-    int64_t new_fd = install_socket_fd(*r);
-    if (new_fd < 0) {
-        (*r)->close();  // free the accepted socket the fd table could not hold
-        return new_fd;
-    }
-    // AF_UNIX peers carry no address/port -- leave the caller's sockaddr untouched.
-    if (s->domain() != kAfUnix) {
-        fill_sockaddr_in(addr, addrlen_ptr, remote, rport);
-    }
-    return new_fd;
+    return do_accept(fd, addr, addrlen_ptr, 0);  // flags=0 (sys_accept has no flags)
 }
 
 int64_t sys_sendto(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/, uint64_t addr,

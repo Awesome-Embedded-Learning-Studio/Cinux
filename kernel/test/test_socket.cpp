@@ -16,22 +16,25 @@
 
 #include <stdint.h>
 
-#include "kernel/errno.hpp"                // kEafnosupport / kEprotonosupport
-#include "kernel/fs/file.hpp"              // File
-#include "kernel/fs/vfs_mount.hpp"         // current_fd_table()
-#include "kernel/net/arp.hpp"              // ArpModule (echo stack)
-#include "kernel/net/icmp.hpp"             // IcmpModule
-#include "kernel/net/ipv4.hpp"             // Ipv4Module / kIpProto*
-#include "kernel/net/loopback_device.hpp"  // LoopbackDevice
-#include "kernel/net/net_stack.hpp"        // NetStack / InDevice
-#include "kernel/net/socket.hpp"           // Socket / socket_ops / kAfInet / kSock*
-#include "kernel/net/tcp.hpp"              // TcpModule
-#include "kernel/net/tcp_socket.hpp"       // TcpSocket
-#include "kernel/net/udp.hpp"              // UdpModule
-#include "kernel/net/udp_socket.hpp"       // UdpSocket
-#include "kernel/net/unix_socket.hpp"      // UnixSocket (F8-M3)
-#include "kernel/syscall/sys_close.hpp"    // sys_close
-#include "kernel/syscall/sys_socket.hpp"   // sys_socket
+#include "kernel/errno.hpp"                   // kEafnosupport / kEprotonosupport
+#include "kernel/fs/file.hpp"                 // File
+#include "kernel/fs/vfs_mount.hpp"            // current_fd_table()
+#include "kernel/net/arp.hpp"                 // ArpModule (echo stack)
+#include "kernel/net/icmp.hpp"                // IcmpModule
+#include "kernel/net/ipv4.hpp"                // Ipv4Module / kIpProto*
+#include "kernel/net/loopback_device.hpp"     // LoopbackDevice
+#include "kernel/net/net_stack.hpp"           // NetStack / InDevice
+#include "kernel/net/socket.hpp"              // Socket / socket_ops / kAfInet / kSock*
+#include "kernel/net/tcp.hpp"                 // TcpModule
+#include "kernel/net/tcp_socket.hpp"          // TcpSocket
+#include "kernel/net/udp.hpp"                 // UdpModule
+#include "kernel/net/udp_socket.hpp"          // UdpSocket
+#include "kernel/net/unix_socket.hpp"         // UnixSocket (F8-M3)
+#include "kernel/syscall/sys_accept4.hpp"     // sys_accept4 (F-ECO batch 7a)
+#include "kernel/syscall/sys_close.hpp"       // sys_close
+#include "kernel/syscall/sys_getsockopt.hpp"  // sys_getsockopt / do_getsockopt_kernel (F-ECO batch 7a)
+#include "kernel/syscall/sys_setsockopt.hpp"  // sys_setsockopt (F-ECO batch 7a)
+#include "kernel/syscall/sys_socket.hpp"      // sys_socket
 #include "kernel/test/big_kernel_test.h"
 
 using cinux::fs::current_fd_table;
@@ -61,6 +64,10 @@ using cinux::net::kSockStream;
 using cinux::net::socket_ops;
 using cinux::syscall::sys_close;
 using cinux::syscall::sys_socket;
+using cinux::syscall::sys_accept4;           // F-ECO batch 7a
+using cinux::syscall::sys_setsockopt;        // F-ECO batch 7a
+using cinux::syscall::sys_getsockopt;        // F-ECO batch 7a
+using cinux::syscall::do_getsockopt_kernel;  // F-ECO batch 7a
 
 namespace test_socket {
 
@@ -346,6 +353,91 @@ void test_unix_socket_bind_duplicate() {
     TEST_ASSERT_EQ(r.error(), cinux::lib::Error::AlreadyExists);  // -> EEXIST
 }
 
+// --- F-ECO batch 7a: accept4 + setsockopt/getsockopt (socket-syscall alignment) ---
+namespace {
+constexpr uint64_t kSolSocketB7   = 1;         // SOL_SOCKET
+constexpr uint64_t kSoTypeB7      = 3;         // SO_TYPE
+constexpr uint64_t kSoReuseaddrB7 = 2;         // SO_REUSEADDR
+constexpr uint64_t kSockCloexecB7 = 02000000;  // SOCK_CLOEXEC (Linux O_CLOEXEC)
+}  // namespace
+
+void test_setsockopt_accepts_options() {
+    int64_t fd = sys_socket(kAfUnix, kSockStream, 0, kFiller, kFiller, kFiller);
+    TEST_ASSERT_GE(fd, 0);
+    // Any option at SOL_SOCKET is accepted as a no-op (no socket-option storage).
+    // optval is ignored by the handler, so the ring0 test kernel can pass a
+    // kernel addr without hitting copy_from_user.
+    uint8_t optval = 1;
+    int64_t r      = sys_setsockopt(static_cast<uint64_t>(fd), kSolSocketB7, kSoReuseaddrB7,
+                                    reinterpret_cast<uint64_t>(&optval), sizeof(optval), 0);
+    TEST_ASSERT_EQ(r, 0);
+    // Bad fd -> -EBADF.
+    TEST_ASSERT_EQ(sys_setsockopt(999, kSolSocketB7, kSoReuseaddrB7,
+                                  reinterpret_cast<uint64_t>(&optval), sizeof(optval), 0),
+                   -cinux::kEbadf);
+    sys_close(static_cast<uint64_t>(fd), kFiller, kFiller, kFiller, kFiller, kFiller);
+}
+
+void test_getsockopt_so_type() {
+    int64_t sfd = sys_socket(kAfUnix, kSockStream, 0, kFiller, kFiller, kFiller);
+    int64_t dfd = sys_socket(kAfUnix, kSockDgram, 0, kFiller, kFiller, kFiller);
+    TEST_ASSERT_GE(sfd, 0);
+    TEST_ASSERT_GE(dfd, 0);
+    int32_t v = 0;
+    TEST_ASSERT_EQ(do_getsockopt_kernel(static_cast<uint64_t>(sfd), kSolSocketB7, kSoTypeB7, &v),
+                   0);
+    TEST_ASSERT_EQ(v, 1);  // SOCK_STREAM
+    TEST_ASSERT_EQ(do_getsockopt_kernel(static_cast<uint64_t>(dfd), kSolSocketB7, kSoTypeB7, &v),
+                   0);
+    TEST_ASSERT_EQ(v, 2);  // SOCK_DGRAM
+    sys_close(static_cast<uint64_t>(sfd), kFiller, kFiller, kFiller, kFiller, kFiller);
+    sys_close(static_cast<uint64_t>(dfd), kFiller, kFiller, kFiller, kFiller, kFiller);
+}
+
+void test_getsockopt_bad_level_and_fd() {
+    int64_t fd = sys_socket(kAfUnix, kSockStream, 0, kFiller, kFiller, kFiller);
+    TEST_ASSERT_GE(fd, 0);
+    int32_t v = 0;
+    // Non-SOL_SOCKET level (IPPROTO_TCP=6) -> -EOPNOTSUPP.
+    TEST_ASSERT_EQ(do_getsockopt_kernel(static_cast<uint64_t>(fd), 6, kSoTypeB7, &v),
+                   -cinux::kEopnotsupp);
+    // Bad fd -> -EBADF.
+    TEST_ASSERT_EQ(do_getsockopt_kernel(999, kSolSocketB7, kSoTypeB7, &v), -cinux::kEbadf);
+    sys_close(static_cast<uint64_t>(fd), kFiller, kFiller, kFiller, kFiller, kFiller);
+}
+
+void test_accept4_cloexec_flag() {
+    // Server: a UnixSocket bound + listening, installed as an fd so accept4 can
+    // resolve it (install_socket_fd wraps the Socket* in a SocketOps inode).
+    UnixSocket* server = new UnixSocket(kSockStream);
+    int64_t     sfd    = cinux::syscall::install_socket_fd(server);
+    TEST_ASSERT_GE(sfd, 0);
+    TEST_ASSERT_TRUE(server->bind_path("/un_acc4").ok());
+    TEST_ASSERT_TRUE(server->listen(1).ok());
+    UnixSocket client(kSockStream);
+    TEST_ASSERT_TRUE(client.connect_path("/un_acc4").ok());
+
+    // accept4 with SOCK_CLOEXEC -> the accepted fd is close-on-exec.
+    int64_t nfd = sys_accept4(static_cast<uint64_t>(sfd), 0, 0, kSockCloexecB7, 0, 0);
+    TEST_ASSERT_GE(nfd, 0);
+    cinux::fs::File* nf = current_fd_table().get(static_cast<int>(nfd));
+    TEST_ASSERT_NOT_NULL(nf);
+    TEST_ASSERT_TRUE(nf->cloexec);
+
+    // Without the flag, the accepted fd is NOT cloexec (regression guard).
+    UnixSocket client2(kSockStream);
+    TEST_ASSERT_TRUE(client2.connect_path("/un_acc4").ok());
+    int64_t nfd2 = sys_accept4(static_cast<uint64_t>(sfd), 0, 0, 0, 0, 0);
+    TEST_ASSERT_GE(nfd2, 0);
+    cinux::fs::File* nf2 = current_fd_table().get(static_cast<int>(nfd2));
+    TEST_ASSERT_NOT_NULL(nf2);
+    TEST_ASSERT_FALSE(nf2->cloexec);
+
+    sys_close(static_cast<uint64_t>(sfd), kFiller, kFiller, kFiller, kFiller, kFiller);
+    sys_close(static_cast<uint64_t>(nfd), kFiller, kFiller, kFiller, kFiller, kFiller);
+    sys_close(static_cast<uint64_t>(nfd2), kFiller, kFiller, kFiller, kFiller, kFiller);
+}
+
 }  // namespace test_socket
 
 extern "C" void run_socket_tests() {
@@ -362,5 +454,10 @@ extern "C" void run_socket_tests() {
     RUN_TEST(test_socket::test_unix_socket_loopback_echo);
     RUN_TEST(test_socket::test_unix_socket_connect_unbound);
     RUN_TEST(test_socket::test_unix_socket_bind_duplicate);
+    TEST_SECTION("F-ECO batch 7a socket-syscall alignment");
+    RUN_TEST(test_socket::test_setsockopt_accepts_options);
+    RUN_TEST(test_socket::test_getsockopt_so_type);
+    RUN_TEST(test_socket::test_getsockopt_bad_level_and_fd);
+    RUN_TEST(test_socket::test_accept4_cloexec_flag);
     TEST_SUMMARY();
 }
