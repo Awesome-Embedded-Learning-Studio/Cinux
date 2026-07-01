@@ -17,9 +17,9 @@
 #include "kernel/fs/inode.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/gui/desktop_icon.hpp"
+#include "kernel/gui/host_cinux.hpp"
 #include "kernel/gui/icon.hpp"
 #include "kernel/gui/terminal.hpp"
-#include "kernel/gui/host_cinux.hpp"
 #include "kernel/gui/window_manager.hpp"
 #include "kernel/ipc/pipe.hpp"
 #include "kernel/ipc/pipe_ops.hpp"
@@ -95,9 +95,18 @@ static void shell_child_entry() {
     task->fd_table->set(0, new cinux::fs::File(info->stdin_read, 0, cinux::fs::OpenFlags::RDONLY));
     task->fd_table->set(1,
                         new cinux::fs::File(info->stdout_write, 0, cinux::fs::OpenFlags::WRONLY));
+    // stderr -> the same stdout pipe so busybox ash's interactive prompt (which
+    // it writes to stderr) appears in the terminal, not lost to an unset fd 2.
+    task->fd_table->set(2,
+                        new cinux::fs::File(info->stdout_write, 0, cinux::fs::OpenFlags::WRONLY));
 
-    const char* argv[] = {info->path, nullptr};
-    const char* envp[] = {nullptr};
+    // "-i" forces interactive mode: the GUI terminal feeds the shell stdin via a
+    // pipe (not a tty), so busybox ash's isatty(0)==false would otherwise select
+    // non-interactive mode (no echo, no prompt) and the user could not see what
+    // they type.  -i makes ash echo + prompt even on a pipe stdin.  (A real fix
+    // is a PTY so isatty/termios work; this unblocks the busybox smoke test.)
+    const char* argv[] = {info->path, "-i", nullptr};
+    const char* envp[] = {"PATH=/bin", nullptr};
     // Load the program, set up the user stack, and jump to user mode.
     // Consolidated with the non-GUI shell launch in init.cpp into
     // launch_user_program(); never returns (jumps to user mode or exits).
@@ -203,8 +212,8 @@ namespace {
 // dependency -- it just calls a registered listener (CODING-TASTE §14).
 void on_key_event(const cinux::drivers::KeyEvent& ev) {
     cinux::gui::Event gui_ev{};
-    gui_ev.type_        = ev.pressed ? cinux::gui::EventType::KeyDown : cinux::gui::EventType::KeyUp;
-    gui_ev.key.ascii    = ev.ascii;
+    gui_ev.type_     = ev.pressed ? cinux::gui::EventType::KeyDown : cinux::gui::EventType::KeyUp;
+    gui_ev.key.ascii = ev.ascii;
     gui_ev.key.scancode = ev.scancode;
     gui_ev.key.pressed  = ev.pressed;
     gui_ev.key.shift    = ev.shift;
