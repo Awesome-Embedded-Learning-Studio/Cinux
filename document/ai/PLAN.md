@@ -2,6 +2,50 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F-ECO 批8 小件（getgroups + setgroups）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b8-groups`，从集成线 `9208751`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`dc3fdc1`）零冲突，两 leg 1062/0）
+
+> busybox 试金石第八刀小件：`id`/`newgrp` 的补充组。login/su 复杂件留后续。
+> **实现**：Task +groups[32]+ngroups（放 fpu_state **后**——其 offset 384 被 static_assert 钉死，插前会推后）。sys_getgroups(115)/setgroups(116)+do_ 变体放 sys_creds 家族；**do_ 取 Task* 参数**（测试内核 current()==null，F3-M4 GOTCHA#22）。getgroups size==0→count / size<count→EINVAL；setgroups root-only + count>32→EINVAL。
+> **机制测 3**（栈 Task 直驱 do_）：getgroups count/array 精确匹配 + too-small→EINVAL + setgroups too-many→EINVAL + **非 root→EPERM**。
+> **GOTCHA**：fpu_state offset 钉死→新 Task 成员须放其后；测试内核 current()==null→creds do_ 须取 Task*。follow-up：login/su（复杂件）/ CAP_SETGID 能力位 / 文件 group 权限查 supplementary groups。详见 [note](../notes/2026-07-01-f-eco-b8-groups.md)。push/PR 归用户。
+
+## ✅ F-ECO 批7（socket syscall 全对齐）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b7-socket`，从集成线 `9683e38`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`ec5ced6` 批7a + `2d2c9cc` 批7b）零冲突，两 leg 1059/0）
+
+> busybox 试金石第七刀：socket(2) 族 14 个 syscall 全对齐（F7-M6 的 7 + 批7a 的 accept4/setsockopt/getsockopt + 批7b 的 getsockname/getpeername/shutdown/socketpair）。applet 端到端验收留 CI。
+> **批7a（主控独占，handler-only）**：共享 helper 重构（socket_from_fd/install_socket_fd 移出匿名 ns + 提取 do_accept，sys_accept 退化、accept4 复用）；setsockopt 全选项 no-op accept；getsockopt SO_TYPE/SO_ERROR；accept4 SOCK_CLOEXEC→File::cloexec。
+> **批7b（主控铺契约 + 3 分身并发，用户决策对治串行手撸）**：socket.hpp +SockAddrStorage +get_local/peer_addr 虚 +do_shutdown/shut_；3 分身零文件交叉填 Unix（+pair_with+socketpair）/ Udp / Tcp 子类 override + send/recv shutdown 检查；主控合并**一次编绿**。getsockname/getpeername 按 domain 拷 sockaddr；shutdown 记方向位子类入口检查。
+> **机制测 8**：setsockopt/getsockopt/accept4-cloexec（批7a）+ getsockname path 精确匹配/getpeer_addr/shutdown 双向/socketpair round-trip（批7b）。
+> **教训**：识别零文件交叉的并行面就并发分身（[[parallel-agents-rigorous-methodology]]），别手撸——批7b 三子类并发一次编绿。follow-up：socket-option 存储（setsockopt 真语义）/ SOCK_NONBLOCK / shutdown 对端传播 / DGRAM socketpair。详见 [note](../notes/2026-07-01-f-eco-b7-socket-alignment.md)。push/PR 归用户。
+
+## ✅ F-ECO 批5（sysinfo + getrusage）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b5`，从集成线 `e2a7d70`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`b4fa398`）零冲突，两 leg 1051/0）
+
+> busybox 试金石第五刀内核件：`ps`/`free`/`uptime`/`top`/`time`。ps 走已有 ProcFS；free/uptime 用 sysinfo；time/top 用 getrusage。applet 端到端验收留 CI。
+> **sysinfo(99)**：填 Linux struct sysinfo(112B)；uptime←HPET 秒、totalram/freeram←g_pmm×4096、procs←signal_nth_task_pid 计数、memunit=1；loads/buffer/swap/high=0（未跟踪诚实非编造）。**getrusage(98)**：填 struct rusage(144B) 全 0（无 per-task 会计）；who 校验 {-1,0,1}（RUSAGE_* 内核+libc 约定并集）。
+> **机制测 4**：sysinfo sane（**cross-check totalram==g_pmm.total_page_count()\*4096** 证 PMM 接对）+ bad-ptr + getrusage zeros（poison 验清零）+ bad-who→EINVAL。
+> **follow-up**：busybox applet 验收（CI）/ load average（调度器采样）/ swap 子系统 / per-task 资源会计（getrusage 真值）。详见 [note](../notes/2026-07-01-f-eco-b5-sysinfo-getrusage.md)。push/PR 归用户。
+
+## ✅ F-ECO 批3 + 批4（nanosleep + dup/dup2/fcntl）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b3-b4`，从集成线 `9ef98e0`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`3be9859`+`b271439`）零冲突，两 leg 1047/0）
+
+> busybox 试金石第三、四刀的**内核件**：批3 `sleep`（nanosleep 35）+ 批4 `sh`+管道+重定向质变点（dup 32 / dup2 33 / fcntl 72）。busybox applet 端到端负载验收留 CI build。
+> **批3 nanosleep**：`sys_nanosleep`/`do_nanosleep_kernel` 复用 clock_gettime 的 HPET monotonic（PIT 兜底）；`while(now<deadline) yield()`——**不 sti/hlt**（sti-in-syscall→#DF，yield 经 Task::ctx 安全）、**不 IRQ wake**（HPET 周期中断是 F5-M4 follow-up，现 poll+yield 正确不高效）；信号 -EINTR 不做（睡满，rem 清零）。do_ 内核变体供测试直调（is_user_vaddr 拒内核栈地址，sys_ 在测试内核过不了 copy_from_user）。
+> **批4 dup/dup2/fcntl**：FDTable +dup/dup2（每次复制 = new File 独立描述，拷 inode+offset+flags+cloexec——hobby 简化避 File 引用计数；新 fd 达同 inode，pipe/重定向够用；Linux 共享描述符留 follow-up）；File +cloexec；sys_fcntl 子集 F_DUPFD/F_GETFD/F_SETFD/F_GETFL（F_SETFL/O_NONBLOCK 运行时改留 follow-up）。
+> **机制测试防假绿（10 测）**：nanosleep duration(HPET delta≥5ms)+zero+bad-nsec；dup inode 共享+byte round-trip（InodeOps 内核缓冲直驱）+ dup2 redirect round-trip(fd42→pipe)+ dup2 same-fd no-op + fcntl cloexec round-trip + F_DUPFD + F_GETFL + bad-fd。
+> **GOTCHA（测间 fd 表污染）**：第一轮批4 测全 PASS 但 test_vfs_close_invalid_fd 红——测试内核 current_fd_table() 全 suite 共享，批4 dup2 占了 fd42 没清 → 后续 close(42) 返 0≠-1。修法：每测结束 cleanup_fds() close 全部创建的 fd。启示：**ring0 测共享全局 fd 表，凡开 fd 的测须收尾 close**。详见 [note](../notes/2026-07-01-f-eco-b3-b4-nanosleep-dup-fcntl.md)。push/PR 归用户。
+
+## ✅ F8-M3 AF_UNIX socket — 收官 2026-07-01（外包 worktree `feat/outsource-f8-unix-socket`，从集成线 `47573bc`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls` 零冲突，两 leg 1037/0）
+
+> F8 IPC 第三里程碑（M1 Pipe + M2 FIFO 已在主线待 push）。AF_UNIX socket 收进 F7-M6 的 **Socket=InodeOps 适配器**——socket fd 仍是 `File→Inode→SocketOps`，`sys_read/write/close` 零改。
+> **架构**：Socket base 加 path 虚函数 `bind_path`/`connect_path`（默认 NotImplemented；path 塞不进 AF_INET 形状的 `bind(port)`/`connect(addr,port)`，加法非破坏 Udp/TcpSocket 零改；listen/accept/send/recv 复用现有 virtuals）。`UnixSocket`（kernel/net/unix_socket.{hpp,cpp}）：bind_path 注册到内存 `UnixRegistry`（仿 FifoRegistry，**不依赖 tmpfs/ext2 真路径**，hobby-OS 简化）；connect_path 建 child、互连 peer、入 server accept 队列（立即建立无握手，确定性测试可 send-before-accept）；send 写 peer 的 4KB RX 环、recv 排干；阻塞走 `prepare_to_wait/schedule_blocked`（不 sti/hlt，避 sti-in-syscall #DF）。锁序：registry 锁绝不与 socket 锁嵌套（无 AB-BA）；peer_ 写一次、send 快照后只持 peer 锁。sys_socket 收 AF_UNIX 直接 `new UnixSocket`（自洽无栈依赖，避开改 net_init.cpp+net_stub.cpp 两处）。
+> **机制测试防假绿（4 测）**：returns_fd（sys_socket 创 UnixSocket）+ loopback echo（connect→send→accept→recv 逐字节精确匹配双向）+ connect 未绑→NotFound + bind 重复→AlreadyExists。echo + 负测走 UnixSocket 直接方法（同 AF_INET TCP/UDP echo——`copy_from_user` 的 `is_user_vaddr` 范围检查拒内核地址，测试内核栈 sockaddr_un 走 sys_bind 会 -EFAULT；sys_bind 的 sockaddr_un 解析留生产 musl 覆盖）。
+> **follow-up**：fs-backed bind() 接 DevFS/tmpfs 真节点 / abstract socket / socketpair + AF_UNIX DGRAM sendto(path) / send-side flow control（ring 满现返 EAGAIN）/ SMP peer 可见性 rigor / connect 阻塞到 accept / close 无 InodeOps::release（listener 不撤名）。详见 [note](../notes/2026-07-01-f8-m3-unix-socket.md)。push/PR 归用户。
+
+## ✅ F-ECO 批2（VFS metadata + dirent 8 syscall）— 收官 2026-07-01（分支 `feat/f-eco-b2-vfs-syscalls`，从 main `470e9c8`，两 leg 1033/0）
+
+> busybox 试金石第二刀（[todo f-eco/00-busybox-touchstone](../todo/f-eco/00-busybox-touchstone.md) 批2）：为 `cp/mv/rm/touch/ln/mkdir/chmod/chown` 普及 8 个 Linux syscall —— `rename`(82)/`symlink`(88)/`link`(86)/`readlink`(89)/`chmod`(90)/`chown`(92)/`umask`(95)/`utimensat`(312)。
+> **严密分身并行（用户决策，对治"prompt 不全→分身改乱"）**：阶段0 主控独占铺公共契约（`InodeOps` 7 default virtual + Ext2 方法/override 声明 + ext2 NotImplemented 桩 + 8 完整 sys handler 走 lookup→派发 + syscall 号/注册/CMake）；阶段1 两分身填 ext2 方法体（块A 独占 `ext2_common.cpp` setattr+readlink / 块B 独占 `ext2_directory.cpp` symlink+link+rename，零文件交叉）。先读全签名模式再铺契约；分身 prompt 注入完整契约 + Ext2 原语清单 + 严格单文件边界 + 禁碰公共头 + 不跑 cmake（主控统一编译）。
+> **机制测试防假绿（价值实证）**：`run_syscall_ext2_tests` 加 6 测（chmod/chown/utimensat/symlink+readlink/link/rename 验语义）抓出两类真 bug——① stat 读 inode cache 不读盘，setattr 写盘须 `invalidate_cached_inode`；② `populate_vfs_inode` 不认 `S_IFLNK` → 符号链接 ops=nullptr → readlink -EIO。分身编绿 + 基线零回归，但 stat 假失败——"绿≠对"。修后两 leg 1033/0（1027+6）。
+> **follow-up**：busybox -O2 真实测（本地无 build，留 CI）/ rename overwrite + 目录 nlink / umask 应用到 create / symlink follow / chown 16 位 / utimensat nsec+wall-clock。详见 [note](../notes/2026-07-01-f-eco-b2-vfs-syscalls.md)。push/PR 归用户。
+
 ## ✅ F7-M6 Socket API 收官（BSD socket 系统调用 / Socket=InodeOps 适配器）— 2026-06-30（worktree `worktree-f7-m6-socket`，从干净 main `f1f29aa`，两 leg 1027/0）
 
 > Feature 域 F7 最后一里程碑。接 F7-M5 TCP ✅（已合 main PR#53）+ F7-M4 UDP ✅（PR#47）。网络线走到「可用」：用户态程序能用 socket()/connect()/send()/recv() 收发数据。

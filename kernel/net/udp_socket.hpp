@@ -24,11 +24,11 @@
 #include <cinux/expected.hpp>
 #include <cstdint>
 
-#include "kernel/net/net_device.hpp"    // NetDevice
-#include "kernel/net/net_stack.hpp"     // NetStack
-#include "kernel/net/socket.hpp"        // Socket
-#include "kernel/net/udp.hpp"           // UdpListener, UdpModule
-#include "kernel/proc/sync.hpp"         // Spinlock
+#include "kernel/net/net_device.hpp"  // NetDevice
+#include "kernel/net/net_stack.hpp"   // NetStack
+#include "kernel/net/socket.hpp"      // Socket
+#include "kernel/net/udp.hpp"         // UdpListener, UdpModule
+#include "kernel/proc/sync.hpp"       // Spinlock
 
 namespace cinux::proc {
 struct Task;  // forward -- wait queue holds blocked recv'ers (host-guarded)
@@ -49,14 +49,18 @@ public:
     UdpSocket(UdpModule& udp, Ipv4Module& ipv4, NetStack& stack, DevRoute route);
 
     // --- Socket overrides ---
-    cinux::lib::ErrorOr<void>     bind(uint16_t local_port) override;
-    cinux::lib::ErrorOr<void>     connect(Ipv4Addr remote, uint16_t remote_port) override;
-    cinux::lib::ErrorOr<int64_t>  send(const uint8_t* buf, uint32_t len) override;
-    cinux::lib::ErrorOr<int64_t>  sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
-                                         uint32_t len) override;
-    cinux::lib::ErrorOr<int64_t>  recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
-                                       uint16_t* out_port) override;
-    void                          close() override;
+    cinux::lib::ErrorOr<void>    bind(uint16_t local_port) override;
+    cinux::lib::ErrorOr<void>    connect(Ipv4Addr remote, uint16_t remote_port) override;
+    cinux::lib::ErrorOr<int64_t> send(const uint8_t* buf, uint32_t len) override;
+    cinux::lib::ErrorOr<int64_t> sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
+                                        uint32_t len) override;
+    cinux::lib::ErrorOr<int64_t> recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
+                                      uint16_t* out_port) override;
+    void                         close() override;
+
+    // --- F-ECO batch 7b: address retrieval (getsockname/getpeername) ---
+    bool get_local_addr(SockAddrStorage* out) const override;
+    bool get_peer_addr(SockAddrStorage* out) const override;
 
     // --- UdpListener: the modules push inbound datagrams INTO the ring here ---
     void on_udp(const Ipv4Header& ip, uint16_t src_port, FrameView payload) override;
@@ -77,16 +81,16 @@ private:
     NetStack&   stack_;
     DevRoute    route_;
 
-    uint16_t    local_port_ = 0;
-    bool        bound_      = false;
-    Ipv4Addr    peer_addr_{};
-    uint16_t    peer_port_  = 0;
-    bool        connected_  = false;
+    uint16_t local_port_ = 0;
+    bool     bound_      = false;
+    Ipv4Addr peer_addr_{};
+    uint16_t peer_port_ = 0;
+    bool     connected_ = false;
 
-    Datagram                 rx_[kRxSlots]{};
-    uint32_t                 rx_head_ = 0, rx_tail_ = 0, rx_count_ = 0;
-    cinux::proc::Spinlock    lock_;
-    cinux::proc::Task*       recv_waiters_ = nullptr;  ///< intrusive list (host-guarded)
+    Datagram              rx_[kRxSlots]{};
+    uint32_t              rx_head_ = 0, rx_tail_ = 0, rx_count_ = 0;
+    cinux::proc::Spinlock lock_;
+    cinux::proc::Task*    recv_waiters_ = nullptr;  ///< intrusive list (host-guarded)
 };
 
 }  // namespace cinux::net

@@ -26,6 +26,13 @@
 
 namespace cinux::net {
 
+namespace {
+/// Swap a 16-bit value host<->network (sockaddr_in::port is big-endian).
+constexpr uint16_t byte_swap16(uint16_t v) {
+    return static_cast<uint16_t>((v >> 8) | (v << 8));
+}
+}  // namespace
+
 #ifndef CINUX_HOST_TEST
 namespace {
 using cinux::proc::Scheduler;
@@ -83,9 +90,9 @@ TcpSocket::TcpSocket(TcpModule& tcp, Ipv4Module& ipv4, NetStack& stack, DevRoute
       connected_(true) {}
 
 cinux::lib::ErrorOr<void> TcpSocket::bind(uint16_t local_port) {
-    auto g          = lock_.irq_guard();
-    local_port_     = local_port;
-    bound_          = true;
+    auto g      = lock_.irq_guard();
+    local_port_ = local_port;
+    bound_      = true;
     return {};
 }
 
@@ -111,21 +118,21 @@ cinux::lib::ErrorOr<void> TcpSocket::connect(Ipv4Addr remote, uint16_t remote_po
             // Auto-bind an ephemeral local port (monotonic; collisions are rare
             // at hobby scale -- a real ephemeral allocator is a follow-up).
             static uint16_t eph = kEphemeralBase;
-            local_port_     = eph++;
+            local_port_         = eph++;
             if (eph >= kEphemeralBase + kEphemeralRange) {
                 eph = kEphemeralBase;
             }
             bound_ = true;
         }
-        remote_addr_  = remote;
-        remote_port_  = remote_port;
-        connected_    = true;
+        remote_addr_ = remote;
+        remote_port_ = remote_port;
+        connected_   = true;
     }
     // Active open (sends SYN). The handshake completes on a later poll().
     NetDevice& dev = route_(remote);
     auto       r   = tcp_.connect(dev, local_port_, remote, remote_port, ipv4_, stack_);
     if (!r.ok()) {
-        auto g = lock_.irq_guard();
+        auto g     = lock_.irq_guard();
         connected_ = false;
         return r.error();
     }
@@ -144,12 +151,13 @@ cinux::lib::ErrorOr<Socket*> TcpSocket::accept(Ipv4Addr* out_remote, uint16_t* o
             auto g = lock_.irq_guard();
             if (accept_count_ > 0) {
                 PendingAccept pa = accept_queue_[accept_head_];
-                accept_head_ = (accept_head_ + 1) % kAcceptMax;
+                accept_head_     = (accept_head_ + 1) % kAcceptMax;
                 --accept_count_;
                 // New a connected child for this peer, then rebind the
                 // connection's TCB listener from the listening parent to the
                 // child so its on_data/on_close reach the child directly.
-                auto* child = new TcpSocket(tcp_, ipv4_, stack_, route_, local_port_, pa.addr, pa.port);
+                auto* child =
+                    new TcpSocket(tcp_, ipv4_, stack_, route_, local_port_, pa.addr, pa.port);
                 tcp_.set_listener(local_port_, pa.addr, pa.port, *child);
                 if (out_remote != nullptr) {
                     *out_remote = pa.addr;
@@ -180,6 +188,9 @@ cinux::lib::ErrorOr<Socket*> TcpSocket::accept(Ipv4Addr* out_remote, uint16_t* o
 }
 
 cinux::lib::ErrorOr<int64_t> TcpSocket::send(const uint8_t* buf, uint32_t len) {
+    if (shut_write()) {  // SHUT_WR recorded -> EPIPE-shaped
+        return cinux::lib::Error::BrokenPipe;
+    }
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -187,7 +198,7 @@ cinux::lib::ErrorOr<int64_t> TcpSocket::send(const uint8_t* buf, uint32_t len) {
     if (!connected_ || peer_closed_) {
         return cinux::lib::Error::InvalidArgument;  // ENOTCONN-shaped
     }
-    uint32_t n = len > kRxSize ? kRxSize : len;  // cap to one segment/ring's worth
+    uint32_t   n   = len > kRxSize ? kRxSize : len;  // cap to one segment/ring's worth
     NetDevice& dev = route_(remote_addr_);
     auto       r   = tcp_.send(dev, local_port_, remote_addr_, remote_port_, buf, n, ipv4_, stack_);
     if (!r.ok()) {
@@ -201,6 +212,9 @@ cinux::lib::ErrorOr<int64_t> TcpSocket::recv(uint8_t* buf, uint32_t len, Ipv4Add
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
+    if (shut_read()) {  // SHUT_RD recorded -> EOF
+        return static_cast<int64_t>(0);
+    }
     for (;;) {
 #ifndef CINUX_HOST_TEST
         bool need_block = false;
@@ -208,8 +222,8 @@ cinux::lib::ErrorOr<int64_t> TcpSocket::recv(uint8_t* buf, uint32_t len, Ipv4Add
         {
             auto g = lock_.irq_guard();
             if (rx_.size() > 0) {
-                uint32_t want  = len < rx_.size() ? len : static_cast<uint32_t>(rx_.size());
-                uint32_t got   = static_cast<uint32_t>(rx_.pop_batch(buf, want));
+                uint32_t want = len < rx_.size() ? len : static_cast<uint32_t>(rx_.size());
+                uint32_t got  = static_cast<uint32_t>(rx_.pop_batch(buf, want));
                 if (out_src != nullptr) {
                     *out_src = remote_addr_;
                 }
@@ -248,14 +262,15 @@ void TcpSocket::on_accept(const TcpEndpoint& /*local*/, const TcpEndpoint& remot
     }
     accept_queue_[accept_tail_].addr = remote.addr;
     accept_queue_[accept_tail_].port = remote.port;
-    accept_tail_ = (accept_tail_ + 1) % kAcceptMax;
+    accept_tail_                     = (accept_tail_ + 1) % kAcceptMax;
     ++accept_count_;
 #ifndef CINUX_HOST_TEST
     wake_one(accept_waiters_);
 #endif
 }
 
-void TcpSocket::on_data(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/, FrameView data) {
+void TcpSocket::on_data(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/,
+                        FrameView data) {
     auto g = lock_.irq_guard();
     if (rx_.full()) {
         return;  // ring full -> drop (no flow control yet)
@@ -269,7 +284,7 @@ void TcpSocket::on_data(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remot
 }
 
 void TcpSocket::on_close(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/) {
-    auto g = lock_.irq_guard();
+    auto g       = lock_.irq_guard();
     peer_closed_ = true;
 #ifndef CINUX_HOST_TEST
     wake_all(recv_waiters_);  // blocked recv'ers retry -> drained ring -> EOF
@@ -291,6 +306,33 @@ void TcpSocket::close() {
     wake_all(recv_waiters_);
     wake_all(accept_waiters_);
 #endif
+}
+
+bool TcpSocket::get_local_addr(SockAddrStorage* out) const {
+    if (!(bound_ || connected_)) {
+        return false;  // not bound/connected -> no local name yet
+    }
+    SockAddrIn sin{};
+    sin.family  = kAfInet;
+    sin.port    = byte_swap16(local_port_);                     // network order
+    sin.addr[0] = sin.addr[1] = sin.addr[2] = sin.addr[3] = 0;  // INADDR_ANY
+    __builtin_memcpy(out->bytes, &sin, sizeof(sin));
+    return true;
+}
+
+bool TcpSocket::get_peer_addr(SockAddrStorage* out) const {
+    if (!connected_) {
+        return false;  // no peer until connect()/accept() completes
+    }
+    SockAddrIn sin{};
+    sin.family  = kAfInet;
+    sin.port    = byte_swap16(remote_port_);  // network order
+    sin.addr[0] = remote_addr_.oct[0];
+    sin.addr[1] = remote_addr_.oct[1];
+    sin.addr[2] = remote_addr_.oct[2];
+    sin.addr[3] = remote_addr_.oct[3];
+    __builtin_memcpy(out->bytes, &sin, sizeof(sin));
+    return true;
 }
 
 }  // namespace cinux::net

@@ -31,6 +31,14 @@ namespace {
 /// (Linux behaviour).  A small window matches the protocol layer's table cap.
 constexpr uint16_t kEphemeralBase  = 32768;
 constexpr uint16_t kEphemeralRange = 16;
+
+/// Host -> network byte order for 16-bit (sockaddr_in::port is big-endian, the
+/// same layout musl lays out in user space; getsockname/getpeername hand back
+/// the wire-order value).  Local helper -- sys_socket.cpp has its own; do not
+/// reach into it.
+constexpr uint16_t byte_swap16(uint16_t v) {
+    return static_cast<uint16_t>((v >> 8) | (v << 8));
+}
 }  // namespace
 
 #ifndef CINUX_HOST_TEST
@@ -92,13 +100,16 @@ cinux::lib::ErrorOr<void> UdpSocket::bind(uint16_t local_port) {
 
 cinux::lib::ErrorOr<void> UdpSocket::connect(Ipv4Addr remote, uint16_t remote_port) {
     // UDP "connect" just fixes a default peer -- no handshake, no FSM.
-    peer_addr_  = remote;
-    peer_port_  = remote_port;
-    connected_  = true;
+    peer_addr_ = remote;
+    peer_port_ = remote_port;
+    connected_ = true;
     return {};
 }
 
 cinux::lib::ErrorOr<int64_t> UdpSocket::send(const uint8_t* buf, uint32_t len) {
+    if (shut_write()) {
+        return cinux::lib::Error::BrokenPipe;  // SHUT_WR recorded -> EPIPE
+    }
     if (!connected_) {
         return cinux::lib::Error::InvalidArgument;  // ENOTCONN-shaped (no Socket peer)
     }
@@ -107,6 +118,9 @@ cinux::lib::ErrorOr<int64_t> UdpSocket::send(const uint8_t* buf, uint32_t len) {
 
 cinux::lib::ErrorOr<int64_t> UdpSocket::sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
                                                uint32_t len) {
+    if (shut_write()) {
+        return cinux::lib::Error::BrokenPipe;  // SHUT_WR recorded -> EPIPE
+    }
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -142,6 +156,9 @@ cinux::lib::ErrorOr<int64_t> UdpSocket::sendto(Ipv4Addr dst, uint16_t dst_port, 
 
 cinux::lib::ErrorOr<int64_t> UdpSocket::recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
                                              uint16_t* out_port) {
+    if (shut_read()) {
+        return static_cast<int64_t>(0);  // SHUT_RD recorded -> EOF (0 bytes)
+    }
     if (buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -194,10 +211,10 @@ void UdpSocket::on_udp(const Ipv4Header& ip, uint16_t src_port, FrameView payloa
         return;  // ring full -> drop (no flow control / backpressure yet)
     }
     Datagram& dg = rx_[rx_tail_];
-    dg.src      = ip.src;
-    dg.src_port = src_port;
-    uint32_t n  = payload.size() < kMaxDgram ? static_cast<uint32_t>(payload.size()) : kMaxDgram;
-    dg.len      = static_cast<uint16_t>(n);
+    dg.src       = ip.src;
+    dg.src_port  = src_port;
+    uint32_t n   = payload.size() < kMaxDgram ? static_cast<uint32_t>(payload.size()) : kMaxDgram;
+    dg.len       = static_cast<uint16_t>(n);
     for (uint32_t i = 0; i < n; ++i) {
         dg.data[i] = payload[i];
     }
@@ -217,6 +234,39 @@ void UdpSocket::close() {
 #ifndef CINUX_HOST_TEST
     wake_all(recv_waiters_);  // blocked recv'ers retry -> empty ring -> WouldBlock
 #endif
+}
+
+bool UdpSocket::get_local_addr(SockAddrStorage* out) const {
+    // getsockname: report the bound local endpoint.  We bind INADDR_ANY (all
+    // interfaces), so the address field is 0.0.0.0 -- there is no per-interface
+    // selection yet.  Unbound -> false (the syscall answers -EINVAL/unnamed).
+    if (!bound_ || out == nullptr) {
+        return false;
+    }
+    SockAddrIn sa{};
+    sa.family = kAfInet;
+    sa.port   = byte_swap16(local_port_);  // wire order
+    // sa.addr stays 0,0,0,0 (INADDR_ANY); sa.zero already cleared by {}.
+    __builtin_memcpy(out->bytes, &sa, sizeof(sa));
+    return true;
+}
+
+bool UdpSocket::get_peer_addr(SockAddrStorage* out) const {
+    // getpeername: report the fixed peer from a prior connect().  UDP connect()
+    // only records the default destination (no handshake), so "connected" IS the
+    // predicate for having a peer.  Unconnected -> false (-ENOTCONN).
+    if (!connected_ || out == nullptr) {
+        return false;
+    }
+    SockAddrIn sa{};
+    sa.family  = kAfInet;
+    sa.port    = byte_swap16(peer_port_);  // wire order
+    sa.addr[0] = peer_addr_.oct[0];
+    sa.addr[1] = peer_addr_.oct[1];
+    sa.addr[2] = peer_addr_.oct[2];
+    sa.addr[3] = peer_addr_.oct[3];
+    __builtin_memcpy(out->bytes, &sa, sizeof(sa));
+    return true;
 }
 
 }  // namespace cinux::net

@@ -26,7 +26,40 @@ WORK="$REPO/build/musl"
 SRC="$WORK/musl-$MUSL_VER"
 TARBALL="$WORK/musl-$MUSL_VER.tar.gz"
 
+install_linux_uapi_headers() {
+    if [ -f "$SYSROOT/include/linux/kd.h" ] &&
+        [ -f "$SYSROOT/include/asm/ioctls.h" ] &&
+        [ -f "$SYSROOT/include/mtd/mtd-user.h" ] &&
+        [ -f "$SYSROOT/include/scsi/sg.h" ]; then
+        return
+    fi
+
+    if [ ! -d /usr/include/linux ] || [ ! -d /usr/include/asm-generic ]; then
+        echo "[build-musl] missing host Linux UAPI headers; install linux-libc-dev" >&2
+        exit 1
+    fi
+
+    mkdir -p "$SYSROOT/include"
+    for dir in linux asm-generic mtd scsi sound video drm rdma; do
+        if [ -d "/usr/include/$dir" ]; then
+            cp -a "/usr/include/$dir" "$SYSROOT/include/"
+        fi
+    done
+
+    if [ -d /usr/include/asm ]; then
+        cp -a /usr/include/asm "$SYSROOT/include/"
+    elif [ -d /usr/include/x86_64-linux-gnu/asm ]; then
+        cp -a /usr/include/x86_64-linux-gnu/asm "$SYSROOT/include/"
+    else
+        echo "[build-musl] missing host asm UAPI headers; install linux-libc-dev" >&2
+        exit 1
+    fi
+
+    echo "[build-musl] installed Linux UAPI headers into sysroot"
+}
+
 if [ -f "$SYSROOT/lib/libc.a" ]; then
+    install_linux_uapi_headers
     echo "[build-musl] sysroot already present at $SYSROOT (rm -rf to rebuild)"
     exit 0
 fi
@@ -62,6 +95,7 @@ fi
 echo "[build-musl] building with $(nproc) jobs..."
 make -j"$(nproc)"
 make install
+install_linux_uapi_headers
 
 # 5. Patch musl-gcc: GCC>=14 host specs inject -latomic_asneeded on static
 #    links, but the musl sysroot has no libatomic_asneeded.a (and musl doesn't
