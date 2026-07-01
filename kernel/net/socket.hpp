@@ -26,7 +26,7 @@
 #include <cinux/expected.hpp>
 #include <cstdint>
 
-#include "kernel/fs/inode.hpp"      // InodeOps
+#include "kernel/fs/inode.hpp"       // InodeOps
 #include "kernel/net/net_types.hpp"  // Ipv4Addr
 
 namespace cinux::net {
@@ -35,6 +35,7 @@ namespace cinux::net {
 // UAPI constants (mirror Linux userspace values; musl compiles against these)
 // ============================================================
 
+constexpr int kAfUnix     = 1;  ///< AF_UNIX (local IPC) -- F8-M3
 constexpr int kAfInet     = 2;  ///< AF_INET (IPv4)
 constexpr int kSockStream = 1;  ///< TCP
 constexpr int kSockDgram  = 2;  ///< UDP
@@ -44,12 +45,29 @@ constexpr int kSockDgram  = 2;  ///< UDP
 ///       syscall handler ntohs()s it into host order before handing it to a
 ///       Socket.  family is host order (musl writes 2).
 struct SockAddrIn {
-    uint16_t family;     ///< AF_INET (host order)
-    uint16_t port;       ///< NETWORK order (big-endian)
-    uint8_t  addr[4];    ///< IPv4 address (network byte order)
-    uint8_t  zero[8];    ///< padding to sizeof(sockaddr) = 16
+    uint16_t family;   ///< AF_INET (host order)
+    uint16_t port;     ///< NETWORK order (big-endian)
+    uint8_t  addr[4];  ///< IPv4 address (network byte order)
+    uint8_t  zero[8];  ///< padding to sizeof(sockaddr) = 16
 };
 static_assert(sizeof(SockAddrIn) == 16, "sockaddr_in is 16 bytes");
+
+/// AF_UNIX socket address -- kernel mirror of libc sockaddr_un.  @p path is a
+/// NUL-terminated filesystem-style leaf name in an IN-MEMORY namespace (a real
+/// tmpfs/ext2-backed bind() is a documented follow-up; this milestone keeps the
+/// kernel off a filesystem dependency).  family is host order (musl writes 1).
+/// @note 110 bytes is the Linux layout; libc sockaddr_un carries trailing pad to
+///       128, which the syscall handler does NOT need (it reads family + path).
+struct SockAddrUn {
+    uint16_t family;     ///< AF_UNIX (host order)
+    char     path[108];  ///< NUL-terminated leaf name
+};
+static_assert(sizeof(SockAddrUn) == 110, "sockaddr_un is family(2) + path[108]");
+
+/// Length of the sockaddr_un path field (Linux sun_path).  Lives here, next to
+/// SockAddrUn, so every translation unit that sees the struct also sees the
+/// bound (the syscall handler + tests loop path bytes up to this length).
+static constexpr uint32_t kUnixPathMax = 108;
 
 class Socket;
 
@@ -70,23 +88,35 @@ public:
 
     /// @name Protocol API (overridden by UdpSocket / TcpSocket in B2 / B3).
     ///@{
-    virtual cinux::lib::ErrorOr<void>     bind(uint16_t local_port);
-    virtual cinux::lib::ErrorOr<void>     connect(Ipv4Addr remote, uint16_t remote_port);
-    virtual cinux::lib::ErrorOr<void>     listen(int backlog);
+    virtual cinux::lib::ErrorOr<void> bind(uint16_t local_port);
+    virtual cinux::lib::ErrorOr<void> connect(Ipv4Addr remote, uint16_t remote_port);
+
+    /// @name AF_UNIX (path-based) API -- overridden by UnixSocket (F8-M3).
+    /// AF_UNIX names are filesystem-style paths, which do NOT fit the
+    /// AF_INET-shaped bind(port)/connect(addr,port) virtuals above.  These
+    /// path-shaped variants default to NotImplemented (so an AF_INET socket
+    /// answers -ENOSYS, never reaching here through sys_bind/sys_connect which
+    /// dispatch on Socket::domain()); UnixSocket overrides both.  listen /
+    /// accept / send / recv are family-agnostic and reuse the virtuals below.
+    ///@{
+    virtual cinux::lib::ErrorOr<void>    bind_path(const char* path);
+    virtual cinux::lib::ErrorOr<void>    connect_path(const char* path);
+    ///@}
+    virtual cinux::lib::ErrorOr<void>    listen(int backlog);
     /// Passive accept: return a NEW Socket* for a completed connection (TCP).
     /// The caller (sys_accept) installs it under a fresh fd.
-    virtual cinux::lib::ErrorOr<Socket*>  accept(Ipv4Addr* out_remote, uint16_t* out_port);
+    virtual cinux::lib::ErrorOr<Socket*> accept(Ipv4Addr* out_remote, uint16_t* out_port);
     /// Send on a connected socket (TCP established, or UDP after connect()).
-    virtual cinux::lib::ErrorOr<int64_t>  send(const uint8_t* buf, uint32_t len);
+    virtual cinux::lib::ErrorOr<int64_t> send(const uint8_t* buf, uint32_t len);
     /// Send a datagram to an explicit destination (UDP sendto).
-    virtual cinux::lib::ErrorOr<int64_t>  sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
-                                                 uint32_t len);
+    virtual cinux::lib::ErrorOr<int64_t> sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
+                                                uint32_t len);
     /// Receive; on success fills @p out_src/@p out_port (pass nullptr to ignore).
     /// Blocks on a per-socket wait queue when no data is available (B2/B3).
-    virtual cinux::lib::ErrorOr<int64_t>  recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
-                                               uint16_t* out_port);
+    virtual cinux::lib::ErrorOr<int64_t> recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
+                                              uint16_t* out_port);
     /// Release protocol resources (unbind / stop_listen / FIN).  No-op by default.
-    virtual void                          close();
+    virtual void                         close();
     ///@}
 
     int domain() const { return domain_; }  ///< AF_INET
@@ -109,8 +139,8 @@ class SocketOps : public cinux::fs::InodeOps {
 public:
     cinux::lib::ErrorOr<int64_t> read(const cinux::fs::Inode* inode, uint64_t /*offset*/, void* buf,
                                       uint64_t count) override;
-    cinux::lib::ErrorOr<int64_t> write(cinux::fs::Inode* inode, uint64_t /*offset*/, const void* buf,
-                                       uint64_t count) override;
+    cinux::lib::ErrorOr<int64_t> write(cinux::fs::Inode* inode, uint64_t /*offset*/,
+                                       const void* buf, uint64_t count) override;
     // ioctl/stat/open inherit the InodeOps defaults (NotImplemented/-1/false) --
     // a socket is not a tty, not a disk file, not a cloning device.
 };

@@ -22,11 +22,12 @@
 
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (SMAP/extable)
 #include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"        // FDTable / File
-#include "kernel/fs/vfs_mount.hpp"   // current_fd_table()
-#include "kernel/net/net_init.hpp"   // create_socket
-#include "kernel/net/net_types.hpp"  // Ipv4Addr
-#include "kernel/net/socket.hpp"     // Socket / SocketOps / SockAddrIn
+#include "kernel/fs/file.hpp"          // FDTable / File
+#include "kernel/fs/vfs_mount.hpp"     // current_fd_table()
+#include "kernel/net/net_init.hpp"     // create_socket
+#include "kernel/net/net_types.hpp"    // Ipv4Addr
+#include "kernel/net/socket.hpp"       // Socket / SocketOps / SockAddrIn / SockAddrUn
+#include "kernel/net/unix_socket.hpp"  // UnixSocket (AF_UNIX, F8-M3)
 
 namespace cinux::syscall {
 
@@ -39,8 +40,11 @@ using cinux::fs::current_fd_table;
 using cinux::net::Ipv4Addr;
 using cinux::net::Socket;
 using cinux::net::SockAddrIn;
+using cinux::net::SockAddrUn;
+using cinux::net::UnixSocket;
 using cinux::net::create_socket;
 using cinux::net::kAfInet;
+using cinux::net::kAfUnix;
 using cinux::net::kSockDgram;
 using cinux::net::kSockStream;
 using cinux::net::socket_ops;
@@ -70,7 +74,8 @@ Socket* socket_from_fd(uint64_t fd) {
 
 /// Parse a user sockaddr_in (addr + VALUE addrlen) into host-order addr+port.
 /// @return true on a valid AF_INET address; false on bad ptr / short len / wrong family.
-bool parse_sockaddr_in(uint64_t addr_virt, uint64_t addrlen, Ipv4Addr* out_addr, uint16_t* out_port) {
+bool parse_sockaddr_in(uint64_t addr_virt, uint64_t addrlen, Ipv4Addr* out_addr,
+                       uint16_t* out_port) {
     if (addr_virt == 0 || addrlen < sizeof(SockAddrIn)) {
         return false;
     }
@@ -111,6 +116,30 @@ bool fill_sockaddr_in(uint64_t addr_virt, uint64_t addrlen_ptr, Ipv4Addr addr, u
     return true;
 }
 
+/// Parse a user sockaddr_un into a NUL-terminated @p out_path (always written).
+/// @return true on a valid AF_UNIX address; false on bad ptr / short len / wrong
+/// family.  @p out_path must have room for kUnixPathMax chars.
+bool parse_sockaddr_un(uint64_t addr_virt, uint64_t addrlen, char* out_path) {
+    if (addr_virt == 0 || addrlen < 2) {  // need at least the family field
+        return false;
+    }
+    SockAddrUn sa;
+    if (!copy_from_user(&sa, reinterpret_cast<void*>(addr_virt), sizeof(sa))) {
+        return false;
+    }
+    if (sa.family != kAfUnix) {
+        return false;
+    }
+    // Force NUL-termination regardless of what userspace wrote.
+    uint32_t i = 0;
+    while (i + 1 < cinux::net::kUnixPathMax && sa.path[i] != '\0') {
+        out_path[i] = sa.path[i];
+        ++i;
+    }
+    out_path[i] = '\0';
+    return out_path[0] != '\0';  // Linux allows empty (abstract) paths; we do not yet
+}
+
 /// Install @p sock under a fresh fd: build a synthetic Inode whose ops is the
 /// shared SocketOps + whose fs_private is @p sock, then FDTable::alloc RDWR.
 /// On success ownership of @p sock + the Inode transfers to the FDTable's File
@@ -121,8 +150,8 @@ int64_t install_socket_fd(Socket* sock) {
     // on success ownership of sock + inode transfers to the FDTable's File
     // (closing the fd frees the File; the Socket/Inode share the pipe-style
     // hobby-OS release-without-hook limitation).
-    Socket* s     = sock;
-    Inode*  inode = new Inode();
+    Socket* s         = sock;
+    Inode*  inode     = new Inode();
     inode->ops        = &socket_ops();
     inode->type       = InodeType::Regular;
     inode->fs_private = s;
@@ -138,12 +167,22 @@ int64_t install_socket_fd(Socket* sock) {
 
 }  // namespace
 
-int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t /*protocol*/, uint64_t, uint64_t, uint64_t) {
-    if (domain != static_cast<uint64_t>(kAfInet)) {
-        return -cinux::kEafnosupport;
-    }
+int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t /*protocol*/, uint64_t, uint64_t,
+                   uint64_t) {
     if (type != static_cast<uint64_t>(kSockStream) && type != static_cast<uint64_t>(kSockDgram)) {
         return -cinux::kEprotonosupport;
+    }
+    // AF_UNIX is self-contained (no NIC / L4 module), so build it here directly
+    // instead of going through create_socket() -- that factory is the ONE bridge
+    // to the production L4 stack (AF_INET) and returns nullptr when the stack is
+    // down.  Handling AF_UNIX here keeps it working in the test kernel (no
+    // net_init) and avoids touching drivers/net + net_stub in lockstep.
+    if (domain == static_cast<uint64_t>(kAfUnix)) {
+        Socket* s = new UnixSocket(static_cast<int>(type));
+        return install_socket_fd(s);
+    }
+    if (domain != static_cast<uint64_t>(kAfInet)) {
+        return -cinux::kEafnosupport;
     }
     Socket* s = create_socket(static_cast<int>(domain), static_cast<int>(type));
     if (s == nullptr) {
@@ -156,6 +195,14 @@ int64_t sys_bind(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint64_
     Socket* s = socket_from_fd(fd);
     if (s == nullptr) {
         return -cinux::kEbadf;
+    }
+    if (s->domain() == kAfUnix) {
+        char path[cinux::net::kUnixPathMax];
+        if (!parse_sockaddr_un(addr, addrlen, path)) {
+            return -cinux::kEfault;
+        }
+        auto r = s->bind_path(path);
+        return r.ok() ? 0 : -cinux::to_errno(r.error());
     }
     Ipv4Addr a{};
     uint16_t port = 0;
@@ -170,6 +217,14 @@ int64_t sys_connect(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint
     Socket* s = socket_from_fd(fd);
     if (s == nullptr) {
         return -cinux::kEbadf;
+    }
+    if (s->domain() == kAfUnix) {
+        char path[cinux::net::kUnixPathMax];
+        if (!parse_sockaddr_un(addr, addrlen, path)) {
+            return -cinux::kEfault;
+        }
+        auto r = s->connect_path(path);
+        return r.ok() ? 0 : -cinux::to_errno(r.error());
     }
     Ipv4Addr a{};
     uint16_t port = 0;
@@ -196,7 +251,7 @@ int64_t sys_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t, u
     }
     Ipv4Addr remote{};
     uint16_t rport = 0;
-    auto r = s->accept(&remote, &rport);
+    auto     r     = s->accept(&remote, &rport);
     if (!r.ok()) {
         return -cinux::to_errno(r.error());
     }
@@ -205,7 +260,10 @@ int64_t sys_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t, u
         (*r)->close();  // free the accepted socket the fd table could not hold
         return new_fd;
     }
-    fill_sockaddr_in(addr, addrlen_ptr, remote, rport);
+    // AF_UNIX peers carry no address/port -- leave the caller's sockaddr untouched.
+    if (s->domain() != kAfUnix) {
+        fill_sockaddr_in(addr, addrlen_ptr, remote, rport);
+    }
     return new_fd;
 }
 
@@ -221,15 +279,13 @@ int64_t sys_sendto(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/, 
         delete[] kbuf;
         return -cinux::kEfault;
     }
-    cinux::lib::ErrorOr<int64_t> r =
-        (addr == 0) ? s->send(kbuf, n)
-                    : [&] {
-                          Ipv4Addr a{};
-                          uint16_t port = 0;
-                          return parse_sockaddr_in(addr, addrlen, &a, &port)
-                                 ? s->sendto(a, port, kbuf, n)
-                                 : cinux::lib::ErrorOr<int64_t>(cinux::lib::Error::InvalidArgument);
-                      }();
+    cinux::lib::ErrorOr<int64_t> r = (addr == 0) ? s->send(kbuf, n) : [&] {
+        Ipv4Addr a{};
+        uint16_t port = 0;
+        return parse_sockaddr_in(addr, addrlen, &a, &port)
+                   ? s->sendto(a, port, kbuf, n)
+                   : cinux::lib::ErrorOr<int64_t>(cinux::lib::Error::InvalidArgument);
+    }();
     delete[] kbuf;  // send/sendto consumed it
     if (!r.ok()) {
         return -cinux::to_errno(r.error());
@@ -247,7 +303,7 @@ int64_t sys_recvfrom(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/
     uint8_t* kbuf = new uint8_t[n ? n : 1];  // manual RAII (freestanding: no <memory>)
     Ipv4Addr src{};
     uint16_t sport = 0;
-    auto r = s->recv(kbuf, n, &src, &sport);
+    auto     r     = s->recv(kbuf, n, &src, &sport);
     if (!r.ok()) {
         delete[] kbuf;
         return -cinux::to_errno(r.error());

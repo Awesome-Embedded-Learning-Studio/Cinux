@@ -29,6 +29,13 @@ cinux::lib::ErrorOr<void> Socket::bind(uint16_t /*local_port*/) {
 cinux::lib::ErrorOr<void> Socket::connect(Ipv4Addr /*remote*/, uint16_t /*remote_port*/) {
     return cinux::lib::Error::NotImplemented;
 }
+// AF_UNIX path-shaped variants -- default stubs.  Overridden by UnixSocket.
+cinux::lib::ErrorOr<void> Socket::bind_path(const char* /*path*/) {
+    return cinux::lib::Error::NotImplemented;
+}
+cinux::lib::ErrorOr<void> Socket::connect_path(const char* /*path*/) {
+    return cinux::lib::Error::NotImplemented;
+}
 cinux::lib::ErrorOr<void> Socket::listen(int /*backlog*/) {
     return cinux::lib::Error::NotImplemented;
 }

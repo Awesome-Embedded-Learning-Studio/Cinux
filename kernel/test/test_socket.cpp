@@ -16,21 +16,22 @@
 
 #include <stdint.h>
 
-#include "kernel/errno.hpp"               // kEafnosupport / kEprotonosupport
-#include "kernel/fs/file.hpp"             // File
-#include "kernel/fs/vfs_mount.hpp"        // current_fd_table()
-#include "kernel/net/arp.hpp"             // ArpModule (echo stack)
-#include "kernel/net/icmp.hpp"            // IcmpModule
-#include "kernel/net/ipv4.hpp"            // Ipv4Module / kIpProto*
-#include "kernel/net/loopback_device.hpp" // LoopbackDevice
-#include "kernel/net/net_stack.hpp"       // NetStack / InDevice
-#include "kernel/net/socket.hpp"          // Socket / socket_ops / kAfInet / kSock*
-#include "kernel/net/tcp.hpp"             // TcpModule
-#include "kernel/net/tcp_socket.hpp"      // TcpSocket
-#include "kernel/net/udp.hpp"             // UdpModule
-#include "kernel/net/udp_socket.hpp"      // UdpSocket
-#include "kernel/syscall/sys_close.hpp"   // sys_close
-#include "kernel/syscall/sys_socket.hpp"  // sys_socket
+#include "kernel/errno.hpp"                // kEafnosupport / kEprotonosupport
+#include "kernel/fs/file.hpp"              // File
+#include "kernel/fs/vfs_mount.hpp"         // current_fd_table()
+#include "kernel/net/arp.hpp"              // ArpModule (echo stack)
+#include "kernel/net/icmp.hpp"             // IcmpModule
+#include "kernel/net/ipv4.hpp"             // Ipv4Module / kIpProto*
+#include "kernel/net/loopback_device.hpp"  // LoopbackDevice
+#include "kernel/net/net_stack.hpp"        // NetStack / InDevice
+#include "kernel/net/socket.hpp"           // Socket / socket_ops / kAfInet / kSock*
+#include "kernel/net/tcp.hpp"              // TcpModule
+#include "kernel/net/tcp_socket.hpp"       // TcpSocket
+#include "kernel/net/udp.hpp"              // UdpModule
+#include "kernel/net/udp_socket.hpp"       // UdpSocket
+#include "kernel/net/unix_socket.hpp"      // UnixSocket (F8-M3)
+#include "kernel/syscall/sys_close.hpp"    // sys_close
+#include "kernel/syscall/sys_socket.hpp"   // sys_socket
 #include "kernel/test/big_kernel_test.h"
 
 using cinux::fs::current_fd_table;
@@ -47,7 +48,9 @@ using cinux::net::TcpModule;
 using cinux::net::TcpSocket;
 using cinux::net::UdpModule;
 using cinux::net::UdpSocket;
+using cinux::net::UnixSocket;
 using cinux::net::kAfInet;
+using cinux::net::kAfUnix;
 using cinux::net::kEtherTypeArp;
 using cinux::net::kEtherTypeIpv4;
 using cinux::net::kIpProtoTcp;
@@ -74,8 +77,8 @@ void test_socket_stream_returns_fd() {
 }
 
 void test_socket_rejects_bad_family() {
-    // AF_UNIX (1) -- only AF_INET is supported.
-    int64_t r = sys_socket(1, kSockDgram, 0, kFiller, kFiller, kFiller);
+    // AF_INET6 (10) -- supported families are AF_UNIX (1) and AF_INET (2).
+    int64_t r = sys_socket(10, kSockDgram, 0, kFiller, kFiller, kFiller);
     TEST_ASSERT_EQ(r, -cinux::kEafnosupport);
 }
 
@@ -108,8 +111,8 @@ void test_socket_fd_routes_to_socket_stub() {
     TEST_ASSERT_FALSE(r.ok());
 
     // close() frees the File (Socket/Inode share the pipe-style hobby leak).
-    TEST_ASSERT_EQ(sys_close(static_cast<uint64_t>(fd), kFiller, kFiller, kFiller, kFiller, kFiller),
-                   0);
+    TEST_ASSERT_EQ(
+        sys_close(static_cast<uint64_t>(fd), kFiller, kFiller, kFiller, kFiller, kFiller), 0);
 }
 
 // --- B2: UdpSocket end-to-end over a deterministic loopback stack ---
@@ -246,6 +249,103 @@ void test_tcp_socket_loopback_echo() {
     TEST_ASSERT_EQ(*cr, static_cast<int64_t>(sizeof(msg)));
 }
 
+// --- F8-M3: AF_UNIX socket ---
+//
+// AF_UNIX has no NIC / L4 module / loopback device: connect_path() wires two
+// sockets as peers through an in-memory name registry (UnixRegistry), and send()
+// copies bytes straight into the peer's RX ring.  test_unix_socket_returns_fd
+// drives the SYSCALL creation path (sys_socket(AF_UNIX) -> UnixSocket behind a
+// SocketOps fd).  The echo + negatives drive the UnixSocket METHODS directly --
+// the same choice the AF_INET TCP/UDP echo tests make, because the ring0 test
+// kernel cannot hand sys_bind a "user" address (copy_from_user's is_user_vaddr
+// range check rejects kernel-stack pointers, so the sockaddr_un parsing in
+// sys_bind is exercised in production via musl, covered here by inspection).
+void test_unix_socket_returns_fd() {
+    int64_t fd = sys_socket(kAfUnix, kSockStream, 0, kFiller, kFiller, kFiller);
+    TEST_ASSERT_GE(fd, 0);
+
+    cinux::fs::File* f = current_fd_table().get(static_cast<int>(fd));
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_NOT_NULL(f->inode);
+    // The fd's inode ops IS the shared SocketOps -> it is a socket fd.
+    TEST_ASSERT_EQ(f->inode->ops, &socket_ops());
+    auto* s = static_cast<Socket*>(f->inode->fs_private);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQ(s->domain(), kAfUnix);
+    TEST_ASSERT_EQ(s->type(), kSockStream);
+
+    TEST_ASSERT_EQ(
+        sys_close(static_cast<uint64_t>(fd), kFiller, kFiller, kFiller, kFiller, kFiller), 0);
+}
+
+void test_unix_socket_loopback_echo() {
+    // Function-local statics (the 4 KB RX ring makes each UnixSocket too large
+    // for two on the 16 KB kernel stack -- mirrors the TcpSocket echo test).
+    static UnixSocket server(kSockStream);
+    static UnixSocket client(kSockStream);
+
+    TEST_ASSERT_TRUE(server.bind_path("/unix_echo").ok());
+    TEST_ASSERT_TRUE(server.listen(1).ok());
+    TEST_ASSERT_TRUE(client.connect_path("/unix_echo").ok());
+
+    // client -> server: send BEFORE accept.  connect_path already created the
+    // accepted child + wired the pair as peers, so bytes buffer in the child's
+    // RX ring until accept() pulls it off.
+    static const uint8_t msg[] = {'u', 'n', 'i', 'x'};
+    auto                 sr    = client.send(msg, sizeof(msg));
+    TEST_ASSERT_TRUE(sr.ok());
+    TEST_ASSERT_EQ(*sr, static_cast<int64_t>(sizeof(msg)));
+
+    // server: accept the child + recv the EXACT bytes (semantic match, not count).
+    auto acc = server.accept(nullptr, nullptr);
+    TEST_ASSERT_TRUE(acc.ok());
+    TEST_ASSERT_NOT_NULL(*acc);
+    Socket* child   = *acc;
+    uint8_t rbuf[8] = {};
+    auto    rr      = child->recv(rbuf, sizeof(rbuf), nullptr, nullptr);
+    TEST_ASSERT_TRUE(rr.ok());
+    TEST_ASSERT_EQ(*rr, static_cast<int64_t>(sizeof(msg)));
+    bool payload_ok = true;
+    for (uint32_t i = 0; i < sizeof(msg); ++i) {
+        if (rbuf[i] != msg[i]) {
+            payload_ok = false;
+        }
+    }
+    TEST_ASSERT_TRUE(payload_ok);
+
+    // echo back: server child -> client.
+    auto er = child->send(rbuf, static_cast<uint32_t>(sizeof(msg)));
+    TEST_ASSERT_TRUE(er.ok());
+    TEST_ASSERT_EQ(*er, static_cast<int64_t>(sizeof(msg)));
+    uint8_t cbuf[8] = {};
+    auto    cr      = client.recv(cbuf, sizeof(cbuf), nullptr, nullptr);
+    TEST_ASSERT_TRUE(cr.ok());
+    TEST_ASSERT_EQ(*cr, static_cast<int64_t>(sizeof(msg)));
+    bool echo_ok = true;
+    for (uint32_t i = 0; i < sizeof(msg); ++i) {
+        if (cbuf[i] != msg[i]) {
+            echo_ok = false;
+        }
+    }
+    TEST_ASSERT_TRUE(echo_ok);
+}
+
+void test_unix_socket_connect_unbound() {
+    UnixSocket client(kSockStream);
+    auto       r = client.connect_path("/unix_nobody");  // never bound
+    TEST_ASSERT_FALSE(r.ok());
+    TEST_ASSERT_EQ(r.error(), cinux::lib::Error::NotFound);  // registry miss -> ENOENT
+}
+
+void test_unix_socket_bind_duplicate() {
+    static UnixSocket a(kSockStream);
+    static UnixSocket b(kSockStream);
+    TEST_ASSERT_TRUE(a.bind_path("/unix_dup").ok());
+    auto r = b.bind_path("/unix_dup");
+    TEST_ASSERT_FALSE(r.ok());
+    TEST_ASSERT_EQ(r.error(), cinux::lib::Error::AlreadyExists);  // -> EEXIST
+}
+
 }  // namespace test_socket
 
 extern "C" void run_socket_tests() {
@@ -257,5 +357,10 @@ extern "C" void run_socket_tests() {
     RUN_TEST(test_socket::test_socket_fd_routes_to_socket_stub);
     RUN_TEST(test_socket::test_udp_socket_loopback_echo);
     RUN_TEST(test_socket::test_tcp_socket_loopback_echo);
+    TEST_SECTION("F8-M3 AF_UNIX socket");
+    RUN_TEST(test_socket::test_unix_socket_returns_fd);
+    RUN_TEST(test_socket::test_unix_socket_loopback_echo);
+    RUN_TEST(test_socket::test_unix_socket_connect_unbound);
+    RUN_TEST(test_socket::test_unix_socket_bind_duplicate);
     TEST_SUMMARY();
 }
