@@ -2,6 +2,13 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F-ECO 批5（sysinfo + getrusage）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b5`，从集成线 `e2a7d70`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`b4fa398`）零冲突，两 leg 1051/0）
+
+> busybox 试金石第五刀内核件：`ps`/`free`/`uptime`/`top`/`time`。ps 走已有 ProcFS；free/uptime 用 sysinfo；time/top 用 getrusage。applet 端到端验收留 CI。
+> **sysinfo(99)**：填 Linux struct sysinfo(112B)；uptime←HPET 秒、totalram/freeram←g_pmm×4096、procs←signal_nth_task_pid 计数、memunit=1；loads/buffer/swap/high=0（未跟踪诚实非编造）。**getrusage(98)**：填 struct rusage(144B) 全 0（无 per-task 会计）；who 校验 {-1,0,1}（RUSAGE_* 内核+libc 约定并集）。
+> **机制测 4**：sysinfo sane（**cross-check totalram==g_pmm.total_page_count()\*4096** 证 PMM 接对）+ bad-ptr + getrusage zeros（poison 验清零）+ bad-who→EINVAL。
+> **follow-up**：busybox applet 验收（CI）/ load average（调度器采样）/ swap 子系统 / per-task 资源会计（getrusage 真值）。详见 [note](../notes/2026-07-01-f-eco-b5-sysinfo-getrusage.md)。push/PR 归用户。
+
 ## ✅ F-ECO 批3 + 批4（nanosleep + dup/dup2/fcntl）— 收官 2026-07-01（外包 worktree `feat/outsource-f-eco-b3-b4`，从集成线 `9ef98e0`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls`（`3be9859`+`b271439`）零冲突，两 leg 1047/0）
 
 > busybox 试金石第三、四刀的**内核件**：批3 `sleep`（nanosleep 35）+ 批4 `sh`+管道+重定向质变点（dup 32 / dup2 33 / fcntl 72）。busybox applet 端到端负载验收留 CI build。
