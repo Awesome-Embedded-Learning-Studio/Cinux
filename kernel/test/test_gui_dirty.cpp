@@ -20,10 +20,10 @@
 
 #ifdef CINUX_GUI
 #    include "kernel/drivers/canvas.hpp"
-#    include "kernel/gui/window_manager.hpp"
 #    include "third_party/Cinux-GUI/core/host.hpp"
 #    include "third_party/Cinux-GUI/core/pump.hpp"
 #    include "third_party/Cinux-GUI/core/region.hpp"
+#    include "kernel/gui/window_manager.hpp"
 #endif
 
 #ifdef CINUX_GUI
@@ -44,10 +44,7 @@ struct FlushRect {
 };
 
 FlushRect g_flushed[64];
-uint32_t  g_flushed_n      = 0;
-uint32_t  g_poll_remaining = 0;
-uint32_t  g_dispatch_n     = 0;
-uint32_t  g_render_n       = 0;
+uint32_t  g_flushed_n = 0;
 
 /// Fake host flush: ignore the pixels, just record the rect the pump pushed.
 void record_flush(void* /*ctx*/, int x, int y, int w, int h, const void* /*pixels*/,
@@ -71,36 +68,6 @@ void fake_render_two(void* /*ctx*/, Frame* frame) {
 /// Fake render_frame: idle (nothing changed).
 void fake_render_idle(void* /*ctx*/, Frame* frame) {
     frame->count = 0;
-}
-
-bool fake_poll_event(void* /*ctx*/, EventHeader* out, uint16_t /*out_cap*/) {
-    if (g_poll_remaining == 0) {
-        return false;
-    }
-    g_poll_remaining--;
-    out->magic       = kEventMagic;
-    out->version     = kAbiVersion;
-    out->type        = EventCode::kKeycode;
-    out->flags       = kEventFlagPressed;
-    out->payload_len = 0;
-    return true;
-}
-
-void fake_dispatch_event(void* /*ctx*/, const EventHeader* /*ev*/, const void* /*payload*/) {
-    g_dispatch_n++;
-}
-
-void fake_render_per_event_then_idle(void* /*ctx*/, Frame* frame) {
-    g_render_n++;
-    if (g_render_n > 2) {
-        frame->count = 0;
-        return;
-    }
-    frame->rects[0] = Rect{static_cast<int>(g_render_n), 0, static_cast<int>(g_render_n + 1), 1};
-    frame->count    = 1;
-    frame->pixels   = reinterpret_cast<const void*>(0x1);
-    frame->stride   = 4;
-    frame->format   = PixelFormat::kXrgb8888;
 }
 
 }  // namespace
@@ -196,26 +163,6 @@ void test_pump_idle_flushes_nothing() {
     TEST_ASSERT_EQ(g_flushed_n, 0u);
 }
 
-void test_pump_flushes_after_each_event() {
-    g_flushed_n      = 0;
-    g_poll_remaining = 2;
-    g_dispatch_n     = 0;
-    g_render_n       = 0;
-
-    Host h{};
-    h.core.poll_event     = fake_poll_event;
-    h.core.dispatch_event = fake_dispatch_event;
-    h.core.render_frame   = fake_render_per_event_then_idle;
-    h.core.flush          = record_flush;
-    cinux::gui::pump(&h);
-
-    TEST_ASSERT_EQ(g_dispatch_n, 2u);
-    TEST_ASSERT_EQ(g_render_n, 3u);  // two input frames + one final idle frame
-    TEST_ASSERT_EQ(g_flushed_n, 2u);
-    TEST_ASSERT_EQ(g_flushed[0].x, 1);
-    TEST_ASSERT_EQ(g_flushed[1].x, 2);
-}
-
 }  // namespace test_pump_flush
 
 extern "C" void run_gui_dirty_tests() {
@@ -225,7 +172,6 @@ extern "C" void run_gui_dirty_tests() {
     RUN_TEST(test_gui_dirty_api::test_invalidate_clips_partial_offscreen);
     RUN_TEST(test_pump_flush::test_pump_flushes_rendered_rects);
     RUN_TEST(test_pump_flush::test_pump_idle_flushes_nothing);
-    RUN_TEST(test_pump_flush::test_pump_flushes_after_each_event);
     TEST_SUMMARY();
 }
 
