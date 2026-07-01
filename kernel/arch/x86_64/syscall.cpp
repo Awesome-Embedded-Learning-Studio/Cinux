@@ -17,6 +17,7 @@
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/signal.hpp"
 #include "kernel/syscall/sys_accept4.hpp"  // F-ECO batch 7a
+#include "kernel/syscall/sys_access.hpp"   // F6 batch 3a
 #include "kernel/syscall/sys_arch_prctl.hpp"
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_chdir.hpp"
@@ -212,6 +213,7 @@ void register_builtin_handlers() {
     // F6-M1: mount / umount2 (runtime fstype-driven; boot /tmp uses tmpfs::init).
     syscall_register(SyscallNr::SYS_mount, sys_mount);
     syscall_register(SyscallNr::SYS_umount2, sys_umount2);
+    syscall_register(SyscallNr::SYS_access, sys_access);  // F6 batch 3a
 }
 
 }  // anonymous namespace
