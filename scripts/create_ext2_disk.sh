@@ -82,11 +82,22 @@ Hello from ext2!
 Cinux can read files from a real filesystem now.
 HELLO_EOF
 
+# F-ECO batch 8 busybox acceptance: minimal /etc/passwd + /etc/group so
+# whoami/id resolve uid 0 -> "root" (without these busybox whoami exits 1).
+cat > "$TMPDIR/etc/passwd" << 'PASSWD_EOF'
+root::0:0:root:/:/bin/sh
+PASSWD_EOF
+cat > "$TMPDIR/etc/group" << 'GROUP_EOF'
+root:x:0:
+GROUP_EOF
+
 # Build the debugfs command script
 DEBUGFS_CMDS=""
 DEBUGFS_CMDS+="mkdir etc\n"
 DEBUGFS_CMDS+="mkdir bin\n"
 DEBUGFS_CMDS+="write $TMPDIR/etc/motd etc/motd\n"
+DEBUGFS_CMDS+="write $TMPDIR/etc/passwd etc/passwd\n"
+DEBUGFS_CMDS+="write $TMPDIR/etc/group etc/group\n"
 DEBUGFS_CMDS+="write $TMPDIR/hello.txt hello.txt\n"
 
 if [ -n "$SHELL_ELF" ] && [ -f "$SHELL_ELF" ]; then
