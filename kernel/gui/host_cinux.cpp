@@ -265,11 +265,6 @@ void cinux_render_frame(void* ctx, Frame* frame) {
     frame->height = screen->height();
     frame->format = PixelFormat::kXrgb8888;
 
-    if (cinux::debug::kEchoTrace) {
-        cinux::lib::kprintf("[ECHO_TRACE] host.render_frame frame_count=%d\n",
-                            static_cast<int>(frame->count));
-    }
-
     wm.clear_dirty();
 }
 uint32_t cinux_now_ms(void* ctx) {

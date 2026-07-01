@@ -246,6 +246,10 @@ public:
         switch (request) {
         case cinux::drivers::kTcgets: {
             const Termios& tm = p->slave_tty().termios();
+            if (cinux::debug::kEchoTrace) {
+                cinux::lib::kprintf("[ECHO_TRACE] pty.slave_ioctl TCGETS lflag=0x%x\n",
+                                    static_cast<unsigned>(tm.c_lflag));
+            }
             if (!cinux::user::copy_to_user(uptr, &tm, sizeof(Termios))) {
                 return cinux::lib::Error::InvalidArgument;  // ~EFAULT (no Fault enum)
             }
@@ -255,6 +259,10 @@ public:
             Termios tm;
             if (!cinux::user::copy_from_user(&tm, uptr, sizeof(Termios))) {
                 return cinux::lib::Error::InvalidArgument;
+            }
+            if (cinux::debug::kEchoTrace) {
+                cinux::lib::kprintf("[ECHO_TRACE] pty.slave_ioctl TCSETS lflag=0x%x\n",
+                                    static_cast<unsigned>(tm.c_lflag));
             }
             p->slave_tty().set_termios(tm);
             return 0;
