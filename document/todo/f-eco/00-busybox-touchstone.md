@@ -24,9 +24,17 @@
 | 7 | `ifconfig/ping/wget/nc` | ~11 socket(`socket`/`bind`/`connect`/`listen`/`accept`/`sendto`/`recvfrom`/`setsockopt`/`getsockname`/`getpeername`/`shutdown`) | F7-M6(协同网络 workflow) | 大 |
 | 8 | `id/whoami/login/su` | `getgroups`/`setgroups` + 权限 enforcement | F9 | 小–中 |
 
-**syscall 累计**:54 → ~90–100(达 ROADMAP「100+」目标)。
+**syscall 累计**:54 → **89**(已注册,目标 100+ 近在咫尺)。
 
-**节奏**:批 0 摸底先行(半小时见信号)→ 批 1/2 低垂果(快速拿 syscall 增量)→ 批 4(sh)第一个硬骨头 → 批 5/6 内核工作多但 syscall 增量小 → 批 7 蹭网络 workflow。
+**进度**:批0–8 ✅ + busybox 14/14 真验收 + PTY 终端交互(GUI)。两 leg 1062/0 + host 69/69。
+
+**远期路线(用户决策:砍 Lua/TinyCC 自建,GCC 自举)**:
+- **层3 init/login**(批6 mount/init PID1):从"手动 execve shell"到"系统自动启动"。
+- **层4 GCC 自举**(F12-M2):GCC+binutils 在 CinuxOS 上跑 → `gcc hello.c -o hello && ./hello` → 从"能跑别人的二进制"到"能编自己的二进制"。**最不可控里程碑**。做法:纯 musl 编 GCC 或 glibc GCC。
+- **层5 UEFI**(F11):BIOS→UEFI 双启动。
+- **层6 近日常使用**:GUI+稳定+GCC 自举闭环 → **在 CinuxOS 上编 CinuxOS**。
+
+**节奏**:批 0 摸底先行 → 批 1/2 低垂果 → 批 4(sh)硬骨头 → 批 5/6 内核工作多 → 批 7 蹭网络 workflow。
 
 ## CI 试金石形态
 
