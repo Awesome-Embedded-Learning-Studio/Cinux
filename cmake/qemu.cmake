@@ -330,12 +330,19 @@ add_custom_target(regenerate-ext2-image
     VERBATIM
 )
 
+add_custom_target(check_uaccess_boundaries
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check_uaccess_boundaries.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking user/kernel access boundary invariants"
+    VERBATIM
+)
+
 add_custom_target(run-kernel-test
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
         -device e1000,netdev=net0 -netdev user,id=net0
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
     USES_TERMINAL
     COMMENT "Starting QEMU with TEST kernel (auto-exit)"
     VERBATIM
@@ -347,7 +354,7 @@ add_custom_target(run-kernel-test-net
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
         -device e1000,netdev=net0 -netdev user,id=net0
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
     USES_TERMINAL
     COMMENT "Starting QEMU with TEST kernel + e1000 NIC (auto-exit)"
     VERBATIM
@@ -365,7 +372,7 @@ add_custom_target(run-kernel-test-xhci
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
         -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
     USES_TERMINAL
     COMMENT "Starting QEMU with TEST kernel + qemu-xhci (auto-exit)"
     VERBATIM
@@ -376,7 +383,7 @@ add_custom_target(run-kernel-test-smp
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
     USES_TERMINAL
     COMMENT "Starting QEMU with TEST kernel + 2 CPUs (auto-exit)"
     VERBATIM
@@ -395,7 +402,7 @@ add_custom_target(run-kernel-test-all
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
     VERBATIM

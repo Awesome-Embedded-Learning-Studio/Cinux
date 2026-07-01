@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/idt.hpp"
-#include "kernel/arch/x86_64/user_access.hpp"  // P3 (SMAP): stac/clac for frame write
+#include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user for signal frames
 #include "kernel/arch/x86_64/usermode.hpp"     // F9 batch 1: USER_SIGRETURN_PAGE
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"  // DEBT-008: VMA check in signal_setup_frame
@@ -389,38 +389,49 @@ void signal_setup_frame(InterruptFrame* frame, Signal sig, uint64_t handler_addr
         }
     }
 
-    // P3 (SMAP real): the SignalFrame + return-addr slots live in user memory;
-    // wrap the writes in a local stac/clac window (global STAC removed). Skip
-    // access_ok: R was just validated against the writable Stack VMA above.
-    cinux::arch::stac();
-    auto* sf = reinterpret_cast<SignalFrame*>(R + 8);
-
     // Save the interrupted user context.
-    sf->r15    = frame->r15;
-    sf->r14    = frame->r14;
-    sf->r13    = frame->r13;
-    sf->r12    = frame->r12;
-    sf->r11    = frame->r11;
-    sf->r10    = frame->r10;
-    sf->r9     = frame->r9;
-    sf->r8     = frame->r8;
-    sf->rdi    = frame->rdi;
-    sf->rsi    = frame->rsi;
-    sf->rbp    = frame->rbp;
-    sf->rdx    = frame->rdx;
-    sf->rcx    = frame->rcx;
-    sf->rbx    = frame->rbx;
-    sf->rax    = frame->rax;
-    sf->rip    = frame->rip;
-    sf->rflags = frame->rflags;
-    sf->rsp    = user_rsp;
-    sf->sig    = static_cast<uint64_t>(sig);
-    sf->magic  = kSigFrameMagic;
+    SignalFrame sf{};
+    sf.r15    = frame->r15;
+    sf.r14    = frame->r14;
+    sf.r13    = frame->r13;
+    sf.r12    = frame->r12;
+    sf.r11    = frame->r11;
+    sf.r10    = frame->r10;
+    sf.r9     = frame->r9;
+    sf.r8     = frame->r8;
+    sf.rdi    = frame->rdi;
+    sf.rsi    = frame->rsi;
+    sf.rbp    = frame->rbp;
+    sf.rdx    = frame->rdx;
+    sf.rcx    = frame->rcx;
+    sf.rbx    = frame->rbx;
+    sf.rax    = frame->rax;
+    sf.rip    = frame->rip;
+    sf.rflags = frame->rflags;
+    sf.rsp    = user_rsp;
+    sf.sig    = static_cast<uint64_t>(sig);
+    sf.magic  = kSigFrameMagic;
+
+    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(R + 8), &sf, sizeof(sf))) {
+        cinux::lib::kprintf("[SIGNAL] handler frame copy failed at 0x%lx\n",
+                            static_cast<unsigned long>(R + 8));
+        if (task != nullptr) {
+            cinux::syscall::sys_exit(static_cast<uint64_t>(Signal::kSigsegv), 0, 0, 0, 0, 0);
+        }
+        return;
+    }
 
     // Return address: handler `ret` lands on the fixed sigreturn page (not
     // stack-resident code).  See USER_SIGRETURN_PAGE / kSigreturnTrampoline.
-    *reinterpret_cast<uint64_t*>(R) = cinux::arch::USER_SIGRETURN_PAGE;
-    cinux::arch::clac();  // end user-frame write window
+    const uint64_t ret_addr = cinux::arch::USER_SIGRETURN_PAGE;
+    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(R), &ret_addr, sizeof(ret_addr))) {
+        cinux::lib::kprintf("[SIGNAL] handler return slot copy failed at 0x%lx\n",
+                            static_cast<unsigned long>(R));
+        if (task != nullptr) {
+            cinux::syscall::sys_exit(static_cast<uint64_t>(Signal::kSigsegv), 0, 0, 0, 0, 0);
+        }
+        return;
+    }
 
     // Redirect the interrupted frame to enter the handler with sig as %rdi.
     frame->rip = handler_addr;
@@ -457,39 +468,51 @@ extern "C" void signal_check_deliver_isr(InterruptFrame* frame) {
     }
 }
 
+void signal_restore_frame(InterruptFrame* frame, const SignalFrame& sf) {
+    frame->r15    = sf.r15;
+    frame->r14    = sf.r14;
+    frame->r13    = sf.r13;
+    frame->r12    = sf.r12;
+    frame->r11    = sf.r11;
+    frame->r10    = sf.r10;
+    frame->r9     = sf.r9;
+    frame->r8     = sf.r8;
+    frame->rdi    = sf.rdi;
+    frame->rsi    = sf.rsi;
+    frame->rbp    = sf.rbp;
+    frame->rdx    = sf.rdx;
+    frame->rcx    = sf.rcx;
+    frame->rbx    = sf.rbx;
+    frame->rax    = sf.rax;
+    frame->rip    = sf.rip;
+    frame->rflags = sf.rflags;
+    frame->rsp    = sf.rsp;
+}
+
 extern "C" void sigreturn_handler(InterruptFrame* frame) {
     // The handler returned into the int $0x80 trampoline.  user RSP points
     // just past the return-address slot, i.e. at the saved SignalFrame.
-    auto* sf = reinterpret_cast<SignalFrame*>(frame->rsp);
-    if (sf->magic != kSigFrameMagic) {
-        cinux::lib::kprintf("[SIGNAL] sigreturn: bad frame magic %p -- killing task\n",
-                            reinterpret_cast<void*>(sf->magic));
+    SignalFrame sf{};
+    if (!cinux::user::copy_from_user(&sf, reinterpret_cast<const void*>(frame->rsp),
+                                     sizeof(sf))) {
+        cinux::lib::kprintf("[SIGNAL] sigreturn: cannot read frame at %p -- killing task\n",
+                            reinterpret_cast<void*>(frame->rsp));
         if (Task* task = Scheduler::current(); task != nullptr) {
-            task->exit_status = static_cast<int>(Signal::kSigkill);
-            Scheduler::exit_current();  // does not return
+            cinux::syscall::sys_exit(static_cast<uint64_t>(Signal::kSigkill), 0, 0, 0, 0, 0);
+        }
+        return;
+    }
+    if (sf.magic != kSigFrameMagic) {
+        cinux::lib::kprintf("[SIGNAL] sigreturn: bad frame magic %p -- killing task\n",
+                            reinterpret_cast<void*>(sf.magic));
+        if (Task* task = Scheduler::current(); task != nullptr) {
+            cinux::syscall::sys_exit(static_cast<uint64_t>(Signal::kSigkill), 0, 0, 0, 0, 0);
         }
         return;
     }
     // Restore the interrupted user context into the frame; the ISR stub will
     // pop the GPRs and IRETQ using these values.
-    frame->r15    = sf->r15;
-    frame->r14    = sf->r14;
-    frame->r13    = sf->r13;
-    frame->r12    = sf->r12;
-    frame->r11    = sf->r11;
-    frame->r10    = sf->r10;
-    frame->r9     = sf->r9;
-    frame->r8     = sf->r8;
-    frame->rdi    = sf->rdi;
-    frame->rsi    = sf->rsi;
-    frame->rbp    = sf->rbp;
-    frame->rdx    = sf->rdx;
-    frame->rcx    = sf->rcx;
-    frame->rbx    = sf->rbx;
-    frame->rax    = sf->rax;
-    frame->rip    = sf->rip;
-    frame->rflags = sf->rflags;
-    frame->rsp    = sf->rsp;
+    signal_restore_frame(frame, sf);
 }
 
 }  // namespace cinux::proc

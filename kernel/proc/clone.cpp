@@ -31,6 +31,7 @@
 #include "kernel/arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/phys_virt.hpp"
+#include "kernel/arch/x86_64/user_access.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -318,19 +319,29 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
         }
     }
 
+    // ---- TID flags ----
+    if ((flags & kCloneParentSettid) && parent_tid != 0) {
+        if (!cinux::user::put_user(child_pid, reinterpret_cast<int*>(parent_tid))) {
+            free_kernel_stack(child);
+            delete child;
+            cinux::proc::g_pid_alloc.free(child_pid);
+            return -14;  // EFAULT
+        }
+    }
+    if ((flags & kCloneChildSettid) && child_tid != 0) {
+        // CLONE_VM shares memory, so writing here is visible to the child.
+        if (!cinux::user::put_user(child_pid, reinterpret_cast<int*>(child_tid))) {
+            free_kernel_stack(child);
+            delete child;
+            cinux::proc::g_pid_alloc.free(child_pid);
+            return -14;  // EFAULT
+        }
+    }
+
     // ---- Linkage: CLONE_THREAD is a sibling, NOT a child of the caller ----
     if (!(flags & kCloneThread)) {
         child->wait_next = parent->children;
         parent->children = child;
-    }
-
-    // ---- TID flags ----
-    if ((flags & kCloneParentSettid) && parent_tid != 0) {
-        *reinterpret_cast<int*>(parent_tid) = child_pid;
-    }
-    if ((flags & kCloneChildSettid) && child_tid != 0) {
-        // CLONE_VM shares memory, so writing here is visible to the child.
-        *reinterpret_cast<int*>(child_tid) = child_pid;
     }
 
     Scheduler::add_task(child);
