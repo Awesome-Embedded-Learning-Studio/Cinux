@@ -64,6 +64,11 @@ public:
                          bool* registered) override;
     void     poll_detach_waiter(const cinux::fs::Inode* inode, cinux::proc::Task* waiter) override;
 
+    // DEBT-023: last-close hook. FDTable::close -> ~File -> InodeOps::release
+    // (once every fd pointing at this read inode is gone) drops one read-end
+    // reference on the shared Pipe; on the final one it fires EOF.
+    void release(cinux::fs::Inode* inode) override;
+
 private:
     Pipe* pipe_;
     bool  nonblock_;
@@ -106,6 +111,10 @@ public:
     uint32_t poll_events(const cinux::fs::Inode* inode, cinux::proc::Task* waiter,
                          bool* registered) override;
     void     poll_detach_waiter(const cinux::fs::Inode* inode, cinux::proc::Task* waiter) override;
+
+    // DEBT-023: last-close hook (see PipeReadOps::release). Drops one write-end
+    // reference on the shared Pipe; on the final one it raises BrokenPipe.
+    void release(cinux::fs::Inode* inode) override;
 
 private:
     Pipe* pipe_;
