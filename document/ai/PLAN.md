@@ -2,7 +2,12 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 GCC 自举主线 — 批1 tmpfs（F6-M4）✅ `6656096` ＋ shm merge `2a86b13` ＋ 批2 mount/umount2+/tmp（F6-M1）✅ `b078fef`（分支 `feat/f12-gcc-selfhost` 从 main `5c03f85`，**主 checkout 串行，不拉 worktree**，未 push）
+## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅(分支 `feat/f12-gcc-selfhost` 从 main `5c03f85`，**主 checkout 串行**，未 push)
+
+> **进度**：批1 tmpfs `6656096` ✅ ＋ shm merge `2a86b13` ✅ ＋ 批2 mount/umount2+/tmp `b078fef` ✅ ＋ 批3a sys_access `25271b3` ✅。目标 `gcc hello.c -o hello && ./hello`。4 批串行：批1 ✅ → 批2 ✅ → **批3 sys_access✅ + init PID1(focus)** → 批4 GCC 工具链装盘 + gcc hello.c。
+> **批3a（✅ `25271b3`）**：sys_access(21) 文件权限检查。`access_granted()` 标准 Unix 判定(owner/group/other 三元 + root 旁路:R/W 直通、X 需 exec 位)→ 可复用给 F6 check_permission / login。机制测 2:root 旁路 R/W + 0644 文件 X_OK 拒(-EACCES)+ 缺路径→ENOENT + 坏 mode→EINVAL。
+> **批3b(🔄 focus,用户拍板 busybox init)**:busybox init 作 PID1。**已探明风险点**:① `start_poll_driver()` 在 `init_task` 前创 kthread([main.cpp:282](../../kernel/main.cpp#L282)),PID 从 1 顺序分配 → kernel_init_thread **大概率 PID2 非 PID1**;busybox init 须 PID1 才正确收孤儿(gcc fork 链关键)→ 需**重排 boot task 创序**(init 先于 poll driver)或专留 PID1;② `launch_user_program` 替换调用者(init 线程可直 execve busybox 不 fork,但 usb::init 须挪到 launch_userspace 前);③ ext2 盘要 `/etc/inittab`(最小: `::respawn:/bin/sh`)+ `/bin/sh`(现 user/shell;busybox sh 要 symlink);④ busybox CONFIG_INIT/GETTY/LOGIN/ASH 全 =y(applet 齐)。**login/getty 暂缓**(staged):先做到 init PID1→respawn sh,getty/login+/etc/passwd 留 follow-up。
+> 验证(批1/2/3a):两 leg run-kernel-test-all 全绿(tmpfs 9×2 + mount 5×2 + access 2×2 + shm 6×2,busybox 14/14,零 FAIL)+ `make run` 冒烟 `[TMPFS] mounted at /tmp`。详见批1/批2 note。push/PR 归用户。
 
 > 目标：`gcc hello.c -o hello && ./hello` 在 CinuxOS 跑通——从「能跑别人二进制」到「能编自己二进制」。ABI 底子已验（busybox -O2 14/14 试金石过）。4 批串行：批1 tmpfs ✅ → 批2 mount/umount2+挂 /tmp ✅ → 批3 sys_access+init PID1 → 批4 GCC 工具链装盘 + gcc hello.c。
 > **批1（✅ `6656096`）**：TmpFs 内存型虚拟 FS（[tmpfs.hpp](../../kernel/fs/tmpfs/tmpfs.hpp) / [tmpfs.cpp](../../kernel/fs/tmpfs/tmpfs.cpp)）——第一个**运行时改写自身目录结构**的 FS（DevFS/ProcFS mount 时定死）。`TmpNode` 堆分配内嵌 Inode（`fs_private` 指回 node，延用 DevFs 招）+ 单向兄弟链表子节点（无上限）+ 可扩容堆缓冲（4KB 对齐增长 + gap 零填）+ 单 per-FS Spinlock。`TmpFileOps`(read/write/stat) + `TmpDirOps`(readdir/create/mkdir/unlink/stat)。lookup 多段 walk（仿 ext2，syscall `split_pathname` 拆 `sub/file` 故 tmpfs 须自 walk）。`is_page_cacheable` 默认 false → 内容直连 `ops->read/write`，不进磁盘 PageCache（已核实 sys_read/sys_write 路由）。
