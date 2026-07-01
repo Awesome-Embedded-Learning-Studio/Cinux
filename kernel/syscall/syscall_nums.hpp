@@ -44,6 +44,8 @@ enum class SyscallNr : uint64_t {
     SYS_dup2           = 33,  ///< duplicate to a specific fd (F-ECO batch 4)
     SYS_nanosleep      = 35,  ///< sleep for a duration (F-ECO batch 3)
     SYS_fcntl          = 72,  ///< manipulate a file descriptor (F-ECO batch 4)
+    SYS_getrusage      = 98,  ///< resource usage (zeros until accounting) (F-ECO batch 5)
+    SYS_sysinfo        = 99,  ///< system stats: RAM/uptime/procs (F-ECO batch 5)
     SYS_getpid         = 39,
     SYS_fork           = 57,
     SYS_clone          = 56,  ///< create a thread/process (F3-M2)

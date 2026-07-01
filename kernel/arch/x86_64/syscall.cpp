@@ -36,6 +36,8 @@
 #include "kernel/syscall/sys_getdents64.hpp"  // F-ECO batch 1
 #include "kernel/syscall/sys_getpid.hpp"
 #include "kernel/syscall/sys_getppid.hpp"
+#include "kernel/syscall/sys_getrusage.hpp"  // F-ECO batch 5
+#include "kernel/syscall/sys_sysinfo.hpp"    // F-ECO batch 5
 #include "kernel/syscall/sys_ioctl.hpp"
 #include "kernel/syscall/sys_iov.hpp"
 #include "kernel/syscall/sys_lseek.hpp"
@@ -116,6 +118,8 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_dup, sys_dup);      // F-ECO batch 4
     syscall_register(SyscallNr::SYS_dup2, sys_dup2);    // F-ECO batch 4
     syscall_register(SyscallNr::SYS_fcntl, sys_fcntl);  // F-ECO batch 4
+    syscall_register(SyscallNr::SYS_getrusage, sys_getrusage);  // F-ECO batch 5
+    syscall_register(SyscallNr::SYS_sysinfo, sys_sysinfo);  // F-ECO batch 5
     syscall_register(SyscallNr::SYS_getpid, sys_getpid);
     syscall_register(SyscallNr::SYS_getppid, sys_getppid);
     syscall_register(SyscallNr::SYS_fork, sys_fork);

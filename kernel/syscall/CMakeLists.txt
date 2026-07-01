@@ -52,4 +52,7 @@ target_sources(big_kernel_common PRIVATE
     # F-ECO batch 4: dup / dup2 / fcntl (sh + pipe + redirect 质变点).
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_dup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_fcntl.cpp
+    # F-ECO batch 5: sysinfo + getrusage (ps/free/uptime/top).
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_sysinfo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_getrusage.cpp
 )

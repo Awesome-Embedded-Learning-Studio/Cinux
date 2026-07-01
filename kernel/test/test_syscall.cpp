@@ -35,16 +35,19 @@
 #include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"  // FDTable / File (F-ECO batch 4 dup/fcntl tests)
 #include "kernel/fs/vfs_mount.hpp"
+#include "kernel/mm/pmm.hpp"  // g_pmm (batch 5 sysinfo cross-check)
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/signal.hpp"
 #include "kernel/syscall/sys_clock_gettime.hpp"
 #include "kernel/syscall/sys_dup.hpp"  // F-ECO batch 4
 #include "kernel/syscall/sys_exit.hpp"
-#include "kernel/syscall/sys_fcntl.hpp"  // F-ECO batch 4
+#include "kernel/syscall/sys_fcntl.hpp"      // F-ECO batch 4
+#include "kernel/syscall/sys_getrusage.hpp"  // F-ECO batch 5
 #include "kernel/syscall/sys_ioctl.hpp"
 #include "kernel/syscall/sys_iov.hpp"
 #include "kernel/syscall/sys_nanosleep.hpp"  // F-ECO batch 3
 #include "kernel/syscall/sys_pipe.hpp"       // do_pipe_kernel (batch 4 dup round-trip)
+#include "kernel/syscall/sys_sysinfo.hpp"    // F-ECO batch 5
 #include "kernel/syscall/sys_write.hpp"
 #include "kernel/syscall/sys_yield.hpp"
 #include "kernel/syscall/syscall_nums.hpp"
@@ -663,6 +666,55 @@ void test_sys_dup_fcntl_bad_fd() {
 }  // namespace test_feco_b4
 
 // ============================================================
+// F-ECO batch 5: sysinfo + getrusage (ps/free/uptime/top)
+// ============================================================
+
+namespace test_feco_b5 {
+
+void test_sys_sysinfo_sane() {
+    // do_sysinfo_kernel takes a kernel pointer (sys_sysinfo is the user boundary;
+    // the ring0 test kernel cannot supply a user ptr -- see nanosleep GOTCHA).
+    cinux::syscall::ksysinfo si{};
+    int64_t                  rc = cinux::syscall::do_sysinfo_kernel(&si);
+    TEST_ASSERT_EQ(rc, 0);
+    TEST_ASSERT_TRUE(si.totalram > 0);  // PMM total * 4096
+    TEST_ASSERT_TRUE(si.freeram > 0);   // some free RAM
+    TEST_ASSERT_TRUE(si.freeram <= si.totalram);
+    TEST_ASSERT_TRUE(si.uptime >= 0);    // monotonic seconds (>= 0; may be 0 early)
+    TEST_ASSERT_TRUE(si.procs > 0);      // at least the test main task
+    TEST_ASSERT_EQ(si.memunit, 1u);      // bytes
+    TEST_ASSERT_EQ(si.loads[0], 0ull);   // no load avg
+    TEST_ASSERT_EQ(si.totalswap, 0ull);  // no swap
+    TEST_ASSERT_EQ(si.totalhigh, 0ull);  // no highmem
+    // Cross-check: totalram mirrors g_pmm.
+    constexpr uint64_t kPageSize = 4096;
+    TEST_ASSERT_EQ(si.totalram, cinux::mm::g_pmm.total_page_count() * kPageSize);
+}
+
+void test_sys_sysinfo_bad_ptr() {
+    TEST_ASSERT_EQ(cinux::syscall::do_sysinfo_kernel(nullptr), -cinux::kEinval);
+}
+
+void test_sys_getrusage_zeros() {
+    cinux::syscall::krusage ru{};
+    ru.ru_maxrss = 99;  // poison to confirm it is zeroed
+    int64_t rc   = cinux::syscall::do_getrusage_kernel(0 /*RUSAGE_SELF*/, &ru);
+    TEST_ASSERT_EQ(rc, 0);
+    TEST_ASSERT_EQ(ru.ru_utime.tv_sec, 0);
+    TEST_ASSERT_EQ(ru.ru_utime.tv_usec, 0);
+    TEST_ASSERT_EQ(ru.ru_stime.tv_sec, 0);
+    TEST_ASSERT_EQ(ru.ru_maxrss, 0);  // accounting not tracked yet -> zeroed
+    TEST_ASSERT_EQ(ru.ru_nvcsw, 0);
+}
+
+void test_sys_getrusage_bad_who() {
+    cinux::syscall::krusage ru;
+    TEST_ASSERT_EQ(cinux::syscall::do_getrusage_kernel(99, &ru), -cinux::kEinval);
+}
+
+}  // namespace test_feco_b5
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -726,6 +778,12 @@ extern "C" void run_syscall_tests() {
     RUN_TEST(test_feco_b4::test_sys_fcntl_fdupfd);
     RUN_TEST(test_feco_b4::test_sys_fcntl_getfl_access_mode);
     RUN_TEST(test_feco_b4::test_sys_dup_fcntl_bad_fd);
+
+    // F-ECO batch 5: sysinfo + getrusage (ps/free/uptime/top).
+    RUN_TEST(test_feco_b5::test_sys_sysinfo_sane);
+    RUN_TEST(test_feco_b5::test_sys_sysinfo_bad_ptr);
+    RUN_TEST(test_feco_b5::test_sys_getrusage_zeros);
+    RUN_TEST(test_feco_b5::test_sys_getrusage_bad_who);
 
     TEST_SUMMARY();
 }
