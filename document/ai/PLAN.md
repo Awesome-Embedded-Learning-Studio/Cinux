@@ -2,6 +2,13 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F8-M3 AF_UNIX socket — 收官 2026-07-01（外包 worktree `feat/outsource-f8-unix-socket`，从集成线 `47573bc`，cherry-pick 回 `feat/f-eco-b2-vfs-syscalls` 零冲突，两 leg 1037/0）
+
+> F8 IPC 第三里程碑（M1 Pipe + M2 FIFO 已在主线待 push）。AF_UNIX socket 收进 F7-M6 的 **Socket=InodeOps 适配器**——socket fd 仍是 `File→Inode→SocketOps`，`sys_read/write/close` 零改。
+> **架构**：Socket base 加 path 虚函数 `bind_path`/`connect_path`（默认 NotImplemented；path 塞不进 AF_INET 形状的 `bind(port)`/`connect(addr,port)`，加法非破坏 Udp/TcpSocket 零改；listen/accept/send/recv 复用现有 virtuals）。`UnixSocket`（kernel/net/unix_socket.{hpp,cpp}）：bind_path 注册到内存 `UnixRegistry`（仿 FifoRegistry，**不依赖 tmpfs/ext2 真路径**，hobby-OS 简化）；connect_path 建 child、互连 peer、入 server accept 队列（立即建立无握手，确定性测试可 send-before-accept）；send 写 peer 的 4KB RX 环、recv 排干；阻塞走 `prepare_to_wait/schedule_blocked`（不 sti/hlt，避 sti-in-syscall #DF）。锁序：registry 锁绝不与 socket 锁嵌套（无 AB-BA）；peer_ 写一次、send 快照后只持 peer 锁。sys_socket 收 AF_UNIX 直接 `new UnixSocket`（自洽无栈依赖，避开改 net_init.cpp+net_stub.cpp 两处）。
+> **机制测试防假绿（4 测）**：returns_fd（sys_socket 创 UnixSocket）+ loopback echo（connect→send→accept→recv 逐字节精确匹配双向）+ connect 未绑→NotFound + bind 重复→AlreadyExists。echo + 负测走 UnixSocket 直接方法（同 AF_INET TCP/UDP echo——`copy_from_user` 的 `is_user_vaddr` 范围检查拒内核地址，测试内核栈 sockaddr_un 走 sys_bind 会 -EFAULT；sys_bind 的 sockaddr_un 解析留生产 musl 覆盖）。
+> **follow-up**：fs-backed bind() 接 DevFS/tmpfs 真节点 / abstract socket / socketpair + AF_UNIX DGRAM sendto(path) / send-side flow control（ring 满现返 EAGAIN）/ SMP peer 可见性 rigor / connect 阻塞到 accept / close 无 InodeOps::release（listener 不撤名）。详见 [note](../notes/2026-07-01-f8-m3-unix-socket.md)。push/PR 归用户。
+
 ## ✅ F-ECO 批2（VFS metadata + dirent 8 syscall）— 收官 2026-07-01（分支 `feat/f-eco-b2-vfs-syscalls`，从 main `470e9c8`，两 leg 1033/0）
 
 > busybox 试金石第二刀（[todo f-eco/00-busybox-touchstone](../todo/f-eco/00-busybox-touchstone.md) 批2）：为 `cp/mv/rm/touch/ln/mkdir/chmod/chown` 普及 8 个 Linux syscall —— `rename`(82)/`symlink`(88)/`link`(86)/`readlink`(89)/`chmod`(90)/`chown`(92)/`umask`(95)/`utimensat`(312)。
