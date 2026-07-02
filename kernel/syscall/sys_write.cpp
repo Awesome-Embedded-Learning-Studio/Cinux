@@ -65,9 +65,9 @@ int64_t do_write_kernel(int fd, const void* kbuf, uint64_t count) {
         return write_result.value();
     }
 
-    // fd=1 (stdout): legacy kprintf output path when no VFS entry is present.
+    // fd=1/2 (stdout/stderr): legacy console output when no VFS entry is present.
     // Reads the kernel staging buffer, not a user pointer.
-    if (fd == 1) {
+    if (fd == 1 || fd == 2) {
         const auto* p = reinterpret_cast<const char*>(kbuf);
         for (uint64_t i = 0; i < count; i++) {
             kprintf("%c", p[i]);

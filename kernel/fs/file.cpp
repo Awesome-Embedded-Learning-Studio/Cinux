@@ -90,14 +90,11 @@ void FDTable::release() {
 // Alloc
 // ============================================================
 
-/// First assignable fd (0=stdin, 1=stdout, 2=stderr are reserved)
-static constexpr uint32_t FD_FIRST = 3;
-
 int FDTable::alloc(Inode* inode, OpenFlags flags) {
     auto g = lock_.guard();
     (void)g;
 
-    for (uint32_t i = FD_FIRST; i < FD_TABLE_SIZE; ++i) {
+    for (uint32_t i = 0; i < FD_TABLE_SIZE; ++i) {
         if (fds_[i] == nullptr) {
             fds_[i] = new File(inode, 0, flags);
             inode_ref(inode);  // DEBT-023: this fd holds one inode reference
@@ -183,10 +180,7 @@ int FDTable::dup(int oldfd, int min_fd) {
     if (oldfd < 0 || oldfd >= static_cast<int>(FD_TABLE_SIZE) || fds_[oldfd] == nullptr) {
         return FD_NONE;
     }
-    // dup never hands out the reserved stdin/out/err slots (0/1/2): start at
-    // FD_FIRST.  This is a hobby-OS deviation from Linux (which dup's lowest >=
-    // 0); it keeps tests deterministic and avoids clobbering the console fds.
-    int start = min_fd < static_cast<int>(FD_FIRST) ? static_cast<int>(FD_FIRST) : min_fd;
+    int start = min_fd < 0 ? 0 : min_fd;
     for (int i = start; i < static_cast<int>(FD_TABLE_SIZE); ++i) {
         if (fds_[i] == nullptr) {
             File* src = fds_[oldfd];

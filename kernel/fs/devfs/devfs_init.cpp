@@ -108,11 +108,20 @@ cinux::lib::ErrorOr<Inode*> devfs_dynamic_lookup(const char* name) {
     if (fifo.error() != cinux::lib::Error::NotFound) {
         return fifo.error();
     }
-    // /dev/tty -> the caller's controlling terminal (the slave side of its PTY).
+    // /dev/tty -> the caller's controlling terminal.  In console-only boots
+    // busybox init may spawn ash with stdio on /dev/console without issuing
+    // TIOCSCTTY first, so no controlling tty is recorded; treat the built-in
+    // console as the fallback controlling terminal until a PTY is acquired.
     if (p[0] == 't' && p[1] == 't' && p[2] == 'y' && p[3] == '\0') {
         cinux::proc::Task* task = cinux::proc::Scheduler::current();
         if (task == nullptr || task->controlling_tty < 0) {
-            return cinux::lib::Error::NotFound;  // no controlling terminal
+            if (task != nullptr) {
+                task->controlling_tty = cinux::drivers::kConsoleControllingTty;
+                if (cinux::drivers::console_tty().foreground_pgid() == 0 && task->pgid != 0) {
+                    cinux::drivers::console_tty().set_foreground_pgid(task->pgid);
+                }
+            }
+            return g_devfs.lookup("console");
         }
         return cinux::drivers::pty_slave_inode(task->controlling_tty);
     }
@@ -154,6 +163,11 @@ bool init() {
     }
     cinux::lib::kprintf("[DEVFS] mounted at /dev (%u nodes)\n", g_devfs.node_count());
     return true;
+}
+
+Inode* console_inode() {
+    auto r = g_devfs.lookup("console");
+    return r.ok() ? r.value() : nullptr;
 }
 
 }  // namespace devfs

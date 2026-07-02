@@ -8,6 +8,8 @@
 
 > **可行性已实证**：99 syscall 覆盖 busybox rootfs 硬依赖 56/60，仅缺 `dup3/pipe2/recvmsg/sendmsg`（程序兜底）；**wait4 实际在 slot 61**（注册名 `SYS_waitpid`，handler 吃 4 实参，musl `waitpid` 传 `rusage=NULL` 兼容——之前 grep `SYS_wait4` 漏判）；busybox init PID1（F-ECO B3b）+ cc1→as→ld→./hello 全自举闭环（F12-M2 批4）均已跑通。双 libc 共存（musl 静态 busybox + glibc 动态 cc1）已 work，不用二选一。
 
+> **2026-07-02 接管阻塞修复**：Buildroot 动态 busybox base rootfs 已在 build-console 进入 `/ #`。根因不是 PIE 整体不支持，而是低地址 `MAP_FIXED`、`PROT_NONE` fault 权限、Linux fd 0/1/2 分配/stdin 安装三组语义缺口；同步把 kernel stack 固定 8 KiB 并加 static_assert。验证 run-kernel-test-all 两腿 `1101/0` + host `69/69`。详见 [note](../notes/2026-07-02-f-usability-buildroot-busybox-fix.md)。
+
 > **范围栅栏**：Buildroot 走 external toolchain（不 internal 编 GCC，那个 CI 顶不住）；target gcc 进 rootfs 一律走 `extract.sh` 拷 host 闭包（as/ld/cc1 + glibc runtime + crt + libgcc + `gcc -H` 头文件闭包），**绝非 Buildroot 编 target gcc**；profile 是 job 属性不进 build_type×sanitizer 矩阵。
 
 ### 设计（三层分离，对齐 Buildroot/Yocto image-builder 范式）

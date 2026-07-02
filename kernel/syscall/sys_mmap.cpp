@@ -14,6 +14,7 @@
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
+#include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/inode.hpp"
@@ -38,6 +39,15 @@ constexpr uint64_t align_up(uint64_t v) {
 
 constexpr bool page_aligned(uint64_t v) {
     return (v & (kPageSize - 1)) == 0;
+}
+
+bool fixed_range_ok(uint64_t addr, uint64_t length) {
+    if (!page_aligned(addr) || addr == 0 || addr + length < addr) {
+        return false;
+    }
+    const uint64_t last = addr + length - 1;
+    return cinux::arch::is_user_vaddr(addr) && cinux::arch::is_user_vaddr(last) &&
+           addr + length <= cinux::arch::USER_STACK_TOP;
 }
 
 /// Translate POSIX prot/flags into the kernel VmaFlags (anonymous mappings).
@@ -101,9 +111,9 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
 
     uint64_t map_addr = 0;
     if ((flags & MAP_FIXED) != 0) {
-        // Honour the requested address, validating alignment + mmap window.
-        if (!page_aligned(addr) || addr < cinux::arch::USER_MMAP_BASE ||
-            addr + aligned_len > cinux::arch::USER_MMAP_END || addr + aligned_len < addr) {
+        // Honour the exact user address. MAP_FIXED may intentionally replace a
+        // low PIE/heap VMA, so do not confine it to the high mmap arena.
+        if (!fixed_range_ok(addr, aligned_len)) {
             return -kEinval;
         }
         map_addr = addr;

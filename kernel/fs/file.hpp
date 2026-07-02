@@ -90,9 +90,9 @@ void inode_unref(Inode* inode);
 /**
  * @brief Per-process file descriptor table
  *
- * Manages a fixed-size array of File pointers.  Descriptor 0 is
- * reserved for stdin, 1 for stdout, and 2 for stderr (allocated
- * externally by the shell / init setup).
+ * Manages a fixed-size array of File pointers.  alloc() follows Linux fd
+ * allocation semantics: return the lowest unused descriptor, including
+ * standard-stream slots 0/1/2 when they are free.
  *
  * Lifetime: the FDTable owns the File objects; close() releases them.
  */

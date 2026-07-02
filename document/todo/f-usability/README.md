@@ -21,6 +21,7 @@ Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟（CinuxO
 - **`wait4` 实际在 slot 61**（注册名 `SYS_waitpid`，handler 吃 4 实参，musl `waitpid` 传 `rusage=NULL` 兼容）。别再 grep `SYS_wait4` 字面量漏判。
 - **busybox init PID1**（F-ECO B3b）+ **cc1→as→ld→./hello 全自举闭环**（F12-M2 批4）均已跑通。
 - **双 libc 共存已 work**：musl 静态 busybox（自洽）+ glibc 动态 cc1（靠 extract.sh 一起拷进来的 glibc `.so` + `/lib64/ld-linux`）。不用二选一。
+- **Buildroot 动态 busybox base rootfs 已到 `/ #`**（2026-07-02）：修低地址 `MAP_FIXED`、`PROT_NONE` fault 权限、Linux fd 0/1/2 分配与 PID1 stdio 安装；详见 [note](../../notes/2026-07-02-f-usability-buildroot-busybox-fix.md)。
 
 ## 三层分离（对齐 Buildroot/Yocto image-builder 范式）
 

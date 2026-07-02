@@ -11,10 +11,9 @@
 
 #pragma once
 
+#include <cinux/expected.hpp>  // ErrorOr (console_tty_ioctl return)
 #include <cstddef>
 #include <cstdint>
-
-#include <cinux/expected.hpp>  // ErrorOr (console_tty_ioctl return)
 
 #include "kernel/drivers/tty/tty.hpp"
 
@@ -23,6 +22,10 @@ struct Task;  // the blocked stdin reader; full def in process.hpp
 }
 
 namespace cinux::drivers {
+
+/// Task::controlling_tty value for the built-in system console.  PTY slaves use
+/// non-negative indices; -1 remains "no controlling terminal".
+constexpr int kConsoleControllingTty = -2;
 
 /// The system console TTY.  Owns its line discipline (TTY), the single blocked
 /// stdin reader, and the foreground process group for signal delivery.  A
