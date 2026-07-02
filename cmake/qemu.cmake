@@ -88,8 +88,7 @@ set(BUSYBOX_ELF "${CMAKE_BINARY_DIR}/musl/busybox")
 # (as/ld + glibc runtime + crt + libgcc; no cc1/headers yet) into the ext2 disk
 # for the GCC self-host smoke. Off by default: CI lacks GCC-private crt, and the
 # subset is a host artifact, not a CinuxOS build product. Local builds enable it
-# with -DCINUX_GCC_TOOLCHAIN=ON.
-option(CINUX_GCC_TOOLCHAIN "Stage host glibc GCC subset (as/ld+crt+libgcc) into ext2 disk" OFF)
+# with -DCINUX_GCC_TOOLCHAIN=ON. (The option() itself lives in cmake/options.cmake.)
 if(CINUX_GCC_TOOLCHAIN)
     set(GCC_ROOT "${CMAKE_BINARY_DIR}/gcc-root")
     set(GCC_ROOT_DEP "${CMAKE_BINARY_DIR}/gcc-root.stamp")
@@ -200,65 +199,98 @@ add_custom_target(image ALL
     DEPENDS ${CINUX_IMAGE_PATH}
 )
 
-add_custom_target(run
-    COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_DEVELOP_FLAG}
-        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
-        -device qemu-xhci,id=xhci
-        -device usb-kbd,bus=xhci.0
-        -device usb-tablet,bus=xhci.0
-        -device ahci,id=ahci
-        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
-        -device ide-hd,drive=ahci-disk,bus=ahci.0
-        -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
-        -device ide-hd,drive=ext2-disk,bus=ahci.1
-        -device e1000,netdev=net0 -netdev user,id=net0
-    DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
-    COMMENT "Starting QEMU (serial: stdio)"
-    VERBATIM
-)
+# ============================================================
+# QEMU run-target factories
+# ============================================================
+# The run-* targets below share almost all of their QEMU command line; these
+# helpers capture the variation along orthogonal axes (SMP / device set / debug
+# / wrapper-vs-direct / image). QEMU argument order is irrelevant here --
+# qemu_test_wrapper.sh just does "$@" and maps the exit code, and the configured
+# run_all_tests.sh.in consumes pre-expanded strings -- so the factory may freely
+# reorder. The hand-written targets stay: run-kernel-test-all (two legs),
+# run-big-kernel-test / run-stress-test (distinct image + deps), run-kernel-
+# test-debug / -interactive (direct QEMU on the test image), run-gdb.
+function(cinux_qemu_test_target name)
+    set(opts SMP DEV_NET DEV_XHCI)
+    cmake_parse_arguments(ARG "${opts}" "COMMENT" "" ${ARGN})
+    set(_smp)
+    if(ARG_SMP)
+        set(_smp -smp 2)
+    endif()
+    set(_devs)
+    if(ARG_DEV_NET)
+        list(APPEND _devs -device e1000,netdev=net0 -netdev user,id=net0)
+    endif()
+    if(ARG_DEV_XHCI)
+        list(APPEND _devs -device qemu-xhci,id=xhci
+                          -device usb-kbd,bus=xhci.0
+                          -device usb-tablet,bus=xhci.0)
+    endif()
+    add_custom_target(${name}
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
+                ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${_smp} ${QEMU_TEST_EXTRA_FLAGS}
+                ${_devs}
+                -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
+        DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE}
+                regenerate-ext2-image ${EXT4_IMAGE}
+        USES_TERMINAL
+        COMMENT "${ARG_COMMENT}"
+        VERBATIM)
+endfunction()
+
+function(cinux_qemu_run_target name)
+    set(opts SMP DEV_NET DEV_XHCI DEBUG)
+    cmake_parse_arguments(ARG "${opts}" "COMMENT" "" ${ARGN})
+    set(_smp)
+    if(ARG_SMP)
+        set(_smp -smp 2)
+    endif()
+    set(_dbg)
+    if(ARG_DEBUG)
+        set(_dbg ${QEMU_DEBUG_FLAGS})
+    endif()
+    set(_devs)
+    set(_deps image)
+    if(ARG_DEV_NET)
+        list(APPEND _devs -device e1000,netdev=net0 -netdev user,id=net0)
+    endif()
+    if(ARG_DEV_XHCI)
+        list(APPEND _devs -device qemu-xhci,id=xhci
+                          -device usb-kbd,bus=xhci.0
+                          -device usb-tablet,bus=xhci.0)
+    endif()
+    if(NOT ARG_DEBUG)
+        # Interactive run targets attach the AHCI + rootfs disk group; run-debug
+        # is a bare image + gdb boot (no extra disks, no extra deps).
+        list(APPEND _devs -device ahci,id=ahci
+                -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
+                -device ide-hd,drive=ahci-disk,bus=ahci.0
+                -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
+                -device ide-hd,drive=ext2-disk,bus=ahci.1)
+        list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS})
+    endif()
+    add_custom_target(${name}
+        COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${_smp} ${QEMU_DEVELOP_FLAG} ${_dbg}
+                ${_devs}
+                -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        DEPENDS ${_deps}
+        USES_TERMINAL
+        COMMENT "${ARG_COMMENT}"
+        VERBATIM)
+endfunction()
+
+cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI COMMENT "Starting QEMU (serial: stdio)")
 
 # Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
-# fork #DF saga is -smp-2-only (cross-core CoW/syscall-frame race); single-CPU
-# is stable, so this is the path to launch external programs from the shell
-# (type a path) without hitting the saga. Use `run` for -smp 2 / AP / net work.
-add_custom_target(run-single
-    COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_DEVELOP_FLAG}
-        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
-        -device qemu-xhci,id=xhci
-        -device usb-kbd,bus=xhci.0
-        -device usb-tablet,bus=xhci.0
-        -device ahci,id=ahci
-        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
-        -device ide-hd,drive=ahci-disk,bus=ahci.0
-        -drive file=${EXT2_IMAGE},format=raw,if=none,id=ext2-disk
-        -device ide-hd,drive=ext2-disk,bus=ahci.1
-        -device e1000,netdev=net0 -netdev user,id=net0
-    DEPENDS image ${AHCI_TEST_IMAGE} ${EXT2_IMAGE}
-    COMMENT "Starting QEMU single-CPU (shell fork stable; no -smp 2 saga)"
-    VERBATIM
-)
+# fork #DF saga is -smp-2-only; single-CPU is stable, so this is the path to
+# launch external programs from the shell without hitting the saga.
+cinux_qemu_run_target(run-single DEV_NET DEV_XHCI
+    COMMENT "Starting QEMU single-CPU (shell fork stable; no -smp 2 saga)")
 
 # F4-M3 P2-4: SMP smoke -- same as `run` but with 2 CPUs, to exercise AP boot.
-add_custom_target(run-smp
-    COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_DEVELOP_FLAG}
-        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
-        -device ahci,id=ahci
-        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
-        -device ide-hd,drive=ahci-disk,bus=ahci.0
-        -drive file=${EXT2_IMAGE},format=raw,if=none,id=ext2-disk
-        -device ide-hd,drive=ext2-disk,bus=ahci.1
-    DEPENDS image ${AHCI_TEST_IMAGE} ${EXT2_IMAGE}
-    COMMENT "Starting QEMU with 2 CPUs (SMP)"
-    VERBATIM
-)
+cinux_qemu_run_target(run-smp SMP COMMENT "Starting QEMU with 2 CPUs (SMP)")
 
-add_custom_target(run-debug
-    COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_DEVELOP_FLAG} ${QEMU_DEBUG_FLAGS}
-        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS image
-    COMMENT "Starting QEMU in debug mode (GDB on :1234)"
-    VERBATIM
-)
+cinux_qemu_run_target(run-debug DEBUG COMMENT "Starting QEMU in debug mode (GDB on :1234)")
 
 
 add_custom_target(run-gdb
@@ -398,57 +430,23 @@ add_custom_target(check_uaccess_boundaries
     VERBATIM
 )
 
-add_custom_target(run-kernel-test
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
-        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
-        -device e1000,netdev=net0 -netdev user,id=net0
-        -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
-    USES_TERMINAL
-    COMMENT "Starting QEMU with TEST kernel (auto-exit)"
-    VERBATIM
-)
+cinux_qemu_test_target(run-kernel-test DEV_NET
+    COMMENT "Starting QEMU with TEST kernel (auto-exit)")
 
 # F5-M6 e1000: dedicated NIC-bringup smoke (same suite, explicit -device e1000).
-add_custom_target(run-kernel-test-net
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
-        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
-        -device e1000,netdev=net0 -netdev user,id=net0
-        -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
-    USES_TERMINAL
-    COMMENT "Starting QEMU with TEST kernel + e1000 NIC (auto-exit)"
-    VERBATIM
-)
+cinux_qemu_test_target(run-kernel-test-net DEV_NET
+    COMMENT "Starting QEMU with TEST kernel + e1000 NIC (auto-exit)")
 
 # F5-M5: run the test kernel with a qemu-xHCI controller + usb-kbd/usb-tablet
 # attached, so the xHCI tests (find_xhci + reset + enumeration + HID) have a
-# real controller to exercise.  The pointing device is a usb-tablet (absolute):
-# the guest decodes its absolute X/Y report so the cursor tracks the host cursor
-# exactly (a relative usb-mouse drifts at the screen edge -- two-cursor skew).
-# QEMU_COMMON_FLAGS still carries the default -usb + legacy usb-tablet (on the
-# UHCI bus, ignored by the guest's xHCI driver, which only scans the xhci bus).
-add_custom_target(run-kernel-test-xhci
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
-        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_TEST_EXTRA_FLAGS}
-        -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0
-        -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
-    USES_TERMINAL
-    COMMENT "Starting QEMU with TEST kernel + qemu-xhci (auto-exit)"
-    VERBATIM
-)
+# real controller to exercise. The pointing device is a usb-tablet (absolute)
+# so the cursor tracks the host cursor (a relative usb-mouse drifts at the edge).
+cinux_qemu_test_target(run-kernel-test-xhci DEV_XHCI
+    COMMENT "Starting QEMU with TEST kernel + qemu-xhci (auto-exit)")
 
 # F4-M3 P2-4: SMP test kernel -- same suite but with 2 CPUs (auto-exit).
-add_custom_target(run-kernel-test-smp
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
-        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
-        -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
-    USES_TERMINAL
-    COMMENT "Starting QEMU with TEST kernel + 2 CPUs (auto-exit)"
-    VERBATIM
-)
+cinux_qemu_test_target(run-kernel-test-smp SMP
+    COMMENT "Starting QEMU with TEST kernel + 2 CPUs (auto-exit)")
 
 # F-VERIFY: 统一入口 -- 一条命令顺序跑 单核 → -smp 2 两套内核测试。
 # 目的:AI/CI 验证时"一个指令全跑",消除"忘跑 -smp 变体"的流程盲区(47/47
