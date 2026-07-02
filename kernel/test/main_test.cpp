@@ -496,7 +496,7 @@ static void musl_hello_smoke_entry() {
         if (child_pid == 0) {
             auto* child        = cinux::proc::Scheduler::current();
             child->addr_space  = new cinux::mm::AddressSpace();
-            const char* argv[] = {"/usr/bin/as", "--version", nullptr};
+            const char* argv[] = {"/usr/bin/as", "/hello.s", "-o", "/hello.o", nullptr};
             const char* envp[] = {nullptr};
             cinux::proc::launch_user_program("/usr/bin/as", argv, envp);
             cinux::proc::Scheduler::exit_current();  // unreachable
@@ -517,7 +517,7 @@ static void musl_hello_smoke_entry() {
             cinux::proc::Scheduler::yield();
         }
         as_ok = (reap > 0 && kstatus == 0);
-        cinux::lib::kprintf("[B4-B2] glibc as --version %s (status=%d reap=%lld)\n",
+        cinux::lib::kprintf("[B4-B2] glibc as /hello.s -o /hello.o %s (status=%d reap=%lld)\n",
                             as_ok ? "PASS" : "FAIL", kstatus, static_cast<long long>(reap));
     }
 #    else
