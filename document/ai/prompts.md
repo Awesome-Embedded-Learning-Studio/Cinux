@@ -62,6 +62,16 @@ RIP=0xFFFFFFFF81003B8D (= irq0_stub, interrupts.S:427)  RSP=0xFFFF80000B20FFD0
 ### Bug 2：SIG21 busybox 自发 SIGTTIN（#DF 修完再看，独立）
 sh `kill(0, SIGTTIN)`（`do_kill_kernel` 诊断 `[KILL] caller pid=2 -> pid=0 sig=21`），default stop。`console_tty_ioctl` 的 `kTiocsctty`/`kTiocspgrp` 加 `[TTY]` log **全程空**——busybox 没调。试过（已回退，无效）：`kTiocsctty` 设 `foreground_pgid=current->pgid` + `/dev/tty` fall back `/dev/console`。根因：console 模式无 PTY（`controlling_tty=-1`），busybox init/sh 控制终端作业控制协议未满足，ash 自检 raise SIGTTIN。需搞清 busybox ash job control 为何 raise（session leader/控制终端/tcgetpgrp），对症补 CinuxOS 语义（参考 F3-M3 进程组 + F10-M3 PTY）。
 
+### Bug 3（Bug 1+2 修完后显现）：动态 busybox ldso bring-up 卡——sh 进 user mode 后零 syscall
+**现状**：Bug 1(#DF)+Bug 2(SIG21) codex 已修（working tree，`STACK_PAGES=2`=8KB + `static_assert` 锁死禁增栈；console_tty/devfs_init 控制终端改），重跑 build-console boot **#DF/SIG21 全消失**，busybox init up + execve /bin/sh follow + `jumping to user mode`（interp entry `0x1007C31A`）全通。**但** sh 进 user mode 后**只有 demand-page（约 5 次），零 syscall**——`grep '\[SYS_'` sh 段只 16 EXECVE + 1 WAITPID，无任何 SYS_WRITE/READ/OPEN/IOCTL，timeout 等输入。无 ash 提示符。
+**含义**：卡点在 `interp entry → busybox main` 之间——musl ldso 没完成 bring-up 转不到 busybox main（否则 busybox main 至少发 write banner / read inittab syscall）。对比 memory `gcc-b3b` build-console 跑通过的 busybox 是**静态** musl（无 ldso，直接 entry→main→syscall，秒到 `~ #`）；Buildroot 这次是**动态** musl，多一层 ldso bring-up，busybox 又比 hello-dyn 重得多，压出 ldso 路径薄弱处。F10-M2 动态 hello 跑通过，但 busybox 重，可能 auxv/TLS/relocate 的 corner case。
+**诊断方向**（按嫌疑排序）：
+1. **auxv 不完整/值错**：musl ldso 启动消费 auxv（AT_PHDR 找 busybox program headers、AT_RANDOM stack canary、AT_ENTRY busybox entry、AT_BASE interp base、AT_HWCAP）。F10-M1 加了 auxv 但可能漏项或值错——ldso 拿不到 busybox PHDR 就无法 relocate。查 execve 构造的 auxv（`execve.cpp` auxv 段）逐项对比 Linux 最小集 + 值。
+2. **TLS 初始化**：musl ldso 装 TLS 模板（`__libc_start_main` 前）+ 设 fs_base。查 execve 的 arch_prctl(ARCH_SET_FS)/TLS image 设置 + ldso TLS init 路径。
+3. **GOT/PLT relocate**：busybox 大量 PLT/GOT，ldso relocate 访问 busybox 各页（demand-page 5 次可能就是 relocate 访问）；relocate 完才跳 busybox entry。卡 relocate（访问非法地址 #PF / 死循环）？查 ldso 卡点 RIP。
+4. **PT_LOAD demand-page**：busybox PT_LOAD 段全加载成功？interp + busybox PT_LOAD 都 demand-page？
+**instrumentation**：execve 跳 user mode 前打印 auxv 全表（key+value）+ interp/busybox PT_LOAD；或 `qemu -d exec` 单步看 ldso 卡 RIP；对比 F10-M2 动态 hello（跑通过）的 auxv/TLS——busybox 重，找差异。
+
 ### 验证（共用）
 ```bash
 cmake -B build-console -DCINUX_GUI=OFF -DCINUX_BUILD_TESTS=ON \
