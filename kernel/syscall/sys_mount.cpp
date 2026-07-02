@@ -29,10 +29,10 @@ using cinux::fs::TmpFs;
 using cinux::fs::vfs_mount_add;
 using cinux::lib::kprintf;
 
-int64_t do_mount_kernel(const char* source, const char* target, const char* fstype,
-                        uint64_t flags) {
-    (void)source;  // tmpfs has no backing device
-    (void)flags;   // MS_* mount flags not yet modelled
+int64_t do_mount_kernel([[maybe_unused]] const char* source, const char* target, const char* fstype,
+                        [[maybe_unused]] uint64_t flags) {
+    // tmpfs has no backing device
+    // MS_* mount flags not yet modelled
 
     if (target == nullptr || fstype == nullptr || target[0] == '\0') {
         return -kEinval;
@@ -64,13 +64,12 @@ int64_t do_mount_kernel(const char* source, const char* target, const char* fsty
     return 0;
 }
 
-int64_t sys_mount(uint64_t source_virt, uint64_t target_virt, uint64_t fstype_virt, uint64_t flags,
-                  uint64_t data, uint64_t) {
-    (void)data;  // mount options string -- not yet parsed
+int64_t sys_mount([[maybe_unused]] uint64_t source_virt, uint64_t target_virt, uint64_t fstype_virt, uint64_t flags,
+                  [[maybe_unused]] uint64_t data, uint64_t) {
+    // mount options string -- not yet parsed
 
     // source is unused for tmpfs; do not even read it (tolerates a NULL source,
     // which Linux permits for source-less filesystems like tmpfs).
-    (void)source_virt;
 
     cinux::fs::PathBuf target;
     if (!resolve_user_path(target_virt, target.data())) {

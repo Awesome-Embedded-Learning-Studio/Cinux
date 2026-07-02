@@ -425,7 +425,7 @@ void UnixSocket::pair_with(UnixSocket* other) {
 // F8-M5 poll readiness (mirrors TcpSocket)
 // ============================================================
 
-uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t UnixSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -452,18 +452,16 @@ uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         }
     }
 #else
-        (void)waiter;
 #endif
     return mask;
 }
 
-void UnixSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void UnixSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(recv_waiters_, waiter);
     wait_remove(accept_waiters_, waiter);
 #else
-        (void)waiter;
 #endif
 }
 

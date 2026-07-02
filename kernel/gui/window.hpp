@@ -91,7 +91,7 @@ public:
      *
      * @param ev  The keyboard event
      */
-    virtual void on_key(KeyEvent& ev) { (void)ev; }
+    virtual void on_key([[maybe_unused]] KeyEvent& ev) { (void)ev; }
 
     /**
      * @brief Handle a paint request
@@ -101,7 +101,7 @@ public:
      *
      * @param canvas  The canvas to paint onto
      */
-    virtual void on_paint(cinux::drivers::Canvas& canvas) { (void)canvas; }
+    virtual void on_paint([[maybe_unused]] cinux::drivers::Canvas& canvas) { (void)canvas; }
 
     /**
      * @brief Query whether this window is a terminal

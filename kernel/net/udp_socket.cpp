@@ -256,7 +256,7 @@ void UdpSocket::close() {
 #endif
 }
 
-uint32_t UdpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t UdpSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -274,17 +274,15 @@ uint32_t UdpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         wait_enqueue(recv_waiters_, waiter);
     }
 #else
-    (void)waiter;
 #endif
     return mask;
 }
 
-void UdpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void UdpSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(recv_waiters_, waiter);
 #else
-    (void)waiter;
 #endif
 }
 

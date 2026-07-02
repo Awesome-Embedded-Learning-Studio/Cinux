@@ -97,10 +97,10 @@ namespace {
 constexpr uint64_t kOAccessMode = 0x3;      ///< mask: 0=RDONLY,1=WRONLY,2=RDWR
 constexpr uint64_t kOCreat      = 0x40;     ///< create if missing
 constexpr uint64_t kOTrunc      = 0x200;    ///< truncate to 0 on open (O_TRUNC)
-constexpr uint64_t kOCloexec    = 0x80000;  ///< close-on-exec (recorded by FDTable later)
+[[maybe_unused]] constexpr uint64_t kOCloexec    = 0x80000;  ///< close-on-exec (recorded by FDTable later)
 
 /// AT_FDCWD: "relative to current working directory".
-constexpr int64_t kAtFdcwd = -100;
+[[maybe_unused]] constexpr int64_t kAtFdcwd = -100;
 
 /// Map Linux access-mode bits to CinuxOS OpenFlags.
 cinux::fs::OpenFlags access_to_open_flags(uint64_t flags) {
@@ -184,7 +184,7 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
     if (fd == cinux::fs::FD_NONE) {
         return -kEmfile;
     }
-    (void)kOCloexec;  // close-on-exec not yet wired into FDTable
+    // close-on-exec not yet wired into FDTable
     return static_cast<int64_t>(fd);
 }
 
@@ -192,13 +192,11 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
 // sys_openat (F10-M1 batch 4) -- musl open()/fopen() entry point
 // ============================================================
 
-int64_t sys_openat(uint64_t dirfd, uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t,
+int64_t sys_openat([[maybe_unused]] uint64_t dirfd, uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t,
                    uint64_t) {
     // Only AT_FDCWD (-100) is meaningful today; a real dirfd would need per-fd
     // path tracking.  musl always passes AT_FDCWD, so we resolve cwd-relative
     // regardless.  (Documented limitation until per-fd paths are tracked.)
-    (void)dirfd;
-    (void)kAtFdcwd;
 
     // Boundary: resolve the user path (cwd-aware), then run kernel logic.
     cinux::fs::PathBuf resolved;

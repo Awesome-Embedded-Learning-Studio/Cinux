@@ -328,7 +328,7 @@ void TcpSocket::close() {
 #endif
 }
 
-uint32_t TcpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t TcpSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -357,12 +357,11 @@ uint32_t TcpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         }
     }
 #else
-        (void)waiter;
 #endif
     return mask;
 }
 
-void TcpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void TcpSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     // A poller parks on at most one of the two queues (per listening/connected
@@ -370,7 +369,6 @@ void TcpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
     wait_remove(recv_waiters_, waiter);
     wait_remove(accept_waiters_, waiter);
 #else
-        (void)waiter;
 #endif
 }
 

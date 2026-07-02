@@ -18,8 +18,8 @@ namespace cinux::proc {
 
 using cinux::arch::InterruptFrame;
 
-void signal_setup_frame(InterruptFrame* frame, Signal sig, uint64_t handler_addr, SigSet sa_mask) {
-    (void)sa_mask;  // TODO: block sa_mask (+ sig) during the handler
+void signal_setup_frame(InterruptFrame* frame, Signal sig, uint64_t handler_addr, [[maybe_unused]] SigSet sa_mask) {
+    // TODO: block sa_mask (+ sig) during the handler
     const uint64_t user_rsp = frame->rsp;
     // Align so the handler entry RSP satisfies the SysV AMD64 ABI (RSP%16==8).
     const uint64_t pad      = user_rsp & 0x0F;  // 0 or 8

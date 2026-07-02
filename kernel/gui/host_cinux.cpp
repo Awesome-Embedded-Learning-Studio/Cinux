@@ -41,8 +41,7 @@ cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here 
 /* ============================================================
  * L2 Input: dequeue one cinux::gui::Event and serialise it to a cinux::gui event.
  * ============================================================ */
-bool cinux_poll_event(void* ctx, EventHeader* out, uint16_t out_cap) {
-    (void)ctx;
+bool cinux_poll_event([[maybe_unused]] void* ctx, EventHeader* out, uint16_t out_cap) {
     if (out == nullptr || out_cap < sizeof(EventHeader)) {
         return false;
     }
@@ -121,8 +120,7 @@ bool cinux_poll_event(void* ctx, EventHeader* out, uint16_t out_cap) {
  * poll, cursor footprint, composite) and report the dirty rects + the staging
  * back buffer. count==0 = idle (nothing changed, the pump flushes nothing).
  * ============================================================ */
-void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) {
-    (void)ctx;
+void cinux_dispatch_event([[maybe_unused]] void* ctx, const EventHeader* ev, const void* payload) {
     if (ev == nullptr || payload == nullptr || ev->magic != kEventMagic ||
         ev->version != kAbiVersion) {
         return;
@@ -186,8 +184,7 @@ void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload)
     }
 }
 
-void cinux_render_frame(void* ctx, Frame* frame) {
-    (void)ctx;
+void cinux_render_frame([[maybe_unused]] void* ctx, Frame* frame) {
     if (frame == nullptr) {
         return;
     }
@@ -267,26 +264,22 @@ void cinux_render_frame(void* ctx, Frame* frame) {
 
     wm.clear_dirty();
 }
-uint32_t cinux_now_ms(void* ctx) {
-    (void)ctx;
+uint32_t cinux_now_ms([[maybe_unused]] void* ctx) {
     return static_cast<uint32_t>(cinux::drivers::PIT::get_uptime_ms());
 }
 
 /* ============================================================
  * Memory / log.
  * ============================================================ */
-void* cinux_alloc(void* ctx, size_t n) {
-    (void)ctx;
+void* cinux_alloc([[maybe_unused]] void* ctx, size_t n) {
     return cinux::mm::kmalloc(n);
 }
 
-void cinux_free(void* ctx, void* p) {
-    (void)ctx;
+void cinux_free([[maybe_unused]] void* ctx, void* p) {
     cinux::mm::kfree(p);
 }
 
-__attribute__((format(printf, 2, 3))) void cinux_log(void* ctx, const char* fmt, ...) {
-    (void)ctx;
+__attribute__((format(printf, 2, 3))) void cinux_log([[maybe_unused]] void* ctx, const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     cinux::lib::kvprintf(fmt, ap);
@@ -305,9 +298,8 @@ __attribute__((format(printf, 2, 3))) void cinux_log(void* ctx, const char* fmt,
  * identical pixels, but only the dirty rects are transferred and the display
  * path now runs through the Host ABI (host-agnostic).
  * ============================================================ */
-void cinux_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
+void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
                  PixelFormat fmt) {
-    (void)ctx;
     if (g_fb == nullptr || pixels == nullptr || w <= 0 || h <= 0) {
         return;
     }
@@ -371,10 +363,7 @@ void cinux_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint
  * desktop action (open a shell), and create_shell_terminal() does exactly
  * that, so behaviour matches the non-cinux::gui gui_pump() path.
  * ============================================================ */
-int cinux_spawn(void* ctx, const char* path, char* const argv[], int* stdin_fd, int* stdout_fd) {
-    (void)ctx;
-    (void)path;
-    (void)argv;
+int cinux_spawn([[maybe_unused]] void* ctx, [[maybe_unused]] const char* path, [[maybe_unused]] char* const argv[], int* stdin_fd, int* stdout_fd) {
     if (stdin_fd != nullptr) {
         *stdin_fd = -1;
     }

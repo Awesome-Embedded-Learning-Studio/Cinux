@@ -212,10 +212,9 @@ uint64_t PMM::alloc_pages(uint64_t count) {
     return page * PAGE_SIZE;
 }
 
-void PMM::free_pages(uint64_t phys, uint64_t count) {
+void PMM::free_pages(uint64_t phys, [[maybe_unused]] uint64_t count) {
     // The buddy records each head's order authoritatively, so @p count is not
     // needed: freeing the head returns the whole power-of-two block.
-    (void)count;
     free_page(phys);
 }
 

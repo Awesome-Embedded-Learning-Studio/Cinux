@@ -150,12 +150,10 @@ void clear_user_mappings(cinux::mm::AddressSpace& space) {
 // execve implementation
 // ============================================================
 
-ExecveResult execve(const char* path, const char* const argv[], const char* const envp[],
+ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[], [[maybe_unused]] const char* const envp[],
                     ElfAuxInfo* aux_out) {
     using namespace cinux::arch;
 
-    (void)argv;
-    (void)envp;
 
     if (path == nullptr || path[0] == '\0') {
         cinux::lib::kprintf("[EXECVE] invalid path\n");
