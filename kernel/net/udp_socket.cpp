@@ -16,6 +16,7 @@
  */
 
 #include "kernel/net/udp_socket.hpp"
+#include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
 
@@ -25,6 +26,12 @@
 #endif
 
 namespace cinux::net {
+
+#ifndef CINUX_HOST_TEST
+using cinux::proc::Scheduler;
+using cinux::proc::Task;
+#endif
+
 
 namespace {
 /// Ephemeral source-port range for auto-binding an unbound UDP socket on sendto
@@ -41,66 +48,6 @@ constexpr uint16_t byte_swap16(uint16_t v) {
 }
 }  // namespace
 
-#ifndef CINUX_HOST_TEST
-namespace {
-using cinux::proc::Scheduler;
-using cinux::proc::Task;
-
-void wait_enqueue(Task*& head, Task* t) {
-    t->wait_next = nullptr;
-    if (head == nullptr) {
-        head = t;
-        return;
-    }
-    Task* x = head;
-    while (x->wait_next != nullptr) {
-        x = x->wait_next;
-    }
-    x->wait_next = t;
-}
-
-Task* wait_dequeue(Task*& head) {
-    Task* t = head;
-    if (t != nullptr) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-    }
-    return t;
-}
-
-void wake_one(Task*& head) {
-    if (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-void wake_all(Task*& head) {
-    while (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
-void wait_remove(Task*& head, Task* t) {
-    if (head == nullptr || t == nullptr) {
-        return;
-    }
-    if (head == t) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-        return;
-    }
-    Task* prev = head;
-    while (prev->wait_next != nullptr && prev->wait_next != t) {
-        prev = prev->wait_next;
-    }
-    if (prev->wait_next == t) {
-        prev->wait_next = t->wait_next;
-        t->wait_next    = nullptr;
-    }
-}
-}  // namespace
-#endif  // CINUX_HOST_TEST
 
 UdpSocket::UdpSocket(UdpModule& udp, Ipv4Module& ipv4, NetStack& stack, DevRoute route)
     : Socket(kAfInet, kSockDgram), udp_(udp), ipv4_(ipv4), stack_(stack), route_(route) {}
