@@ -37,6 +37,7 @@ public:
     cinux::lib::ErrorOr<int64_t> write(Inode* inode, uint64_t offset, const void* buf,
                                        uint64_t count) override;
     cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st) override;
+    cinux::lib::ErrorOr<void>    truncate(Inode* inode, uint64_t new_size) override;
 
     /// ext2 regular files are disk-backed: route sys_read through the PageCache
     /// so repeated reads and demand paging share one copy of each page.

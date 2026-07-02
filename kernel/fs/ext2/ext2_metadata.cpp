@@ -93,4 +93,42 @@ int64_t Ext2::readlink(uint32_t ino, char* buf, uint64_t buf_size) {
     return static_cast<int64_t>(n);
 }
 
+void Ext2::populate_vfs_inode(Ext2CachedInode& cached) {
+    const Ext2Inode& disk = cached.disk_inode;
+
+    cached.vfs_inode.ino = cached.ino;
+
+    cached.vfs_inode.size = disk.i_size;
+
+    uint16_t mode_type = disk.i_mode & EXT2_S_IFMT;
+    if (mode_type == EXT2_S_IFDIR) {
+        cached.vfs_inode.type = InodeType::Directory;
+        cached.vfs_inode.ops  = &dir_ops_;
+    } else if (mode_type == EXT2_S_IFREG) {
+        cached.vfs_inode.type = InodeType::Regular;
+        cached.vfs_inode.ops  = &file_ops_;
+    } else if (mode_type == EXT2_S_IFLNK) {
+        // F-ECO batch 2: a symlink reuses the file ops -- readlink() reads the
+        // target string from the first data block exactly like a file read.
+        // There is no InodeType::Symlink yet, so the VFS type stays Unknown
+        // (honest); the on-disk i_mode still carries S_IFLNK for stat().
+        cached.vfs_inode.type = InodeType::Unknown;
+        cached.vfs_inode.ops  = &file_ops_;
+    } else {
+        cached.vfs_inode.type = InodeType::Unknown;
+        cached.vfs_inode.ops  = nullptr;
+    }
+
+    cached.vfs_inode.fs_private = &cached;
+
+    cached.vfs_inode.mode   = disk.i_mode;
+    cached.vfs_inode.uid    = disk.i_uid;
+    cached.vfs_inode.gid    = disk.i_gid;
+    cached.vfs_inode.nlink  = disk.i_links_count;
+    cached.vfs_inode.atime  = disk.i_atime;
+    cached.vfs_inode.ctime  = disk.i_ctime;
+    cached.vfs_inode.mtime  = disk.i_mtime;
+    cached.vfs_inode.blocks = disk.i_blocks;
+}
+
 }  // namespace cinux::fs

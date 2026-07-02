@@ -21,7 +21,7 @@ CMake 架构升级 + 大文件拆分 + 代码/注释优化审查。
 | F9 | 安全机制 | M1 NX/SMEP/SMAP✅(2026-06-25;NXE+SMEP+SMAP 均真生效并验证:修 3 bug—CPUID.07H 子叶 ecx=0 / test harness 调 enable_smep_smap / test 读用户 stac;-cpu host 透传 932/0+test_f9 验证 CR4 设;默认 -cpu max WSL2 KVM 隐藏 leaf 7 故 CPUID-gated 跳过) M2 ASLR✅ M3 UID/GID✅ M4 Stack Canary✅（批6 -fstack-protector-strong + TSC canary + __stack_chk_fail kpanic，932/0）| 硬件保护/ASLR/权限;详见 PLAN「🔄 F9」 |
 | F10 | 用户态运行时 | **M1 musl 静态移植🔄（2026-06-26 立项，砍自建 libc，直接移植 musl）** M2 ELF动态链接✅（2026-06-30 收官，用 musl ldso，kernel 做 PT_INTERP/interp 加载/auxv，不自建 loader；CinuxOS 跑通 musl 动态 hello） M3 TTY✅（Phase 1：行规范+阻塞读+ioctl TCGETS/TCSETS/TIOCGWINSZ+信号,feat/f10-m3-tty 已合 main PR#46；Phase 2：PTY master/slave+/dev/ptmx+/dev/pts/N+/dev/tty+TIOCSCTTY,feat/f10-m3-pty 待 PR） M4 CFBox+init⏳ | musl libc/sysroot/musl-gcc/CFBox；详见 PLAN「🔄 F10-M1」 |
 | F11 | 启动与平台 | M1 FAT32⏳ M2 UEFI启动⏳ | BIOS+UEFI 双启动 |
-| F12 | 开发者生态（**用户决策:砍 Lua/TinyCC 自建,GCC 自举**） | M1 GDB/KALLSYMS✅(KALLSYMS 合 F-INFRA,GDB 待) M2 GCC 自举⏳(GCC+binutils 在 CinuxOS 上跑,编 .c 产 ELF) M3 自举闭环⏳(在 CinuxOS 编 CinuxOS) M4 包管理+编辑器⏳ | 现成 GCC/binutils 运行→自举编译→日常可用 |
+| F12 | 开发者生态（**用户决策:砍 Lua/TinyCC 自建,GCC 自举**） | M1 GDB/KALLSYMS✅(KALLSYMS 合 F-INFRA,GDB 待) M2 GCC 自举🔄(批4-a as+ld 自举 ✅ 2026-07-02:glibc 动态 ELF 跑通,as+ld 编 hello + ./hello 自举 PASS;修 file-backed mmap CoW/mapcount + PageCache write invalidation + ext2 unlink + uaccess lazy fault + libc link artifacts;B4-b cc1+headers→B4-c gcc hello.c 完整自举待续) M3 自举闭环⏳(在 CinuxOS 编 CinuxOS) M4 包管理+编辑器⏳ | 现成 GCC/binutils 运行→自举编译→日常可用 |
 | F13 | GUI 分离 → **visor 跨平台库** | 立项调研✅(DRAFT 2026-06-21):visor 七层架构 + profile ceiling;M0-M9 待确认启动 | 独立 visor 仓库(submodule)+ Cinux host adapter;详见 `document/todo/f13-gui/` + `document/notes/2026-06-21-f13-visor-*.md` |
 
 ## 横切里程碑(非 Feature 域,服务于所有复杂特性)

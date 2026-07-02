@@ -32,7 +32,6 @@
 #include "kernel/syscall/sys_exit.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"  // F-ECO batch 4
 #include "kernel/syscall/sys_fork.hpp"
-#include "kernel/syscall/sys_reboot.hpp"  // B3b: busybox init
 #include "kernel/syscall/sys_futex.hpp"
 #include "kernel/syscall/sys_getcwd.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
@@ -56,6 +55,7 @@
 #include "kernel/syscall/sys_ping.hpp"
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
+#include "kernel/syscall/sys_reboot.hpp"      // B3b: busybox init
 #include "kernel/syscall/sys_setsockopt.hpp"  // F-ECO batch 7a
 #include "kernel/syscall/sys_shm.hpp"         // F8-M4
 #include "kernel/syscall/sys_shutdown.hpp"    // F-ECO batch 7b
@@ -68,6 +68,7 @@
 #include "kernel/syscall/sys_chmod.hpp"
 #include "kernel/syscall/sys_chown.hpp"
 #include "kernel/syscall/sys_link.hpp"
+#include "kernel/syscall/sys_pread64.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_readlink.hpp"
 #include "kernel/syscall/sys_rename.hpp"
@@ -111,6 +112,7 @@ void write_msr(uint32_t msr, uint64_t value) {
 void register_builtin_handlers() {
     using namespace cinux::syscall;
     syscall_register(SyscallNr::SYS_read, sys_read);
+    syscall_register(SyscallNr::SYS_pread64, sys_pread64);
     syscall_register(SyscallNr::SYS_write, sys_write);
     syscall_register(SyscallNr::SYS_open, sys_open);
     syscall_register(SyscallNr::SYS_close, sys_close);

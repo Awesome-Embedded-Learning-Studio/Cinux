@@ -82,6 +82,13 @@ public:
     virtual cinux::lib::ErrorOr<void>    unlink(Inode* dir, const char* name, uint32_t namelen);
     virtual cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st);
 
+    /// Set the file length to @p new_size (sys_open O_TRUNC / ftruncate).
+    /// Shrink-only for the O_TRUNC case (new_size 0): the backend updates the
+    /// on-disk + VFS size; freeing the now-orphaned data blocks is a follow-up
+    /// (a hobby-os leak, not a correctness issue -- reads stop at i_size).  The
+    /// default returns NotImplemented; only ext2 overrides for now.
+    virtual cinux::lib::ErrorOr<void>    truncate(Inode* inode, uint64_t new_size);
+
     /// Device-specific ioctl (terminal ioctls on a PTY/console inode, ...).
     /// @p request is the Linux ioctl request word (TCGETS, TIOCSCTTY, ...);
     /// @p arg the opaque user payload.  The default returns NotImplemented;

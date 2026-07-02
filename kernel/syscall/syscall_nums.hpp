@@ -37,6 +37,7 @@ enum class SyscallNr : uint64_t {
     SYS_rt_sigprocmask = 14,  ///< examine/set signal mask (F3-M1)
     SYS_rt_sigreturn   = 15,  ///< return from signal handler (F3-M1, batch 3)
     SYS_ioctl          = 16,  ///< device-specific control (musl __stdout_write TIOCGWINSZ probe)
+    SYS_pread64        = 17,  ///< B4-B2: positioned read (glibc ldso precision-reads ELF)
     SYS_readv          = 19,  ///< read into multiple buffers (musl __stdio_read)
     SYS_writev         = 20,  ///< write from multiple buffers (musl __stdio_write)
     SYS_pipe           = 22,

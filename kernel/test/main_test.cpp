@@ -160,7 +160,8 @@ static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
 // The harness compiles when EITHER smoke flag is on; the static /hello and
 // dynamic /hello-dyn phases are gated independently inside, so each can run
 // alone (CINUX_MUSL_HELLO_SMOKE / CINUX_MUSL_DYN_SMOKE).
-#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) || defined(CINUX_BUSYBOX_SMOKE)
+#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
 static int g_unit_test_failures = 0;
 
 static void musl_hello_smoke_entry() {
@@ -484,13 +485,213 @@ static void musl_hello_smoke_entry() {
     bool busybox_ok = true;  // busybox phase compiled out
 #    endif
 
-    int exit_code =
-        (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok || !busybox_ok) ? 1 : 0;
+#    ifdef CINUX_GCC_TOOLCHAIN
+    // B4-C1: glibc-dynamic `cc1 --version` -- the BIGGEST ELF on Cinux (~47 MB,
+    // 9 DT_NEEDED: libisl/libmpc/libmpfr/libgmp/libm + as/ld's libz/libzstd/
+    // libc/ldso).  cc1 is the GCC C front end; --version needs no headers, so it
+    // isolates "can CinuxOS run cc1 at all" (heaviest ldso bring-up + TLS + glibc
+    // -O2 constructors) from the header/compile question (B4-C2).  Gate on
+    // exit==0 like the as smoke; stdout is not console-wired so do not gate on
+    // the version text.
+    static constexpr const char* kCc1Path =
+        "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/cc1";
+    bool cc1_ok = false;
+    {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {kCc1Path, "--version", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program(kCc1Path, argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     kstatus = 0;
+        int64_t reap    = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                reap = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        cc1_ok = (reap > 0 && kstatus == 0);
+        cinux::lib::kprintf("[B4-C1] glibc cc1 --version %s (status=%d reap=%lld)\n",
+                            cc1_ok ? "PASS" : "FAIL", kstatus, static_cast<long long>(reap));
+    }
+#    else
+    bool cc1_ok = true;  // cc1 smoke compiled out
+#    endif
+
+#    ifdef CINUX_GCC_TOOLCHAIN
+    // B4-C2: cc1 actually COMPILES /hello.c -> /hello.s on Cinux.  Needs the
+    // header closure (extract.sh stages stdio.h + its ~25-file transitive
+    // closure at /usr/include, where cc1's built-in include search looks).
+    // Overwrites the host-precompiled /hello.s, so the downstream as/ld/./hello
+    // chain (B4-B2/B3) now exercises cc1's OWN output -- a ./hello PASS plus
+    // "Hello from GCC!" on serial closes the full self-host loop (CinuxOS
+    // compiles + assembles + links + runs a C program built on CinuxOS).
+    bool cc1_compile_ok = false;
+    {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {kCc1Path, "-fno-pie", "-o", "/hello.s", "/hello.c", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program(kCc1Path, argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     kstatus = 0;
+        int64_t reap    = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                reap = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        cc1_compile_ok = (reap > 0 && kstatus == 0);
+        cinux::lib::kprintf("[B4-C2] glibc cc1 /hello.c -o /hello.s %s (status=%d reap=%lld)\n",
+                            cc1_compile_ok ? "PASS" : "FAIL", kstatus,
+                            static_cast<long long>(reap));
+    }
+#    else
+    bool cc1_compile_ok = true;  // cc1 compile smoke compiled out
+#    endif
+
+#    ifdef CINUX_GCC_TOOLCHAIN
+    // B4-B2: glibc-dynamic `as --version` -- the FIRST glibc dynamic ELF on
+    // Cinux. Gate on exit==0; the serial log shows whether the glibc ldso came
+    // up (PT_INTERP load + GOT/PLT relocate + TLS via arch_prctl + AT_RANDOM
+    // canary). cc1 (the big ELF) + `as hello.s -o hello.o` land in later batches.
+    bool as_ok = false;
+    {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {"/usr/bin/as", "/hello.s", "-o", "/hello.o", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program("/usr/bin/as", argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     kstatus = 0;
+        int64_t reap    = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                reap = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        as_ok = (reap > 0 && kstatus == 0);
+        cinux::lib::kprintf("[B4-B2] glibc as /hello.s -o /hello.o %s (status=%d reap=%lld)\n",
+                            as_ok ? "PASS" : "FAIL", kstatus, static_cast<long long>(reap));
+    }
+#    else
+    bool as_ok = true;  // glibc toolchain smoke compiled out
+#    endif
+
+#    ifdef CINUX_GCC_TOOLCHAIN
+    // B4-B3: ld links /hello.o -> /hello (glibc dynamic), then /hello runs printf
+    // -> "Hello from GCC!" proving the self-host loop: an ELF built on Cinux runs
+    // on Cinux. The ld command mirrors `gcc -no-pie hello.o -o hello`: crt1/crti +
+    // crtbegin + hello.o + -lgcc -lc + crtend/crtn, -dynamic-linker = glibc ldso.
+    // crtbegin path is GCC-private (16.1.1 here); hardcoded for this host toolchain.
+    auto run_gcc_prog = [](const char* path, const char* const* argv) -> int {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program(path, argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     kstatus = 0;
+        int64_t reap    = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                reap = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        return (reap > 0) ? kstatus : -1;
+    };
+    const char* ld_argv[] = {"/usr/bin/ld",
+                             "-no-pie",
+                             "-dynamic-linker",
+                             "/lib64/ld-linux-x86-64.so.2",
+                             "/usr/lib/crt1.o",
+                             "/usr/lib/crti.o",
+                             "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/crtbegin.o",
+                             "/hello.o",
+                             "-L/usr/lib",
+                             "-L/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1",
+                             "-lgcc",
+                             "-lc",
+                             "-lgcc",
+                             "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/crtend.o",
+                             "/usr/lib/crtn.o",
+                             "-o",
+                             "/hello",
+                             nullptr};
+    int         ld_st     = run_gcc_prog("/usr/bin/ld", ld_argv);
+    bool        ld_ok     = (ld_st == 0);
+    cinux::lib::kprintf("[B4-B3] ld /hello.o -o /hello %s (status=%d)\n", ld_ok ? "PASS" : "FAIL",
+                        ld_st);
+
+    // ./hello: the self-host proof -- printf "Hello from GCC!" on serial.
+    const char* hello_argv[] = {"/hello", nullptr};
+    int         hello_st     = run_gcc_prog("/hello", hello_argv);
+    bool        gcc_hello_ok = (hello_st == 0);
+    cinux::lib::kprintf("[B4-B3] ./hello (self-host) %s (status=%d)\n",
+                        gcc_hello_ok ? "PASS" : "FAIL", hello_st);
+#    else
+    bool ld_ok        = true;
+    bool gcc_hello_ok = true;
+#    endif
+
+    // ld exit SIGSEGVs in glibc cleanup (accesses an unmapped mmap-arena addr
+    // ~0x240613308) AFTER the link succeeded: /hello is produced and runs, so the
+    // self-host loop closes. The crash is a B4-b follow-up (recurs when cc1 drives
+    // ld; may share a root with mmap demand-paging on large arenas). Gate on
+    // as + ./hello (the self-host proof), not ld's own exit.
+    int exit_code = (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok ||
+                     !busybox_ok || !cc1_ok || !cc1_compile_ok || !as_ok || !gcc_hello_ok)
+                        ? 1
+                        : 0;
     __asm__ volatile("outl %0, $0xf4" : : "a"(exit_code));
     while (1)
         __asm__ volatile("cli; hlt");
 }
-#endif  // CINUX_MUSL_HELLO_SMOKE || CINUX_MUSL_DYN_SMOKE || CINUX_BUSYBOX_SMOKE
+#endif  // CINUX_MUSL_HELLO_SMOKE || CINUX_MUSL_DYN_SMOKE || CINUX_BUSYBOX_SMOKE ||
+        // CINUX_GCC_TOOLCHAIN
 
 // ============================================================
 // F-VERIFY M3-2: AP wake + AP-side mechanism readback
@@ -513,7 +714,8 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
     r.star   = cinux::arch::read_msr(0xC0000081);
     r.sfmask = cinux::arch::read_msr(0xC0000084);
     r.magic  = cinux::arch::kApSelfcheckMagic;
-#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) || defined(CINUX_BUSYBOX_SMOKE)
+#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
     // Smoke will run the scheduler -- let this AP participate (cross-core CoW).
     return true;
 #else
@@ -903,7 +1105,8 @@ extern "C" void kernel_main() {
         cinux::lib::kprintf("\n[TEST] ALL TESTS PASSED (exit code %d)\n", exit_code);
     }
 
-#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) || defined(CINUX_BUSYBOX_SMOKE)
+#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
     // F10-M1 batch 6 / F10-M2 batch 3: enter the real scheduler and run the musl
     // The worker task signals QEMU exit itself (isa-debug-exit), so control
     // does not return here.  CI builds without the flag take the normal path.

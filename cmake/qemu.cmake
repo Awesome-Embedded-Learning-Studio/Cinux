@@ -70,11 +70,41 @@ set(MUSL_LDSO_ELF "${CMAKE_BINARY_DIR}/musl-sysroot/lib/libc.so")
 # clang --target=x86_64-linux-musl, not a CMake target). The ring-3 smoke
 # fork+execves it to run echo/cat/ls applets -- the first ecosystem touchstone.
 set(BUSYBOX_ELF "${CMAKE_BINARY_DIR}/musl/busybox")
+
+# B4-B1: optionally stage the host's glibc-dynamic GCC toolchain subset
+# (as/ld + glibc runtime + crt + libgcc; no cc1/headers yet) into the ext2 disk
+# for the GCC self-host smoke. Off by default: CI lacks GCC-private crt, and the
+# subset is a host artifact, not a CinuxOS build product. Local builds enable it
+# with -DCINUX_GCC_TOOLCHAIN=ON.
+option(CINUX_GCC_TOOLCHAIN "Stage host glibc GCC subset (as/ld+crt+libgcc) into ext2 disk" OFF)
+if(CINUX_GCC_TOOLCHAIN)
+    set(GCC_ROOT "${CMAKE_BINARY_DIR}/gcc-root")
+    set(GCC_ROOT_DEP "${CMAKE_BINARY_DIR}/gcc-root.stamp")
+    set(EXT2_DISK_SIZE 128)
+    set(EXT2_DISK_INODES 8192)
+    add_custom_command(
+        OUTPUT ${GCC_ROOT_DEP}
+        COMMAND ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh ${GCC_ROOT}
+        COMMAND ${CMAKE_COMMAND} -E touch ${GCC_ROOT_DEP}
+        DEPENDS ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh
+        COMMENT "Staging GCC toolchain subset (as/ld + glibc runtime + crt)"
+        VERBATIM
+    )
+else()
+    set(GCC_ROOT "")
+    set(GCC_ROOT_DEP "")
+    set(EXT2_DISK_SIZE 8)
+    set(EXT2_DISK_INODES 1024)
+endif()
+
 add_custom_command(
     OUTPUT ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF} ${BUSYBOX_ELF}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
-    COMMENT "Creating ext2 filesystem image with /bin/sh (+ /hello, /forktest, /hello-dyn if musl built)"
+    COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
+            ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
+            ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
+            ${BUSYBOX_ELF} ${GCC_ROOT}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
+    COMMENT "Creating ext2 image with /bin/sh (+ GCC toolchain if CINUX_GCC_TOOLCHAIN)"
     VERBATIM
 )
 
@@ -339,8 +369,11 @@ add_custom_target(run-stress-test
 # 每次 run-kernel-test 前强制重建 ext2.img，确保磁盘状态干净
 add_custom_target(regenerate-ext2-image
     COMMAND ${CMAKE_COMMAND} -E remove -f ${EXT2_IMAGE}
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF} ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF} ${BUSYBOX_ELF}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell
+    COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
+            ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
+            ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
+            ${BUSYBOX_ELF} ${GCC_ROOT}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM
 )

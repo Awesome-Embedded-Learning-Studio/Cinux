@@ -134,11 +134,15 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
 
     // Attach the file backing (if any) to the freshly recorded VMA.  Contents
     // are demand-read via the Page Cache in M4; here we only remember the inode.
+    // Take an inode reference so the backing stays alive for the lifetime of the
+    // mapping (the fd that mmap'd it may close, but the VMA persists); the VMA
+    // store drops the ref when the node is freed (clear/split/remove in vma.cpp).
     if (backing_inode != nullptr) {
         cinux::mm::VMA* v = task->addr_space->vmas().find(map_addr);
         if (v != nullptr) {
             v->backing     = backing_inode;
             v->file_offset = offset;
+            cinux::fs::inode_ref(backing_inode);
         }
     }
 

@@ -1,4 +1,5 @@
 target_sources(big_kernel_common PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_pread64.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_open.cpp

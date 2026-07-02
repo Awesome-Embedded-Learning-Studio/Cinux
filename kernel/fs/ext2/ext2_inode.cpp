@@ -121,8 +121,27 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
         }
     }
 
-    // Cache full -- evict slot 1+ (slot 0 is always root)
-    uint32_t evict = 1 + (ino % (EXT2_INODE_CACHE_SIZE - 1));
+    // Cache full -- evict an UNREFERENCED slot.  A blind hash pick could reuse
+    // a slot whose inode is still mapped (VMA) or open (fd): those hold an
+    // inode_ref, and the VMA/File would keep dereferencing the slot after it is
+    // repopulated for a different ino -- a use-after-free that served the wrong
+    // file's bytes (the ld/cc1-.o crash root cause).  Slot 0 is root -- never
+    // evict.  Scan for a slot that is either free or cached-but-unreferenced
+    // (refcount == 0); only if every slot is pinned do we fall back to the hash
+    // slot with a warning (cache-capacity issue, not silent corruption).
+    uint32_t evict = 0;
+    for (uint32_t i = 1; i < EXT2_INODE_CACHE_SIZE; ++i) {
+        if (!inode_cache_[i].in_use || inode_cache_[i].vfs_inode.refcount == 0) {
+            evict = i;
+            break;
+        }
+    }
+    if (evict == 0) {
+        evict = 1 + (ino % (EXT2_INODE_CACHE_SIZE - 1));
+        cinux::lib::kprintf(
+            "[EXT2] inode cache exhausted (all slots pinned); evicting ino=%lu slot=%u\n",
+            static_cast<unsigned long>(inode_cache_[evict].ino), evict);
+    }
 
     inode_cache_[evict].in_use = false;
     if (!read_disk_inode(ino, inode_cache_[evict].disk_inode)) {
@@ -135,43 +154,8 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
     return &inode_cache_[evict].vfs_inode;
 }
 
-void Ext2::populate_vfs_inode(Ext2CachedInode& cached) {
-    const Ext2Inode& disk = cached.disk_inode;
-
-    cached.vfs_inode.ino = cached.ino;
-
-    cached.vfs_inode.size = disk.i_size;
-
-    uint16_t mode_type = disk.i_mode & EXT2_S_IFMT;
-    if (mode_type == EXT2_S_IFDIR) {
-        cached.vfs_inode.type = InodeType::Directory;
-        cached.vfs_inode.ops  = &dir_ops_;
-    } else if (mode_type == EXT2_S_IFREG) {
-        cached.vfs_inode.type = InodeType::Regular;
-        cached.vfs_inode.ops  = &file_ops_;
-    } else if (mode_type == EXT2_S_IFLNK) {
-        // F-ECO batch 2: a symlink reuses the file ops -- readlink() reads the
-        // target string from the first data block exactly like a file read.
-        // There is no InodeType::Symlink yet, so the VFS type stays Unknown
-        // (honest); the on-disk i_mode still carries S_IFLNK for stat().
-        cached.vfs_inode.type = InodeType::Unknown;
-        cached.vfs_inode.ops  = &file_ops_;
-    } else {
-        cached.vfs_inode.type = InodeType::Unknown;
-        cached.vfs_inode.ops  = nullptr;
-    }
-
-    cached.vfs_inode.fs_private = &cached;
-
-    cached.vfs_inode.mode   = disk.i_mode;
-    cached.vfs_inode.uid    = disk.i_uid;
-    cached.vfs_inode.gid    = disk.i_gid;
-    cached.vfs_inode.nlink  = disk.i_links_count;
-    cached.vfs_inode.atime  = disk.i_atime;
-    cached.vfs_inode.ctime  = disk.i_ctime;
-    cached.vfs_inode.mtime  = disk.i_mtime;
-    cached.vfs_inode.blocks = disk.i_blocks;
-}
+// populate_vfs_inode() lives in ext2_metadata.cpp (split for the 500-line
+// limit): it shares the disk->VFS inode translation done there.
 
 // ============================================================
 // Inode allocator

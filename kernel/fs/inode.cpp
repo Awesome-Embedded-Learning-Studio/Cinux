@@ -27,6 +27,10 @@ cinux::lib::ErrorOr<Inode*> InodeOps::create(Inode*, const char*, uint32_t) {
     return cinux::lib::Error::NotImplemented;
 }
 
+cinux::lib::ErrorOr<void> InodeOps::truncate(Inode*, uint64_t) {
+    return cinux::lib::Error::NotImplemented;
+}
+
 cinux::lib::ErrorOr<Inode*> InodeOps::mkdir(Inode*, const char*, uint32_t) {
     return cinux::lib::Error::NotImplemented;
 }

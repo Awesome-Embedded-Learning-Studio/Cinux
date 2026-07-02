@@ -13,6 +13,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ramdisk/ramdisk.cpp
     # --- ext2 ---
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_dirops.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_inode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ext2/ext2_block.cpp

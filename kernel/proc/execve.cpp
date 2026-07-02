@@ -281,6 +281,19 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
         break;
     }
 
+    // F4-B0: scan PT_GNU_STACK to decide whether the user stack may be executable.
+    // glibc-built ELFs carry PT_GNU_STACK=RW (NX stack, the glibc default); only
+    // legacy RWX marks request an executable stack. Absence -> NX (modern default;
+    // Linux defaults to X only for ABI-legacy binaries CinuxOS does not host).
+    constexpr uint32_t kPtGnuStack      = 0x6474e551;
+    bool               stack_executable = false;
+    for (uint16_t i = 0; i < phnum; i++) {
+        if (phdrs[i].p_type == kPtGnuStack && (phdrs[i].p_flags & elf::PF_X)) {
+            stack_executable = true;
+            break;
+        }
+    }
+
     delete[] phdrs;
 
     if (!main_img.has_load) {
@@ -353,12 +366,13 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
     }
 
     if (aux_out != nullptr) {
-        aux_out->at_phdr    = main_img.phdr_va;
-        aux_out->at_phnum   = ehdr->e_phnum;
-        aux_out->at_phent   = sizeof(elf::Elf64_Phdr);
-        aux_out->at_entry   = ehdr->e_entry;  // ldso jumps here after relocating
-        aux_out->at_base    = interp_base;    // interpreter load base (0 if static)
-        aux_out->has_interp = has_interp;
+        aux_out->at_phdr          = main_img.phdr_va;
+        aux_out->at_phnum         = ehdr->e_phnum;
+        aux_out->at_phent         = sizeof(elf::Elf64_Phdr);
+        aux_out->at_entry         = ehdr->e_entry;  // ldso jumps here after relocating
+        aux_out->at_base          = interp_base;    // interpreter load base (0 if static)
+        aux_out->has_interp       = has_interp;
+        aux_out->stack_executable = stack_executable;  // F4-B0: PT_GNU_STACK PF_X
     }
 
     cinux::lib::kprintf("[EXECVE] loaded %s entry=%p%s pid=%d\n", path,

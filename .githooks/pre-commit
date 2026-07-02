@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# CinuxOS pre-commit hook -- run the same checks CI runs, BEFORE the push.
+#
+# Activate for your clone (one-time):
+#     git config core.hooksPath .githooks
+#     chmod +x .githooks/pre-commit
+#
+# Checks (extend here as new CI gates land):
+#   * scripts/check_line_limits.py  -- per-file 500-line (.cpp/.S) / 300 (.hpp/.h)
+#     limit. The hook passes --hpp 500 to match CI exactly.
+#
+# Bypass for a WIP commit:  git commit --no-verify (use sparingly; CI will still
+# catch it, and a red main is louder than a blocked local commit).
+
+set -euo pipefail
+
+# Run from the repo root regardless of where staged files live.
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[pre-commit] running scripts/check_line_limits.py --hpp 500 ..."
+python3 scripts/check_line_limits.py --hpp 500
+echo "[pre-commit] line-count limits OK"

@@ -164,6 +164,13 @@ if(CINUX_BUSYBOX_SMOKE)
     target_compile_definitions(big_kernel_common PUBLIC CINUX_BUSYBOX_SMOKE)
 endif()
 
+# B4-B2: glibc-dynamic GCC toolchain ring-3 smoke (as --version, then
+# as hello.s -o hello.o). Off by default; enabled locally with
+# -DCINUX_GCC_TOOLCHAIN=ON (also stages the toolchain subset on the ext2 disk).
+if(CINUX_GCC_TOOLCHAIN)
+    target_compile_definitions(big_kernel_common PUBLIC CINUX_GCC_TOOLCHAIN)
+endif()
+
 # F-INFRA I-9: opt-in UBSan. -fsanitize=undefined at COMPILE only (the freestanding
 # stubs in kernel/lib/ubsan.cpp resolve the __ubsan_handle_* refs -- no libubsan).
 # Exclude the stub + the diagnostic/panic path so a UB hit cannot recurse.

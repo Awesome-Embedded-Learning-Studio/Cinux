@@ -95,6 +95,7 @@ namespace {
 /// Linux open() flag bits (x86-64 UAPI).
 constexpr uint64_t kOAccessMode = 0x3;      ///< mask: 0=RDONLY,1=WRONLY,2=RDWR
 constexpr uint64_t kOCreat      = 0x40;     ///< create if missing
+constexpr uint64_t kOTrunc      = 0x200;    ///< truncate to 0 on open (O_TRUNC)
 constexpr uint64_t kOCloexec    = 0x80000;  ///< close-on-exec (recorded by FDTable later)
 
 /// AT_FDCWD: "relative to current working directory".
@@ -149,6 +150,17 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags) {
         }
     }
     cinux::fs::Inode* inode = inode_result.value();
+
+    // O_TRUNC: truncate the file to 0 before handing out the fd.  Without this
+    // a shorter rewrite leaves the old tail (B4-C2: cc1 overwrote the host-
+    // precompiled /hello.s but the residual "...progbits\n" tail -> as saw
+    // "gbits" -> "no such instruction").
+    if ((flags & kOTrunc) != 0 && inode->ops != nullptr) {
+        auto tr = inode->ops->truncate(inode, 0);
+        if (!tr.ok()) {
+            return -to_errno(tr.error());
+        }
+    }
 
     int fd = cinux::fs::current_fd_table().alloc(inode, access_to_open_flags(flags));
     if (fd == cinux::fs::FD_NONE) {

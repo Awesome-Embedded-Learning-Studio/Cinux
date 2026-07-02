@@ -410,6 +410,18 @@ private:
     /// Scratch block buffer for read_block()/write_block() (max ext2 block = 4096 B)
     uint8_t block_buf_[4096];
 
+    /// Snapshot buffers for unlink()'s indirect-block release.  free_block()
+    /// does its own read_block(bitmap)+write_block(bitmap), which overwrite
+    /// block_buf_; so unlink must copy each indirect pointer array out of
+    /// block_buf_ BEFORE freeing the data blocks it lists -- otherwise every
+    /// entry after the first free_block() reads bitmap bytes reinterpreted as
+    /// a block number (the "group out of range" garbage seen when a file that
+    /// spans indirect blocks is unlinked).  Two buffers because the doubly-
+    /// indirect walk is nested: the top-level array must survive while each
+    /// child's array is processed, so they cannot share one buffer.
+    uint32_t unlink_ptr_buf_[1024];
+    uint32_t unlink_child_buf_[1024];
+
     /// Whether mount() has succeeded
     bool mounted_{};
 
