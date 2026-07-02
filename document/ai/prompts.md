@@ -36,3 +36,44 @@
 
 ## /fix-debt [DEBT-NNN]
 读 document/todo/quality/debt.md、document/ai/QUALITY-GATES.md、document/todo/quality/audit-guide.md。对指定债务 propose 修复批:①根因复核 ②触及文件/调用方 ③设计与同步策略 ④测试计划 ⑤文档同步 ⑥commit 草案。停下等确认;确认后按一债一批执行,绿后更新 debt.md+notes。
+
+---
+
+## 任务交接：F-USABILITY 修 #DF 栈溢出 + SIG21 busybox SIGTTIN（粘贴给 codex）
+
+> 把下面整段粘贴给 codex，自洽含分支/已完成/根因实证/修法约束/验证/规范入口。
+
+你在 CinuxOS 仓库（C++17 内核，主分支 `main`）。**先读规范再动手**：`CLAUDE.md` + `document/ai/DIRECTIVES.md`（架构铁律）+ `document/ai/CODING-TASTE.md`（标识符+注释英文、私有 `_`、常量 `k`、提交前 clang-format）+ `document/ai/PLAN.md` 顶部「🔄 F-USABILITY」段 + `~/.claude/plans/humming-floating-wozniak.md`。
+
+### 背景（已完成，不要重做）
+分支 `feat/f-usability`（从 main `6ba4a88`，**5 commit 未 push**：`e12a386`/`ed7849e`/`13388d1`/`439cc75`/`6629247`）。symlink follow 已闭环（`InodeType::Symlink` + `Ext2::readlink` fast-symlink 判据 `i_blocks==0` + `FileSystem::lookup_child` + 新 `kernel/fs/vfs_lookup.{hpp,cpp}` component walk+follow+环检测 + execve main+interp follow）。Buildroot rootfs（`build/buildroot/output/images/rootfs.ext2`，Bootlin musl busybox）已 boot 到 busybox init（`CinuxOS Buildroot init: userspace up`）+ fork /bin/sh + jumping user mode。**但 ash 无提示符、不能交互**，卡两个独立 bug。working tree 干净（诊断 log/workaround/增栈均已回退）。
+
+### Bug 1（头号）：#DF 栈溢出
+sh 运行时 PIT 时钟中断 double fault：
+```
+==== EXCEPTION: #DF (vector 8) ==== / KERNEL PANIC Double Fault (error=0)
+RIP=0xFFFFFFFF81003B8D (= irq0_stub, interrupts.S:427)  RSP=0xFFFF80000B20FFD0
+```
+**确认栈溢出**：`STACK_PAGES` 4→8（16→32KB）消除 #DF（实测）。**严禁增栈 workaround**——Linux 栈 8KB 够，CinuxOS 16KB 溢出 = 调用链栈过深 bug。`STACK_PAGES` 已回退 4。
+**已排除**：①单函数大栈帧（生产 big_kernel `-Wframe-larger-than` 净，只 test 超限）；②`handle_pf` sti-in-handler→PIT 嵌套（page_fault.cpp 无 sti，排除 sys-ping-df 模式）。
+**真根因方向**：嵌套调用链累计 + PIT 中断在该 task 栈叠加。嫌疑：demand-page/CoW（`handle_pf`+ext2+mm CoW）、`execve`/`elf_load`、`read` 链。Buildroot busybox **动态 musl** 启动期大量 demand-page/CoW 压深栈。
+**真修**：①instrumentation——PIT 入口打印 RSP 与 current `kernel_stack_top` 差（剩余栈深），抓最深时刻+backtrace（FO KALLSYMS 就绪）；②定位最深函数/链，减栈（大局部改堆 `unique_ptr`/kmalloc、拆深嵌套、递归改迭代）；③验证 16KB（`STACK_PAGES=4` 不动）下 #DF 消 + ash 到提示符。**不改 STACK_PAGES / handle_pf 保持 cli**。
+
+### Bug 2：SIG21 busybox 自发 SIGTTIN（#DF 修完再看，独立）
+sh `kill(0, SIGTTIN)`（`do_kill_kernel` 诊断 `[KILL] caller pid=2 -> pid=0 sig=21`），default stop。`console_tty_ioctl` 的 `kTiocsctty`/`kTiocspgrp` 加 `[TTY]` log **全程空**——busybox 没调。试过（已回退，无效）：`kTiocsctty` 设 `foreground_pgid=current->pgid` + `/dev/tty` fall back `/dev/console`。根因：console 模式无 PTY（`controlling_tty=-1`），busybox init/sh 控制终端作业控制协议未满足，ash 自检 raise SIGTTIN。需搞清 busybox ash job control 为何 raise（session leader/控制终端/tcgetpgrp），对症补 CinuxOS 语义（参考 F3-M3 进程组 + F10-M3 PTY）。
+
+### 验证（共用）
+```bash
+cmake -B build-console -DCINUX_GUI=OFF -DCINUX_BUILD_TESTS=ON \
+  -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF -DCINUX_BUSYBOX_SMOKE=OFF \
+  -DCINUX_ROOTFS_BUILDROOT_IMG="$(pwd)/build/buildroot/output/images/rootfs.ext2" -S .
+cmake --build build-console -j$(nproc)   # 改公共头/接口编两次（KALLSYMS 两阶段）
+timeout 90 cmake --build build-console --target run > /tmp/boot.log 2>&1
+grep -anE "/ #|~ #|BusyBox|userspace up|#DF|SIG21|default stop" /tmp/boot.log
+```
+成功：ash 提示符（`/ #`/`~ #`）或 BusyBox banner，无 #DF/SIG21。**回归门**（改公共接口/头必跑）：`timeout 120 cmake --build build --target run-kernel-test-all -j$(nproc)` 应 1101/0 + `cmake --build build --target test_host` 100%（build/ 关 smoke + `-DCINUX_GCC_TOOLCHAIN=OFF` 防 GCC 自举 smoke 拖超时）。QEMU 一律 `timeout` 包裹；多会话 `-vnc :0` 撞车时临时 sed `:0→:5` 跑完 `git checkout` 还原；输出 `>/tmp/x.log`+grep，别 cat 全文。
+
+### 纪律
+一批一 commit 一验证（绿才提交）；msg `<type>(<scope>): <中文简述>` 无 Co-Auth；commit 你做，push/PR 归用户；源文件 500 行软限；Error 经 `cinux::lib::ErrorOr<T>`（Cinux-Base 子模块）；根目录无 Makefile 一律 `cmake --build build --target`；完成一批写 `document/notes/<date>-<m>-<b>.md`。
+
+接到后先确认：读 PLAN.md F-USABILITY 段 + `git log --oneline -6`（在 `feat/f-usability`，HEAD=`6629247`），从 Bug 1 instrumentation 起。
