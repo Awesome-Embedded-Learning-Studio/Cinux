@@ -160,7 +160,7 @@ cinux::lib::ErrorOr<PingResult> ping(Ipv4Addr dst, uint16_t id, uint16_t seq, Rx
     constexpr uint32_t kRounds        = 200;  // re-sends (ARP then ICMP)
     constexpr uint32_t kPumpsPerRound = 4;    // RX drains per send
     for (uint32_t s = 0; s < kRounds && g_icmp.reply_count() == 0; ++s) {
-        (void)g_icmp.send_echo_request(*g_adapter, dst, id, seq, *g_ipv4, g_stack);
+        static_cast<void>(g_icmp.send_echo_request(*g_adapter, dst, id, seq, *g_ipv4, g_stack));
         for (uint32_t k = 0; k < kPumpsPerRound; ++k) {
             if (pump()) {
                 break;

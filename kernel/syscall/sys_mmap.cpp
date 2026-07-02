@@ -119,7 +119,7 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
         map_addr = addr;
         // Drop any prior VMA in this range (physical pages freed in batch 2's
         // munmap; here we only fix the bookkeeping).
-        (void)task->addr_space->vmas().remove(map_addr, map_addr + aligned_len);
+        static_cast<void>(task->addr_space->vmas().remove(map_addr, map_addr + aligned_len));
     } else {
         // F9 batch 8 (ASLR): jitter the first-fit hint so each process's
         // mappings start at an unpredictable address. The window bounds stay
@@ -234,7 +234,7 @@ int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, ui
     }
 
     // Re-record the range with the new flags (splits when partially covered).
-    (void)task->addr_space->vmas().remove(addr, addr + aligned_len);
+    static_cast<void>(task->addr_space->vmas().remove(addr, addr + aligned_len));
     auto ir = task->addr_space->vmas().insert(addr, addr + aligned_len, vma);
     if (!ir.ok()) {
         if (backing != nullptr) {

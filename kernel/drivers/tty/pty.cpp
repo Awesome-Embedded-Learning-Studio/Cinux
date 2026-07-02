@@ -28,7 +28,7 @@ void Pty::echo_thunk(char c, void* ctx) {
 void Pty::echo_to_master(char c) {
     // Echo is best-effort: if the master never drains and the ring fills,
     // drop the echoed byte rather than block the input path.
-    (void)master_push(c);
+    static_cast<void>(master_push(c));
 }
 
 // ============================================================
@@ -73,7 +73,7 @@ cinux::lib::ErrorOr<int64_t> Pty::master_write(const void* buf, uint64_t count) 
         // Each byte drives canonical editing, echo (-> master), and signal
         // processing inside the discipline; the return value is ignored here
         // (signals surface via take_pending_signal, overflow drops the byte).
-        (void)slave_tty_.input_char(p[i]);
+        static_cast<void>(slave_tty_.input_char(p[i]));
     }
     return static_cast<int64_t>(count);
 }

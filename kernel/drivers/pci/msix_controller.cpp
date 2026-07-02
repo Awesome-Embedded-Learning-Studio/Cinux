@@ -95,7 +95,7 @@ void MsixController::program_vector(uint8_t index, uint8_t vector, uint8_t dest_
     e.msg_addr_upper           = 0;
     e.msg_addr_lower           = xapic_message_address(dest_apic_id);
     e.msg_data                 = xapic_message_data(vector);
-    (void)e.vector_control;  // read-back orders the writes
+    static_cast<void>(e.vector_control);  // read-back orders the writes
     e.vector_control = 0;    // unmask
 }
 

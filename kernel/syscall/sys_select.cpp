@@ -184,7 +184,7 @@ int64_t sys_select(uint64_t nfds, uint64_t readfds, uint64_t writefds, uint64_t 
         ktimeval tv;
         tv.tv_sec  = rem_ns / static_cast<int64_t>(kNsPerSec);
         tv.tv_usec = (rem_ns % static_cast<int64_t>(kNsPerSec)) / 1000;
-        (void)cinux::user::copy_to_user(reinterpret_cast<void*>(timeout_virt), &tv, sizeof(tv));
+        static_cast<void>(cinux::user::copy_to_user(reinterpret_cast<void*>(timeout_virt), &tv, sizeof(tv)));
     }
 
     return ready;

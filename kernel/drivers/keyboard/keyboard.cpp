@@ -278,7 +278,7 @@ bool Keyboard::poll(KeyEvent& out) {
 void Keyboard::enqueue(const KeyEvent& ev) {
     // Drop the event if the buffer is full -- RingBuffer::push returns
     // false when full, matching the previous drop-newest semantics.
-    (void)buf_.push(ev);
+    static_cast<void>(buf_.push(ev));
 }
 
 // ============================================================

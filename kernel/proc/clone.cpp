@@ -115,7 +115,7 @@ void cow_clone_address_space(Task* parent, Task* child) {
     // Clone VMA records so bookkeeping matches the CoW page tables.
     for (cinux::mm::VMA* v = parent->addr_space->vmas().first(); v != nullptr;
          v                 = parent->addr_space->vmas().next(v)) {
-        (void)child->addr_space->vmas().insert(v->start, v->end, v->flags);
+        static_cast<void>(child->addr_space->vmas().insert(v->start, v->end, v->flags));
         if (v->backing != nullptr) {
             cinux::mm::VMA* cv = child->addr_space->vmas().find(v->start);
             if (cv != nullptr) {

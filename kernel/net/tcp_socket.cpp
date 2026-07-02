@@ -319,7 +319,7 @@ void TcpSocket::close() {
     }
     if (connected_ && !peer_closed_) {
         NetDevice& dev = route_(remote_addr_);
-        (void)tcp_.close(dev, local_port_, remote_addr_, remote_port_, ipv4_, stack_);
+        static_cast<void>(tcp_.close(dev, local_port_, remote_addr_, remote_port_, ipv4_, stack_));
     }
     peer_closed_ = true;
 #ifndef CINUX_HOST_TEST

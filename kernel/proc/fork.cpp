@@ -399,7 +399,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         // shared by pointer; their contents are demand-read in M4 (Page Cache).
         for (cinux::mm::VMA* v = parent->addr_space->vmas().first(); v != nullptr;
              v                 = parent->addr_space->vmas().next(v)) {
-            (void)child->addr_space->vmas().insert(v->start, v->end, v->flags);
+            static_cast<void>(child->addr_space->vmas().insert(v->start, v->end, v->flags));
             if (v->backing != nullptr) {
                 cinux::mm::VMA* cv = child->addr_space->vmas().find(v->start);
                 if (cv != nullptr) {
