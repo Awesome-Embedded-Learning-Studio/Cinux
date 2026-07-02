@@ -72,6 +72,48 @@ sh `kill(0, SIGTTIN)`（`do_kill_kernel` 诊断 `[KILL] caller pid=2 -> pid=0 si
 4. **PT_LOAD demand-page**：busybox PT_LOAD 段全加载成功？interp + busybox PT_LOAD 都 demand-page？
 **instrumentation**：execve 跳 user mode 前打印 auxv 全表（key+value）+ interp/busybox PT_LOAD；或 `qemu -d exec` 单步看 ldso 卡 RIP；对比 F10-M2 动态 hello（跑通过）的 auxv/TLS——busybox 重，找差异。
 
+---
+
+## 任务交接：F-USABILITY 阶段2 CI 可用性测试（阶段1 已完成，粘贴给 codex）
+
+> 阶段1 已落地（commit `21b1d6a`，Buildroot 动态 busybox boot 到 ash `/ #`，多次稳定）。Bug 1(#DF)+2(SIG21)+3(ldso) 全修。接阶段2：把"能用"变成 CI 自动回归。
+
+### 目标
+CI 每次 PR 自动验证 CinuxOS 能跑真实用户态：boot Buildroot rootfs → busybox init 跑测试脚本（一组真实工具）→ 串口输出 OK/FAIL → CI gate。
+
+### 设计
+1. **overlay 测试脚本** `rootfs/overlay/etc/cinux-usability-test.sh`（busybox sh）：boot 后跑一组，每项 `echo OK xxx`/`FAIL xxx`，末尾算分。建议项：
+   - `ls /` 含 `etc/bin/sbin/lib`
+   - `cat /etc/inittab` 成功读
+   - `uname -a` 输出含 `Linux`
+   - `mkdir /tmp/t && echo hi > /tmp/t/f && cat /tmp/t/f` 含 `hi`（写回读 + tmpfs）
+   - `echo $((1+2))` = `3`（算术）
+   - 管道 `ls / | wc -l` > 0
+   - fork-exec `sh -c 'echo spawned'` 含 `spawned`
+2. **inittab 触发**：`rootfs/overlay/etc/inittab` 加 `::once:/etc/cinux-usability-test.sh`（boot 后自动跑一次）。测试末尾 `poweroff -f` 或 init 退出触发 isa-debug-exit（exit code 反映通过率，对齐 `qemu_test_wrapper.sh` 的 isa-debug-exit 协议）。
+3. **CI job** `.github/workflows/ci.yml` 加 `buildroot-usability`：
+   - `actions/cache` Buildroot output（key = `cinuxos_base_defconfig` + overlay hash）
+   - 编 Buildroot base rootfs（`make -C build/buildroot cinuxos_base_defconfig && make -C build/buildroot`，或封装 `scripts/build_rootfs.sh`）
+   - 编 CinuxOS test 内核（`build-console`，`CINUX_ROOTFS_BUILDROOT_IMG=...`）
+   - QEMU boot（`cmake --build build-console --target run`，timeout 包）+ 串口 → log
+   - `grep "OK\|FAIL"` 算分 + `check_test_count.sh`（F-QA 计数 gate，可复用）类 gate；失败 `upload-artifact` serial log
+4. **profile 概念**：CinuxOS 侧 CMake 加 `CINUX_ROOTFS_PROFILE`（base=纯 boot 到 ash；usability=+测试脚本 gate；gcc/g++ 后续）。job 选 profile，不进 build_type×sanitizer 矩阵。
+
+### 复用（已就绪）
+- overlay 机制（`rootfs/overlay/`）+ inittab（批1 接入，`::respawn:/bin/sh` 现有，加 `::once:` 测试）
+- `CINUX_ROOTFS_BUILDROOT_IMG`（`cmake/qemu.cmake`，run target 挂 Buildroot rootfs）
+- `isa-debug-exit` + `scripts/qemu_test_wrapper.sh`（run-kernel-test 用，exit code 协议）
+- `scripts/check_test_count.sh`（F-QA，计数 gate）
+
+### 验证
+本地：`cmake -B build-console -DCINUX_GUI=OFF -DCINUX_ROOTFS_BUILDROOT_IMG=$(pwd)/build/buildroot/output/images/rootfs.ext2 -S . && timeout 120 cmake --build build-console --target run`，串口见一组 `OK xxx` 无 `FAIL`。
+CI：`.github/workflows/ci.yml` 加 `buildroot-usability` job，PR 跑 + gate；回归门不破（`run-kernel-test-all` 仍 1101/0）。
+
+### 规范 + 纪律
+先读 `CLAUDE.md` + `document/ai/DIRECTIVES.md` + `document/ai/CODING-TASTE.md` + `document/ai/PLAN.md`「🔄 F-USABILITY」段（批表里阶段2）。一批一 commit 一验证（绿才提交）；msg `<type>(<scope>): <中文简述>` 无 Co-Auth；commit 你做，push/PR 归用户；源文件 500 行软限；`cmake --build build --target <name>`（根目录无 Makefile）；QEMU 一律 `timeout` 包；多会话 `-vnc :0` 撞车临时 sed `:0→:5` 跑完还原；输出 `>/tmp/x.log`+grep 别 cat 全文。完成一批写 `document/notes/<date>-<m>-<b>.md`。
+
+接到后先 `/resume` 式确认：读 PLAN.md F-USABILITY 段 + `git log --oneline -8`（HEAD=`21b1d6a`，阶段1 完成），从 overlay 测试脚本起。
+
 ### 验证（共用）
 ```bash
 cmake -B build-console -DCINUX_GUI=OFF -DCINUX_BUILD_TESTS=ON \
