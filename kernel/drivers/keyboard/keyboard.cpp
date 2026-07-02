@@ -267,7 +267,6 @@ void Keyboard::irq1_handler(cinux::arch::InterruptFrame* /*frame*/) {
 
 bool Keyboard::poll(KeyEvent& out) {
     cinux::proc::InterruptGuard guard;
-    (void)guard;
 
     return buf_.pop(out);
 }

@@ -45,7 +45,6 @@ RoundRobin::RoundRobin() : head_(0), tail_(0), count_(0) {
 
 void RoundRobin::enqueue(Task* task) {
     auto g = lock_.irq_guard();
-    (void)g;
     if (task->on_runq) {
         return;  // already queued -- idempotent (F8-M5 lost-wakeup dedup)
     }
@@ -77,7 +76,6 @@ void RoundRobin::remove_at_locked(int i) {
 
 void RoundRobin::dequeue(Task* task) {
     auto g = lock_.irq_guard();
-    (void)g;
     for (int i = 0; i < count_; i++) {
         if (run_queue_[(head_ + i) % MAX_TASKS] == task) {
             remove_at_locked(i);
@@ -88,7 +86,6 @@ void RoundRobin::dequeue(Task* task) {
 
 Task* RoundRobin::pick_next() {
     auto g = lock_.irq_guard();
-    (void)g;
     if (count_ == 0) {
         return nullptr;
     }
@@ -151,13 +148,11 @@ bool RoundRobin::is_empty() const {
     // length; ==0 means no runnable task.  Used by ap_idle_entry()'s lost-wakeup
     // recheck (has_runnable_task) under cli.
     auto g = lock_.irq_guard();
-    (void)g;
     return count_ == 0;
 }
 
 void RoundRobin::clear() {
     auto g = lock_.irq_guard();
-    (void)g;
     for (int i = 0; i < MAX_TASKS; i++) {
         if (run_queue_[i] != nullptr) {
             run_queue_[i]->on_runq = false;  // drop stale flag on ejected tasks
@@ -171,7 +166,6 @@ void RoundRobin::clear() {
 
 bool RoundRobin::task_tick(Task* current) {
     auto g = lock_.irq_guard();
-    (void)g;
     // DEBT-007: per-task quantum (was a shared RoundRobin member -> multi-core
     // tick races shrank the slice to DEFAULT_TIME_SLICE/ncpus, and one core's
     // recharge reset the other's running task).  Aligned with Linux

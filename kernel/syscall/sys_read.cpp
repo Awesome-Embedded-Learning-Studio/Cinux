@@ -40,7 +40,6 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
     cinux::fs::File*    file = tbl.get(fd);
     if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
         auto g = file->offset_lock_.guard();
-        (void)g;
         // Disk-backed files (ext2) are served through the PageCache so that
         // read() and demand paging share one cached copy; pipes and other
         // transient ops keep their direct read() path.

@@ -237,7 +237,6 @@ int64_t sys_rt_sigtimedwait(uint64_t set, uint64_t info, uint64_t /*timeout*/, u
     // opt-in Task::sigwait_blocked wake in signal_send() stays wired for a
     // future blocking+timeout variant.
     cinux::proc::InterruptGuard guard;
-    (void)guard;
     SigSet avail = task->sig_pending & wait_set;
     if (avail != 0) {
         for (int n = 1; n <= cinux::proc::kSignalMax; ++n) {

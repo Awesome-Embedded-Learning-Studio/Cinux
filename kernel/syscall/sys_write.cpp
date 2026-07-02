@@ -46,7 +46,6 @@ int64_t do_write_kernel(int fd, const void* kbuf, uint64_t count) {
     cinux::fs::File*    file = tbl.get(fd);
     if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
         auto g = file->offset_lock_.guard();
-        (void)g;
         auto write_result = file->inode->ops->write(file->inode, file->offset, kbuf, count);
         if (!write_result.ok()) {
             int err = to_errno(write_result.error());

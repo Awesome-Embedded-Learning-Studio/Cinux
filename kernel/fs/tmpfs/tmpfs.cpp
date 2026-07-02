@@ -113,7 +113,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         if (count == 0 || offset >= node->size) {
             return 0;  // nothing requested, or past EOF
         }
@@ -130,7 +129,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         if (count == 0) {
             return 0;
         }
@@ -169,7 +167,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         fill_reg_stat(node, st);
         return {};
     }
@@ -222,7 +219,6 @@ public:
         }
         auto* dir = static_cast<TmpNode*>(inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         auto dot = fill_dot_entry(index, name, name_max);
         if (!dot.ok() || dot.value() == 1) {
@@ -262,7 +258,6 @@ public:
         }
         auto* dir = static_cast<TmpNode*>(dir_inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         // Walk the child list keeping a prev pointer so we can splice the
         // matching entry out.
@@ -297,7 +292,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         fill_dir_stat(node, st);
         return {};
     }
@@ -326,7 +320,6 @@ private:
         }
         auto* dir = static_cast<TmpNode*>(dir_inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         if (find_child(dir, name, namelen) != nullptr) {
             return Error::AlreadyExists;
@@ -413,7 +406,6 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
         return Error::InvalidArgument;
     }
     auto g = lock_.guard();
-    (void)g;
 
     if (root_ == nullptr) {
         return Error::IOError;  // not mounted

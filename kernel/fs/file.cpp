@@ -92,7 +92,6 @@ void FDTable::release() {
 
 int FDTable::alloc(Inode* inode, OpenFlags flags) {
     auto g = lock_.guard();
-    (void)g;
 
     for (uint32_t i = 0; i < FD_TABLE_SIZE; ++i) {
         if (fds_[i] == nullptr) {
@@ -113,7 +112,6 @@ int FDTable::close(int fd) {
     Inode* inode = nullptr;
     {
         auto g = lock_.guard();
-        (void)g;
 
         if (fd < 0 || fd >= static_cast<int>(FD_TABLE_SIZE)) {
             return -1;
@@ -141,7 +139,6 @@ int FDTable::close(int fd) {
 
 File* FDTable::get(int fd) const {
     auto g = lock_.guard();
-    (void)g;
 
     if (fd < 0 || fd >= static_cast<int>(FD_TABLE_SIZE)) {
         return nullptr;
@@ -155,7 +152,6 @@ File* FDTable::get(int fd) const {
 
 bool FDTable::set(int fd, File* file) {
     auto g = lock_.guard();
-    (void)g;
 
     if (fd < 0 || fd >= static_cast<int>(FD_TABLE_SIZE)) {
         return false;
@@ -175,7 +171,6 @@ bool FDTable::set(int fd, File* file) {
 
 int FDTable::dup(int oldfd, int min_fd) {
     auto g = lock_.guard();
-    (void)g;
 
     if (oldfd < 0 || oldfd >= static_cast<int>(FD_TABLE_SIZE) || fds_[oldfd] == nullptr) {
         return FD_NONE;
@@ -197,7 +192,6 @@ int FDTable::dup2(int oldfd, int newfd) {
     Inode* disp_inode = nullptr;
     {
         auto g = lock_.guard();
-        (void)g;
 
         if (oldfd < 0 || oldfd >= static_cast<int>(FD_TABLE_SIZE) || fds_[oldfd] == nullptr) {
             return FD_NONE;
