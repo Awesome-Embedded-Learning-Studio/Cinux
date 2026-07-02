@@ -448,4 +448,25 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
     return &cur->inode;
 }
 
+// F-USABILITY batch 1a: single-component lookup for the vfs_lookup layer.
+// Recovers the parent TmpNode via fs_private, then delegates to find_child
+// (the same primitive lookup() walks with) under the fs lock.
+ErrorOr<Inode*> TmpFs::lookup_child(const Inode* parent,
+                                    const char* name, uint32_t namelen) {
+    if (parent == nullptr || name == nullptr || namelen == 0) {
+        return Error::InvalidArgument;
+    }
+    if (parent->type != InodeType::Directory || parent->fs_private == nullptr) {
+        return Error::NotFound;
+    }
+    auto g = lock_.guard();
+    (void)g;
+    TmpNode* parent_node = static_cast<TmpNode*>(parent->fs_private);
+    TmpNode* child = find_child(parent_node, name, namelen);
+    if (child == nullptr) {
+        return Error::NotFound;
+    }
+    return &child->inode;
+}
+
 }  // namespace cinux::fs

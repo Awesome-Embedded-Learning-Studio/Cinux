@@ -79,6 +79,13 @@ public:
     cinux::lib::ErrorOr<void>   mount() override;
     cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
 
+    /// F-USABILITY batch 1a: single-component lookup for the vfs_lookup layer.
+    /// Resolves one name within parent via find_child (the same primitive
+    /// lookup() walks with). Implementation in tmpfs.cpp (uses TmpNode).
+    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent,
+                                             const char* name,
+                                             uint32_t namelen) override;
+
     /// Allocate the next inode number.  Called by the create / mkdir ops.
     uint64_t alloc_ino() { return next_ino_++; }
 

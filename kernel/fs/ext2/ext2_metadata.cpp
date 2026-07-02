@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "ext2.hpp"
+#include "ext2_types.hpp"  // EXT2_S_IF* mode bits (switch labels in populate_vfs_inode)
 
 namespace cinux::fs {
 
@@ -76,16 +77,26 @@ int64_t Ext2::readlink(uint32_t ino, char* buf, uint64_t buf_size) {
     if (!read_disk_inode(ino, d)) {
         return -1;
     }
-    // Symlink target lives in the first data block (i_block[0]), not inlined.
-    if (d.i_block[0] == 0) {
-        return -1;
-    }
-    if (!read_block(d.i_block[0])) {
-        return -1;
-    }
     // Copy up to min(i_size, buf_size) bytes; no NUL terminator (Linux readlink).
     uint64_t n =
         (static_cast<uint64_t>(d.i_size) < buf_size) ? static_cast<uint64_t>(d.i_size) : buf_size;
+    // Fast symlink: NO data block allocated (i_blocks == 0) and target ≤60B
+    // inlines in the i_block[] array. Long symlink: target in the i_block[0]
+    // data block. i_blocks==0 is the real discriminator -- CinuxOS sys_symlink
+    // always allocates a data block (so its short symlinks are long-format,
+    // i_blocks > 0; ext2_links.cpp), while mkfs.ext2 -d / Buildroot store short
+    // symlinks as fast (i_blocks == 0). i_size alone would misread CinuxOS
+    // short symlinks (regression caught by symlink_b2 roundtrip test).
+    if (d.i_blocks == 0 && static_cast<uint64_t>(d.i_size) <= sizeof(d.i_block)) {
+        const uint8_t* src = reinterpret_cast<const uint8_t*>(d.i_block);
+        for (uint64_t i = 0; i < n; ++i) {
+            buf[i] = static_cast<char>(src[i]);
+        }
+        return static_cast<int64_t>(n);
+    }
+    if (d.i_block[0] == 0 || !read_block(d.i_block[0])) {
+        return -1;
+    }
     const uint8_t* src = block_buf();
     for (uint64_t i = 0; i < n; ++i) {
         buf[i] = static_cast<char>(src[i]);
@@ -101,22 +112,28 @@ void Ext2::populate_vfs_inode(Ext2CachedInode& cached) {
     cached.vfs_inode.size = disk.i_size;
 
     uint16_t mode_type = disk.i_mode & EXT2_S_IFMT;
-    if (mode_type == EXT2_S_IFDIR) {
+    switch (mode_type) {
+    case EXT2_S_IFDIR:
         cached.vfs_inode.type = InodeType::Directory;
         cached.vfs_inode.ops  = &dir_ops_;
-    } else if (mode_type == EXT2_S_IFREG) {
+        break;
+    case EXT2_S_IFREG:
         cached.vfs_inode.type = InodeType::Regular;
         cached.vfs_inode.ops  = &file_ops_;
-    } else if (mode_type == EXT2_S_IFLNK) {
-        // F-ECO batch 2: a symlink reuses the file ops -- readlink() reads the
-        // target string from the first data block exactly like a file read.
-        // There is no InodeType::Symlink yet, so the VFS type stays Unknown
-        // (honest); the on-disk i_mode still carries S_IFLNK for stat().
-        cached.vfs_inode.type = InodeType::Unknown;
+        break;
+    case EXT2_S_IFLNK:
+        // F-ECO batch 2 / F-USABILITY batch 1a: a symlink now has its own
+        // InodeType (was Unknown -- no Symlink enum existed). readlink() yields
+        // the target string: fast symlink inlines it in i_block[], long
+        // symlink stores it in the i_block[0] data block. ops reuses file_ops_
+        // so readlink() resolves.
+        cached.vfs_inode.type = InodeType::Symlink;
         cached.vfs_inode.ops  = &file_ops_;
-    } else {
+        break;
+    default:
         cached.vfs_inode.type = InodeType::Unknown;
         cached.vfs_inode.ops  = nullptr;
+        break;
     }
 
     cached.vfs_inode.fs_private = &cached;
