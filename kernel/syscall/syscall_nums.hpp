@@ -53,6 +53,7 @@ enum class SyscallNr : uint64_t {
     SYS_sysinfo        = 99,  ///< system stats: RAM/uptime/procs (F-ECO batch 5)
     SYS_getpid         = 39,
     SYS_fork           = 57,
+    SYS_vfork          = 58,  ///< vfork (B3b: busybox init respawns sh) = fork
     SYS_clone          = 56,  ///< create a thread/process (F3-M2)
     SYS_execve         = 59,
     SYS_exit           = 60,
@@ -69,6 +70,8 @@ enum class SyscallNr : uint64_t {
     SYS_mknod           = 133,  ///< create a filesystem node (FIFO via S_IFIFO; F8-M2)
     SYS_mount           = 165,  ///< mount a filesystem (F6-M1: fstype-driven, tmpfs)
     SYS_umount2         = 166,  ///< unmount a filesystem (F6-M1: path-based, frees if owned)
+    SYS_reboot          = 169,  ///< reboot/poweroff (B3b: no-op -EPERM; busybox init probes)
+    SYS_rt_sigtimedwait = 128,  ///< wait for a signal (B3b: block; busybox init main loop)
     SYS_access          = 21,   ///< check file permissions (F6 batch 3a)
     SYS_uname           = 63,   ///< system identity (F-ECO busybox sh smoke)
     SYS_unlink          = 87,
