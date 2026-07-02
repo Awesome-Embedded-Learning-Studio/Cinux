@@ -50,6 +50,19 @@ add_custom_command(
 
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
+
+# F-USABILITY: 可选用外部 rootfs（Buildroot 产）替代 create_ext2_disk.sh 产的 ext2.img。
+# 设 CINUX_ROOTFS_BUILDROOT_IMG 指向 Buildroot output/images/rootfs.ext2，则 run target 用它
+# 作 AHCI port 1 盘，且跳过 ext2.img 生成依赖（外部产，CMake 不重建）。手搓 create_ext2_disk.sh
+# 仍为默认（CINUX_ROOTFS_BUILDROOT_IMG 空），两条 rootfs 并存（F-USABILITY 设计）。
+set(CINUX_ROOTFS_BUILDROOT_IMG "" CACHE FILEPATH "External rootfs.ext2 (e.g. Buildroot output/images/rootfs.ext2); empty = use create_ext2_disk.sh-generated ext2.img")
+if(CINUX_ROOTFS_BUILDROOT_IMG)
+    set(ROOTFS_IMG "${CINUX_ROOTFS_BUILDROOT_IMG}")
+    set(ROOTFS_DEPS "")                  # 外部产，无 CMake 生成依赖
+else()
+    set(ROOTFS_IMG "${EXT2_IMAGE}")
+    set(ROOTFS_DEPS "${EXT2_IMAGE}")     # create_ext2_disk.sh custom command OUTPUT
+endif()
 set(USER_SHELL_ELF "${CMAKE_BINARY_DIR}/user/shell")
 # F10-M1 batch 6: musl static hello at /hello when present (built by
 # tools/musl/build-musl.sh + build-hello.sh; not a CMake target, so not a hard
@@ -196,10 +209,10 @@ add_custom_target(run
         -device ahci,id=ahci
         -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
         -device ide-hd,drive=ahci-disk,bus=ahci.0
-        -drive file=${EXT2_IMAGE},format=raw,if=none,id=ext2-disk
+        -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
         -device ide-hd,drive=ext2-disk,bus=ahci.1
         -device e1000,netdev=net0 -netdev user,id=net0
-    DEPENDS image ${AHCI_TEST_IMAGE} ${EXT2_IMAGE}
+    DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
     COMMENT "Starting QEMU (serial: stdio)"
     VERBATIM
 )
