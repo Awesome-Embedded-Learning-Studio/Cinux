@@ -53,8 +53,11 @@ done
 # libgcc_s.so.1 is a GCC runtime ld may pull; ensure present.
 cp_lib /usr/lib/libgcc_s.so.1
 
-# --- link-time crt + libgcc (ld needs these when linking hello.o -> hello) ---
+# --- link-time crt + libc + libgcc (ld needs these when linking hello.o -> hello) ---
 for f in crt1.o Scrt1.o crti.o crtn.o; do
+    cp -a "/usr/lib/$f" "$ROOT/usr/lib/" 2>/dev/null || true
+done
+for f in libc.so libc_nonshared.a libc.a; do
     cp -a "/usr/lib/$f" "$ROOT/usr/lib/" 2>/dev/null || true
 done
 for f in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o crtfastmath.o; do

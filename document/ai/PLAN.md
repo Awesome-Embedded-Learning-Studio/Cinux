@@ -2,7 +2,9 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅ ＋ 批3b busybox init PID1 ✅（已合 main PR#61 `0b82e1b`）→ **批4-a GCC 工具链(glibc 动态)as+ld 自举 ✅**（分支 `feat/b4-gcc-toolchain`，6 commit c7c1ff5→270daf0，未 push）
+## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅ ＋ 批3b busybox init PID1 ✅（已合 main PR#61 `0b82e1b`）→ **批4-a GCC 工具链(glibc 动态)as+ld 自举 ✅**（分支 `feat/b4-gcc-toolchain`，8 commit `c7c1ff5→本批` 未 push）
+
+> **批4-a 收敛（2026-07-02 会话三）**：前次 “as+ld ✅” 曾误判（`./hello` 实际是盘上预放 musl hello），随后 ld 自举拆出并修完 6 个屏蔽层：① file-backed MAP_PRIVATE writable demand-page 缺 CoW（as 重定位污染 libbfd page cache）✅；② file-backed page cache PTE 缺 mapcount ref（进程退出 free 共享 cache 页）✅；③ ext2 unlink indirect 释放中 `free_block` 覆盖单 `block_buf_` + double-indirect 漏释放 ✅；④ ext2 write 直写磁盘绕过 PageCache，as 写 `/hello.o` 后 ld mmap/read 命中 stale cached page ✅（`PageCache::invalidate_range`）；⑤ uaccess extable 早于懒缺页，`read()` 大 buffer 跨未触达 malloc/mmap 页被误判 `-EFAULT` ✅（有效 VMA not-present faults 先 demand-page 再恢复 `rep movsb`）；⑥ toolchain staging 漏 link-time `libc.so/libc_nonshared.a/libc.a` ✅。验证：手动 TCG 同一测试镜像 `1098 passed,0 failed` + `[B4-B3] ld /hello.o -o /hello PASS` + `Hello from GCC!` + `./hello PASS`。
 
 > **进度**：批1 tmpfs `6656096` ✅ ＋ shm merge `2a86b13` ✅ ＋ 批2 mount/umount2+/tmp `b078fef` ✅ ＋ 批3a sys_access `25271b3` ✅。目标 `gcc hello.c -o hello && ./hello`。4 批串行：批1 ✅ → 批2 ✅ → **批3 sys_access✅ + init PID1(focus)** → 批4 GCC 工具链装盘 + gcc hello.c。
 > **批3a（✅ `25271b3`）**：sys_access(21) 文件权限检查。`access_granted()` 标准 Unix 判定(owner/group/other 三元 + root 旁路:R/W 直通、X 需 exec 位)→ 可复用给 F6 check_permission / login。机制测 2:root 旁路 R/W + 0644 文件 X_OK 拒(-EACCES)+ 缺路径→ENOENT + 坏 mode→EINVAL。

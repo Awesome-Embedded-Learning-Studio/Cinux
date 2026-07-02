@@ -12,6 +12,7 @@
 
 #include "ext2.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/lib/string.hpp"
 
 namespace cinux::fs {
 
@@ -399,23 +400,63 @@ int Ext2::unlink(uint32_t parent_ino, const char* name, uint32_t name_len) {
             }
         }
 
-        // Free singly-indirect block and its referenced data blocks
+        // Free singly-indirect block and its referenced data blocks.
+        // SNAPSHOT discipline: free_block() does its own read_block(bitmap) +
+        // write_block(bitmap), which overwrite block_buf_.  Reading indirect[i]
+        // straight out of block_buf_ would turn every entry after the first
+        // free_block() into bitmap bytes reinterpreted as a block number (the
+        // "group out of range" garbage seen when a file spanning indirect
+        // blocks is unlinked).  Copy the pointer array aside first.
         if (target_disk.i_block[EXT2_INDIRECT_BLOCK] != 0) {
-            uint32_t indirect_blk = target_disk.i_block[EXT2_INDIRECT_BLOCK];
+            uint32_t indirect_blk   = target_disk.i_block[EXT2_INDIRECT_BLOCK];
+            uint32_t ptrs_per_block = bs / sizeof(uint32_t);
 
             if (read_block(indirect_blk)) {
-                auto*    indirect       = reinterpret_cast<uint32_t*>(block_buf_);
-                uint32_t ptrs_per_block = bs / sizeof(uint32_t);
-
+                memcpy(unlink_ptr_buf_, block_buf_, ptrs_per_block * sizeof(uint32_t));
                 for (uint32_t i = 0; i < ptrs_per_block; ++i) {
-                    if (indirect[i] != 0) {
-                        free_block(indirect[i]);
+                    if (unlink_ptr_buf_[i] != 0) {
+                        free_block(unlink_ptr_buf_[i]);
                     }
                 }
             }
 
             free_block(indirect_blk);
             target_disk.i_block[EXT2_INDIRECT_BLOCK] = 0;
+        }
+
+        // Free doubly-indirect block, its child singly-indirect blocks, and
+        // their data blocks (previously missing entirely -- files beyond ~268
+        // KB at 1 KB blocks leaked the whole double-indirect subtree on unlink,
+        // and ld's linked /hello reaches that size).  Two-level snapshot:
+        // unlink_ptr_buf_ holds the top-level array across the outer loop;
+        // unlink_child_buf_ holds each child's array inside the inner loop
+        // (they cannot share a buffer -- the outer array must survive inner
+        // processing).
+        if (target_disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK] != 0) {
+            uint32_t di_blk         = target_disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK];
+            uint32_t ptrs_per_block = bs / sizeof(uint32_t);
+
+            if (read_block(di_blk)) {
+                memcpy(unlink_ptr_buf_, block_buf_, ptrs_per_block * sizeof(uint32_t));
+                for (uint32_t i = 0; i < ptrs_per_block; ++i) {
+                    uint32_t child_blk = unlink_ptr_buf_[i];
+                    if (child_blk == 0) {
+                        continue;
+                    }
+                    if (read_block(child_blk)) {
+                        memcpy(unlink_child_buf_, block_buf_, ptrs_per_block * sizeof(uint32_t));
+                        for (uint32_t j = 0; j < ptrs_per_block; ++j) {
+                            if (unlink_child_buf_[j] != 0) {
+                                free_block(unlink_child_buf_[j]);
+                            }
+                        }
+                    }
+                    free_block(child_blk);
+                }
+            }
+
+            free_block(di_blk);
+            target_disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK] = 0;
         }
 
         target_disk.i_dtime  = 0;

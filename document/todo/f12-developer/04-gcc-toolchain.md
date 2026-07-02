@@ -11,9 +11,9 @@
 
 ## B4-a 切片（第一刀 = as+ld 链路）
 1. **B0 内核 glibc 兼容 4 处 ✅** — auxv +AT_PLATFORM/AT_HWCAP + execve 扫 PT_GNU_STACK + brk 64MB→240MB。
-2. **B1 host 提取 + 装盘** — `tools/gcc-toolchain/extract.sh`(as/ld 子集,不含 cc1/headers)+ `create_ext2_disk.sh` 升级 `mkfs.ext2 -d` 目录树 + 扩盘 128MB + inode 8192。
-3. **B2 as 冒烟** — `as --version` 验 glibc ldso 加载 + `as hello.s -o hello.o`;按 `-ENOSYS` 日志补 syscall 缺口(ftruncate 等)。
-4. **B3 ld 链路 + 自举** — `ld hello.o + crt + libc + libgcc -o hello && ./hello`(glibc 动态 ELF 跑 printf)。
+2. **B1 host 提取 + 装盘 ✅** — `tools/gcc-toolchain/extract.sh`(as/ld 子集,不含 cc1/headers)+ link-time libc artifacts + `create_ext2_disk.sh` 升级 `mkfs.ext2 -d` 目录树 + 扩盘 128MB + inode 8192。
+3. **B2 as 冒烟 ✅** — `as --version` 验 glibc ldso 加载 + `as hello.s -o hello.o`;按实际日志补 pread64/uaccess/page-cache 缺口。
+4. **B3 ld 链路 + 自举 ✅** — `ld hello.o + crt + libc + libgcc -o hello && ./hello`(glibc 动态 ELF 跑 printf "Hello from GCC!")。
 
 ## 后续（outline,本弧不做）
 - **B4-b cc1**:装 headers(249MB)+ cc1(47MB);`gcc -c hello.c`(大 ELF + 大 mmap + mremap/getrusage 缺口)。

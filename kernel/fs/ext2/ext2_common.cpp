@@ -13,6 +13,7 @@
 #include "ext2_extent.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
+#include "kernel/mm/page_cache.hpp"
 
 namespace cinux::fs {
 
@@ -218,6 +219,15 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, c
         ext2_.write_disk_inode(static_cast<uint32_t>(inode->ino), disk);
 
         inode->size = disk.i_size;
+    }
+
+    // b4-bug4: write() bypasses the page cache (writes disk blocks directly),
+    // so without invalidation a later mmap()/read() of the same file serves the
+    // stale pre-write cached page (as wrote hello.o, ld then mmap'd it and saw
+    // the zero-filled first page -> "file not recognized").  Refresh cached
+    // pages overlapping this write in place so the next reader sees fresh bytes.
+    if (total_written > 0) {
+        cinux::mm::g_page_cache.invalidate_range(inode, offset, total_written);
     }
 
     return static_cast<int64_t>(total_written);

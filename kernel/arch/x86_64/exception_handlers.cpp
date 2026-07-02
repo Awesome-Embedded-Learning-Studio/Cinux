@@ -224,14 +224,24 @@ void handle_pf(InterruptFrame* frame) {
     __asm__ volatile("movq %%cr2, %0" : "=r"(fault_addr));
 
     // F-EXTABLE: a kernel-mode fault whose RIP is an annotated user accessor
-    // (copy_to/from_user rep movsb) recovers via the __ex_table fixup instead
-    // of demand-paging or panicking. Rewrite frame->rip to the fixup (clac +
-    // ok=false -> caller returns -EFAULT) and return; iretq resumes there.
-    // User-mode faults (cs & 3 != 0) skip this and fall through to demand-page
-    // unchanged -- the F2 lazy-allocation contract is left to a later milestone.
-    if ((frame->cs & 0x03) == 0) {
-        if (const auto* entry = cinux::arch::search_exception_tables(frame->rip)) {
-            frame->rip = entry->fixup_rip;
+    // (copy_to/from_user rep movsb) normally recovers via the __ex_table fixup
+    // (clac + ok=false -> caller returns -EFAULT).  One case must NOT be fixed
+    // up immediately: a not-present fault on a valid user VMA.  Linux uaccess
+    // faults can populate a lazy user page and then resume the rep movsb; doing
+    // the fixup first turns large read()/write() buffers that cross an
+    // untouched malloc/mmap page into spurious -EFAULT.
+    const auto* extable_entry =
+        ((frame->cs & 0x03) == 0) ? cinux::arch::search_exception_tables(frame->rip) : nullptr;
+    if (extable_entry != nullptr) {
+        bool should_demand_page = false;
+        if ((frame->error_code & 0x01) == 0 && cinux::arch::is_user_vaddr(fault_addr)) {
+            auto* task         = cinux::proc::Scheduler::current();
+            should_demand_page = task != nullptr && task->addr_space != nullptr &&
+                                 task->addr_space->vmas().find(fault_addr) != nullptr;
+        }
+        if (!should_demand_page) {
+            const auto* entry = extable_entry;
+            frame->rip        = entry->fixup_rip;
             return;
         }
     }
@@ -394,20 +404,75 @@ void handle_pf(InterruptFrame* frame) {
                 auto           gp       = cinux::mm::g_page_cache.get_page(vma->backing, file_off);
                 if (gp.ok()) {
                     uint64_t fflags = cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_USER;
-                    if (cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write)) {
-                        fflags |= cinux::arch::FLAG_WRITABLE;
-                    }
                     // F9 batch 2: NXE is on -- non-exec file pages are NX (bit
                     // 63 is valid now; was reserved-bit #PF before EFER.NXE).
                     if (!cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Exec)) {
                         fflags |= cinux::arch::FLAG_NX;
                     }
+
+                    // MAP_PRIVATE writable file mappings (a shared library's
+                    // .data/.got) must NOT map the page-cache page writably:
+                    // that page is shared across every process mapping the file,
+                    // so a write -- the dynamic loader relocating DT_GNU_HASH or
+                    // GOT slots -- corrupts the cached contents for the next
+                    // loader. (Root cause of the ld SIGSEGV on the GCC self-host
+                    // line: `as` relocated libbfd's DYNAMIC d_ptr straight into
+                    // the shared cache page; `ld` later hit that same cache page
+                    // and dereferenced `as`'s now-stale relocation.)  Copy the
+                    // cached page into a fresh private page (copy-on-demand) and
+                    // map THAT writably, leaving the cache page untouched.
+                    // Read-only and MAP_SHARED file mappings keep sharing it.
+                    const bool private_writable =
+                        cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write) &&
+                        !cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Shared);
+                    uint64_t map_phys = gp.value()->phys;
+                    if (private_writable) {
+                        const uint64_t cow_phys = cinux::mm::g_pmm.alloc_page_locked();
+                        if (cow_phys != 0) {
+                            memcpy(reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE + cow_phys),
+                                   reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE +
+                                                           gp.value()->phys),
+                                   cinux::arch::PAGE_SIZE);
+                            map_phys = cow_phys;
+                            fflags |= cinux::arch::FLAG_WRITABLE;
+                        }
+                        // The cache page is no longer mapped into this VMA --
+                        // drop the reference get_page() took.  On OOM (cow_phys
+                        // == 0) fall through mapping the cache page read-only:
+                        // reads still work, the next write re-faults, and the
+                        // shared cache page is never corrupted.
+                        cinux::mm::g_page_cache.release(gp.value());
+                    } else if (cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write)) {
+                        // MAP_SHARED writable file mapping: writes hit the shared
+                        // cache page (write-back to disk is a follow-up).
+                        fflags |= cinux::arch::FLAG_WRITABLE;
+                    }
+
                     uint64_t cur_cr3 = cinux::arch::read_cr3();
-                    if (g_vmm.map_nolock(virt_page, gp.value()->phys, fflags, &cur_cr3)) {
-                        kprintf("[VMM] File demand-read %p -> phys %p\n",
+                    if (g_vmm.map_nolock(virt_page, map_phys, fflags, &cur_cr3)) {
+                        if (map_phys == gp.value()->phys) {
+                            // Sharing the page-cache page: claim a mapcount ref
+                            // for THIS PTE so the address-space teardown unmap
+                            // (free_subtree's mapcount_dec_and_test) does not
+                            // drop it to 0 and free the page.  alloc_page gave
+                            // the cache page its own ref (the "1" that stands
+                            // for page-cache ownership); every mapping adds one
+                            // more, so the cache page always survives teardown
+                            // and the next process hits real file contents
+                            // (root cause #2 of the ld SEGV/127: as's teardown
+                            // freed libbfd's cached .text page, PMM reused the
+                            // phys, and ld then read garbage where the ELF magic
+                            // used to be).
+                            cinux::mm::g_pmm.mapcount_inc(map_phys);
+                        }
+                        kprintf("[VMM] File demand-read %p -> phys %p%s\n",
                                 reinterpret_cast<void*>(virt_page),
-                                reinterpret_cast<void*>(gp.value()->phys));
+                                reinterpret_cast<void*>(map_phys),
+                                (map_phys != gp.value()->phys) ? " (CoW)" : "");
                         return;
+                    }
+                    if (map_phys != gp.value()->phys) {
+                        cinux::mm::g_pmm.free_page_locked(map_phys);
                     }
                 } else {
                     klog_warn("page cache read failed for file VMA @ %p",

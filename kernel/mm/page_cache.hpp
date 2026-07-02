@@ -33,11 +33,10 @@
 #include <stdint.h>
 
 #include <cinux/expected.hpp>
-
-#include "kernel/proc/sync.hpp"
 #include <new>
 
 #include "kernel/mm/slab.hpp"
+#include "kernel/proc/sync.hpp"
 
 namespace cinux::fs {
 struct Inode;
@@ -48,16 +47,16 @@ namespace cinux::mm {
 /// A single cached file page.  Owned by the PageCache hash table.
 struct CachedPage {
     // F2-M7b: heap CachedPage objects are served by the dedicated cache.
-    static void*       operator new(size_t) {
+    static void* operator new(size_t) {
         return cinux::mm::cache_alloc(cinux::mm::g_cached_page_cache);
     }
-    static void*       operator new(size_t, std::align_val_t) {
+    static void* operator new(size_t, std::align_val_t) {
         return cinux::mm::cache_alloc(cinux::mm::g_cached_page_cache);
     }
-    static void        operator delete(void* p) {
+    static void operator delete(void* p) {
         cinux::mm::cache_free(cinux::mm::g_cached_page_cache, p);
     }
-    static void        operator delete(void* p, std::align_val_t) {
+    static void operator delete(void* p, std::align_val_t) {
         cinux::mm::cache_free(cinux::mm::g_cached_page_cache, p);
     }
 
@@ -111,6 +110,17 @@ public:
 
     /// Decrement the reference count of @p page (floors at 0).  No eviction.
     void release(CachedPage* page);
+
+    /// Drop the cache's stale view of [file_off, file_off + count) after a
+    /// write() pushed new bytes to disk.  For each cached page overlapping the
+    /// range the writer just updated, re-read the page from disk IN PLACE (same
+    /// physical page, so any existing mapping's PTEs stay valid and observe the
+    /// new bytes).  Without this, a second process that mmap()s or reads the
+    /// file serves the pre-write cached page (b4-bug4: as wrote hello.o, then ld
+    /// mmap'd it and saw the stale zero-filled first page -> "file not
+    /// recognized").  Pages not currently cached are a no-op.  Safe to call from
+    /// the write() syscall path (the disk read runs outside the cache lock).
+    void invalidate_range(cinux::fs::Inode* inode, uint64_t file_off, uint64_t count);
 
     size_t cached_pages() const;  ///< Pages currently cached
     size_t hit_count() const;     ///< get_page hits since init
