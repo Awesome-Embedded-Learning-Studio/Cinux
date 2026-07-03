@@ -53,6 +53,7 @@
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
 #include "kernel/syscall/sys_ping.hpp"
+#include "kernel/syscall/sys_cinux_exit.hpp"  // F-USABILITY buildroot gate
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
 #include "kernel/syscall/sys_reboot.hpp"      // B3b: busybox init
@@ -185,6 +186,9 @@ void register_builtin_handlers() {
 
     // F7: ICMP echo (shell ping).
     syscall_register(SyscallNr::SYS_ping, sys_ping);
+
+    // F-USABILITY: QEMU isa-debug-exit gate (buildroot-usability test script).
+    syscall_register(SyscallNr::SYS_cinux_exit, sys_cinux_exit);
 
     // F7-M6: BSD socket API (Linux x86_64 numbers 41-50).
     syscall_register(SyscallNr::SYS_socket, sys_socket);

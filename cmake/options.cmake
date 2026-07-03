@@ -77,6 +77,30 @@ option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for
 option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF)
 
 # =============================================================================
+# Rootfs profile (F-USABILITY stage 2)
+# =============================================================================
+# Selects the rootfs the `run` / `run-*` QEMU targets attach as the ext2 disk.
+#   handcrafted (default): create_ext2_disk.sh-built ext2.img (the kernel test
+#     rootfs with /hello, /forktest, busybox, ...).
+#   buildroot: an external Buildroot rootfs.ext2 pointed at by
+#     CINUX_ROOTFS_BUILDROOT_IMG (real Linux userland; the buildroot-usability
+#     CI gate). Back-compat: setting CINUX_ROOTFS_BUILDROOT_IMG on first
+#     configure without an explicit profile defaults the profile to "buildroot"
+#     (the F-USABILITY stage-1 workflow sets just the img path).
+set(CINUX_ROOTFS_BUILDROOT_IMG ""
+    CACHE FILEPATH "Buildroot rootfs.ext2 (used when CINUX_ROOTFS_PROFILE=buildroot); empty otherwise")
+if(NOT DEFINED CINUX_ROOTFS_PROFILE)
+    if(DEFINED CINUX_ROOTFS_BUILDROOT_IMG AND CINUX_ROOTFS_BUILDROOT_IMG)
+        set(CINUX_ROOTFS_PROFILE "buildroot")
+    else()
+        set(CINUX_ROOTFS_PROFILE "handcrafted")
+    endif()
+endif()
+set(CINUX_ROOTFS_PROFILE "${CINUX_ROOTFS_PROFILE}"
+    CACHE STRING "rootfs profile: handcrafted | buildroot")
+set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
+
+# =============================================================================
 # Switches that map 1:1 to a same-named PUBLIC compile definition on
 # big_kernel_common. kernel/CMakeLists.txt loops over this list instead of one
 # if() per flag. CINUX_UBSAN is intentionally absent (see comment above).

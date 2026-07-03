@@ -25,6 +25,12 @@ set(BIG_KERNEL_COMPILE_OPTIONS
     -fno-pie
     -fstack-protector-strong -mstack-protector-guard=global  # F9 batch 6: stack canary
     -mcmodel=kernel
+    # Cancel the global _FORTIFY_SOURCE=2 (root CMakeLists CMAKE_CXX_FLAGS_RELEASE)
+    # for the freestanding kernel: gcc fortify rewrites memcpy/memset/memmove to
+    # __memcpy_chk/__memset_chk/__memmove_chk, which the kernel does not provide
+    # (no glibc) -> link failure. Host unit tests keep _FORTIFY_SOURCE (they link
+    # glibc and benefit from the overflow checks); kernel objects opt out here.
+    -U_FORTIFY_SOURCE
     -mno-red-zone
     -Wall
     -Wextra

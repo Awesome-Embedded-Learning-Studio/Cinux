@@ -51,14 +51,19 @@ add_custom_command(
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 
-# F-USABILITY: 可选用外部 rootfs（Buildroot 产）替代 create_ext2_disk.sh 产的 ext2.img。
-# 设 CINUX_ROOTFS_BUILDROOT_IMG 指向 Buildroot output/images/rootfs.ext2，则 run target 用它
-# 作 AHCI port 1 盘，且跳过 ext2.img 生成依赖（外部产，CMake 不重建）。手搓 create_ext2_disk.sh
-# 仍为默认（CINUX_ROOTFS_BUILDROOT_IMG 空），两条 rootfs 并存（F-USABILITY 设计）。
-set(CINUX_ROOTFS_BUILDROOT_IMG "" CACHE FILEPATH "External rootfs.ext2 (e.g. Buildroot output/images/rootfs.ext2); empty = use create_ext2_disk.sh-generated ext2.img")
-if(CINUX_ROOTFS_BUILDROOT_IMG)
+# F-USABILITY: rootfs image selected by CINUX_ROOTFS_PROFILE (set in
+# cmake/options.cmake; CINUX_ROOTFS_BUILDROOT_IMG supplies the buildroot path).
+#   buildroot   -- external Buildroot rootfs.ext2 (real Linux userland; the
+#                  buildroot-usability CI gate). No CMake rebuild dep.
+#   handcrafted -- create_ext2_disk.sh-built ext2.img (default; the kernel
+#                  test rootfs with /hello, /forktest, busybox, ...).
+if(CINUX_ROOTFS_PROFILE STREQUAL "buildroot")
+    if(NOT CINUX_ROOTFS_BUILDROOT_IMG)
+        message(FATAL_ERROR
+            "CINUX_ROOTFS_PROFILE=buildroot requires -DCINUX_ROOTFS_BUILDROOT_IMG=<rootfs.ext2>")
+    endif()
     set(ROOTFS_IMG "${CINUX_ROOTFS_BUILDROOT_IMG}")
-    set(ROOTFS_DEPS "")                  # 外部产，无 CMake 生成依赖
+    set(ROOTFS_DEPS "")                  # 外部产,CMake 不重建
 else()
     set(ROOTFS_IMG "${EXT2_IMAGE}")
     set(ROOTFS_DEPS "${EXT2_IMAGE}")     # create_ext2_disk.sh custom command OUTPUT
@@ -464,6 +469,29 @@ add_custom_target(run-kernel-test-all
     DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
+    VERBATIM
+)
+
+# F-USABILITY stage 2: boot the Buildroot rootfs.ext2 under the production
+# (GUI-off) kernel and gate on the isa-debug-exit code. The rootfs's
+# cinux-usability-test.sh (inittab ::once:) runs ls/cat/uname/mkdir/pipe/
+# fork-exec, then cinux-exit -> sys_cinux_exit (221) -> port 0xf4 -> QEMU exits
+# (code<<1)|1 (0 -> exit 1 = pass, 1 -> exit 3 = fail); qemu_test_wrapper.sh
+# maps 1 -> SUCCESS. Build with -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot
+# -DCINUX_ROOTFS_BUILDROOT_IMG=<rootfs.ext2>.
+add_custom_target(run-buildroot-usability
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
+        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS}
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04
+        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        -device ahci,id=ahci
+        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
+        -device ide-hd,drive=ahci-disk,bus=ahci.0
+        -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
+        -device ide-hd,drive=ext2-disk,bus=ahci.1
+    DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
+    USES_TERMINAL
+    COMMENT "F-USABILITY: Buildroot rootfs usability gate (init -> test script -> cinux-exit)"
     VERBATIM
 )
 

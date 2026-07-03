@@ -97,6 +97,7 @@ enum class SyscallNr : uint64_t {
     SYS_openat          = 257,  ///< open relative to dirfd (musl open/openat; AT_FDCWD=-100)
     SYS_newfstatat      = 262,  ///< stat relative to dirfd (musl stat/fstat/lstat)
     SYS_ping            = 220,  ///< ICMP echo (F7 shell ping; Cinux-custom)
+    SYS_cinux_exit      = 221,  ///< QEMU isa-debug-exit gate (F-USABILITY buildroot-usability; Cinux-custom)
     // --- F7-M6 socket API (Linux x86_64 numbers; slots 41-50 were free) ---
     SYS_socket          = 41,   ///< create a socket (AF_INET / SOCK_STREAM | SOCK_DGRAM)
     SYS_connect         = 42,   ///< initiate a connection (TCP) / set peer (UDP)

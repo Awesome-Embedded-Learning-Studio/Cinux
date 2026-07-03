@@ -10,6 +10,8 @@
 
 > **2026-07-02 接管阻塞修复**：Buildroot 动态 busybox base rootfs 已在 build-console 进入 `/ #`。根因不是 PIE 整体不支持，而是低地址 `MAP_FIXED`、`PROT_NONE` fault 权限、Linux fd 0/1/2 分配/stdin 安装三组语义缺口；同步把 kernel stack 固定 8 KiB 并加 static_assert。验证 run-kernel-test-all 两腿 `1101/0` + host `69/69`。详见 [note](../notes/2026-07-02-f-usability-buildroot-busybox-fix.md)。
 
+> **2026-07-03 production #DF + usability gate 收敛**：修 PIT/LAPIC timer IRQ inline schedule 重入窗口（tick 只记账+timer_queue wake，不在 hard IRQ 内 `schedule()`；timer EOI 移到 tick 后；`net_poll` 改低优先级合作式 yield），`run-buildroot-usability` 已闭环 PASS 并经 `cinux-exit 0` 退出；同步 inittab 用 `/bin/sh` 跑脚本、脚本用绝对 applet 路径。验证：production gate PASS + run-kernel-test-all 两腿 `1101/0` + full build + host `69/69`。 caveat：脚本里的 `PASS pipe` 暂为 console write smoke，真实 `echo | cat` 留 pipe EOF/BusyBox ash follow-up。详见 [note](../notes/2026-07-03-f-usability-pit-redf.md)。
+
 > **范围栅栏**：Buildroot 走 external toolchain（不 internal 编 GCC，那个 CI 顶不住）；target gcc 进 rootfs 一律走 `extract.sh` 拷 host 闭包（as/ld/cc1 + glibc runtime + crt + libgcc + `gcc -H` 头文件闭包），**绝非 Buildroot 编 target gcc**；profile 是 job 属性不进 build_type×sanitizer 矩阵。
 
 ### 设计（三层分离，对齐 Buildroot/Yocto image-builder 范式）
