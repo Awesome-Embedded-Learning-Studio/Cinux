@@ -36,8 +36,11 @@ fi
 # Configure from the CinuxOS defconfig.  BR2_DL_DIR isolates the toolchain
 # download cache under <output_dir>/dl so it survives across runs.
 cp "$REPO_ROOT/rootfs/buildroot/$DEFCONFIG" "$BR_SRC/configs/$DEFCONFIG"
+# $DEFCONFIG is already the buildroot defconfig target name (file
+# configs/<name>_defconfig, make target <name>_defconfig). Appending
+# _defconfig again makes buildroot look for <name>_defconfig_defconfig.
 make -C "$BR_SRC" O="$OUTPUT_DIR/output" BR2_DL_DIR="$OUTPUT_DIR/dl" \
-     "${DEFCONFIG}_defconfig"
+     "${DEFCONFIG}"
 
 # The defconfig's BR2_ROOTFS_OVERLAY is relative to the buildroot source tree
 # ("../../rootfs/overlay"), which only resolves from the in-tree location used
