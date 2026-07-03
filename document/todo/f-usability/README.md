@@ -53,6 +53,13 @@ extract.sh 产出(GCC 工具链闭包, 批3+) ──┘
 | 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++；`g++ hello.cpp` |
 | 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear（按需） |
 
+## 批3 follow-up（登记，留后续）
+
+- **unhandled syscall stub 降噪**：glibc probe（318 getcpu / 435 clone3 / 273 rseq / 334 / 302）现走 ENOSYS fallback（非致命），补 stub 返 ENOSYS 或合理值改善 CI log 可读性。
+- **既有信号 SMP 债**：sig_pending/sig_blocked 普通 uint64 无原子，SMP 投递竞态；批3a-2（`fb42a1d`）只修 force_sig 新债（per-task `sig_forced`），既有债（信号子系统全原子化 + siglock）留独立 follow-up。
+- **gcc driver 残留**：collect2 fork-exec + pipe 连 cc1/as/ld 完整语义（B4-C2 + 批3 修了大头）；残留 pipe EOF 对齐 BusyBox ash（阶段2 caveat：`echo | cat` 真管道留 follow-up）。
+- **CI gcc-smoke 真验**：批3b-2（`f9e35cc`）写完结构，push 后验 buildroot 下载/编译 + assemble + gate（顺带补批2 buildroot-usability CI 债——阶段2 只本地闭环）。
+
 ## 头号坑：target vs cross 工具链
 
 进 rootfs 的 GCC 必须是 **native**（在 CinuxOS 跑、产 CinuxOS 二进制）。extract.sh 拷的是 host 的 cc1/as/ld —— 它们是 glibc 动态的 host 二进制，靠一起拷进来的 glibc `.so` 在 CinuxOS 跑（已验证）。**绝不能塞 Buildroot 的 cross compiler**（host 程序，CinuxOS 跑不了，一跑 SIGSEGV 且难分辨是内核问题还是工具链塞错）。

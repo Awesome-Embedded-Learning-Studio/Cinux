@@ -36,7 +36,7 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 | 0 | 立项 | docs（本段）+ ROADMAP F-USABILITY + todo `f-usability/README.md` | ✅ `e12a386` | docs-only |
 | 1 | 0+1 验证+接管 | Buildroot base defconfig（external+busybox+musl）；`create_ext2_disk.sh` 手搓并存；本地 boot 到 ash；overlay 合并 | ✅ `21b1d6a` | build-console boot 动态 busybox ash `/ #` + 两 leg 1101/0 + host 69/69 |
 | 2 | 2 可用性测试 | overlay 内 `cinux-usability-test.sh`（ls/cat/uname/mkdir+rm/管道/fork-exec）；CI `buildroot-usability` job + `run-buildroot-usability` target（isa-debug-exit gate） | ✅ `33f187b`+`1e08083` | run-buildroot-usability 闭环 PASS + cinux-exit 0 SUCCESS + 两 leg 1101/0 + host 69/69 |
-| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs（材料已齐）；`gcc /smoke/hello.c -o /tmp/a.out && /tmp/a.out`；CI `gcc-smoke` job | ✅ | CinuxOS 上 gcc 编译+运行 hello，断言 "Hello" |
+| 3 | 3 gcc 冒烟 | gcc driver 单命令跑通（codex `ec6d4b0` 5 根因：CLONE_VFORK/forced SIGSEGV/VMA backing-offset/tmpfs O_CREAT mode/waitpid reaped_pid）+ force_sig SMP follow-up（`fb42a1d` per-task sig_forced）+ assemble 固化（`43ad667`）+ worktree 合并（`5deb904`等+`072a588`）+ CI gcc-smoke job（`f9e35cc`，待 push 验） | ✅ 本地 | `gcc -fno-pie -no-pie /hello.c` 输出 Hello from GCC! + gate PASS；两 leg 1108/0 + host 69/0；CI gate 待 push |
 | 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++.so + headers；`g++ hello.cpp`；C++ 试金石（异常/STL/pthread） | ⏳ | CinuxOS 上 g++ 编译+运行，C++ 闭环 |
 | 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear sshd（按需） | ⏳ | 按需 |
 
@@ -46,6 +46,7 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 - **target vs cross 工具链（头号坑）**：进 rootfs 的 GCC 必须是 **native**（在 CinuxOS 跑、产 CinuxOS 二进制）。extract.sh 拷的是 host 的 cc1/as/ld——它们是 glibc 动态的 host 二进制，靠一起拷进来的 glibc `.so` + `/lib64/ld-linux` 在 CinuxOS 跑（已验证）。**绝不能**塞 Buildroot 的 cross compiler（host 程序，CinuxOS 跑不了，一跑 SIGSEGV 且难分辨是内核还是工具链塞错）。
 - **wait4 命名陷阱**：slot 61 注册名是 `SYS_waitpid` 但就是 Linux `__NR_wait4`（handler 4 实参）。别再 grep `SYS_wait4` 漏判。
 - **Buildroot 本机依赖**：make/gcc/g++/bison/flex ✅；rsync/cpio/ncurses-dev/libssl-dev 阶段0 前置核对。
+- **批3 follow-up（登记，留后续）**：①unhandled syscall stub 降噪（glibc probe：318 getcpu / 435 clone3 / 273 rseq / 334 / 302，现走 ENOSYS fallback 非致命，补 stub 改善 CI log 可读性）；②既有信号 SMP 债（sig_pending/sig_blocked 普通 uint64 无原子，SMP 投递竞态；批3a-2 只修 force_sig 新债 per-task sig_forced，既有债留独立 follow-up）；③gcc driver 残留（collect2 fork-exec + pipe 连 cc1/as/ld，B4-C2+批3 修了大头，残留 pipe EOF 对齐 BusyBox ash）；④CI gcc-smoke 真验（批3b-2 写完结构，push 后验 buildroot 下载/编译 + assemble + gate）。
 - **手搓并存纪律**：`tools/musl/` + `create_ext2_disk.sh` 保留作快反馈/调试载体；两条 rootfs 走不同 CMake option/profile，Buildroot 出问题时能定位是内核还是 rootfs 的锅。
 
 ## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅ ＋ 批3b busybox init PID1 ✅（已合 main PR#61 `0b82e1b`）→ **批4-a GCC 工具链(glibc 动态)as+ld 自举 ✅ ＋ 批4-C2 cc1 编译→as→ld→./hello 全自举闭环 ✅**（分支 `feat/b4-gcc-toolchain`，未 push）
