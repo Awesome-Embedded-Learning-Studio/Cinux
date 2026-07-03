@@ -1,9 +1,11 @@
 name: Setup Cinux build
 description: >-
-  Shared CI precondition for Cinux jobs: checkout (submodules) + apt install
-  (ccache always on) + ccache cache + optional musl/busybox cache + compiler
-  version + cmake configure (ccache launchers wired in) + dump the CINUX_ switch
-  state to the log. Build/run/artifact stay in the calling job (they vary most).
+  Shared CI precondition for Cinux jobs: apt install (ccache always on) + ccache
+  cache + optional musl/busybox cache + compiler version + cmake configure
+  (ccache launchers wired in) + dump the CINUX_ switch state to the log. The
+  caller MUST check out the repo (with submodules) before invoking this action:
+  a local action's action.yml is read from the runner workspace, so this action
+  cannot be the first step of a job.
 
 inputs:
   apt-packages:
@@ -28,11 +30,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v4
-      with:
-        ref: ${{ github.head_ref || github.ref_name }}
-        submodules: recursive
-
     - name: Install dependencies
       shell: bash
       run: sudo apt-get install -y ccache ${{ inputs.apt-packages }}

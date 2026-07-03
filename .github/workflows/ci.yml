@@ -20,6 +20,12 @@ jobs:
       matrix:
         sanitizer: [asan, tsan]
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
           apt-packages: qemu-system-x86 e2fsprogs python3
@@ -70,6 +76,12 @@ jobs:
         build_type: [Debug, Release]
         sanitizer: [none, ubsan, lockdep]
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
           apt-packages: qemu-system-x86 e2fsprogs python3 linux-libc-dev
@@ -123,6 +135,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
           apt-packages: qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev
@@ -169,6 +187,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
           apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev
