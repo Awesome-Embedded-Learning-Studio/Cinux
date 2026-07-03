@@ -2,12 +2,20 @@
 # Stage the GCC toolchain subset for the B4-a as+ld smoke into a directory tree.
 #
 # Usage: extract.sh [output_dir]   (default build/gcc-root)
+#       GCC_BIN=<gcc-binary> extract.sh ...   (default: gcc; CI pins gcc-13)
 #
 # NOT a self-built toolchain (user decision 2026-07-02: don't compile GCC). This
 # copies the host's glibc-dynamic as/ld + their runtime .so closure + the crt
 # objects + libgcc, laid out exactly as GCC's built-in specs expect (hardcoded
 # /usr/lib, /usr/lib/gcc/<triple>/<ver>, /lib64 paths). cc1 and headers are
-# deferred to B4-b -- as+ld do not read headers.
+# deferred to B4-b -- as/ld do not read headers.
+#
+# GCC_BIN selects which host GCC to mirror.  The whole closure -- driver, cc1,
+# collect2, libgcc, crt objects, liblto_plugin -- MUST come from one GCC version,
+# or cc1 and the driver disagree at runtime.  Default `gcc`; CI sets GCC_BIN=gcc-13
+# so the version is explicit and does not drift when ubuntu-latest's default `gcc`
+# rolls.  cc1 is located via `gcc -print-prog-name=cc1` (GCC's own spec-driven
+# answer), NOT a hardcoded path.
 #
 # The tree feeds scripts/create_ext2_disk.sh via its GCC_ROOT arg; mkfs.ext2 -d
 # merges it (cp -a preserves SONAME symlinks like libbfd.so -> libbfd-2.46.0.so).
@@ -15,7 +23,17 @@
 set -e
 
 ROOT="${1:-build/gcc-root}"
-GCC_INSTALL="$(dirname "$(gcc -print-file-name=crtbegin.o)")"  # /usr/lib/gcc/<triple>/<ver>
+GCC_BIN="${GCC_BIN:-gcc}"
+if ! command -v "$GCC_BIN" >/dev/null 2>&1; then
+    echo "[extract] ERROR: GCC_BIN='$GCC_BIN' not found on PATH" >&2
+    echo "[extract]        Set GCC_BIN to an installed gcc (e.g. gcc-13), or apt-get install it." >&2
+    exit 1
+fi
+# -print-prog-name=cc1 returns <installdir>/cc1 even when the file is absent (it
+# is a spec-driven path, not a stat), so the -x test below is the real check.
+CC1="$("$GCC_BIN" -print-prog-name=cc1)"
+GCC_INSTALL="$(dirname "$CC1")"  # /usr/lib/gcc/<triple>/<ver>
+GCC_DRIVER="$(command -v "$GCC_BIN")"
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/usr/bin" "$ROOT/usr/lib" "$ROOT/lib64" "$ROOT$GCC_INSTALL"
@@ -68,13 +86,13 @@ cp -a /usr/lib/libatomic.a "$ROOT/usr/lib/" 2>/dev/null || true
 # Debian/Ubuntu split cc1 into the cpp-N package (not gcc-N); build-essential
 # does not depend on cpp, so a fresh CI runner has the gcc driver + collect2 but
 # no cc1.  Fail up front with a clear message instead of a vague cp error below.
-if [ ! -f "$GCC_INSTALL/cc1" ]; then
-    echo "[extract] ERROR: cc1 not found at $GCC_INSTALL/cc1" >&2
-    echo "[extract]        On Debian/Ubuntu: apt-get install cpp (cc1 ships in cpp-N)." >&2
+if [ ! -x "$CC1" ]; then
+    echo "[extract] ERROR: cc1 not found at $CC1 (GCC_BIN=$GCC_BIN)" >&2
+    echo "[extract]        On Debian/Ubuntu: apt-get install cpp-N (cc1 ships in cpp-N, not gcc-N)." >&2
     exit 1
 fi
-cp -a "$GCC_INSTALL/cc1" "$ROOT$GCC_INSTALL/cc1"
-ldd "$GCC_INSTALL/cc1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
+cp -a "$CC1" "$ROOT$GCC_INSTALL/cc1"
+ldd "$CC1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
 
@@ -85,10 +103,13 @@ done
 #     .init_array constructors.  liblto_plugin.so is still needed because GCC's
 #     default link path passes -fuse-linker-plugin even for this tiny C smoke.
 #     cc1plus/lto1/lto-wrapper stay out: C-only smoke (g++ is a later batch). ---
-cp -a /usr/bin/gcc "$ROOT/usr/bin/gcc"
+# The driver installs at the fixed PT_INTERP-independent name /usr/bin/gcc on the
+# rootfs (what CinuxOS users invoke), but is sourced from $GCC_BIN so it matches
+# cc1/collect2/libgcc -- one version end to end.
+cp -a "$GCC_DRIVER" "$ROOT/usr/bin/gcc"
 cp -a "$GCC_INSTALL/collect2" "$ROOT$GCC_INSTALL/collect2"
-cp -a "$(gcc -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
-ldd /usr/bin/gcc "$GCC_INSTALL/collect2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
+cp -a "$("$GCC_BIN" -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
+ldd "$GCC_DRIVER" "$GCC_INSTALL/collect2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
 
@@ -102,7 +123,7 @@ done
 for f in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o crtfastmath.o; do
     cp -a "$GCC_INSTALL/$f" "$ROOT$GCC_INSTALL/" 2>/dev/null || true
 done
-cp -aL "$(gcc -print-libgcc-file-name)" "$ROOT$GCC_INSTALL/"          # libgcc.a
+cp -aL "$("$GCC_BIN" -print-libgcc-file-name)" "$ROOT$GCC_INSTALL/"          # libgcc.a
 cp -aL "$GCC_INSTALL/libgcc_eh.a" "$ROOT$GCC_INSTALL/" 2>/dev/null || true
 
 # --- hello.s: host-precompiled as input for the B4-a as+ld smoke, plus the
@@ -117,7 +138,7 @@ EOF
 # -fno-pie: CinuxOS only loads non-PIE ET_EXEC so far (F10-M2 hello-dyn), so emit
 # a non-PIE assembly (absolute addressing, links with crt1.o + crtbegin.o under
 # ld -no-pie). PIE main (Scrt1/crtbeginS, ET_DYN) is a follow-up with ELF-base ASLR.
-gcc -S -fno-pie -o "$ROOT/hello.s" /tmp/cinux_hello.c
+"$GCC_BIN" -S -fno-pie -o "$ROOT/hello.s" /tmp/cinux_hello.c
 cp /tmp/cinux_hello.c "$ROOT/hello.c"
 rm -f /tmp/cinux_hello.c
 
@@ -127,7 +148,7 @@ rm -f /tmp/cinux_hello.c
 #     ~249 MB of /usr/include.  cc1's built-in include search (/usr/include +
 #     $GCC_INSTALL/include) then resolves <stdio.h> et al.  [ -f ] filters the
 #     "Multiple include guards ..." non-path line gcc -H appends. ---
-gcc -H -fsyntax-only -fno-pie "$ROOT/hello.c" 2>&1 >/dev/null \
+"$GCC_BIN" -H -fsyntax-only -fno-pie "$ROOT/hello.c" 2>&1 >/dev/null \
     | sed -E 's/^[. ]+//' | grep -v '^$' | sort -u | while read -r h; do
     [ -f "$h" ] || continue
     install -Dm0644 "$h" "$ROOT$h"
@@ -138,7 +159,7 @@ done
 # at features.h:518 "fatal error: stdc-predef.h: No such file or directory".
 [ -f /usr/include/stdc-predef.h ] && install -Dm0644 /usr/include/stdc-predef.h "$ROOT/usr/include/stdc-predef.h"
 
-echo "[extract] GCC toolchain subset staged at $ROOT"
+echo "[extract] GCC toolchain subset staged at $ROOT (GCC_BIN=$GCC_BIN)"
 du -sh "$ROOT"
 echo "[extract] binaries:"; ls "$ROOT/usr/bin"
 echo "[extract] /usr/lib (.so + crt):"; ls "$ROOT/usr/lib"

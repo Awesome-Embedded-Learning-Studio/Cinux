@@ -195,10 +195,13 @@ jobs:
           submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
-          # cpp: provides cc1 at /usr/lib/gcc/<triple>/<ver>/cc1.  On Debian/Ubuntu
-          # build-essential pulls gcc/g++ but NOT cpp, so cc1 is missing without
-          # this (Arch's gcc ships cc1 in the main package, hiding the gap locally).
-          apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev cpp
+          # cc1 ships in cpp-N (NOT gcc-N) on Debian/Ubuntu; build-essential pulls
+          # gcc/g++ but not cpp, so a fresh runner has the driver + collect2 yet no
+          # cc1.  Install the full gcc-13 family pinned to one version -- extract.sh
+          # mirrors GCC_BIN=gcc-13's whole closure (driver + cc1 + collect2 + libgcc
+          # + crt), so every piece must come from the same N.  (Arch's gcc is one
+          # monolithic package with cc1 inside, which hides this gap locally.)
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev
           cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2
           cache-buildroot: 'true'
 
@@ -211,9 +214,12 @@ jobs:
       - name: Assemble gcc rootfs
         # CI's buildroot target lives under build/buildroot-ci/output (not the
         # stage-1 default build/buildroot), so point assemble at it via env.
-        run: |
-          BR_TARGET=${{ github.workspace }}/build/buildroot-ci/output/target \
-            cmake --build build --target assemble-gcc-rootfs -j$(nproc)
+        # Pin GCC_BIN=gcc-13 so extract.sh mirrors that version's whole closure
+        # (driver + cc1 + collect2 + libgcc + crt), matching the apt packages.
+        env:
+          BR_TARGET: ${{ github.workspace }}/build/buildroot-ci/output/target
+          GCC_BIN: gcc-13
+        run: cmake --build build --target assemble-gcc-rootfs -j$(nproc)
 
       - name: Run gcc gate
         run: |
