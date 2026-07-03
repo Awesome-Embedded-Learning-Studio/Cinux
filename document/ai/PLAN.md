@@ -31,10 +31,10 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 ### 批表
 | 批 | 阶段 | 范围 | 状态 | 验证 |
 |----|------|------|------|------|
-| 0 | 立项 | docs（本段）+ ROADMAP F-USABILITY + todo `f-usability/README.md` | 🔄 | docs-only |
-| 1 | 0+1 验证+接管 | Buildroot base defconfig（external+busybox+musl）；assemble/pack 工具；本地 boot 到 ash；overlay 合并；**取代** `create_ext2_disk.sh`（手搓并存） | ⏳ | 本地 boot ash 提示符 + run-kernel-test-all 两 leg 零回归 |
-| 2 | 2 可用性测试 | overlay 内 `cinux-usability-test.sh`（ls/cat/uname/mkdir+rm/管道/fork-exec）；CI `build-rootfs` + `buildroot-usability` job（强缓存） | ⏳ | CI 进 shell 跑工具 + exit code gate |
-| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs（材料已齐）；`gcc /smoke/hello.c -o /tmp/a.out && /tmp/a.out`；CI `gcc-smoke` job | ⏳ | CinuxOS 上 gcc 编译+运行 hello，断言 "Hello" |
+| 0 | 立项 | docs（本段）+ ROADMAP F-USABILITY + todo `f-usability/README.md` | ✅ `e12a386` | docs-only |
+| 1 | 0+1 验证+接管 | Buildroot base defconfig（external+busybox+musl）；`create_ext2_disk.sh` 手搓并存；本地 boot 到 ash；overlay 合并 | ✅ `21b1d6a` | build-console boot 动态 busybox ash `/ #` + 两 leg 1101/0 + host 69/69 |
+| 2 | 2 可用性测试 | overlay 内 `cinux-usability-test.sh`（ls/cat/uname/mkdir+rm/管道/fork-exec）；CI `buildroot-usability` job + `run-buildroot-usability` target（isa-debug-exit gate） | ✅ `33f187b`+`1e08083` | run-buildroot-usability 闭环 PASS + cinux-exit 0 SUCCESS + 两 leg 1101/0 + host 69/69 |
+| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs（材料已齐）；`gcc /smoke/hello.c -o /tmp/a.out && /tmp/a.out`；CI `gcc-smoke` job | 🔄 | CinuxOS 上 gcc 编译+运行 hello，断言 "Hello" |
 | 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++.so + headers；`g++ hello.cpp`；C++ 试金石（异常/STL/pthread） | ⏳ | CinuxOS 上 g++ 编译+运行，C++ 闭环 |
 | 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear sshd（按需） | ⏳ | 按需 |
 
