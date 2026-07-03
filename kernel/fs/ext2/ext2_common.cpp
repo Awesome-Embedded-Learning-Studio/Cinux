@@ -258,13 +258,14 @@ cinux::lib::ErrorOr<void> Ext2FileOps::truncate(Inode* inode, uint64_t new_size)
 }
 
 cinux::lib::ErrorOr<void> Ext2FileOps::stat(const Inode* inode, struct stat* st) {
+    return ext2_.fill_stat(inode, st);
+}
+
+cinux::lib::ErrorOr<void> Ext2::fill_stat(const Inode* inode, struct stat* st) const {
     if (inode == nullptr || inode->fs_private == nullptr || st == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-
-    auto*            cached = ext2_cached_inode(inode);
-    const Ext2Inode& disk   = cached->disk_inode;
-
+    const Ext2Inode& disk = ext2_cached_inode(inode)->disk_inode;
     // Zero first so the Linux-ABI fields the backend does not set (__pad0,
     // *_nsec, __unused) stay 0 -- no kernel-stack bytes leak to user space.
     memset(st, 0, sizeof(*st));
@@ -276,12 +277,11 @@ cinux::lib::ErrorOr<void> Ext2FileOps::stat(const Inode* inode, struct stat* st)
     st->st_gid     = disk.i_gid;
     st->st_rdev    = 0;
     st->st_size    = disk.i_size;
-    st->st_blksize = ext2_.block_size();
+    st->st_blksize = block_size();
     st->st_blocks  = disk.i_blocks;
     st->st_atime   = disk.i_atime;
     st->st_mtime   = disk.i_mtime;
     st->st_ctime   = disk.i_ctime;
-
     return {};
 }
 

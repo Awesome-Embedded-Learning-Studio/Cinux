@@ -11,7 +11,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <cstring>  // memset
 
 #include "ext2.hpp"
 #include "ext2_extent.hpp"
@@ -163,28 +162,7 @@ cinux::lib::ErrorOr<void> Ext2DirOps::stat(const Inode* inode, struct stat* st) 
     if (inode == nullptr || inode->fs_private == nullptr || st == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-
-    auto*            cached = ext2_cached_inode(inode);
-    const Ext2Inode& disk   = cached->disk_inode;
-
-    // Zero first so the Linux-ABI fields the backend does not set (__pad0,
-    // *_nsec, __unused) stay 0 -- no kernel-stack bytes leak to user space.
-    memset(st, 0, sizeof(*st));
-    st->st_dev     = 0;
-    st->st_ino     = inode->ino;
-    st->st_nlink   = disk.i_links_count;
-    st->st_mode    = disk.i_mode;
-    st->st_uid     = disk.i_uid;
-    st->st_gid     = disk.i_gid;
-    st->st_rdev    = 0;
-    st->st_size    = disk.i_size;
-    st->st_blksize = ext2_.block_size();
-    st->st_blocks  = disk.i_blocks;
-    st->st_atime   = disk.i_atime;
-    st->st_mtime   = disk.i_mtime;
-    st->st_ctime   = disk.i_ctime;
-
-    return {};
+    return ext2_.fill_stat(inode, st);
 }
 
 // F-ECO batch 2 directory attribute ops. A directory is just an inode; the

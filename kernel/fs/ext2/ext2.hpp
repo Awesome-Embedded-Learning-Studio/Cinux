@@ -147,6 +147,11 @@ public:
     /// on false the caller frees @p blk and bails.
     bool zero_and_write_block(uint32_t blk);
 
+    /// Fill @p st from @p inode's cached on-disk fields.  Shared by Ext2FileOps
+    /// and Ext2DirOps stat(): validates inputs, zeroes the struct (so the unset
+    /// Linux-ABI fields stay 0), and copies the ext2 inode fields.
+    cinux::lib::ErrorOr<void> fill_stat(const Inode* inode, struct stat* st) const;
+
     // ============================================================
     // File / directory mutation
     // ============================================================
