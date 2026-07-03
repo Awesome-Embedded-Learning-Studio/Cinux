@@ -32,11 +32,30 @@ fi
 # -print-prog-name=cc1 returns <installdir>/cc1 even when the file is absent (it
 # is a spec-driven path, not a stat), so the -x test below is the real check.
 CC1="$("$GCC_BIN" -print-prog-name=cc1)"
-GCC_INSTALL="$(dirname "$CC1")"  # /usr/lib/gcc/<triple>/<ver>
+GCC_PROG_DIR="$(dirname "$CC1")"  # e.g. /usr/libexec/gcc/<triple>/<ver>
+GCC_LIBGCC="$("$GCC_BIN" -print-libgcc-file-name)"
+GCC_LIB_DIR="$(dirname "$GCC_LIBGCC")"  # e.g. /usr/lib/gcc/<triple>/<ver>
 GCC_DRIVER="$(command -v "$GCC_BIN")"
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT/usr/bin" "$ROOT/usr/lib" "$ROOT/lib64" "$ROOT$GCC_INSTALL"
+mkdir -p "$ROOT/usr/bin" "$ROOT/usr/lib" "$ROOT/lib64" "$ROOT$GCC_PROG_DIR" "$ROOT$GCC_LIB_DIR"
+
+copy_abs() {
+    local src="$1"
+    [ -e "$src" ] || return 0
+    mkdir -p "$ROOT$(dirname "$src")"
+    cp -aL "$src" "$ROOT$src"
+}
+
+copy_gcc_file() {
+    local name="$1"
+    local src
+    src="$("$GCC_BIN" -print-file-name="$name")"
+    [ -n "$src" ] || return 0
+    [ "$src" != "$name" ] || return 0
+    [ -e "$src" ] || return 0
+    copy_abs "$src"
+}
 
 # --- binaries: as/ld only (cc1 + gcc driver land with B4-b) ---
 # Ubuntu's gcc/as/ld entries can be versioned symlinks.  Install real ELF files
@@ -55,6 +74,7 @@ cp -aL /lib64/ld-linux-x86-64.so.2 "$ROOT/lib64/ld-linux-x86-64.so.2"
 cp_lib() {
     local src="$1"
     [ -f "$src" ] || return 0
+    copy_abs "$src"
     cp -aL "$src" "$ROOT/usr/lib/"
     local base soname
     base=$(basename "$src")
@@ -93,7 +113,7 @@ if [ ! -x "$CC1" ]; then
     echo "[extract]        On Debian/Ubuntu: apt-get install cpp-N (cc1 ships in cpp-N, not gcc-N)." >&2
     exit 1
 fi
-cp -aL "$CC1" "$ROOT$GCC_INSTALL/cc1"
+copy_abs "$CC1"
 ldd "$CC1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
@@ -109,24 +129,29 @@ done
 # rootfs (what CinuxOS users invoke), but is sourced from $GCC_BIN so it matches
 # cc1/collect2/libgcc -- one version end to end.
 cp -aL "$GCC_DRIVER" "$ROOT/usr/bin/gcc"
-cp -aL "$GCC_INSTALL/collect2" "$ROOT$GCC_INSTALL/collect2"
-cp -aL "$("$GCC_BIN" -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
-ldd "$GCC_DRIVER" "$GCC_INSTALL/collect2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
+COLLECT2="$("$GCC_BIN" -print-prog-name=collect2)"
+copy_abs "$COLLECT2"
+copy_gcc_file liblto_plugin.so
+ldd "$GCC_DRIVER" "$COLLECT2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
 
 # --- link-time crt + libc + libgcc (ld needs these when linking hello.o -> hello) ---
 for f in crt1.o Scrt1.o crti.o crtn.o; do
+    copy_gcc_file "$f"
     cp -a "/usr/lib/$f" "$ROOT/usr/lib/" 2>/dev/null || true
 done
 for f in libc.so libc_nonshared.a libc.a; do
+    copy_gcc_file "$f"
     cp -a "/usr/lib/$f" "$ROOT/usr/lib/" 2>/dev/null || true
 done
 for f in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o crtfastmath.o; do
-    cp -a "$GCC_INSTALL/$f" "$ROOT$GCC_INSTALL/" 2>/dev/null || true
+    copy_gcc_file "$f"
 done
-cp -aL "$("$GCC_BIN" -print-libgcc-file-name)" "$ROOT$GCC_INSTALL/"          # libgcc.a
-cp -aL "$GCC_INSTALL/libgcc_eh.a" "$ROOT$GCC_INSTALL/" 2>/dev/null || true
+copy_abs "$GCC_LIBGCC"          # libgcc.a
+copy_gcc_file libgcc_eh.a
+copy_gcc_file libgcc_s.so
+copy_gcc_file libgcc_s.so.1
 
 # --- hello.s: host-precompiled as input for the B4-a as+ld smoke, plus the
 #     hello.c source for B4-b cc1. ---
@@ -148,7 +173,7 @@ rm -f /tmp/cinux_hello.c
 #     actually compile hello.c on Cinux.  The closure is tiny (~25 files,
 #     ~200 KB); stage exactly those at their absolute paths instead of all
 #     ~249 MB of /usr/include.  cc1's built-in include search (/usr/include +
-#     $GCC_INSTALL/include) then resolves <stdio.h> et al.  [ -f ] filters the
+#     GCC's private include dir) then resolves <stdio.h> et al.  [ -f ] filters the
 #     "Multiple include guards ..." non-path line gcc -H appends. ---
 "$GCC_BIN" -H -fsyntax-only -fno-pie "$ROOT/hello.c" 2>&1 >/dev/null \
     | sed -E 's/^[. ]+//' | grep -v '^$' | sort -u | while read -r h; do
@@ -165,4 +190,5 @@ echo "[extract] GCC toolchain subset staged at $ROOT (GCC_BIN=$GCC_BIN)"
 du -sh "$ROOT"
 echo "[extract] binaries:"; ls "$ROOT/usr/bin"
 echo "[extract] /usr/lib (.so + crt):"; ls "$ROOT/usr/lib"
-echo "[extract] $GCC_INSTALL:"; ls "$ROOT$GCC_INSTALL"
+echo "[extract] $GCC_PROG_DIR:"; ls "$ROOT$GCC_PROG_DIR"
+echo "[extract] $GCC_LIB_DIR:"; ls "$ROOT$GCC_LIB_DIR"

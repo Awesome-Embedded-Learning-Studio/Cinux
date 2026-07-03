@@ -7,7 +7,7 @@
 #   buildroot_target : buildroot output/target dir
 #                      (default $REPO/build/buildroot/output/target)
 #   gcc_root         : extract.sh output dir (default $REPO/build/gcc-root;
-#                      created on demand by re-running extract.sh)
+#                      recreated on each assemble to avoid stale host closures)
 #
 # This is the gcc-profile counterpart to the handcrafted create_ext2_disk.sh:
 # buildroot builds the base musl/busybox target out-of-tree, and this script
@@ -29,11 +29,10 @@ if [ ! -d "$BR_TARGET" ]; then
     exit 1
 fi
 
-# Stage the GCC closure on demand (idempotent: extract.sh rm -rf's then rebuilds).
-if [ ! -x "$GCC_ROOT/usr/bin/gcc" ]; then
-    echo "[assemble] staging GCC closure via extract.sh..."
-    "$REPO_ROOT/tools/gcc-toolchain/extract.sh" "$GCC_ROOT" >/dev/null
-fi
+# Stage the GCC closure every time.  It is quick, and stale closures are easy to
+# hit when iterating locally or under act with a reused build directory.
+echo "[assemble] staging GCC closure via extract.sh..."
+"$REPO_ROOT/tools/gcc-toolchain/extract.sh" "$GCC_ROOT" >/dev/null
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
