@@ -16,6 +16,7 @@
  */
 
 #include "kernel/net/tcp_socket.hpp"
+#include "kernel/net/byte_order.hpp"
 #include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
@@ -33,12 +34,6 @@ using cinux::proc::Task;
 #endif
 
 
-namespace {
-/// Swap a 16-bit value host<->network (sockaddr_in::port is big-endian).
-constexpr uint16_t byte_swap16(uint16_t v) {
-    return static_cast<uint16_t>((v >> 8) | (v << 8));
-}
-}  // namespace
 
 
 TcpSocket::TcpSocket(TcpModule& tcp, Ipv4Module& ipv4, NetStack& stack, DevRoute route)

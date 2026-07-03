@@ -16,6 +16,7 @@
  */
 
 #include "kernel/net/udp_socket.hpp"
+#include "kernel/net/byte_order.hpp"
 #include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
@@ -39,13 +40,6 @@ namespace {
 constexpr uint16_t kEphemeralBase  = 32768;
 constexpr uint16_t kEphemeralRange = 16;
 
-/// Host -> network byte order for 16-bit (sockaddr_in::port is big-endian, the
-/// same layout musl lays out in user space; getsockname/getpeername hand back
-/// the wire-order value).  Local helper -- sys_socket.cpp has its own; do not
-/// reach into it.
-constexpr uint16_t byte_swap16(uint16_t v) {
-    return static_cast<uint16_t>((v >> 8) | (v << 8));
-}
 }  // namespace
 
 
