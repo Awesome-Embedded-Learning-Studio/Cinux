@@ -36,26 +36,13 @@ void Pty::echo_to_master(char c) {
 // ============================================================
 
 bool Pty::master_push(char c) {
-    if (master_full_) {
-        return false;
-    }
-    master_buf_[master_tail_] = c;
-    master_tail_              = (master_tail_ + 1) % kMasterBufSize;
-    if (master_tail_ == master_head_) {
-        master_full_ = true;
-    }
-    return true;
+    return master_buf_.push(c);  // RingBuffer::push returns false when full
 }
 
 size_t Pty::master_pop(char* buf, size_t maxlen) {
     size_t n = 0;
-    while (n < maxlen) {
-        if (master_head_ == master_tail_ && !master_full_) {
-            break;  // empty
-        }
-        buf[n++]     = master_buf_[master_head_];
-        master_head_ = (master_head_ + 1) % kMasterBufSize;
-        master_full_ = false;
+    while (n < maxlen && master_buf_.pop(buf[n])) {
+        ++n;
     }
     return n;
 }
@@ -129,9 +116,7 @@ const TTY& Pty::slave_tty() const {
 }
 
 void Pty::reset() {
-    master_head_ = 0;
-    master_tail_ = 0;
-    master_full_ = false;
+    master_buf_.clear();
     // Fresh line discipline (default termios, empty line/cooked buffers).
     slave_tty_   = TTY{};
     // The echo sink must keep routing to this object: re-wire it after the
