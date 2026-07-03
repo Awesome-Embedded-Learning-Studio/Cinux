@@ -27,31 +27,6 @@
 
 namespace cinux::fs {
 
-/// ext2-private typed accessor: Inode::fs_private holds the Ext2CachedInode.
-/// Centralises the downcast so a typo'd mask or const-wrong variant can't
-/// spread across the InodeOps call sites.
-inline Ext2CachedInode* ext2_cached_inode(Inode* inode) {
-    return static_cast<Ext2CachedInode*>(inode->fs_private);
-}
-inline const Ext2CachedInode* ext2_cached_inode(const Inode* inode) {
-    return static_cast<const Ext2CachedInode*>(inode->fs_private);
-}
-
-/// @brief Does this dirent's name equal @p name (length + bytes)?
-/// Centralises the byte-compare both directory.cpp (remove-dir-entry) and
-/// init.cpp (inode-by-name) do while walking a directory block.
-inline bool dirent_name_matches(const Ext2DirEntry& entry, const char* name, uint32_t name_len) {
-    if (entry.name_len != name_len) {
-        return false;
-    }
-    for (uint32_t i = 0; i < name_len; ++i) {
-        if (entry.name[i] != name[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // ============================================================
 // Ext2 Filesystem Driver Class
 // ============================================================
@@ -364,6 +339,17 @@ public:
                           uint32_t name_len, uint32_t& out_entry_ino);
 
 private:
+    /// Located inode (block + byte offset within it); filled by locate_inode_block.
+    struct InodeLoc {
+        uint32_t target_block;
+        uint32_t within_block_offset;
+    };
+
+    /// Locate @p ino's containing block + offset, read_block() it, bounds-check.
+    /// Shared by read_disk_inode / write_disk_inode (the inode-location math is
+    /// identical).  On success block_buf_ holds ino's block; @return true.
+    bool locate_inode_block(uint32_t ino, InodeLoc& out);
+
     // ============================================================
     // Metadata write-back helpers
     // ============================================================
