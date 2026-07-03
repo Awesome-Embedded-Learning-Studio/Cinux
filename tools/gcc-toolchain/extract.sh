@@ -39,8 +39,10 @@ rm -rf "$ROOT"
 mkdir -p "$ROOT/usr/bin" "$ROOT/usr/lib" "$ROOT/lib64" "$ROOT$GCC_INSTALL"
 
 # --- binaries: as/ld only (cc1 + gcc driver land with B4-b) ---
-cp -a /usr/bin/as "$ROOT/usr/bin/as"
-cp -a /usr/bin/ld "$ROOT/usr/bin/ld"
+# Ubuntu's gcc/as/ld entries can be versioned symlinks.  Install real ELF files
+# into the rootfs so execve does not chase a dangling host-only symlink.
+cp -aL /usr/bin/as "$ROOT/usr/bin/as"
+cp -aL /usr/bin/ld "$ROOT/usr/bin/ld"
 
 # --- dynamic interpreter at the exact PT_INTERP path ---
 # Resolve the real file (/lib64 is a symlink on Arch); install it as a regular
@@ -91,7 +93,7 @@ if [ ! -x "$CC1" ]; then
     echo "[extract]        On Debian/Ubuntu: apt-get install cpp-N (cc1 ships in cpp-N, not gcc-N)." >&2
     exit 1
 fi
-cp -a "$CC1" "$ROOT$GCC_INSTALL/cc1"
+cp -aL "$CC1" "$ROOT$GCC_INSTALL/cc1"
 ldd "$CC1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
@@ -106,9 +108,9 @@ done
 # The driver installs at the fixed PT_INTERP-independent name /usr/bin/gcc on the
 # rootfs (what CinuxOS users invoke), but is sourced from $GCC_BIN so it matches
 # cc1/collect2/libgcc -- one version end to end.
-cp -a "$GCC_DRIVER" "$ROOT/usr/bin/gcc"
-cp -a "$GCC_INSTALL/collect2" "$ROOT$GCC_INSTALL/collect2"
-cp -a "$("$GCC_BIN" -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
+cp -aL "$GCC_DRIVER" "$ROOT/usr/bin/gcc"
+cp -aL "$GCC_INSTALL/collect2" "$ROOT$GCC_INSTALL/collect2"
+cp -aL "$("$GCC_BIN" -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
 ldd "$GCC_DRIVER" "$GCC_INSTALL/collect2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
