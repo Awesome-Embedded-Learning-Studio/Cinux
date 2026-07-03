@@ -182,10 +182,15 @@ void test_force_send_bypasses_block_and_ignore() {
 
     TEST_ASSERT_EQ(signal_force_send(&t, Signal::kSigsegv), 0);
 
-    TEST_ASSERT_FALSE(sig_is_member(t.sig_blocked, Signal::kSigsegv));
+    // force is delivery-time only: it tags sig_forced but must NOT persistently
+    // mutate sig_blocked or the shared sig_actions (SMP-safe; matches Linux
+    // force_sig_info).  The bypass itself is exercised by the delivery path
+    // (signal_pick_deliverable avail + forced->default in the kernel fault tests).
+    TEST_ASSERT_TRUE(sig_is_member(t.sig_forced, Signal::kSigsegv));
+    TEST_ASSERT_TRUE(sig_is_member(t.sig_blocked, Signal::kSigsegv));  // block mask retained
     TEST_ASSERT_TRUE(sig_is_member(t.sig_pending, Signal::kSigsegv));
     TEST_ASSERT_EQ(t.sig_actions->actions[static_cast<int>(Signal::kSigsegv)].type,
-                   HandlerType::kDefault);
+                   HandlerType::kIgnore);  // disposition retained
 }
 
 }  // namespace test_sig_send

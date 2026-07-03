@@ -107,13 +107,20 @@ extern "C" void signal_check_deliver_isr(InterruptFrame* frame) {
     if (n == 0) {
         return;
     }
-    Signal           sig = static_cast<Signal>(n);
+    Signal     sig    = static_cast<Signal>(n);
+    const bool forced = (task->sig_forced & (SigSet{1} << n)) != 0;
+    task->sig_forced &= ~(SigSet{1} << n);  // consume the force tag
     const SigAction& act = task->sig_actions->actions[n];
     switch (act.type) {
     case HandlerType::kDefault:
         signal_exec_default(task, sig);  // may not return (terminate)
         break;
     case HandlerType::kIgnore:
+        // A forced signal bypasses SIG_IGN and runs the default action so a
+        // sync fault cannot livelock by returning to the faulting RIP.
+        if (forced) {
+            signal_exec_default(task, sig);
+        }
         break;
     case HandlerType::kCustom:
         signal_setup_frame(frame, sig, act.handler_addr, act.sa_mask);

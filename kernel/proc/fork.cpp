@@ -235,6 +235,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     child->cwd         = SharedCwd::create_copy(parent->cwd);
     child->fd_table    = nullptr;  // detached; rebuilt fresh below
     child->sig_pending = 0;
+    child->sig_forced  = 0;  // force tags are per-task; a child never inherits them
     if (child->sig_actions == nullptr || child->cwd == nullptr) {
         cinux::lib::kprintf("[PROC] fork: shared-state copy failed\n");
         delete child;

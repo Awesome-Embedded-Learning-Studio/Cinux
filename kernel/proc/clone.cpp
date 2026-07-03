@@ -172,6 +172,7 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
     }
     child->fd_table    = nullptr;  // detached; rebuilt/shared below
     child->sig_pending = 0;
+    child->sig_forced  = 0;  // force tags are per-task; a child never inherits them
     if (child->sig_actions == nullptr || child->cwd == nullptr) {
         cinux::lib::kprintf("[PROC] clone: shared-state alloc failed\n");
         delete child;

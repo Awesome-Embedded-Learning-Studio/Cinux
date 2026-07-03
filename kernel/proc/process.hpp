@@ -165,10 +165,12 @@ struct Task {
     // 3: dispositions live in a refcounted SharedSigActions so CLONE_SIGHAND
     // threads can share them (fork copies, clone may share).
     SharedSigActions* sig_actions{
-        nullptr};                   ///< Refcounted dispositions (never null for a live task)
-    SigSet   sig_pending{0};        ///< Signals pending delivery
-    SigSet   sig_blocked{0};        ///< Signals blocked from delivery
-    uint64_t sig_altstack{0};       ///< sigaltstack base (0 = main stack)
+        nullptr};              ///< Refcounted dispositions (never null for a live task)
+    SigSet   sig_pending{0};   ///< Signals pending delivery
+    SigSet   sig_blocked{0};   ///< Signals blocked from delivery
+    SigSet   sig_forced{0};    ///< Force-delivered (sync faults): bypass block mask + SIG_IGN at
+                               ///< delivery (per-task, SMP-safe)
+    uint64_t sig_altstack{0};  ///< sigaltstack base (0 = main stack)
     uint64_t sig_altstack_size{0};  ///< sigaltstack size in bytes
 
     // F3-M2: futex wait state.  Set in FUTEX_WAIT just before blocking, then
