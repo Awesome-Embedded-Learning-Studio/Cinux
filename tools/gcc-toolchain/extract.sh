@@ -65,6 +65,14 @@ cp -a /usr/lib/libatomic.a "$ROOT/usr/lib/" 2>/dev/null || true
 #     libisl/libmpc/libmpfr/libgmp/libm on top of as/ld's libz/libzstd/libc.
 #     `cc1 --version` needs NO headers, so this stages the binary + deps only;
 #     /usr/include (the C headers, ~250 MB) lands with B4-C2 (actual compile). ---
+# Debian/Ubuntu split cc1 into the cpp-N package (not gcc-N); build-essential
+# does not depend on cpp, so a fresh CI runner has the gcc driver + collect2 but
+# no cc1.  Fail up front with a clear message instead of a vague cp error below.
+if [ ! -f "$GCC_INSTALL/cc1" ]; then
+    echo "[extract] ERROR: cc1 not found at $GCC_INSTALL/cc1" >&2
+    echo "[extract]        On Debian/Ubuntu: apt-get install cpp (cc1 ships in cpp-N)." >&2
+    exit 1
+fi
 cp -a "$GCC_INSTALL/cc1" "$ROOT$GCC_INSTALL/cc1"
 ldd "$GCC_INSTALL/cc1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"

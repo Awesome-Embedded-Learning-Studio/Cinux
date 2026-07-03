@@ -195,7 +195,10 @@ jobs:
           submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
-          apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev
+          # cpp: provides cc1 at /usr/lib/gcc/<triple>/<ver>/cc1.  On Debian/Ubuntu
+          # build-essential pulls gcc/g++ but NOT cpp, so cc1 is missing without
+          # this (Arch's gcc ships cc1 in the main package, hiding the gap locally).
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev cpp
           cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2
           cache-buildroot: 'true'
 
