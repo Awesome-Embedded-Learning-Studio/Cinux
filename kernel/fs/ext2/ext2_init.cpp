@@ -50,6 +50,14 @@ bool Ext2::write_block(uint32_t block_num) {
     return true;
 }
 
+bool Ext2::zero_and_write_block(uint32_t blk) {
+    auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
+    for (uint32_t i = 0; i < block_size_; ++i) {
+        dma[i] = 0;
+    }
+    return write_block(blk);
+}
+
 // ============================================================
 // Accessors
 // ============================================================

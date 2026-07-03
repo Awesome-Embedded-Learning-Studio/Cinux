@@ -131,6 +131,12 @@ public:
      */
     bool write_block(uint32_t block_num);
 
+    /// Zero block_buf_ (block_size_ bytes) then write it to @p blk.  Used at
+    /// every freshly-allocated metadata block (inode/get_or_alloc_block paths)
+    /// so the new block hits disk zeroed.  @return write_block()'s result;
+    /// on false the caller frees @p blk and bails.
+    bool zero_and_write_block(uint32_t blk);
+
     // ============================================================
     // File / directory mutation
     // ============================================================

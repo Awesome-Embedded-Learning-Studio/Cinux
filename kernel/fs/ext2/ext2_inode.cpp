@@ -283,14 +283,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(blk)) {
-                free_block(blk);
-                return 0;
-            }
+            if (!zero_and_write_block(blk)) { free_block(blk); return 0; }
 
             disk.i_block[file_block] = blk;
         }
@@ -307,14 +300,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(indirect_blk)) {
-                free_block(indirect_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(indirect_blk)) { free_block(indirect_blk); return 0; }
 
             disk.i_block[EXT2_INDIRECT_BLOCK] = indirect_blk;
         }
@@ -333,14 +319,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(data_blk)) {
-                free_block(data_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(data_blk)) { free_block(data_blk); return 0; }
 
             if (!read_block(indirect_blk)) {
                 return 0;
@@ -386,14 +365,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(di_blk)) {
-                free_block(di_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(di_blk)) { free_block(di_blk); return 0; }
 
             disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK] = di_blk;
         }
@@ -411,14 +383,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(child_blk)) {
-                free_block(child_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(child_blk)) { free_block(child_blk); return 0; }
             // Re-read the double-indirect block: writing the child clobbered buf.
             if (!read_block(di_blk)) {
                 return 0;
@@ -442,14 +407,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(data_blk)) {
-                free_block(data_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(data_blk)) { free_block(data_blk); return 0; }
             // Re-read the child block: writing the data block clobbered buf.
             if (!read_block(child_blk)) {
                 return 0;
