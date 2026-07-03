@@ -29,6 +29,7 @@
 #include "kernel/drivers/apic/local_apic.hpp"         // F5-M6: g_lapic (e1000 poll timer)
 #include "kernel/drivers/pci/pci.hpp"                 // F10-M1 batch 6: PCI->AHCI for ext2
 #include "kernel/fs/ext2/ext2.hpp"                    // F10-M1 batch 6: ext2 mount
+#include "kernel/fs/file.hpp"                         // FDTable::close to clear polluted fd 0/1/2
 #include "kernel/fs/procfs/procfs.hpp"                // F-ECO busybox: procfs::init (/proc)
 #include "kernel/fs/vfs_mount.hpp"                    // F10-M1 batch 6: VFS mount
 #include "kernel/lib/kallsyms.hpp"
@@ -173,6 +174,19 @@ static void musl_hello_smoke_entry() {
             __asm__ volatile("cli; hlt");
     }
     task->children = nullptr;
+
+    // Ring-0 unit tests share one global fd table, and some leak an open fd
+    // onto slot 0/1/2: CinuxOS FDTable does NOT reserve stdin/stdout/stderr,
+    // so the first open() in a leaking test claims fd 0. Smoke children
+    // inherit that polluted table via fork, and a stale inode on fd=1 turns
+    // busybox echo's `return fflush(stdout)==0 ? 0 : 1` into exit(1) (echo/cat
+    // FAIL while env/hostname/ps -- which don't gate exit on stdout -- PASS).
+    // Restore the Unix convention here so children fall back to the legacy
+    // console path (do_write_kernel fd=1 kprintf) for stdio. Root cause is the
+    // leaking unit test (follow-up); this close is the harness self-defence.
+    cinux::fs::current_fd_table().close(0);
+    cinux::fs::current_fd_table().close(1);
+    cinux::fs::current_fd_table().close(2);
 
     // Mount the ext2 disk (AHCI port 1) into the global VFS so execve can
     // resolve /hello.  The harness keeps no global AHCI/ext2 (each ext2 test
