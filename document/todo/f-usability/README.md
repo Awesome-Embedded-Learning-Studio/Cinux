@@ -22,6 +22,9 @@ Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟（CinuxO
 - **busybox init PID1**（F-ECO B3b）+ **cc1→as→ld→./hello 全自举闭环**（F12-M2 批4）均已跑通。
 - **双 libc 共存已 work**：musl 静态 busybox（自洽）+ glibc 动态 cc1（靠 extract.sh 一起拷进来的 glibc `.so` + `/lib64/ld-linux`）。不用二选一。
 - **Buildroot 动态 busybox base rootfs 已到 `/ #`**（2026-07-02）：修低地址 `MAP_FIXED`、`PROT_NONE` fault 权限、Linux fd 0/1/2 分配与 PID1 stdio 安装；详见 [note](../../notes/2026-07-02-f-usability-buildroot-busybox-fix.md)。
+- **gcc driver 单命令已闭环**（2026-07-03）：Buildroot gcc profile 内
+  `gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out` 输出 `Hello from GCC!`；
+  详见 [note](../../notes/2026-07-03-f-usability-b3-thread-gcc.md)。
 
 ## 三层分离（对齐 Buildroot/Yocto image-builder 范式）
 
@@ -46,7 +49,7 @@ extract.sh 产出(GCC 工具链闭包, 批3+) ──┘
 | 0 | 立项 | docs（本 README）+ ROADMAP + PLAN |
 | 1 | 0+1 验证+接管 | Buildroot base defconfig；assemble/pack 工具；本地 boot 到 ash；overlay 合并；取代 create_ext2_disk.sh（手搓并存） |
 | 2 | 2 可用性测试 | overlay 测试脚本；CI build-rootfs + buildroot-usability job |
-| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs；`gcc hello.c && ./a.out`；CI gcc-smoke job |
+| 3 | 3 gcc 冒烟 ✅ | extract.sh 闭包进 rootfs；`gcc hello.c && ./a.out`；CI gcc-smoke job |
 | 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++；`g++ hello.cpp` |
 | 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear（按需） |
 

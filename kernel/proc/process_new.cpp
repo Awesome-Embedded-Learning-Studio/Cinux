@@ -158,7 +158,7 @@ void free_kernel_stack(Task* task) {
 // waitpid implementation
 // ============================================================
 
-WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc) {
+WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc, int* reaped_pid) {
     auto* parent = Scheduler::current();
     if (parent == nullptr) {
         cinux::lib::kprintf("[WAITPID] no current task\n");
@@ -193,8 +193,12 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
 
         if (target != nullptr) {
             // Reap: collect status, unlink, free pid, mark Dead.
+            int target_pid = target->pid;
             if (status != nullptr) {
                 *status = target->exit_status;
+            }
+            if (reaped_pid != nullptr) {
+                *reaped_pid = target_pid;
             }
             if (prev != nullptr) {
                 prev->wait_next = target->wait_next;
@@ -205,7 +209,7 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
             target->state  = TaskState::Dead;
             target->parent = nullptr;
             cinux::lib::kprintf("[WAITPID] reaped child pid=%d exit_status=%d by parent pid=%d\n",
-                                target->pid, target->exit_status, parent->pid);
+                                target_pid, target->exit_status, parent->pid);
             // SMP reap/free safety: the child exited (became Zombie) on its own
             // CPU BEFORE its yield()->schedule()->context_switch finished. We can
             // observe Zombie here on the parent's CPU while the child's CPU is
@@ -232,7 +236,7 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
                 cinux::lib::kprintf(
                     "[WAITPID] WARN: child pid=%d still on_cpu=%d after spin -- "
                     "leaking struct (no free)\n",
-                    target->pid, target->on_cpu);
+                    target_pid, target->on_cpu);
                 return WaitpidResult::Ok;
             }
             // Q4e-2 (DEBT-002): now that the child's switch is provably done,

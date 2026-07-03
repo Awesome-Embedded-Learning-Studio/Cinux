@@ -225,6 +225,11 @@ bool signal_nth_task_pid(uint32_t n, int* out_pid);
 /// Queue @p sig on @p target's pending set.  Returns 0 / -errno.
 int signal_send(Task* target, Signal sig);
 
+/// Queue a synchronous kernel-generated signal.  Unlike kill(2), a forced
+/// signal must not be masked away by the faulting task and SIG_IGN is reset to
+/// default so a user #PF/#UD cannot livelock by returning to the same RIP.
+int signal_force_send(Task* target, Signal sig);
+
 /// Send @p sig to every task in process group @p pgid (F3-M3 batch 2).
 /// @p pgid == 0 resolves to the caller's own group.  Returns the number of
 /// recipients signalled; 0 means no task matched (the syscall layer maps that

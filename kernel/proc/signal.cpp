@@ -171,7 +171,7 @@ bool signal_is_uncatchable(Signal sig) {
 // Delivery (batch 2)
 // ============================================================
 
-int signal_send(Task* target, Signal sig) {
+int queue_signal(Task* target, Signal sig, bool force) {
     if (!signal_valid(static_cast<int>(sig))) {
         return -22;  // EINVAL
     }
@@ -179,9 +179,16 @@ int signal_send(Task* target, Signal sig) {
         target->state == TaskState::Dead) {
         return -3;  // ESRCH
     }
+    if (force) {
+        sig_set_del(target->sig_blocked, sig);
+        if (!signal_is_uncatchable(sig) &&
+            target->sig_actions->actions[static_cast<int>(sig)].type == HandlerType::kIgnore) {
+            target->sig_actions->actions[static_cast<int>(sig)].type = HandlerType::kDefault;
+        }
+    }
     // A signal with disposition SIG_IGN is discarded unless it is uncatchable
     // (SIGKILL/SIGSTOP), which override SIG_IGN.
-    if (!signal_is_uncatchable(sig) &&
+    if (!force && !signal_is_uncatchable(sig) &&
         target->sig_actions->actions[static_cast<int>(sig)].type == HandlerType::kIgnore) {
         return 0;
     }
@@ -211,6 +218,14 @@ int signal_send(Task* target, Signal sig) {
         Scheduler::unblock(target);
     }
     return 0;
+}
+
+int signal_send(Task* target, Signal sig) {
+    return queue_signal(target, sig, /*force=*/false);
+}
+
+int signal_force_send(Task* target, Signal sig) {
+    return queue_signal(target, sig, /*force=*/true);
 }
 
 int killpg(int pgid, Signal sig) {

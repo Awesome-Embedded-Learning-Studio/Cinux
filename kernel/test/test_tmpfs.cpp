@@ -110,6 +110,28 @@ void test_append_and_offset_read() {
     TEST_ASSERT_EQ(memcmp(buf, "abcdef", 6), 0);
 }
 
+void test_truncate_shrink_and_extend() {
+    TmpFs tfs;
+    TEST_ASSERT_TRUE(tfs.mount().ok());
+    Inode* root = lookup_or_null(&tfs, "");
+    Inode* f    = create_or_null(root, "trunc", 5);
+    TEST_ASSERT_NOT_NULL(f);
+
+    TEST_ASSERT_EQ(write_or_neg1(f, 0, "abcdef", 6), 6);
+    TEST_ASSERT_TRUE(f->ops->truncate(f, 3).ok());
+    TEST_ASSERT_EQ(f->size, 3u);
+
+    char buf[8];
+    TEST_ASSERT_EQ(read_or_neg1(f, 0, buf, sizeof(buf)), 3);
+    TEST_ASSERT_EQ(memcmp(buf, "abc", 3), 0);
+
+    TEST_ASSERT_TRUE(f->ops->truncate(f, 6).ok());
+    TEST_ASSERT_EQ(f->size, 6u);
+    TEST_ASSERT_EQ(read_or_neg1(f, 0, buf, sizeof(buf)), 6);
+    TEST_ASSERT_EQ(memcmp(buf, "abc", 3), 0);
+    TEST_ASSERT_TRUE(buf_all(reinterpret_cast<const uint8_t*>(buf + 3), 3, 0));
+}
+
 // Write 50 bytes, then write another 50 at offset 4090 -- the second write
 // straddles the 4 KiB growth boundary, so the buffer must grow to 8192 and the
 // gap [50, 4090) must be zero-filled (not stale heap bytes).
@@ -189,11 +211,19 @@ void test_stat_file_and_dir() {
     TEST_ASSERT_EQ(st.st_nlink, 1u);
     TEST_ASSERT_NE(st.st_ino, 0u);  // a real inode number, not the root
 
+    TEST_ASSERT_TRUE(f->ops->chmod(f, 0755).ok());
+    TEST_ASSERT_TRUE(f->ops->stat(f, &st).ok());
+    TEST_ASSERT_EQ(st.st_mode, static_cast<uint32_t>(kTmpfsSIfReg | 0755));
+
     Inode* d = mkdir_or_null(root, "dir", 3);
     TEST_ASSERT_NOT_NULL(d);
     TEST_ASSERT_TRUE(d->ops->stat(d, &st).ok());
     TEST_ASSERT_EQ(st.st_mode, static_cast<uint32_t>(kTmpfsSIfDir | 0755));
     TEST_ASSERT_EQ(st.st_nlink, 2u);
+
+    TEST_ASSERT_TRUE(d->ops->chmod(d, 0700).ok());
+    TEST_ASSERT_TRUE(d->ops->stat(d, &st).ok());
+    TEST_ASSERT_EQ(st.st_mode, static_cast<uint32_t>(kTmpfsSIfDir | 0700));
 }
 
 // ---------- unlink ----------
@@ -258,6 +288,7 @@ extern "C" void run_tmpfs_tests() {
     RUN_TEST(test_tmpfs::test_mount_and_root);
     RUN_TEST(test_tmpfs::test_create_write_read_roundtrip);
     RUN_TEST(test_tmpfs::test_append_and_offset_read);
+    RUN_TEST(test_tmpfs::test_truncate_shrink_and_extend);
     RUN_TEST(test_tmpfs::test_grow_past_4k_boundary_and_gap);
     RUN_TEST(test_tmpfs::test_mkdir_readdir_and_nested_lookup);
     RUN_TEST(test_tmpfs::test_stat_file_and_dir);

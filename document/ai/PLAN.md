@@ -12,6 +12,8 @@
 
 > **2026-07-03 production #DF + usability gate 收敛**：修 PIT/LAPIC timer IRQ inline schedule 重入窗口（tick 只记账+timer_queue wake，不在 hard IRQ 内 `schedule()`；timer EOI 移到 tick 后；`net_poll` 改低优先级合作式 yield），`run-buildroot-usability` 已闭环 PASS 并经 `cinux-exit 0` 退出；同步 inittab 用 `/bin/sh` 跑脚本、脚本用绝对 applet 路径。验证：production gate PASS + run-kernel-test-all 两腿 `1101/0` + full build + host `69/69`。 caveat：脚本里的 `PASS pipe` 暂为 console write smoke，真实 `echo | cat` 留 pipe EOF/BusyBox ash follow-up。详见 [note](../notes/2026-07-03-f-usability-pit-redf.md)。
 
+> **2026-07-03 批3 gcc driver 单命令闭环**：`gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out` 已在 Buildroot gcc rootfs 内跑通，输出 `Hello from GCC!` 并通过 `[usability] PASS gcc-compile-run`。修复横跨 forced SIGSEGV、`CLONE_VFORK` parent block + child exec detach、tmpfs truncate/create mode/chmod、file-backed VMA backing+offset 保真、`waitpid(-1)` 返回实际 child pid，以及 Arch GCC 的 `liblto_plugin.so`/`*_asneeded` staging。验证：`run-buildroot-usability` PASS + `run-kernel-test-all` 两腿 `1108/0`。详见 [note](../notes/2026-07-03-f-usability-b3-thread-gcc.md)。
+
 > **范围栅栏**：Buildroot 走 external toolchain（不 internal 编 GCC，那个 CI 顶不住）；target gcc 进 rootfs 一律走 `extract.sh` 拷 host 闭包（as/ld/cc1 + glibc runtime + crt + libgcc + `gcc -H` 头文件闭包），**绝非 Buildroot 编 target gcc**；profile 是 job 属性不进 build_type×sanitizer 矩阵。
 
 ### 设计（三层分离，对齐 Buildroot/Yocto image-builder 范式）
@@ -34,7 +36,7 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 | 0 | 立项 | docs（本段）+ ROADMAP F-USABILITY + todo `f-usability/README.md` | ✅ `e12a386` | docs-only |
 | 1 | 0+1 验证+接管 | Buildroot base defconfig（external+busybox+musl）；`create_ext2_disk.sh` 手搓并存；本地 boot 到 ash；overlay 合并 | ✅ `21b1d6a` | build-console boot 动态 busybox ash `/ #` + 两 leg 1101/0 + host 69/69 |
 | 2 | 2 可用性测试 | overlay 内 `cinux-usability-test.sh`（ls/cat/uname/mkdir+rm/管道/fork-exec）；CI `buildroot-usability` job + `run-buildroot-usability` target（isa-debug-exit gate） | ✅ `33f187b`+`1e08083` | run-buildroot-usability 闭环 PASS + cinux-exit 0 SUCCESS + 两 leg 1101/0 + host 69/69 |
-| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs（材料已齐）；`gcc /smoke/hello.c -o /tmp/a.out && /tmp/a.out`；CI `gcc-smoke` job | 🔄 | CinuxOS 上 gcc 编译+运行 hello，断言 "Hello" |
+| 3 | 3 gcc 冒烟 | extract.sh 闭包进 rootfs（材料已齐）；`gcc /smoke/hello.c -o /tmp/a.out && /tmp/a.out`；CI `gcc-smoke` job | ✅ | CinuxOS 上 gcc 编译+运行 hello，断言 "Hello" |
 | 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++.so + headers；`g++ hello.cpp`；C++ 试金石（异常/STL/pthread） | ⏳ | CinuxOS 上 g++ 编译+运行，C++ 闭环 |
 | 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear sshd（按需） | ⏳ | 按需 |
 

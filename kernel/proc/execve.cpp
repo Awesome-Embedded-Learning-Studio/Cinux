@@ -17,7 +17,7 @@
 #include "kernel/arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"  // F9 batch 1: USER_SIGRETURN_PAGE
-#include "kernel/fs/vfs_lookup.hpp"  // F-USABILITY batch 1c: symlink-following lookup
+#include "kernel/fs/vfs_lookup.hpp"         // F-USABILITY batch 1c: symlink-following lookup
 #include "kernel/lib/aslr.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -177,7 +177,8 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
     // /bin/busybox), replacing the open-coded vfs_resolve + fs->lookup that
     // stopped at the link and failed with "not a regular file".
     const char* cwd = (task->cwd != nullptr) ? task->cwd->path : "/";
-    auto        lr  = cinux::fs::vfs_lookup(path, static_cast<uint32_t>(cinux::fs::LookupFlag::Follow), cwd);
+    auto        lr =
+        cinux::fs::vfs_lookup(path, static_cast<uint32_t>(cinux::fs::LookupFlag::Follow), cwd);
     if (!lr.ok()) {
         cinux::lib::kprintf("[EXECVE] lookup failed: %s\n", path);
         return ExecveResult::FileNotFound;
@@ -232,12 +233,26 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
         return ExecveResult::ReadFailed;
     }
 
-    clear_user_mappings(*task->addr_space);
-    // F10 shell-launch: execve replaces the image, so discard any VMA records
-    // inherited from fork (a fresh AddressSpace has none; a forked child has the
-    // parent's).  Without this the new PT_LOAD insert collides with the stale
-    // set and "VMA record failed" aborts the load.
-    task->addr_space->vmas().clear();
+    if (task->vfork_parent != nullptr) {
+        auto* new_space = new cinux::mm::AddressSpace();
+        if (new_space == nullptr) {
+            cinux::lib::kprintf("[EXECVE] vfork address-space allocation failed\n");
+            return ExecveResult::MapFailed;
+        }
+        auto* old_space  = task->addr_space;
+        task->addr_space = new_space;
+        if (old_space != nullptr && old_space->release()) {
+            delete old_space;
+        }
+        task->addr_space->activate();
+    } else {
+        clear_user_mappings(*task->addr_space);
+        // F10 shell-launch: execve replaces the image, so discard any VMA records
+        // inherited from fork (a fresh AddressSpace has none; a forked child has the
+        // parent's).  Without this the new PT_LOAD insert collides with the stale
+        // set and "VMA record failed" aborts the load.
+        task->addr_space->vmas().clear();
+    }
 
     // Map the main program's PT_LOAD segments (base 0: non-PIE p_vaddr is the
     // absolute load address). load_elf_image is shared with the interpreter
@@ -375,6 +390,11 @@ ExecveResult execve(const char* path, const char* const argv[], const char* cons
     cinux::lib::kprintf("[EXECVE] loaded %s entry=%p%s pid=%d\n", path,
                         reinterpret_cast<void*>(entry_va), has_interp ? " (dynamic)" : "",
                         task->pid);
+
+    if (task->vfork_parent != nullptr) {
+        Scheduler::unblock(task->vfork_parent);
+        task->vfork_parent = nullptr;
+    }
 
     return ExecveResult::Ok;
 }

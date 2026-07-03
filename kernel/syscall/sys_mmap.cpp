@@ -214,9 +214,15 @@ int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, ui
 
     // Preserve the non-protection attributes; replace R/W/X from @p prot.
     using cinux::mm::VmaFlags;
-    const VmaFlags base = existing->flags & (VmaFlags::Anonymous | VmaFlags::Shared |
-                                             VmaFlags::Stack | VmaFlags::Heap);
-    VmaFlags       vma  = base;
+    const VmaFlags    base        = existing->flags & (VmaFlags::Anonymous | VmaFlags::Shared |
+                                                       VmaFlags::Stack | VmaFlags::Heap);
+    cinux::fs::Inode* backing     = existing->backing;
+    uint64_t          file_offset = existing->file_offset + (addr - existing->start);
+    if (backing != nullptr) {
+        cinux::fs::inode_ref(backing);
+    }
+
+    VmaFlags vma = base;
     if ((prot & PROT_READ) != 0) {
         vma |= VmaFlags::Read;
     }
@@ -231,7 +237,18 @@ int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, ui
     (void)task->addr_space->vmas().remove(addr, addr + aligned_len);
     auto ir = task->addr_space->vmas().insert(addr, addr + aligned_len, vma);
     if (!ir.ok()) {
+        if (backing != nullptr) {
+            cinux::fs::inode_unref(backing);
+        }
         return -to_errno(ir.error());
+    }
+    if (backing != nullptr) {
+        if (cinux::mm::VMA* updated = task->addr_space->vmas().find(addr)) {
+            updated->backing     = backing;
+            updated->file_offset = file_offset;
+        } else {
+            cinux::fs::inode_unref(backing);
+        }
     }
 
     // Re-issue PTE permissions for any already-mapped pages (map() overwrites).

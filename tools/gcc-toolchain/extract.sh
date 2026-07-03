@@ -50,8 +50,16 @@ cp_lib() {
 ldd /usr/bin/as /usr/bin/ld 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
-# libgcc_s.so.1 is a GCC runtime ld may pull; ensure present.
-cp_lib /usr/lib/libgcc_s.so.1
+# Arch GCC's default link specs pass -lgcc_s_asneeded and
+# -latomic_asneeded through collect2/ld.  Stage both linker scripts and their
+# targets so the single-command gcc path resolves exactly as it does on host.
+for f in /usr/lib/libgcc_s.so /usr/lib/libgcc_s.so.1 \
+         /usr/lib/libgcc_s_asneeded.so \
+         /usr/lib/libatomic.so /usr/lib/libatomic.so.1 /usr/lib/libatomic.so.1.2.0 \
+         /usr/lib/libatomic_asneeded.so; do
+    cp_lib "$f"
+done
+cp -a /usr/lib/libatomic.a "$ROOT/usr/lib/" 2>/dev/null || true
 
 # --- B4-C1: cc1 (GCC C front end, ~47 MB) + its .so closure.  cc1 pulls
 #     libisl/libmpc/libmpfr/libgmp/libm on top of as/ld's libz/libzstd/libc.
@@ -59,6 +67,20 @@ cp_lib /usr/lib/libgcc_s.so.1
 #     /usr/include (the C headers, ~250 MB) lands with B4-C2 (actual compile). ---
 cp -a "$GCC_INSTALL/cc1" "$ROOT$GCC_INSTALL/cc1"
 ldd "$GCC_INSTALL/cc1" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
+    cp_lib "$lib"
+done
+
+# --- F-USABILITY stage 3: gcc driver + collect2 (single-command `gcc hello.c`
+#     path).  The driver (~1.7 MB) forks cc1/as/ld and pipes their stderr; its
+#     .so closure is just libc + ldso (already staged via as/ld, so the ldd
+#     cp_lib below is a harmless no-op).  collect2 runs at link time to wire
+#     .init_array constructors.  liblto_plugin.so is still needed because GCC's
+#     default link path passes -fuse-linker-plugin even for this tiny C smoke.
+#     cc1plus/lto1/lto-wrapper stay out: C-only smoke (g++ is a later batch). ---
+cp -a /usr/bin/gcc "$ROOT/usr/bin/gcc"
+cp -a "$GCC_INSTALL/collect2" "$ROOT$GCC_INSTALL/collect2"
+cp -a "$(gcc -print-file-name=liblto_plugin.so)" "$ROOT$GCC_INSTALL/liblto_plugin.so"
+ldd /usr/bin/gcc "$GCC_INSTALL/collect2" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
     cp_lib "$lib"
 done
 
