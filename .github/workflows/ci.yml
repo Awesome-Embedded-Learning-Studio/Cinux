@@ -157,3 +157,46 @@ jobs:
           name: busybox-smoke-serial-log
           path: build/busybox-serial.log
           if-no-files-found: ignore
+
+  gcc-smoke:
+    # F-USABILITY stage 3: real native-GCC toolchain gate.  Builds the buildroot
+    # base rootfs (cached), assembles the gcc-profile rootfs (extract.sh gcc
+    # closure), and runs run-buildroot-usability under the production kernel so
+    # `gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out` prints
+    # "Hello from GCC!" and cinux-exits 0.  First run downloads+builds buildroot
+    # (~10 min); cache hits skip that.  Also the long-overdue buildroot CI gate
+    # (stage 2 only had the local run-buildroot-usability target).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ./.github/actions/setup-cinux
+        with:
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2
+          cache-buildroot: 'true'
+
+      - name: Build buildroot base rootfs (cached)
+        run: scripts/build-buildroot.sh build/buildroot-ci cinuxos_base_defconfig
+
+      - name: Build kernel image
+        run: cmake --build build --target image -j$(nproc)
+
+      - name: Assemble gcc rootfs
+        # CI's buildroot target lives under build/buildroot-ci/output (not the
+        # stage-1 default build/buildroot), so point assemble at it via env.
+        run: |
+          BR_TARGET=${{ github.workspace }}/build/buildroot-ci/output/target \
+            cmake --build build --target assemble-gcc-rootfs -j$(nproc)
+
+      - name: Run gcc gate
+        run: |
+          set -o pipefail
+          timeout 120 cmake --build build --target run-buildroot-usability 2>&1 | tee build/gcc-smoke.log
+
+      - name: Upload gcc-smoke log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcc-smoke-log
+          path: build/gcc-smoke.log
+          if-no-files-found: ignore

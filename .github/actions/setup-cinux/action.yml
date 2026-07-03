@@ -21,6 +21,9 @@ inputs:
   cache-busybox:
     description: Cache build/busybox-src + build/musl/busybox (busybox-smoke job).
     default: 'false'
+  cache-buildroot:
+    description: Cache the buildroot tree (src+dl+output) for the gcc-smoke job.
+    default: 'false'
 
 runs:
   using: composite
@@ -60,6 +63,15 @@ runs:
           build/busybox-src/busybox-*
           build/musl/busybox
         key: busybox-${{ runner.os }}-${{ hashFiles('tools/musl/build-busybox.sh', 'tools/musl/busybox-1.36.0.config') }}
+
+    - name: Cache buildroot tree
+      if: inputs.cache-buildroot == 'true'
+      uses: actions/cache@v4
+      with:
+        # src + dl (Bootlin toolchain tarball) + output (compiled rootfs) -- keyed
+        # by defconfig + overlay so a content change forces a rebuild.
+        path: build/buildroot-ci
+        key: buildroot-${{ runner.os }}-${{ hashFiles('rootfs/buildroot/*.defconfig', 'rootfs/overlay/**') }}
 
     - name: Compiler version
       shell: bash

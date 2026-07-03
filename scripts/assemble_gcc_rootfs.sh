@@ -18,8 +18,10 @@ set -euo pipefail
 
 OUTPUT="${1:?usage: $0 <output_img> [buildroot_target] [gcc_root]}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BR_TARGET="${2:-$REPO_ROOT/build/buildroot/output/target}"
-GCC_ROOT="${3:-$REPO_ROOT/build/gcc-root}"
+# BR_TARGET / GCC_ROOT may be overridden via the environment too -- CI uses a
+# buildroot output dir different from the stage-1 default (build/buildroot-ci).
+BR_TARGET="${2:-${BR_TARGET:-$REPO_ROOT/build/buildroot/output/target}}"
+GCC_ROOT="${3:-${GCC_ROOT:-$REPO_ROOT/build/gcc-root}}"
 
 if [ ! -d "$BR_TARGET" ]; then
     echo "[assemble] error: buildroot target dir not found: $BR_TARGET" >&2
