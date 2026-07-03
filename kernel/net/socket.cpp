@@ -84,7 +84,7 @@ SocketOps& socket_ops() {
 
 cinux::lib::ErrorOr<int64_t> SocketOps::read(const cinux::fs::Inode* inode, uint64_t /*offset*/,
                                              void* buf, uint64_t count) {
-    auto* s = static_cast<Socket*>(inode->fs_private);
+    auto* s = socket_of(inode);
     if (s == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -97,7 +97,7 @@ cinux::lib::ErrorOr<int64_t> SocketOps::read(const cinux::fs::Inode* inode, uint
 
 cinux::lib::ErrorOr<int64_t> SocketOps::write(cinux::fs::Inode* inode, uint64_t /*offset*/,
                                               const void* buf, uint64_t count) {
-    auto* s = static_cast<Socket*>(inode->fs_private);
+    auto* s = socket_of(inode);
     if (s == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -128,7 +128,7 @@ void Socket::poll_detach_waiter(cinux::proc::Task*) {
 
 uint32_t SocketOps::poll_events(const cinux::fs::Inode* inode, cinux::proc::Task* waiter,
                                 bool* registered) {
-    auto* s = static_cast<Socket*>(inode->fs_private);
+    auto* s = socket_of(inode);
     if (s == nullptr) {
         if (registered != nullptr) {
             *registered = false;
@@ -139,7 +139,7 @@ uint32_t SocketOps::poll_events(const cinux::fs::Inode* inode, cinux::proc::Task
 }
 
 void SocketOps::poll_detach_waiter(const cinux::fs::Inode* inode, cinux::proc::Task* waiter) {
-    auto* s = static_cast<Socket*>(inode->fs_private);
+    auto* s = socket_of(inode);
     if (s != nullptr) {
         s->poll_detach_waiter(waiter);
     }
@@ -149,7 +149,7 @@ void SocketOps::release(cinux::fs::Inode* inode) {
     // Closing a socket fd: release the protocol resources (unbind the port,
     // stop listening, send FIN).  Each socket fd owns exactly one Socket, so a
     // plain close -> Socket::close() is correct without inode refcounting.
-    auto* s = static_cast<Socket*>(inode->fs_private);
+    auto* s = socket_of(inode);
     if (s != nullptr) {
         s->close();
     }
