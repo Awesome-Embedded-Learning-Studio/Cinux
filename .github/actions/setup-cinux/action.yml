@@ -69,9 +69,12 @@ runs:
       uses: actions/cache@v4
       with:
         # src + dl (Bootlin toolchain tarball) + output (compiled rootfs) -- keyed
-        # by defconfig + overlay so a content change forces a rebuild.
+        # by defconfig + overlay so a content change forces a rebuild.  Pin
+        # concrete files (no globs): a malformed hashFiles glob silently breaks
+        # composite-action injection and every job reports "Can't find
+        # action.yml".
         path: build/buildroot-ci
-        key: buildroot-${{ runner.os }}-${{ hashFiles('rootfs/buildroot/*.defconfig', 'rootfs/overlay/**') }}
+        key: buildroot-${{ runner.os }}-${{ hashFiles('rootfs/buildroot/cinuxos_base_defconfig', 'rootfs/overlay/etc/inittab', 'rootfs/overlay/etc/cinux-usability-test.sh', 'rootfs/overlay/sbin/cinux-exit') }}
 
     - name: Compiler version
       shell: bash
