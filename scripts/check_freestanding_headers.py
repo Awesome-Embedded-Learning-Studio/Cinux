@@ -59,6 +59,7 @@ INCLUDE_RE = re.compile(r'^\s*#\s*include\s*<([a-z0-9_]+)>', re.MULTILINE)
 EXEMPT = {
     "kernel/syscall/sys_pipe.cpp": {"memory"},
     "kernel/syscall/sys_execve.cpp": {"memory"},
+    "kernel/syscall/sys_mount.cpp": {"memory"},  # do_mount_kernel: unique_ptr<TmpFs> RAII over new/delete
 }
 
 
