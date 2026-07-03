@@ -260,15 +260,7 @@ uint32_t Ext2::lookup_in_dir(uint32_t dir_ino, const char* name, uint32_t name_l
             }
 
             if (entry->inode != 0 && entry->name_len == name_len) {
-                bool match = true;
-                for (uint32_t i = 0; i < name_len; ++i) {
-                    if (entry->name[i] != name[i]) {
-                        match = false;
-                        break;
-                    }
-                }
-
-                if (match) {
+                if (dirent_name_matches(*entry, name, name_len)) {
                     return entry->inode;
                 }
             }

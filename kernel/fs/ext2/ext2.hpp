@@ -37,6 +37,21 @@ inline const Ext2CachedInode* ext2_cached_inode(const Inode* inode) {
     return static_cast<const Ext2CachedInode*>(inode->fs_private);
 }
 
+/// @brief Does this dirent's name equal @p name (length + bytes)?
+/// Centralises the byte-compare both directory.cpp (remove-dir-entry) and
+/// init.cpp (inode-by-name) do while walking a directory block.
+inline bool dirent_name_matches(const Ext2DirEntry& entry, const char* name, uint32_t name_len) {
+    if (entry.name_len != name_len) {
+        return false;
+    }
+    for (uint32_t i = 0; i < name_len; ++i) {
+        if (entry.name[i] != name[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // ============================================================
 // Ext2 Filesystem Driver Class
 // ============================================================

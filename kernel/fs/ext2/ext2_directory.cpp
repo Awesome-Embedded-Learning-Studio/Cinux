@@ -166,15 +166,7 @@ bool Ext2::remove_dir_entry(uint32_t /*dir_ino*/, const Ext2Inode& dir_disk, con
             }
 
             if (entry->inode != 0 && entry->name_len == name_len) {
-                bool match = true;
-                for (uint32_t i = 0; i < name_len; ++i) {
-                    if (entry->name[i] != name[i]) {
-                        match = false;
-                        break;
-                    }
-                }
-
-                if (match) {
+                if (dirent_name_matches(*entry, name, name_len)) {
                     out_entry_ino = entry->inode;
 
                     if (pos == 0) {
