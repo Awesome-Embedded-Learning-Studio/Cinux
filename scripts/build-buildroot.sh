@@ -15,6 +15,16 @@ OUTPUT_DIR="${1:?usage: $0 <output_dir> [defconfig]}"
 DEFCONFIG="${2:-cinuxos_base_defconfig}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# buildroot resolves a relative O= relative to its own source tree, not the
+# caller's cwd -- a relative OUTPUT_DIR ends up nested inside the buildroot
+# src dir (e.g. <output>/buildroot-2026.02.3/<output>/output), so every later
+# $OUTPUT_DIR/... lookup (sed on output/.config, images/rootfs.ext2) misses it.
+# Force absolute up front so O=, BR_SRC, cp, sed all agree.
+case "$OUTPUT_DIR" in
+    /*) ;;
+    *) OUTPUT_DIR="$REPO_ROOT/$OUTPUT_DIR" ;;
+esac
+
 BR_VER="2026.02.3"
 BR_TARBALL="buildroot-${BR_VER}.tar.gz"
 BR_URL="https://buildroot.org/downloads/${BR_TARBALL}"
