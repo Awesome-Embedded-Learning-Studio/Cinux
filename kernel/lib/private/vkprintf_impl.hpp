@@ -182,6 +182,24 @@ void vkprintf_impl(OutputFn&& putc_fn, const char* fmt, va_list args) {
             fmt++;
         }
 
+        // Parse optional precision '.*' or '.N' (applies to %s: cap the char
+        // count, so callers can print a non-NUL-terminated buffer like a
+        // readlink() target via %.*s).  Other specifiers ignore it for now.
+        int precision = -1;
+        if (*fmt == '.') {
+            ++fmt;
+            if (*fmt == '*') {
+                precision = va_arg(args, int);
+                ++fmt;
+            } else {
+                precision = 0;
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    ++fmt;
+                }
+            }
+        }
+
         // Parse optional length modifier: l, ll
         // On LP64 (x86_64 Linux) both long and long long are 64-bit.
         int long_count = 0;
@@ -208,10 +226,14 @@ void vkprintf_impl(OutputFn&& putc_fn, const char* fmt, va_list args) {
                 s = "(null)";
             }
 
-            // Measure string length
+            // Measure string length, capped by precision (%.*s / %.Ns) -- needed
+            // for non-NUL-terminated buffers such as readlink() targets.
             int slen = 0;
             while (s[slen] != '\0') {
                 slen++;
+            }
+            if (precision >= 0 && precision < slen) {
+                slen = precision;
             }
 
             if (left_align) {

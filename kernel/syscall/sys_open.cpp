@@ -14,6 +14,7 @@
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/path.hpp"
 #include "kernel/fs/vfs_mount.hpp"
+#include "kernel/fs/vfs_lookup.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/syscall/path_util.hpp"
@@ -125,42 +126,42 @@ uint32_t create_mode_from(uint64_t mode) {
 }  // anonymous namespace
 
 int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mode) {
-    const char*            rel_path = nullptr;
-    cinux::fs::FileSystem* fs       = cinux::fs::vfs_resolve(resolved_path, &rel_path);
-    if (fs == nullptr) {
-        cinux::lib::kprintf("[SYS_OPENAT] No filesystem mounted for '%s'\n", resolved_path);
-        return -kEnoent;
-    }
+    // Resolve through the VFS *with symlink following* (F-USABILITY batch 4).
+    // open() must follow a trailing symlink: ld linking libstdc++.so (a symlink
+    // -> libstdc++.so.6.0.35) otherwise opened the symlink inode itself, and
+    // reading it served the inline target bytes as "file content" -> BFD
+    // "file format not recognized".  The old fs->lookup path only walks directory
+    // components and never follows; vfs_lookup follows intermediates always and
+    // the trailing component under Follow, capping at MAXSYMLINKS=40.
+    constexpr uint32_t kFollow = static_cast<uint32_t>(cinux::fs::LookupFlag::Follow);
+    constexpr uint32_t kParent = static_cast<uint32_t>(cinux::fs::LookupFlag::Parent);
 
-    bool created      = false;
-    auto inode_result = fs->lookup(rel_path);
-    if (!inode_result.ok()) {
+    bool              created = false;
+    cinux::fs::Inode* inode   = nullptr;
+    auto              lr      = cinux::fs::vfs_lookup(resolved_path, kFollow, "/");
+    if (!lr.ok()) {
         // Missing file: create it if O_CREAT, otherwise it is an error.
-        if (!(flags & kOCreat)) {
-            return -to_errno(inode_result.error());
+        if (!(flags & kOCreat) || lr.error() != cinux::lib::Error::NotFound) {
+            return -to_errno(lr.error());
         }
-        cinux::fs::PathBuf parent_buf;
-        const char*        leaf_name = nullptr;
-        uint32_t           name_len  = 0;
-        if (!split_pathname(rel_path, parent_buf, &leaf_name, &name_len)) {
-            return -kEinval;
+        auto plr = cinux::fs::vfs_lookup(resolved_path, kParent, "/");
+        if (!plr.ok() || plr.value().parent == nullptr || plr.value().parent->ops == nullptr) {
+            return plr.ok() ? -kEio : -to_errno(plr.error());
         }
-        auto parent_result = fs->lookup(parent_buf);
-        if (!parent_result.ok() || parent_result.value()->ops == nullptr) {
-            return parent_result.ok() ? -kEio : -to_errno(parent_result.error());
-        }
-        auto create_result =
-            parent_result.value()->ops->create(parent_result.value(), leaf_name, name_len);
+        auto create_result = plr.value().parent->ops->create(plr.value().parent, plr.value().leaf,
+                                                             plr.value().leaf_len);
         if (!create_result.ok()) {
             return -to_errno(create_result.error());
         }
-        created      = true;
-        inode_result = fs->lookup(rel_path);
-        if (!inode_result.ok()) {
-            return -to_errno(inode_result.error());
+        created = true;
+        auto lr2 = cinux::fs::vfs_lookup(resolved_path, kFollow, "/");
+        if (!lr2.ok()) {
+            return -to_errno(lr2.error());
         }
+        inode = lr2.value().target;
+    } else {
+        inode = lr.value().target;
     }
-    cinux::fs::Inode* inode = inode_result.value();
 
     if (created && inode->ops != nullptr) {
         auto chmod_result = inode->ops->chmod(inode, create_mode_from(mode));

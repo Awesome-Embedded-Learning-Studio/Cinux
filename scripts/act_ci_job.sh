@@ -14,11 +14,12 @@
 #   ACT_WORKDIR=/tmp/cinux-act-gcc-smoke
 #   ACT_IMAGE=catthehacker/ubuntu:act-latest
 #   ACT_OFFLINE=0              # allow act to fetch actions if cache is cold
+#   ACT_PREPARE_ONLY=1         # only sync + patch the temp worktree
 
 set -euo pipefail
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
@@ -27,6 +28,7 @@ EVENT="${ACT_EVENT:-push}"
 IMAGE="${ACT_IMAGE:-catthehacker/ubuntu:act-latest}"
 PROXY="${ACT_PROXY:-http://host.docker.internal:7890}"
 OFFLINE="${ACT_OFFLINE:-1}"
+PREPARE_ONLY="${ACT_PREPARE_ONLY:-0}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORKDIR="${ACT_WORKDIR:-/tmp/cinux-act-$JOB}"
@@ -40,17 +42,50 @@ case "$WORKDIR" in
         ;;
 esac
 
-if ! command -v act >/dev/null 2>&1; then
-    echo "[act-ci] act not found on PATH" >&2
-    exit 1
-fi
-
 if ! command -v rsync >/dev/null 2>&1; then
     echo "[act-ci] rsync not found on PATH" >&2
     exit 1
 fi
 
-mkdir -p "$WORKDIR"
+if ! command -v git >/dev/null 2>&1; then
+    echo "[act-ci] git not found on PATH" >&2
+    exit 1
+fi
+
+if [ "$PREPARE_ONLY" = "0" ]; then
+    if ! command -v act >/dev/null 2>&1; then
+        echo "[act-ci] act not found on PATH" >&2
+        exit 1
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[act-ci] docker not found on PATH" >&2
+        echo "[act-ci] enable Docker Desktop WSL integration or expose docker in this shell" >&2
+        exit 1
+    fi
+    if ! docker version >/dev/null 2>&1; then
+        echo "[act-ci] docker daemon is not reachable from this shell" >&2
+        echo "[act-ci] check Docker Desktop is running and WSL integration is enabled" >&2
+        exit 1
+    fi
+    if [ "$OFFLINE" != "0" ] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "[act-ci] image missing locally: $IMAGE" >&2
+        echo "[act-ci] run: docker pull $IMAGE" >&2
+        echo "[act-ci] or set ACT_OFFLINE=0 to let act fetch what it needs" >&2
+        exit 1
+    fi
+fi
+
+if [ -e "$WORKDIR" ] && [ ! -w "$WORKDIR" ]; then
+    if [ -n "${ACT_WORKDIR:-}" ]; then
+        echo "[act-ci] ACT_WORKDIR is not writable: $WORKDIR" >&2
+        echo "[act-ci] choose a new /tmp/cinux-act-* path or fix ownership" >&2
+        exit 1
+    fi
+    WORKDIR="$(mktemp -d "/tmp/cinux-act-$JOB-XXXXXX")"
+    echo "[act-ci] default workdir was not writable; using $WORKDIR"
+else
+    mkdir -p "$WORKDIR"
+fi
 
 echo "[act-ci] syncing worktree -> $WORKDIR"
 rsync -a --delete \
@@ -58,6 +93,8 @@ rsync -a --delete \
     --exclude='/.git' \
     --exclude='/build/' \
     --exclude='/.cache/' \
+    --exclude='/cache.tzst' \
+    --exclude='/manifest.txt' \
     "$REPO_ROOT/" "$WORKDIR/"
 
 python3 - "$WORKDIR" <<'PY'
@@ -104,6 +141,30 @@ text = text.replace(
 )
 action.write_text(text)
 PY
+
+# act resolves the workspace + composite-action paths (./.github/actions/...)
+# against git, but the rsync above excludes the source .git. Give the temp tree
+# a throwaway repo with tracked patched files so act can derive a ref and local
+# action paths. Without this setup-cinux may fail in 47 ms with
+# "repository does not exist", or resolve action.yml to an empty path.
+if [ -e "$WORKDIR/.git" ]; then
+    rm -rf "$WORKDIR/.git"
+fi
+git -C "$WORKDIR" init -q -b main
+cat >> "$WORKDIR/.git/info/exclude" <<'EOF'
+/build/
+/.cache/
+/cache.tzst
+/manifest.txt
+EOF
+git -C "$WORKDIR" add -A
+git -C "$WORKDIR" -c user.email=act@local -c user.name=act \
+    commit -q --allow-empty -m act-base >/dev/null
+
+if [ "$PREPARE_ONLY" != "0" ]; then
+    echo "[act-ci] prepared temp worktree at $WORKDIR"
+    exit 0
+fi
 
 cmd=(
     act "$EVENT"

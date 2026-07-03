@@ -115,6 +115,11 @@ public:
 
     cinux::lib::ErrorOr<void>   mount() override;
     cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
+    // Single-component lookup for the vfs_lookup resolver (F-USABILITY batch 4):
+    // without this the FileSystem base returns ENOSYS and open("/dev/null") etc.
+    // fails.  DevFs is flat (root directory + device nodes only).
+    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
+                                             uint32_t namelen) override;
 
     /// Number of registered device nodes (excludes the root directory).
     uint32_t node_count() const { return node_count_; }

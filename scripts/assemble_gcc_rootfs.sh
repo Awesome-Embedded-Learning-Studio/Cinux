@@ -38,19 +38,24 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cp -a "$BR_TARGET" "$WORK/target"
 
-# buildroot target /lib64 is a symlink -> /lib (musl layout); the GCC closure
-# ships /lib64 as a real dir (glibc ld-linux-x86-64.so.2).  Drop the symlink so
-# the real dir merges in -- both loaders coexist (see header comment).
-rm -f "$WORK/target/lib64"
+# buildroot's musl layout symlinks /lib64 -> /lib and /usr/lib64 -> /usr/lib;
+# the GCC closure ships both as real dirs (glibc's ld-linux-x86-64.so.2 lands in
+# each).  Drop the symlinks so the real dirs merge in -- both loaders coexist
+# (see header comment).  Newer buildroot also adds /usr/lib64 -> /usr/lib, which
+# the C++ closure (cc1plus/libstdc++) started exercising.
+rm -f "$WORK/target/lib64" "$WORK/target/usr/lib64"
 cp -a "$GCC_ROOT/." "$WORK/target/"
 
 # The latest overlay (inittab + usability script) wins over the merged tree.
 cp "$REPO_ROOT/rootfs/overlay/etc/inittab" "$WORK/target/etc/inittab"
 cp "$REPO_ROOT/rootfs/overlay/etc/cinux-usability-test.sh" "$WORK/target/etc/cinux-usability-test.sh"
 
-# 128 MB / 8192 inodes holds base (~5 MB) + GCC closure (~71 MB, ~10k headers).
-# block_size=1024 matches the CinuxOS ext2 driver's expectation.
-dd if=/dev/zero of="$OUTPUT" bs=1M count=128 status=none
-mkfs.ext2 -q -b 1024 -O none -N 8192 -d "$WORK/target" "$OUTPUT"
+# 192 MB / 16384 inodes holds base (~5 MB) + the C/C++ GCC closure (~127 MB:
+# cc1 + cc1plus + libstdc++ + the C and C++ header trees).  Plain ext2 (-O none,
+# no extents): the ext2 driver only *reads* ext4 extents (F6-M5); extent writes
+# are a follow-up, so a writable rootfs must stay ext2 for now.  block_size=1024
+# matches the driver's expectation.
+dd if=/dev/zero of="$OUTPUT" bs=1M count=192 status=none
+mkfs.ext2 -q -b 1024 -O none -N 16384 -d "$WORK/target" "$OUTPUT"
 
 echo "[assemble] gcc rootfs -> $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"

@@ -302,7 +302,7 @@ void signal_exec_default(Task* task, Signal sig) {
         // further down is the same class -- left as follow-up, off the smoke path.)
         cinux::lib::kprintf("[SIGNAL] default kill: tid=%u '%s' by SIG%d\n",
                             static_cast<unsigned>(task->tid), task->name, static_cast<int>(sig));
-        cinux::syscall::sys_exit(static_cast<uint64_t>(sig), 0, 0, 0, 0, 0);  // does not return
+        cinux::syscall::exit_and_reap_current(static_cast<int>(sig));  // WIFSIGNALED (sig in low byte); does not return
         break;
     case SigDefault::kIgnore:
         break;

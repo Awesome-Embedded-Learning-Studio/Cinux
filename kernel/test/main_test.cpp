@@ -482,7 +482,10 @@ static void musl_hello_smoke_entry() {
     int bb_ok = 0, bb_bad = 0;
     for (const auto& a : kBatch) {
         int  st   = bb_run(a.applet, a.a1, a.a2);
-        bool pass = (st == a.expect);
+        // waitpid status is Linux-encoded (F-USABILITY b4): WIFEXITED stores the
+        // code in bits 8-15 (low byte 0), so decode with WEXITSTATUS before
+        // comparing -- exit(1) (e.g. busybox false) is status=256, not 1.
+        bool pass = ((st & 0x7f) == 0) && (((st >> 8) & 0xff) == a.expect);
         cinux::lib::kprintf("[F-ECO] bb %-9s %s (status=%d want=%d)\n", a.applet,
                             pass ? "PASS" : "FAIL", st, a.expect);
         if (pass) {
