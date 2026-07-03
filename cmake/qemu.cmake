@@ -495,6 +495,21 @@ add_custom_target(run-buildroot-usability
     VERBATIM
 )
 
+# F-USABILITY stage 3: assemble the gcc-profile rootfs.ext2 (buildroot base
+# target + GCC toolchain closure via tools/gcc-toolchain/extract.sh).  Produces
+# a rootfs that ships a native gcc driver so `gcc /hello.c` runs on CinuxOS.
+# Assumes the buildroot base target dir (<buildroot>/output/target) already
+# exists (built out-of-tree by buildroot); CMake does not track that dependency.
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
+            ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
+            ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh
+    VERBATIM
+)
+add_custom_target(assemble-gcc-rootfs DEPENDS ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2)
+
 # 测试内核调试模式
 add_custom_target(run-kernel-test-debug
     COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${QEMU_DEBUG_FLAGS}
