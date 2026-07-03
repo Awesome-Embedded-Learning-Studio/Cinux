@@ -60,6 +60,7 @@ EXEMPT = {
     "kernel/syscall/sys_pipe.cpp": {"memory"},
     "kernel/syscall/sys_execve.cpp": {"memory"},
     "kernel/syscall/sys_mount.cpp": {"memory"},  # do_mount_kernel: unique_ptr<TmpFs> RAII over new/delete
+    "kernel/syscall/sys_socket.cpp": {"memory"},  # install_socket_fd: unique_ptr<Socket/Inode> RAII over new/delete
 }
 
 
