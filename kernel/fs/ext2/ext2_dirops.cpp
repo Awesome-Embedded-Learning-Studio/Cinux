@@ -32,7 +32,7 @@ cinux::lib::ErrorOr<int64_t> Ext2DirOps::readdir(const Inode* inode, uint64_t in
         return cinux::lib::Error::InvalidArgument;
     }
 
-    auto*            cached = static_cast<const Ext2CachedInode*>(inode->fs_private);
+    auto*            cached = ext2_cached_inode(inode);
     const Ext2Inode& disk   = cached->disk_inode;
 
     uint32_t bs = ext2_.block_size();
@@ -164,7 +164,7 @@ cinux::lib::ErrorOr<void> Ext2DirOps::stat(const Inode* inode, struct stat* st) 
         return cinux::lib::Error::InvalidArgument;
     }
 
-    auto*            cached = static_cast<const Ext2CachedInode*>(inode->fs_private);
+    auto*            cached = ext2_cached_inode(inode);
     const Ext2Inode& disk   = cached->disk_inode;
 
     // Zero first so the Linux-ABI fields the backend does not set (__pad0,

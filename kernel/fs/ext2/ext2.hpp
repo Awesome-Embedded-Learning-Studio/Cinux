@@ -27,6 +27,16 @@
 
 namespace cinux::fs {
 
+/// ext2-private typed accessor: Inode::fs_private holds the Ext2CachedInode.
+/// Centralises the downcast so a typo'd mask or const-wrong variant can't
+/// spread across the InodeOps call sites.
+inline Ext2CachedInode* ext2_cached_inode(Inode* inode) {
+    return static_cast<Ext2CachedInode*>(inode->fs_private);
+}
+inline const Ext2CachedInode* ext2_cached_inode(const Inode* inode) {
+    return static_cast<const Ext2CachedInode*>(inode->fs_private);
+}
+
 // ============================================================
 // Ext2 Filesystem Driver Class
 // ============================================================
