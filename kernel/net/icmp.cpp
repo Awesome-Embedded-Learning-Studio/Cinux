@@ -64,7 +64,7 @@ void IcmpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev,
         buf.p[2]          = static_cast<uint8_t>(cs >> 8);
         buf.p[3]          = static_cast<uint8_t>(cs & 0xFF);
         // Reply to the request's source; Ipv4Module sources our local address.
-        (void)ipv4.send(dev, ip.src, kIpProtoIcmp, buf.p, n, stack);
+        static_cast<void>(ipv4.send(dev, ip.src, kIpProtoIcmp, buf.p, n, stack));
     } else if (hdr.type == kIcmpEchoReply) {
         ++reply_count_;
         last_id_  = hdr.id;

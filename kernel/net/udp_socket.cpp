@@ -16,6 +16,8 @@
  */
 
 #include "kernel/net/udp_socket.hpp"
+#include "kernel/net/byte_order.hpp"
+#include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
 
@@ -26,81 +28,20 @@
 
 namespace cinux::net {
 
+#ifndef CINUX_HOST_TEST
+using cinux::proc::Scheduler;
+using cinux::proc::Task;
+#endif
+
+
 namespace {
 /// Ephemeral source-port range for auto-binding an unbound UDP socket on sendto
 /// (Linux behaviour).  A small window matches the protocol layer's table cap.
 constexpr uint16_t kEphemeralBase  = 32768;
 constexpr uint16_t kEphemeralRange = 16;
 
-/// Host -> network byte order for 16-bit (sockaddr_in::port is big-endian, the
-/// same layout musl lays out in user space; getsockname/getpeername hand back
-/// the wire-order value).  Local helper -- sys_socket.cpp has its own; do not
-/// reach into it.
-constexpr uint16_t byte_swap16(uint16_t v) {
-    return static_cast<uint16_t>((v >> 8) | (v << 8));
-}
 }  // namespace
 
-#ifndef CINUX_HOST_TEST
-namespace {
-using cinux::proc::Scheduler;
-using cinux::proc::Task;
-
-void wait_enqueue(Task*& head, Task* t) {
-    t->wait_next = nullptr;
-    if (head == nullptr) {
-        head = t;
-        return;
-    }
-    Task* x = head;
-    while (x->wait_next != nullptr) {
-        x = x->wait_next;
-    }
-    x->wait_next = t;
-}
-
-Task* wait_dequeue(Task*& head) {
-    Task* t = head;
-    if (t != nullptr) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-    }
-    return t;
-}
-
-void wake_one(Task*& head) {
-    if (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-void wake_all(Task*& head) {
-    while (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
-void wait_remove(Task*& head, Task* t) {
-    if (head == nullptr || t == nullptr) {
-        return;
-    }
-    if (head == t) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-        return;
-    }
-    Task* prev = head;
-    while (prev->wait_next != nullptr && prev->wait_next != t) {
-        prev = prev->wait_next;
-    }
-    if (prev->wait_next == t) {
-        prev->wait_next = t->wait_next;
-        t->wait_next    = nullptr;
-    }
-}
-}  // namespace
-#endif  // CINUX_HOST_TEST
 
 UdpSocket::UdpSocket(UdpModule& udp, Ipv4Module& ipv4, NetStack& stack, DevRoute route)
     : Socket(kAfInet, kSockDgram), udp_(udp), ipv4_(ipv4), stack_(stack), route_(route) {}
@@ -256,7 +197,7 @@ void UdpSocket::close() {
 #endif
 }
 
-uint32_t UdpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t UdpSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -274,17 +215,15 @@ uint32_t UdpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         wait_enqueue(recv_waiters_, waiter);
     }
 #else
-    (void)waiter;
 #endif
     return mask;
 }
 
-void UdpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void UdpSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(recv_waiters_, waiter);
 #else
-    (void)waiter;
 #endif
 }
 

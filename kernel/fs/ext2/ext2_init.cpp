@@ -50,6 +50,14 @@ bool Ext2::write_block(uint32_t block_num) {
     return true;
 }
 
+bool Ext2::zero_and_write_block(uint32_t blk) {
+    auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
+    for (uint32_t i = 0; i < block_size_; ++i) {
+        dma[i] = 0;
+    }
+    return write_block(blk);
+}
+
 // ============================================================
 // Accessors
 // ============================================================
@@ -252,15 +260,7 @@ uint32_t Ext2::lookup_in_dir(uint32_t dir_ino, const char* name, uint32_t name_l
             }
 
             if (entry->inode != 0 && entry->name_len == name_len) {
-                bool match = true;
-                for (uint32_t i = 0; i < name_len; ++i) {
-                    if (entry->name[i] != name[i]) {
-                        match = false;
-                        break;
-                    }
-                }
-
-                if (match) {
+                if (dirent_name_matches(*entry, name, name_len)) {
                     return entry->inode;
                 }
             }
@@ -326,6 +326,27 @@ cinux::lib::ErrorOr<Inode*> Ext2::lookup(const char* path) {
         return cinux::lib::Error::IOError;
     }
     return result;
+}
+
+// F-USABILITY batch 1a: single-component lookup -- the vfs_lookup layer walks
+// paths one component at a time and follows symlinks at the vfs level. Each
+// step delegates to lookup_in_dir (the same primitive lookup() uses) and hands
+// back the cached Inode.
+cinux::lib::ErrorOr<Inode*> Ext2::lookup_child(const Inode* parent,
+                                               const char* name,
+                                               uint32_t namelen) {
+    if (parent == nullptr || name == nullptr || namelen == 0) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    const uint32_t ino = lookup_in_dir(parent->ino, name, namelen);
+    if (ino == 0) {
+        return cinux::lib::Error::NotFound;
+    }
+    Inode* inode = get_cached_inode(ino);
+    if (inode == nullptr) {
+        return cinux::lib::Error::IOError;
+    }
+    return inode;
 }
 
 }  // namespace cinux::fs

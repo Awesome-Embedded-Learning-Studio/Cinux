@@ -1,22 +1,6 @@
 /**
  * @file kernel/fs/tmpfs/tmpfs.cpp
- * @brief TmpFs implementation: TmpNode tree + file/dir InodeOps + TmpFs backend
- *
- * Defines the on-disk-less entry as TmpNode (heap-allocated, embeds its Inode),
- * the InodeOps subclasses for regular files (TmpFileOps) and directories
- * (TmpDirOps) in an anonymous namespace, then the TmpFs FileSystem backend that
- * owns the root tree.  Pure logic only -- no kprintf, no kernel-only I/O -- so
- * this translation unit links cleanly into both the kernel and (potentially)
- * host unit tests, exactly like devfs.cpp.
- *
- * Recovery convention: every InodeOps override receives an Inode* whose
- * fs_private points at the owning TmpNode (set in TmpFs::mount / make_node);
- * the ops static_cast it back to TmpNode* and reach the owning TmpFs via
- * node->fs (mainly for the per-FS lock and the inode-number allocator).
- *
- * TmpNode is defined in cinux::fs (not the anonymous namespace) so it is the
- * very type the header forward-declares; the header never exposes its layout,
- * so it stays opaque to everyone except this translation unit.
+ * @brief TmpFs implementation: TmpNode tree, InodeOps, and backend.
  */
 
 #include "tmpfs.hpp"
@@ -31,10 +15,6 @@ namespace cinux::fs {
 using cinux::lib::Error;
 using cinux::lib::ErrorOr;
 
-// ============================================================
-// TmpNode -- one heap entry (file or directory), embeds its Inode
-// ============================================================
-
 struct TmpNode {
     Inode    inode;                ///< Embedded; ops + fs_private set by TmpFs
     TmpFs*   fs;                   ///< Owning filesystem (lock + ino allocator)
@@ -48,10 +28,6 @@ struct TmpNode {
 };
 
 namespace {
-
-// ============================================================
-// Shared helpers
-// ============================================================
 
 /// Round @p need up to a whole number of kTmpfsGrowthAlign units (at least one
 /// unit), so a stream of small writes into one file reallocates O(log) times.
@@ -90,7 +66,7 @@ void fill_reg_stat(const TmpNode* node, struct stat* st) {
     memset(st, 0, sizeof(*st));
     st->st_ino     = node->inode.ino;
     st->st_nlink   = 1;
-    st->st_mode    = kTmpfsSIfReg | 0644;
+    st->st_mode    = node->inode.mode;
     st->st_size    = node->size;
     st->st_blksize = 4096;
     st->st_blocks  = (node->size + 511) / 512;
@@ -101,7 +77,7 @@ void fill_dir_stat(const TmpNode* node, struct stat* st) {
     memset(st, 0, sizeof(*st));
     st->st_ino     = node->inode.ino;
     st->st_nlink   = 2;
-    st->st_mode    = kTmpfsSIfDir | 0755;
+    st->st_mode    = node->inode.mode;
     st->st_blksize = 4096;
 }
 
@@ -129,10 +105,6 @@ ErrorOr<int64_t> fill_dot_entry(uint64_t index, char* name, uint64_t name_max) {
     return 0;
 }
 
-// ============================================================
-// Regular files: read / write / stat
-// ============================================================
-
 class TmpFileOps : public InodeOps {
 public:
     ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count) override {
@@ -141,7 +113,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         if (count == 0 || offset >= node->size) {
             return 0;  // nothing requested, or past EOF
         }
@@ -158,7 +129,6 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         if (count == 0) {
             return 0;
         }
@@ -197,15 +167,48 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         fill_reg_stat(node, st);
         return {};
     }
-};
 
-// ============================================================
-// Directories: readdir / create / mkdir / unlink / stat
-// ============================================================
+    ErrorOr<void> truncate(Inode* inode, uint64_t length) override {
+        if (inode == nullptr) {
+            return Error::InvalidArgument;
+        }
+        auto* node = static_cast<TmpNode*>(inode->fs_private);
+        auto  g    = node->fs->lock_.guard();
+        (void)g;
+
+        if (length > node->capacity) {
+            uint64_t newcap = round_up_capacity(length);
+            uint8_t* nd     = new uint8_t[newcap];
+            if (node->size > 0) {
+                memcpy(nd, node->data, node->size);
+            }
+            memset(nd + node->size, 0, length - node->size);
+            delete[] node->data;
+            node->data     = nd;
+            node->capacity = newcap;
+        } else if (length > node->size) {
+            memset(node->data + node->size, 0, length - node->size);
+        }
+
+        node->size       = length;
+        node->inode.size = length;
+        return {};
+    }
+
+    ErrorOr<void> chmod(Inode* inode, uint32_t mode) override {
+        if (inode == nullptr) {
+            return Error::InvalidArgument;
+        }
+        auto* node = static_cast<TmpNode*>(inode->fs_private);
+        auto  g    = node->fs->lock_.guard();
+        (void)g;
+        node->inode.mode = kTmpfsSIfReg | (mode & 07777);
+        return {};
+    }
+};
 
 class TmpDirOps : public InodeOps {
 public:
@@ -216,7 +219,6 @@ public:
         }
         auto* dir = static_cast<TmpNode*>(inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         auto dot = fill_dot_entry(index, name, name_max);
         if (!dot.ok() || dot.value() == 1) {
@@ -256,7 +258,6 @@ public:
         }
         auto* dir = static_cast<TmpNode*>(dir_inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         // Walk the child list keeping a prev pointer so we can splice the
         // matching entry out.
@@ -291,8 +292,18 @@ public:
         }
         auto* node = static_cast<TmpNode*>(inode->fs_private);
         auto  g    = node->fs->lock_.guard();
-        (void)g;
         fill_dir_stat(node, st);
+        return {};
+    }
+
+    ErrorOr<void> chmod(Inode* inode, uint32_t mode) override {
+        if (inode == nullptr) {
+            return Error::InvalidArgument;
+        }
+        auto* node = static_cast<TmpNode*>(inode->fs_private);
+        auto  g    = node->fs->lock_.guard();
+        (void)g;
+        node->inode.mode = kTmpfsSIfDir | (mode & 07777);
         return {};
     }
 
@@ -309,7 +320,6 @@ private:
         }
         auto* dir = static_cast<TmpNode*>(dir_inode->fs_private);
         auto  g   = dir->fs->lock_.guard();
-        (void)g;
 
         if (find_child(dir, name, namelen) != nullptr) {
             return Error::AlreadyExists;
@@ -335,10 +345,6 @@ private:
     }
 };
 
-// ============================================================
-// Tree teardown
-// ============================================================
-
 /// Recursively free @p node and its descendants (depth-first).  Used by the
 /// TmpFs destructor so a stack-local TmpFs (unit tests) leaks nothing.
 void free_tree(TmpNode* node) {
@@ -356,10 +362,6 @@ void free_tree(TmpNode* node) {
 }
 
 }  // anonymous namespace
-
-// ============================================================
-// TmpFs
-// ============================================================
 
 TmpFs::TmpFs() = default;
 
@@ -404,7 +406,6 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
         return Error::InvalidArgument;
     }
     auto g = lock_.guard();
-    (void)g;
 
     if (root_ == nullptr) {
         return Error::IOError;  // not mounted
@@ -446,6 +447,26 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
         }
     }
     return &cur->inode;
+}
+
+// F-USABILITY batch 1a: single-component lookup for the vfs_lookup layer.
+// Recovers the parent TmpNode via fs_private, then delegates to find_child
+// (the same primitive lookup() walks with) under the fs lock.
+ErrorOr<Inode*> TmpFs::lookup_child(const Inode* parent, const char* name, uint32_t namelen) {
+    if (parent == nullptr || name == nullptr || namelen == 0) {
+        return Error::InvalidArgument;
+    }
+    if (parent->type != InodeType::Directory || parent->fs_private == nullptr) {
+        return Error::NotFound;
+    }
+    auto g = lock_.guard();
+    (void)g;
+    TmpNode* parent_node = static_cast<TmpNode*>(parent->fs_private);
+    TmpNode* child       = find_child(parent_node, name, namelen);
+    if (child == nullptr) {
+        return Error::NotFound;
+    }
+    return &child->inode;
 }
 
 }  // namespace cinux::fs

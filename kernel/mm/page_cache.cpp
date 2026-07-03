@@ -160,7 +160,7 @@ void PageCache::invalidate_range(cinux::fs::Inode* inode, uint64_t file_off, uin
             // mirroring get_page()'s initial fill.
             void* v = reinterpret_cast<void*>(p->virt);
             memset(v, 0, ps);
-            (void)inode->ops->read(inode, off, v, ps);
+            static_cast<void>(inode->ops->read(inode, off, v, ps));
         }
         if (off == last) {
             break;

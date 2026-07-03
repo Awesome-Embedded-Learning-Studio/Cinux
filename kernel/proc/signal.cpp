@@ -171,7 +171,7 @@ bool signal_is_uncatchable(Signal sig) {
 // Delivery (batch 2)
 // ============================================================
 
-int signal_send(Task* target, Signal sig) {
+int queue_signal(Task* target, Signal sig, bool force) {
     if (!signal_valid(static_cast<int>(sig))) {
         return -22;  // EINVAL
     }
@@ -179,9 +179,18 @@ int signal_send(Task* target, Signal sig) {
         target->state == TaskState::Dead) {
         return -3;  // ESRCH
     }
+    if (force) {
+        // SMP-safe force: tag the signal per-task so delivery bypasses the
+        // block mask and SIG_IGN.  Do NOT mutate sig_blocked or the shared
+        // SharedSigActions table -- both are read locklessly by other CPUs and
+        // CLONE_SIGHAND siblings, so rewriting them (a) races those readers and
+        // (b) permanently corrupts user disposition across the group.  Mirrors
+        // Linux force_sig_info: force is a delivery-time behaviour, not state.
+        sig_set_add(target->sig_forced, sig);
+    }
     // A signal with disposition SIG_IGN is discarded unless it is uncatchable
     // (SIGKILL/SIGSTOP), which override SIG_IGN.
-    if (!signal_is_uncatchable(sig) &&
+    if (!force && !signal_is_uncatchable(sig) &&
         target->sig_actions->actions[static_cast<int>(sig)].type == HandlerType::kIgnore) {
         return 0;
     }
@@ -211,6 +220,14 @@ int signal_send(Task* target, Signal sig) {
         Scheduler::unblock(target);
     }
     return 0;
+}
+
+int signal_send(Task* target, Signal sig) {
+    return queue_signal(target, sig, /*force=*/false);
+}
+
+int signal_force_send(Task* target, Signal sig) {
+    return queue_signal(target, sig, /*force=*/true);
 }
 
 int killpg(int pgid, Signal sig) {
@@ -252,7 +269,9 @@ int signal_pick_deliverable(Task* task, bool allow_custom) {
     if (task == nullptr) {
         return 0;
     }
-    const SigSet avail = task->sig_pending & ~task->sig_blocked;
+    // Forced signals (sync faults) bypass the block mask; the force tag is
+    // consumed (cleared) in the delivery paths below.
+    const SigSet avail = (task->sig_pending & ~task->sig_blocked) | task->sig_forced;
     for (int n = 1; n <= kSignalMax; n++) {
         if ((avail & (SigSet{1} << n)) == 0) {
             continue;
@@ -325,13 +344,20 @@ void signal_check_and_deliver() {
     if (n == 0) {
         return;
     }
-    Signal           sig = static_cast<Signal>(n);
+    Signal     sig    = static_cast<Signal>(n);
+    const bool forced = (task->sig_forced & (SigSet{1} << n)) != 0;
+    task->sig_forced &= ~(SigSet{1} << n);  // consume the force tag
     const SigAction& act = task->sig_actions->actions[n];
     switch (act.type) {
     case HandlerType::kDefault:
         signal_exec_default(task, sig);  // may not return (terminate)
         break;
     case HandlerType::kIgnore:
+        // A forced signal bypasses SIG_IGN and runs the default action so a
+        // sync fault cannot livelock by returning to the faulting RIP.
+        if (forced) {
+            signal_exec_default(task, sig);
+        }
         break;
     case HandlerType::kCustom:
         // Left pending; delivered on the interrupt return path (batch 3).

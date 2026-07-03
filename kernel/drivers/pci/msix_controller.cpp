@@ -58,6 +58,10 @@ cinux::lib::ErrorOr<void> MsixController::init(const MsixCap& cap, const PCIDevi
     for (uint64_t i = 0; i < table_pages; ++i) {
         if (!cinux::mm::g_vmm.map(kMsixTableVirt + i * kPageSize, table_phys + i * kPageSize,
                                   kMmioFlags)) {
+            // Roll back the table pages already mapped before failing.
+            for (uint64_t j = 0; j < i; ++j) {
+                cinux::mm::g_vmm.unmap(kMsixTableVirt + j * kPageSize);
+            }
             return cinux::lib::Error::OutOfMemory;
         }
     }
@@ -69,6 +73,14 @@ cinux::lib::ErrorOr<void> MsixController::init(const MsixCap& cap, const PCIDevi
     for (uint64_t i = 0; i < pba_pages; ++i) {
         if (!cinux::mm::g_vmm.map(kMsixPbaVirt + i * kPageSize, pba_phys + i * kPageSize,
                                   kMmioFlags)) {
+            // Roll back: the PBA pages mapped so far, plus the whole table region.
+            for (uint64_t j = 0; j < i; ++j) {
+                cinux::mm::g_vmm.unmap(kMsixPbaVirt + j * kPageSize);
+            }
+            for (uint64_t j = 0; j < table_pages; ++j) {
+                cinux::mm::g_vmm.unmap(kMsixTableVirt + j * kPageSize);
+            }
+            table_ = nullptr;  // table region was rolled back above
             return cinux::lib::Error::OutOfMemory;
         }
     }
@@ -95,7 +107,7 @@ void MsixController::program_vector(uint8_t index, uint8_t vector, uint8_t dest_
     e.msg_addr_upper           = 0;
     e.msg_addr_lower           = xapic_message_address(dest_apic_id);
     e.msg_data                 = xapic_message_data(vector);
-    (void)e.vector_control;  // read-back orders the writes
+    static_cast<void>(e.vector_control);  // read-back orders the writes
     e.vector_control = 0;    // unmask
 }
 

@@ -17,6 +17,7 @@
  */
 
 #include "kernel/net/unix_socket.hpp"
+#include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
 
@@ -28,67 +29,11 @@
 namespace cinux::net {
 
 #ifndef CINUX_HOST_TEST
-namespace {
 using cinux::proc::Scheduler;
 using cinux::proc::Task;
+#endif
 
-// Intrusive singly-linked wait queue helpers (identical to tcp_socket.cpp).  A
-// blocked recv'er / accept'er parks on the queue; the producer wake_one()s it.
-void wait_enqueue(Task*& head, Task* t) {
-    t->wait_next = nullptr;
-    if (head == nullptr) {
-        head = t;
-        return;
-    }
-    Task* x = head;
-    while (x->wait_next != nullptr) {
-        x = x->wait_next;
-    }
-    x->wait_next = t;
-}
 
-Task* wait_dequeue(Task*& head) {
-    Task* t = head;
-    if (t != nullptr) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-    }
-    return t;
-}
-
-void wake_one(Task*& head) {
-    if (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-void wake_all(Task*& head) {
-    while (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
-void wait_remove(Task*& head, Task* t) {
-    if (head == nullptr || t == nullptr) {
-        return;
-    }
-    if (head == t) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-        return;
-    }
-    Task* prev = head;
-    while (prev->wait_next != nullptr && prev->wait_next != t) {
-        prev = prev->wait_next;
-    }
-    if (prev->wait_next == t) {
-        prev->wait_next = t->wait_next;
-        t->wait_next    = nullptr;
-    }
-}
-}  // namespace
-#endif  // CINUX_HOST_TEST
 
 // UnixRegistry (in-memory path -> listener map) lives in unix_registry.cpp --
 // split out to keep this file under the 500-line limit.
@@ -425,7 +370,7 @@ void UnixSocket::pair_with(UnixSocket* other) {
 // F8-M5 poll readiness (mirrors TcpSocket)
 // ============================================================
 
-uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t UnixSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -452,18 +397,16 @@ uint32_t UnixSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         }
     }
 #else
-        (void)waiter;
 #endif
     return mask;
 }
 
-void UnixSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void UnixSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(recv_waiters_, waiter);
     wait_remove(accept_waiters_, waiter);
 #else
-        (void)waiter;
 #endif
 }
 

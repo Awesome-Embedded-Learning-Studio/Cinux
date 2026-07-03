@@ -76,6 +76,12 @@ public:
      */
     cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
 
+    /// F-USABILITY batch 1a: single-component lookup for the vfs_lookup layer.
+    /// Resolves one name within parent via lookup_in_dir + get_cached_inode.
+    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent,
+                                             const char* name,
+                                             uint32_t namelen) override;
+
     /**
      * @brief Get the resolved block size in bytes
      * @return Block size (1024, 2048, or 4096)
@@ -124,6 +130,17 @@ public:
      * @return true on success, false on I/O error
      */
     bool write_block(uint32_t block_num);
+
+    /// Zero block_buf_ (block_size_ bytes) then write it to @p blk.  Used at
+    /// every freshly-allocated metadata block (inode/get_or_alloc_block paths)
+    /// so the new block hits disk zeroed.  @return write_block()'s result;
+    /// on false the caller frees @p blk and bails.
+    bool zero_and_write_block(uint32_t blk);
+
+    /// Fill @p st from @p inode's cached on-disk fields.  Shared by Ext2FileOps
+    /// and Ext2DirOps stat(): validates inputs, zeroes the struct (so the unset
+    /// Linux-ABI fields stay 0), and copies the ext2 inode fields.
+    cinux::lib::ErrorOr<void> fill_stat(const Inode* inode, struct stat* st) const;
 
     // ============================================================
     // File / directory mutation
@@ -322,6 +339,17 @@ public:
                           uint32_t name_len, uint32_t& out_entry_ino);
 
 private:
+    /// Located inode (block + byte offset within it); filled by locate_inode_block.
+    struct InodeLoc {
+        uint32_t target_block;
+        uint32_t within_block_offset;
+    };
+
+    /// Locate @p ino's containing block + offset, read_block() it, bounds-check.
+    /// Shared by read_disk_inode / write_disk_inode (the inode-location math is
+    /// identical).  On success block_buf_ holds ino's block; @return true.
+    bool locate_inode_block(uint32_t ino, InodeLoc& out);
+
     // ============================================================
     // Metadata write-back helpers
     // ============================================================

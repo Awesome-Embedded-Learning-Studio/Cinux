@@ -14,6 +14,7 @@
  */
 
 #pragma once
+#include <cinux/ring_buffer.hpp>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -165,11 +166,9 @@ private:
     char   line_buf_[kLineBufSize];
     size_t line_len_;
 
-    // cooked output ring (committed lines + raw bytes waiting for read_cooked)
-    char   cooked_[kCookedBufSize];
-    size_t cooked_head_;
-    size_t cooked_tail_;
-    bool   cooked_full_;
+    // cooked output ring (committed lines + raw bytes waiting for read_cooked).
+    // RingBuffer encapsulates the head/tail/full bookkeeping (formerly 3 fields).
+    cinux::lib::RingBuffer<char, kCookedBufSize> cooked_;
 
     TtySignal pending_signal_;
     bool      eof_pending_;  ///< VEOF on an empty line -- next read returns 0

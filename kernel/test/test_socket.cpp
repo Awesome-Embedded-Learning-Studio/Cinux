@@ -78,11 +78,13 @@ static constexpr uint64_t kFiller = 0;
 void test_socket_dgram_returns_fd() {
     int64_t fd = sys_socket(kAfInet, kSockDgram, 0, kFiller, kFiller, kFiller);
     TEST_ASSERT_GE(fd, 0);
+    current_fd_table().close(static_cast<int>(fd));  // do not leak the fd
 }
 
 void test_socket_stream_returns_fd() {
     int64_t fd = sys_socket(kAfInet, kSockStream, 0, kFiller, kFiller, kFiller);
     TEST_ASSERT_GE(fd, 0);
+    current_fd_table().close(static_cast<int>(fd));  // do not leak the fd
 }
 
 void test_socket_rejects_bad_family() {

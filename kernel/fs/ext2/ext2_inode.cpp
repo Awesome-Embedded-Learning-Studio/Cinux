@@ -20,80 +20,50 @@ namespace cinux::fs {
 // Disk inode read/write
 // ============================================================
 
-bool Ext2::read_disk_inode(uint32_t ino, Ext2Inode& out_inode) {
+bool Ext2::locate_inode_block(uint32_t ino, InodeLoc& out) {
     if (ino == 0) {
         return false;
     }
-
     uint32_t group = (ino - 1) / inodes_per_group_;
-
     if (group >= group_count_) {
-        cinux::lib::kprintf("[EXT2] Inode %u: group %u out of range\n", ino, group);
+        cinux::lib::kprintf("[EXT2] inode %u: group %u out of range\n", ino, group);
         return false;
     }
-
-    uint32_t inode_table_block = bgdt_[group].bg_inode_table;
-    uint32_t index_in_group    = (ino - 1) % inodes_per_group_;
-    uint64_t byte_offset       = static_cast<uint64_t>(index_in_group) * inode_size_;
-
-    uint32_t block_offset        = static_cast<uint32_t>(byte_offset / block_size_);
-    uint32_t within_block_offset = static_cast<uint32_t>(byte_offset % block_size_);
-
-    uint32_t target_block = inode_table_block + block_offset;
-
-    if (!read_block(target_block)) {
-        cinux::lib::kprintf("[EXT2] Failed to read inode block %u\n", target_block);
+    // Inode byte offset within its group's inode table.
+    const uint64_t byte_offset = static_cast<uint64_t>((ino - 1) % inodes_per_group_) * inode_size_;
+    out.target_block        = bgdt_[group].bg_inode_table + static_cast<uint32_t>(byte_offset / block_size_);
+    out.within_block_offset = static_cast<uint32_t>(byte_offset % block_size_);
+    if (!read_block(out.target_block)) {
+        cinux::lib::kprintf("[EXT2] failed to read inode block %u\n", out.target_block);
         return false;
     }
-
-    auto* block_data = reinterpret_cast<const uint8_t*>(block_buf_);
-
-    if (within_block_offset + sizeof(Ext2Inode) > block_size_) {
-        cinux::lib::kprintf("[EXT2] Inode %u crosses block boundary\n", ino);
+    if (out.within_block_offset + sizeof(Ext2Inode) > block_size_) {
+        cinux::lib::kprintf("[EXT2] inode %u crosses block boundary\n", ino);
         return false;
     }
+    return true;
+}
 
-    memcpy(&out_inode, block_data + within_block_offset, sizeof(Ext2Inode));
+bool Ext2::read_disk_inode(uint32_t ino, Ext2Inode& out_inode) {
+    InodeLoc loc{};
+    if (!locate_inode_block(ino, loc)) {
+        return false;
+    }
+    memcpy(&out_inode, reinterpret_cast<const uint8_t*>(block_buf_) + loc.within_block_offset,
+           sizeof(Ext2Inode));
     return true;
 }
 
 bool Ext2::write_disk_inode(uint32_t ino, const Ext2Inode& inode) {
-    if (ino == 0) {
+    InodeLoc loc{};
+    if (!locate_inode_block(ino, loc)) {
         return false;
     }
-
-    uint32_t group = (ino - 1) / inodes_per_group_;
-
-    if (group >= group_count_) {
-        cinux::lib::kprintf("[EXT2] write_disk_inode: ino %u group %u out of range\n", ino, group);
+    memcpy(reinterpret_cast<uint8_t*>(block_buf_) + loc.within_block_offset, &inode, sizeof(Ext2Inode));
+    if (!write_block(loc.target_block)) {
+        cinux::lib::kprintf("[EXT2] write_disk_inode: failed to write block %u\n", loc.target_block);
         return false;
     }
-
-    uint32_t inode_table_block   = bgdt_[group].bg_inode_table;
-    uint32_t index_in_group      = (ino - 1) % inodes_per_group_;
-    uint64_t byte_offset         = static_cast<uint64_t>(index_in_group) * inode_size_;
-    uint32_t block_offset        = static_cast<uint32_t>(byte_offset / block_size_);
-    uint32_t within_block_offset = static_cast<uint32_t>(byte_offset % block_size_);
-    uint32_t target_block        = inode_table_block + block_offset;
-
-    if (!read_block(target_block)) {
-        cinux::lib::kprintf("[EXT2] write_disk_inode: failed to read block %u\n", target_block);
-        return false;
-    }
-
-    if (within_block_offset + sizeof(Ext2Inode) > block_size_) {
-        cinux::lib::kprintf("[EXT2] write_disk_inode: ino %u crosses block boundary\n", ino);
-        return false;
-    }
-
-    auto* block_data = reinterpret_cast<uint8_t*>(block_buf_);
-    memcpy(block_data + within_block_offset, &inode, sizeof(Ext2Inode));
-
-    if (!write_block(target_block)) {
-        cinux::lib::kprintf("[EXT2] write_disk_inode: failed to write block %u\n", target_block);
-        return false;
-    }
-
     return true;
 }
 
@@ -283,14 +253,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(blk)) {
-                free_block(blk);
-                return 0;
-            }
+            if (!zero_and_write_block(blk)) { free_block(blk); return 0; }
 
             disk.i_block[file_block] = blk;
         }
@@ -307,14 +270,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(indirect_blk)) {
-                free_block(indirect_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(indirect_blk)) { free_block(indirect_blk); return 0; }
 
             disk.i_block[EXT2_INDIRECT_BLOCK] = indirect_blk;
         }
@@ -333,14 +289,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(data_blk)) {
-                free_block(data_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(data_blk)) { free_block(data_blk); return 0; }
 
             if (!read_block(indirect_blk)) {
                 return 0;
@@ -386,14 +335,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(di_blk)) {
-                free_block(di_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(di_blk)) { free_block(di_blk); return 0; }
 
             disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK] = di_blk;
         }
@@ -411,14 +353,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(child_blk)) {
-                free_block(child_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(child_blk)) { free_block(child_blk); return 0; }
             // Re-read the double-indirect block: writing the child clobbered buf.
             if (!read_block(di_blk)) {
                 return 0;
@@ -442,14 +377,7 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
                 return 0;
             }
 
-            auto* dma = reinterpret_cast<uint8_t*>(block_buf_);
-            for (uint32_t i = 0; i < block_size_; ++i) {
-                dma[i] = 0;
-            }
-            if (!write_block(data_blk)) {
-                free_block(data_blk);
-                return 0;
-            }
+            if (!zero_and_write_block(data_blk)) { free_block(data_blk); return 0; }
             // Re-read the child block: writing the data block clobbered buf.
             if (!read_block(child_blk)) {
                 return 0;

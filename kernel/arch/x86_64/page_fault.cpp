@@ -13,7 +13,7 @@
 #include <cstring>  // memcpy/memset
 
 #include "arch/x86_64/paging.hpp"
-#include "kernel/arch/x86_64/extable.hpp"    // search_exception_tables
+#include "kernel/arch/x86_64/extable.hpp"     // search_exception_tables
 #include "kernel/arch/x86_64/fault_diag.hpp"  // capture_first_pf + panic + CoW diag
 #include "kernel/arch/x86_64/idt.hpp"         // InterruptFrame
 #include "kernel/arch/x86_64/paging_config.hpp"
@@ -38,6 +38,23 @@ namespace {
 using cinux::arch::InterruptFrame;
 using cinux::lib::kprintf;
 using cinux::mm::g_vmm;
+
+constexpr uint64_t kPageFaultWrite       = 1u << 1;
+constexpr uint64_t kPageFaultInstruction = 1u << 4;
+
+bool vma_allows_fault(cinux::mm::VMA* vma, uint64_t error_code) {
+    if (vma == nullptr) {
+        return false;
+    }
+    if ((error_code & kPageFaultInstruction) != 0) {
+        return cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Exec);
+    }
+    if ((error_code & kPageFaultWrite) != 0) {
+        return cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write);
+    }
+    return cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Read) ||
+           cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write);
+}
 }  // namespace
 
 extern "C" {
@@ -58,9 +75,10 @@ void handle_pf(InterruptFrame* frame) {
     if (extable_entry != nullptr) {
         bool should_demand_page = false;
         if ((frame->error_code & 0x01) == 0 && cinux::arch::is_user_vaddr(fault_addr)) {
-            auto* task         = cinux::proc::Scheduler::current();
-            should_demand_page = task != nullptr && task->addr_space != nullptr &&
-                                 task->addr_space->vmas().find(fault_addr) != nullptr;
+            auto* task = cinux::proc::Scheduler::current();
+            should_demand_page =
+                task != nullptr && task->addr_space != nullptr &&
+                vma_allows_fault(task->addr_space->vmas().find(fault_addr), frame->error_code);
         }
         if (!should_demand_page) {
             const auto* entry = extable_entry;
@@ -164,14 +182,12 @@ void handle_pf(InterruptFrame* frame) {
                 map_flags |= cinux::arch::FLAG_NX;
             }
 
-            if (vma == nullptr) {
+            if (!vma_allows_fault(vma, err)) {
                 // F2-M5: hard VMA gate. A genuine user-mode (err&0x04)
                 // not-present fault on an address with no covering VMA is a
-                // real segfault -- NULL deref, wild pointer, or stack overflow
-                // past the guard. Terminate the offending task. Real SIGSEGV
-                // delivery is F3's job; until then exit_current() is the
-                // SIGSEGV-equivalent kill, and its context_switch() abandons
-                // this frame (the dead task is never resumed here).
+                // real segfault -- NULL deref, wild pointer, stack overflow
+                // past the guard, or access to a PROT_NONE / wrong-permission
+                // mapping. Terminate the offending task.
                 //
                 // Kernel-mode access to a user address (ring-0 test code
                 // probing a test-built mapping, or copy_to/from_user) is NOT a
@@ -181,15 +197,25 @@ void handle_pf(InterruptFrame* frame) {
                 // syscall/execve can mutate the VMA store concurrently.
                 const bool user_fault = (err & 0x04) != 0;
                 if (user_fault && task != nullptr) {
+                    if (vma != nullptr) {
+                        klog_error("segfault VMA: [%p, %p) flags=0x%lx err=0x%lx",
+                                   reinterpret_cast<void*>(vma->start),
+                                   reinterpret_cast<void*>(vma->end),
+                                   static_cast<unsigned long>(vma->flags),
+                                   static_cast<unsigned long>(err));
+                    } else {
+                        klog_error("segfault VMA: none err=0x%lx", static_cast<unsigned long>(err));
+                    }
                     klog_error(
-                        "segfault: tid=%u '%s' rip=%p rsp=%p addr=%p has no VMA -- sending SIGSEGV",
+                        "segfault: tid=%u '%s' rip=%p rsp=%p addr=%p not permitted -- sending "
+                        "SIGSEGV",
                         static_cast<unsigned>(task->tid), task->name ? task->name : "(null)",
                         reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->rsp),
                         reinterpret_cast<void*>(fault_addr));
                     // F3-M1: queue SIGSEGV; the ISR stub's signal_check_deliver_isr
                     // (invoked right after handle_pf returns) delivers it -- to a
                     // custom handler if installed, else the default Terminate.
-                    cinux::proc::signal_send(task, cinux::proc::Signal::kSigsegv);
+                    cinux::proc::signal_force_send(task, cinux::proc::Signal::kSigsegv);
                     return;
                 }
                 // Kernel NULL/near-NULL deref (the nullptr->field pattern): Linux
@@ -214,7 +240,7 @@ void handle_pf(InterruptFrame* frame) {
                     "demand-paged user addr %p has no VMA (kernel-mode/no-task "
                     "context; mapping zero page)",
                     reinterpret_cast<void*>(fault_addr));
-            } else if (vma->backing != nullptr &&
+            } else if (vma != nullptr && vma->backing != nullptr &&
                        !cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Anonymous)) {
                 // File-backed VMA (F2-M4): demand-read the file page through the
                 // page cache instead of mapping a zero page, so mmap'd files
@@ -355,6 +381,17 @@ void handle_pf(InterruptFrame* frame) {
     if ((err & 0x04) != 0) {
         auto* task = cinux::proc::Scheduler::current();
         if (task != nullptr) {
+            cinux::mm::VMA* vma =
+                task->addr_space != nullptr ? task->addr_space->vmas().find(fault_addr) : nullptr;
+            if (vma != nullptr) {
+                klog_error("segfault VMA: [%p, %p) flags=0x%lx backing=%p file_off=0x%lx",
+                           reinterpret_cast<void*>(vma->start), reinterpret_cast<void*>(vma->end),
+                           static_cast<unsigned long>(vma->flags),
+                           reinterpret_cast<void*>(vma->backing),
+                           static_cast<unsigned long>(vma->file_offset));
+            } else {
+                klog_error("segfault VMA: none");
+            }
             klog_error(
                 "segfault: tid=%u '%s' rip=%p rsp=%p addr=%p err=0x%lx (%s %s%s%s) "
                 "-- unresolvable user #PF, sending SIGSEGV",
@@ -362,7 +399,7 @@ void handle_pf(InterruptFrame* frame) {
                 reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->rsp),
                 reinterpret_cast<void*>(fault_addr), static_cast<unsigned long>(err), access,
                 present, reserved, fetch);
-            cinux::proc::signal_send(task, cinux::proc::Signal::kSigsegv);
+            cinux::proc::signal_force_send(task, cinux::proc::Signal::kSigsegv);
             return;
         }
     }

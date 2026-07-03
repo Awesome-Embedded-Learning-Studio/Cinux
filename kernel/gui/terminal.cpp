@@ -105,12 +105,12 @@ void Terminal::on_key(KeyEvent& ev) {
             ch = '\n';
         }
         cinux::debug::trace_char("terminal.on_key before master_write", ch);
-        auto wr = master_inode_->ops->write(master_inode_, 0, &ch, 1);
+        [[maybe_unused]] auto wr = master_inode_->ops->write(master_inode_, 0, &ch, 1);
         if (cinux::debug::kEchoTrace) {
             cinux::lib::kprintf("[ECHO_TRACE] terminal.on_key master_write ok=%d n=%d\n",
                                 wr.ok() ? 1 : 0, wr.ok() ? static_cast<int>(*wr) : -1);
         }
-        (void)wr;  // echo arrives via poll_output (master_read); no local display
+        // echo arrives via poll_output (master_read); no local display
         return;
     }
 

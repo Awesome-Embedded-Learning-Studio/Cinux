@@ -8,77 +8,48 @@ on:
 
 jobs:
   host-tests:
+    # F-QA Q1-5 (ASan+UBSan+gcov) and F-VERIFY M4 (TSan) are mutually exclusive,
+    # so they form a 2-cell matrix instead of two near-identical jobs. The static
+    # memory-layout overlap check (F-VERIFY M0-5) runs on the asan cell only --
+    # it is an ELF static analysis, sanitizer-independent. Both cells build
+    # Release(-O2)+FORTIFY and run `make test_host`.
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, tsan]
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           submodules: recursive
-
-      - name: Install dependencies
-        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3
-
-      - name: Compiler version
-        run: echo "GCC $(gcc --version | head -1)"
-
-      - name: Configure
-        # F-QA: CINUX_HOST_ASAN (ASAN+UBSAN+gcov) is a hard CI gate. DEBT-017
-        # (the host ASAN findings Q1-5 first surfaced — test_pipe OOB,
-        # FDTable File leaks, test_sys_pipe/test_multi_terminal ownership) is
-        # fixed, so host tests now run sanitized: any UAF/OOB/leak in the
-        # InodeOps/mock-layer code fails CI. Verified Release(-O2)+FORTIFY+ASAN
-        # parity locally (F-QA Q2).
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_HOST_ASAN=ON -S .
+      - uses: ./.github/actions/setup-cinux
+        with:
+          apt-packages: qemu-system-x86 e2fsprogs python3
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON ${{ matrix.sanitizer == 'asan' && '-DCINUX_HOST_ASAN=ON' || '-DCINUX_HOST_TSAN=ON' }}
 
       - name: Build
-        run: cmake --build build -j$(nproc)
+        run: |
+          ccache --zero-stats
+          cmake --build build -j$(nproc)
+          ccache --show-stats || true
 
       - name: Check memory layout (region/LBA overlap)
-        # F-VERIFY M0-5: check_memory_layout.py was authored (parses linker
-        # scripts + ELF PT_LOAD segments + disk LBA, exits 1 on overlap) but
-        # never ran in CI -- so the MSI-X/xHCI BAR0 collision class was a
-        # debug session, not a build failure. Wire it so a future static
-        # overlap fails CI. (Runtime-allocated MMIO like xHCI BAR0 can't be
-        # caught here -- that's a runtime self-test, tracked in M3/M6.)
+        if: matrix.sanitizer == 'asan'
+        # F-VERIFY M0-5: parse linker scripts + ELF PT_LOAD segments + disk LBA,
+        # exit 1 on overlap. Wired so a future static overlap fails CI. Runtime
+        # MMIO (xHCI BAR0) can't be caught here -- that's a runtime self-test.
         run: python3 scripts/check_memory_layout.py --mini-elf build/kernel/mini/mini_kernel --big-elf build/kernel/big/big_kernel
 
       - name: Run host tests
         working-directory: build
         run: make test_host
 
-  host-tests-tsan:
-    # F-VERIFY M4: ThreadSanitizer gate for the -pthread host tests (test_pmm
-    # 4-thread alloc/free, test_sync_concurrent 8-thread lock stress). TSan is
-    # mutually exclusive with ASan, so it is a separate job, not a cell on
-    # host-tests. Catches data races in concurrent host test code (lockdep only
-    # does lock-order; it cannot see two threads touching a field with no lock).
-    # Value ramps as M2 links real kernel code into these tests.
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          submodules: recursive
-
-      - name: Install dependencies
-        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3
-
-      - name: Compiler version
-        run: echo "GCC $(gcc --version | head -1)"
-
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_HOST_TSAN=ON -S .
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
-
-      - name: Run host tests (ThreadSanitizer)
-        working-directory: build
-        run: make test_host
-
   line-limits:
+    # Pure-python static gates; no toolchain, so it does NOT use setup-cinux.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -99,71 +70,53 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # F-QA Q1-3: run the QEMU kernel suite across build-type × sanitizer
-        # so UBSAN/LOCKDEP (already opt-in locally) become CI-resident regress
-        # gates, and Debug (-O0) vs Release (-O2) both stay green (FO GOTCHA:
-        # CMAKE_BUILD_TYPE default-empty first -O2 run). Parallel jobs.
+        # F-QA Q1-3: build-type × sanitizer so UBSAN/LOCKDEP become CI-resident
+        # regress gates, and Debug(-O0) vs Release(-O2) both stay green. All 6
+        # cells are load-bearing -- do not cut without an F-QA amendment.
         build_type: [Debug, Release]
         sanitizer: [none, ubsan, lockdep]
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           submodules: recursive
-
-      - name: Install dependencies
-        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3 linux-libc-dev
-
-      - name: Cache musl sysroot (ring-3 smoke)
-        # P3: smoke is ON by default, so CI must build the musl user binaries
-        # (/hello, /forktest) for the ext2 image. Cache the sysroot (~30s musl
-        # build) keyed on build-musl.sh; the script is idempotent on libc.a so a
-        # cache hit skips the download + compile.
-        uses: actions/cache@v4
+      - uses: ./.github/actions/setup-cinux
         with:
-          path: build/musl-sysroot
-          key: musl-${{ runner.os }}-${{ hashFiles('tools/musl/build-musl.sh') }}
+          apt-packages: qemu-system-x86 e2fsprogs python3 linux-libc-dev
+          cache-musl: 'true'
+          cmake-flags: -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCINUX_BUILD_TESTS=ON ${{ matrix.sanitizer == 'ubsan' && '-DCINUX_UBSAN=ON' || '' }} ${{ matrix.sanitizer == 'lockdep' && '-DCINUX_LOCKDEP=ON' || '' }}
 
       - name: Build musl user binaries (/hello, /forktest)
+        # P3: MUSL_HELLO_SMOKE is ON by default, so CI must build /hello +
+        # /forktest for the ext2 image. Cache (in setup-cinux) keys on build-
+        # musl.sh; the script is idempotent on libc.a.
         run: |
           tools/musl/build-musl.sh
           tools/musl/build-hello.sh
           tools/musl/build-forktest.sh
 
-      - name: Compiler version
-        run: echo "GCC $(gcc --version | head -1)"
-
-      - name: Configure
-        run: |
-          ARGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCINUX_BUILD_TESTS=ON"
-          if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then ARGS="$ARGS -DCINUX_UBSAN=ON"; fi
-          if [ "${{ matrix.sanitizer }}" = "lockdep" ]; then ARGS="$ARGS -DCINUX_LOCKDEP=ON"; fi
-          cmake -B build $ARGS -S .
-
       - name: Build
-        # Build twice: the first pass seeds the KALLSYMS table stub and its
-        # POST_BUILD step regenerates the real table from nm; the second pass
-        # compiles the real table into the test kernel (F-INFRA I-5). Without
-        # the second pass the kernel runs with an empty symbol table.
+        # Build twice: first pass seeds the KALLSYMS stub, POST_BUILD regenerates
+        # the real table from nm; second pass compiles it in (F-INFRA I-5).
         run: |
+          ccache --zero-stats
           cmake --build build -j$(nproc)
           cmake --build build -j$(nproc)
+          ccache --show-stats || true
 
       - name: Run kernel tests (single-CPU + -smp 2)
         working-directory: build
-        # F-VERIFY: run-kernel-test-all runs the suite under single-CPU THEN
-        # -smp 2 in one target, so CI can't forget the SMP variant (the 47/47
-        # SMP-空转 blind spot was a process gap, not just code). Either leg
-        # failing fails the build (wrapper maps isa-debug-exit). timeout 300
-        # for two QEMU runs (each <60s normal). tee captures both legs to
-        # serial.log for post-mortem; pipefail propagates the exit code.
+        # F-VERIFY: run-kernel-test-all runs single-CPU THEN -smp 2 in one
+        # target, so CI can't forget the SMP variant. Either leg failing fails
+        # the build (wrapper maps isa-debug-exit). timeout 300 for two QEMU
+        # runs; tee captures both legs to serial.log; pipefail propagates exit.
         run: |
           set -o pipefail
           timeout 300 make run-kernel-test-all 2>&1 | tee serial.log
 
       - name: Check test count did not regress (F-QA Q1-4)
-        # F-QA Q1-4: fail if fewer tests than baseline ran (silent test loss).
-        # Runs only when the QEMU suite itself succeeded.
         working-directory: build
         run: bash ${{ github.workspace }}/scripts/check_test_count.sh serial.log
 
@@ -176,34 +129,24 @@ jobs:
           if-no-files-found: ignore
 
   busybox-smoke:
-    # F-ECO: keep the real userland ecosystem gate as a dedicated job instead
-    # of multiplying BusyBox build/download cost across the Debug/Release x
-    # sanitizer kernel matrix.  This job builds the static BusyBox artifact,
-    # enables CINUX_BUSYBOX_SMOKE, and runs both single-CPU and -smp 2 legs.
+    # F-ECO: real userland ecosystem gate as a dedicated job (not multiplied
+    # across the 6-cell kernel matrix). Builds static BusyBox, enables
+    # CINUX_BUSYBOX_SMOKE, runs both single-CPU and -smp 2 legs.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           submodules: recursive
-
-      - name: Install dependencies
-        run: sudo apt-get install -y qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev
-
-      - name: Cache musl sysroot
-        uses: actions/cache@v4
+      - uses: ./.github/actions/setup-cinux
         with:
-          path: build/musl-sysroot
-          key: musl-${{ runner.os }}-${{ hashFiles('tools/musl/build-musl.sh') }}
-
-      - name: Cache BusyBox source/build
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/busybox-src/busybox-*
-            build/musl/busybox
-          key: busybox-${{ runner.os }}-${{ hashFiles('tools/musl/build-busybox.sh', 'tools/musl/busybox-1.36.0.config') }}
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev
+          cache-musl: 'true'
+          cache-busybox: 'true'
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_BUSYBOX_SMOKE=ON
 
       - name: Build musl + BusyBox user binaries
         run: |
@@ -212,13 +155,12 @@ jobs:
           tools/musl/build-forktest.sh
           tools/musl/build-busybox.sh
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_BUSYBOX_SMOKE=ON -S .
-
       - name: Build
         run: |
+          ccache --zero-stats
           cmake --build build -j$(nproc)
           cmake --build build -j$(nproc)
+          ccache --show-stats || true
 
       - name: Run BusyBox smoke (single-CPU + -smp 2)
         working-directory: build
@@ -232,4 +174,62 @@ jobs:
         with:
           name: busybox-smoke-serial-log
           path: build/busybox-serial.log
+          if-no-files-found: ignore
+
+  gcc-smoke:
+    # F-USABILITY stage 3: real native-GCC toolchain gate.  Builds the buildroot
+    # base rootfs (cached), assembles the gcc-profile rootfs (extract.sh gcc
+    # closure), and runs run-buildroot-usability under the production kernel so
+    # `gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out` prints
+    # "Hello from GCC!" and cinux-exits 0.  First run downloads+builds buildroot
+    # (~10 min); cache hits skip that.  Also the long-overdue buildroot CI gate
+    # (stage 2 only had the local run-buildroot-usability target).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Local action (setup-cinux) needs the repo checked out before the runner
+      # can read its action.yml -- it cannot be the first step of a job by itself.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: recursive
+      - uses: ./.github/actions/setup-cinux
+        with:
+          # cc1 ships in cpp-N (NOT gcc-N) on Debian/Ubuntu; build-essential pulls
+          # gcc/g++ but not cpp, so a fresh runner has the driver + collect2 yet no
+          # cc1.  Install the full gcc-13 family pinned to one version -- extract.sh
+          # mirrors GCC_BIN=gcc-13's whole closure (driver + cc1 + collect2 + libgcc
+          # + crt), so every piece must come from the same N.  (Arch's gcc is one
+          # monolithic package with cc1 inside, which hides this gap locally.)
+          apt-packages: bc cmake xxd qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2
+          cache-buildroot: 'true'
+
+      - name: Build buildroot base rootfs (cached)
+        run: scripts/build-buildroot.sh build/buildroot-ci cinuxos_base_defconfig
+
+      - name: Build kernel image
+        run: cmake --build build --target image -j$(nproc)
+
+      - name: Assemble gcc rootfs
+        # CI's buildroot target lives under build/buildroot-ci/output (not the
+        # stage-1 default build/buildroot), so point assemble at it via env.
+        # Pin GCC_BIN=gcc-13 so extract.sh mirrors that version's whole closure
+        # (driver + cc1 + collect2 + libgcc + crt), matching the apt packages.
+        env:
+          BR_TARGET: ${{ github.workspace }}/build/buildroot-ci/output/target
+          GCC_BIN: gcc-13
+        run: cmake --build build --target assemble-gcc-rootfs -j$(nproc)
+
+      - name: Run gcc gate
+        run: |
+          set -o pipefail
+          timeout 120 cmake --build build --target run-buildroot-usability 2>&1 | tee build/gcc-smoke.log
+
+      - name: Upload gcc-smoke log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcc-smoke-log
+          path: build/gcc-smoke.log
           if-no-files-found: ignore

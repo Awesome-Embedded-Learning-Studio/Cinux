@@ -59,25 +59,26 @@ namespace {
 ArpModule       g_arp;
 IcmpModule      g_icmp;
 NetStack        g_stack;
-UdpModule       g_udp;     // proto 17 -- registered into the L4 table in init()
-TcpModule       g_tcp;     // proto  6 -- registered into the L4 table in init()
-LoopbackDevice  g_lo;      // 127.0.0.1 software NIC (~12 KB; static, never stack)
+UdpModule       g_udp;  // proto 17 -- registered into the L4 table in init()
+TcpModule       g_tcp;  // proto  6 -- registered into the L4 table in init()
+LoopbackDevice  g_lo;   // 127.0.0.1 software NIC (~12 KB; static, never stack)
 Ipv4Module*     g_ipv4    = nullptr;
 E1000NetDevice* g_adapter = nullptr;
 bool            g_ready   = false;
 
 // Background net RX poll driver kthread body.  Drains the e1000 ring via
 // NetStack::poll() and sti/hlt's to keep QEMU's main loop running so SLIRP
-// injects ARP/ICMP replies.  This is a kernel THREAD, not a syscall: being
-// preempted mid-loop is safe (its context is saved via Task::ctx, not a syscall
-// trap frame), so it can sti/hlt freely -- unlike ping(), which must NOT.
-// Spawned once by start_poll_driver().
+// injects ARP/ICMP replies.  This is a kernel THREAD, not a syscall: it owns
+// the sti/hlt wait that ping() must never do.  It yields cooperatively after
+// each poll/sleep round because timer IRQs do not context-switch inline.
+// Spawned once by start_poll_driver() at low priority.
 void net_poll_entry() {
     while (true) {
         g_stack.poll();
         cinux::arch::irq_enable();
         cinux::arch::hlt();
         cinux::arch::irq_disable();
+        cinux::proc::Scheduler::yield();
     }
 }
 
@@ -159,7 +160,7 @@ cinux::lib::ErrorOr<PingResult> ping(Ipv4Addr dst, uint16_t id, uint16_t seq, Rx
     constexpr uint32_t kRounds        = 200;  // re-sends (ARP then ICMP)
     constexpr uint32_t kPumpsPerRound = 4;    // RX drains per send
     for (uint32_t s = 0; s < kRounds && g_icmp.reply_count() == 0; ++s) {
-        (void)g_icmp.send_echo_request(*g_adapter, dst, id, seq, *g_ipv4, g_stack);
+        static_cast<void>(g_icmp.send_echo_request(*g_adapter, dst, id, seq, *g_ipv4, g_stack));
         for (uint32_t k = 0; k < kPumpsPerRound; ++k) {
             if (pump()) {
                 break;
@@ -195,7 +196,11 @@ void start_poll_driver() {
     if (!g_ready) {
         return;  // no NIC -> nothing to poll
     }
-    auto* t = cinux::proc::TaskBuilder().set_entry(net_poll_entry).set_name("net_poll").build();
+    auto* t = cinux::proc::TaskBuilder()
+                  .set_entry(net_poll_entry)
+                  .set_name("net_poll")
+                  .set_priority(200)
+                  .build();
     if (t != nullptr) {
         cinux::proc::Scheduler::add_task(t);
         cinux::lib::kprintf("[net] poll driver started\n");

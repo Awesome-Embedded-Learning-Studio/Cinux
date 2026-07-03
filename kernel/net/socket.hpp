@@ -168,6 +168,12 @@ protected:
     uint8_t shut_ = 0;  ///< shutdown direction bits (do_shutdown)
 };
 
+/// Typed accessor: a socket inode's fs_private holds its Socket.  Centralises
+/// the downcast at the InodeOps/socket syscall seam.
+inline Socket* socket_of(const cinux::fs::Inode* inode) {
+    return static_cast<Socket*>(inode->fs_private);
+}
+
 /// @brief InodeOps shim -- makes a socket fd indistinguishable from a pipe fd to
 ///        the fd layer.  ONE shared stateless instance (socket_ops()); the
 ///        per-fd Socket lives in inode->fs_private.

@@ -164,7 +164,7 @@ private:
     Inode root_inode_{};
 
     /// Sink wired into the console device; null => console writes discard.
-    CharSink* console_sink_;
+    CharSink*     console_sink_;
     /// Read+ioctl backend for /dev/console (B3b); null => read/ioctl return
     /// NotImplemented (host unit tests).
     ConsoleInput* console_input_;
@@ -178,7 +178,8 @@ private:
  * @return true on success, false if mount() or vfs_mount_add(/dev) fails.
  */
 namespace devfs {
-bool init();
+bool   init();
+Inode* console_inode();
 }  // namespace devfs
 
 }  // namespace cinux::fs

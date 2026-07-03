@@ -19,8 +19,8 @@
 
 namespace cinux::syscall {
 
-int64_t do_umount2_kernel(const char* target, uint64_t flags) {
-    (void)flags;  // MNT_FORCE / MNT_DETACH / MNT_EXPIRE not yet modelled
+int64_t do_umount2_kernel(const char* target, [[maybe_unused]] uint64_t flags) {
+    // MNT_FORCE / MNT_DETACH / MNT_EXPIRE not yet modelled
 
     if (target == nullptr || target[0] == '\0') {
         return -kEinval;

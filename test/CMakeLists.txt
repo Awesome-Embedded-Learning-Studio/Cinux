@@ -19,8 +19,8 @@ set(CINUX_HOST_TEST ON)
 # tests. Zero kernel changes — only host test targets. Catches UAF/OOB/UB at
 # the InodeOps/mock layer; --coverage gives gcov compile+link in one flag.
 # TSan is mutually exclusive with ASan, so it is a separate follow-up
-# (-DCINUX_HOST_TSAN build) rather than combined here.
-option(CINUX_HOST_ASAN "Host unit tests: AddressSanitizer + UBSan + gcov coverage" OFF)
+# (-DCINUX_HOST_TSAN build) rather than combined here. (option() in
+# cmake/options.cmake.)
 if(CINUX_HOST_ASAN)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g --coverage)
     add_link_options(-fsanitize=address,undefined --coverage)
@@ -34,8 +34,7 @@ endif()
 # tests (test_pmm concurrent alloc/free, test_sync_concurrent 8-thread lock
 # stress).  Value ramps once M2 links REAL kernel code (sync/scheduler/PMM) into
 # these tests; today it guards the concurrent mirror re-implementations + any new
-# -pthread test.  GCC -fsanitize=thread.
-option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for -pthread tests)" OFF)
+# -pthread test.  GCC -fsanitize=thread.  (option() in cmake/options.cmake.)
 if(CINUX_HOST_TSAN)
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=thread)

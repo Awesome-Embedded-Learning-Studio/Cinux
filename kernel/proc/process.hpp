@@ -165,10 +165,12 @@ struct Task {
     // 3: dispositions live in a refcounted SharedSigActions so CLONE_SIGHAND
     // threads can share them (fork copies, clone may share).
     SharedSigActions* sig_actions{
-        nullptr};                   ///< Refcounted dispositions (never null for a live task)
-    SigSet   sig_pending{0};        ///< Signals pending delivery
-    SigSet   sig_blocked{0};        ///< Signals blocked from delivery
-    uint64_t sig_altstack{0};       ///< sigaltstack base (0 = main stack)
+        nullptr};              ///< Refcounted dispositions (never null for a live task)
+    SigSet   sig_pending{0};   ///< Signals pending delivery
+    SigSet   sig_blocked{0};   ///< Signals blocked from delivery
+    SigSet   sig_forced{0};    ///< Force-delivered (sync faults): bypass block mask + SIG_IGN at
+                               ///< delivery (per-task, SMP-safe)
+    uint64_t sig_altstack{0};  ///< sigaltstack base (0 = main stack)
     uint64_t sig_altstack_size{0};  ///< sigaltstack size in bytes
 
     // F3-M2: futex wait state.  Set in FUTEX_WAIT just before blocking, then
@@ -289,6 +291,9 @@ struct Task {
      *  (futex/waitpid Blocked waits stay non-interruptible until the broader
      *  "interruptible sleep" TODO at signal_send lands).  After fpu_state. */
     bool sigwait_blocked{false};
+
+    /** Parent blocked by CLONE_VFORK until this task execs or exits. */
+    Task* vfork_parent{nullptr};
 };
 
 // F4-followup (SMP migration race): context_switch.S writes from->on_cpu = -1
@@ -422,9 +427,12 @@ constexpr int kWaitNoHang = 1;
  * @param status     Pointer to store the child's exit status (may be nullptr)
  * @param options    Bitmask: kWaitNoHang => return NotExited instead of blocking
  * @param pid_alloc  Reference to the global PID allocator
+ * @param reaped_pid Optional out parameter receiving the child PID that was
+ *                   reaped when the result is Ok.
  * @return WaitpidResult::Ok on success, or an error code
  */
-WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc);
+WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc,
+                      int* reaped_pid = nullptr);
 
 // ============================================================
 // Assembly entry point (C linkage)

@@ -50,6 +50,29 @@ namespace {
 
 void dummy_entry() {}
 
+class CurrentFdTableGuard {
+public:
+    CurrentFdTableGuard() : prev_(Scheduler::current()), task_(new Task()) {
+        task_->fd_table = new cinux::fs::FDTable();
+        Scheduler::set_current(task_);
+    }
+
+    ~CurrentFdTableGuard() {
+        Scheduler::set_current(prev_);
+        delete task_;
+    }
+
+private:
+    Task* prev_;
+    Task* task_;
+};
+
+void reserve_stdio_slots() {
+    for (int fd = 0; fd <= 2; ++fd) {
+        current_fd_table().set(fd, new cinux::fs::File(nullptr, 0, cinux::fs::OpenFlags::RDWR));
+    }
+}
+
 /// Build a pipe into the current (global) fd table; return its two fds.
 void make_pipe(int& rfd, int& wfd) {
     int     kfds[2] = {-1, -1};
@@ -192,12 +215,16 @@ void test_poll_negative_fd_ignored() {
 
 /// A closed fd (no fd-table entry, fd > 2) reports POLLNVAL.
 void test_poll_closed_fd_pollnval() {
+    CurrentFdTableGuard guard;
+    reserve_stdio_slots();
+
     int rfd, wfd;
     make_pipe(rfd, wfd);
+    TEST_ASSERT_GE(rfd, 3);
     current_fd_table().close(rfd);  // rfd is now unused
 
     uint16_t rv = 0;
-    // rfd > 2 (the pipe fds), so an absent entry is a genuine invalid fd.
+    // rfd > 2, so an absent entry is a genuine invalid fd, not legacy stdio.
     TEST_ASSERT_EQ(poll_one_immediate(rfd, kPollIn, rv), 1);
     TEST_ASSERT_EQ(rv, kPollNval);
 

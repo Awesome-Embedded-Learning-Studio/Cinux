@@ -71,6 +71,14 @@ int64_t sys_exit(uint64_t code, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t
         if (task->parent != nullptr) {
             cinux::proc::Scheduler::unblock(task->parent);
         }
+        // CLONE_VFORK: the parent was blocked in clone() until we exec or exit.
+        // execve released it early; on exit we release it here and clear the
+        // back-pointer so the soon-to-be-reaped Task does not dangle.  unblock()
+        // is idempotent (no-op unless the target is actually Blocked).
+        if (task->vfork_parent != nullptr) {
+            cinux::proc::Scheduler::unblock(task->vfork_parent);
+            task->vfork_parent = nullptr;
+        }
         cinux::lib::kprintf("[SYSCALL] sys_exit(%u) from tid=%u '%s'\n",
                             static_cast<unsigned>(code), static_cast<unsigned>(task->tid),
                             task->name);

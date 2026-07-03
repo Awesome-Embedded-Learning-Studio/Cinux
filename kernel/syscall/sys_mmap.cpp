@@ -14,6 +14,7 @@
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
+#include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/inode.hpp"
@@ -38,6 +39,15 @@ constexpr uint64_t align_up(uint64_t v) {
 
 constexpr bool page_aligned(uint64_t v) {
     return (v & (kPageSize - 1)) == 0;
+}
+
+bool fixed_range_ok(uint64_t addr, uint64_t length) {
+    if (!page_aligned(addr) || addr == 0 || addr + length < addr) {
+        return false;
+    }
+    const uint64_t last = addr + length - 1;
+    return cinux::arch::is_user_vaddr(addr) && cinux::arch::is_user_vaddr(last) &&
+           addr + length <= cinux::arch::USER_STACK_TOP;
 }
 
 /// Translate POSIX prot/flags into the kernel VmaFlags (anonymous mappings).
@@ -101,15 +111,15 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
 
     uint64_t map_addr = 0;
     if ((flags & MAP_FIXED) != 0) {
-        // Honour the requested address, validating alignment + mmap window.
-        if (!page_aligned(addr) || addr < cinux::arch::USER_MMAP_BASE ||
-            addr + aligned_len > cinux::arch::USER_MMAP_END || addr + aligned_len < addr) {
+        // Honour the exact user address. MAP_FIXED may intentionally replace a
+        // low PIE/heap VMA, so do not confine it to the high mmap arena.
+        if (!fixed_range_ok(addr, aligned_len)) {
             return -kEinval;
         }
         map_addr = addr;
         // Drop any prior VMA in this range (physical pages freed in batch 2's
         // munmap; here we only fix the bookkeeping).
-        (void)task->addr_space->vmas().remove(map_addr, map_addr + aligned_len);
+        static_cast<void>(task->addr_space->vmas().remove(map_addr, map_addr + aligned_len));
     } else {
         // F9 batch 8 (ASLR): jitter the first-fit hint so each process's
         // mappings start at an unpredictable address. The window bounds stay
@@ -204,9 +214,15 @@ int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, ui
 
     // Preserve the non-protection attributes; replace R/W/X from @p prot.
     using cinux::mm::VmaFlags;
-    const VmaFlags base = existing->flags & (VmaFlags::Anonymous | VmaFlags::Shared |
-                                             VmaFlags::Stack | VmaFlags::Heap);
-    VmaFlags       vma  = base;
+    const VmaFlags    base        = existing->flags & (VmaFlags::Anonymous | VmaFlags::Shared |
+                                                       VmaFlags::Stack | VmaFlags::Heap);
+    cinux::fs::Inode* backing     = existing->backing;
+    uint64_t          file_offset = existing->file_offset + (addr - existing->start);
+    if (backing != nullptr) {
+        cinux::fs::inode_ref(backing);
+    }
+
+    VmaFlags vma = base;
     if ((prot & PROT_READ) != 0) {
         vma |= VmaFlags::Read;
     }
@@ -218,10 +234,21 @@ int64_t sys_mprotect(uint64_t addr, uint64_t length, uint64_t prot, uint64_t, ui
     }
 
     // Re-record the range with the new flags (splits when partially covered).
-    (void)task->addr_space->vmas().remove(addr, addr + aligned_len);
+    static_cast<void>(task->addr_space->vmas().remove(addr, addr + aligned_len));
     auto ir = task->addr_space->vmas().insert(addr, addr + aligned_len, vma);
     if (!ir.ok()) {
+        if (backing != nullptr) {
+            cinux::fs::inode_unref(backing);
+        }
         return -to_errno(ir.error());
+    }
+    if (backing != nullptr) {
+        if (cinux::mm::VMA* updated = task->addr_space->vmas().find(addr)) {
+            updated->backing     = backing;
+            updated->file_offset = file_offset;
+        } else {
+            cinux::fs::inode_unref(backing);
+        }
     }
 
     // Re-issue PTE permissions for any already-mapped pages (map() overwrites).

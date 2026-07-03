@@ -347,7 +347,7 @@ uint32_t Pipe::available() const {
 // poll(2) / select(2) readiness (F8-M5)
 // ============================================================
 
-uint32_t Pipe::poll_read_events(cinux::proc::Task* waiter) {
+uint32_t Pipe::poll_read_events([[maybe_unused]] cinux::proc::Task* waiter) {
     auto     g    = lock_.irq_guard();
     uint32_t mask = 0;
     // POLLIN whenever bytes are buffered; POLLHUP once the writer closes (Linux
@@ -367,12 +367,12 @@ uint32_t Pipe::poll_read_events(cinux::proc::Task* waiter) {
         wait_enqueue(read_waiters_, waiter);
     }
 #else
-    (void)waiter;  // host: no scheduler / wait queues -- readiness only
+    // host: no scheduler / wait queues -- readiness only
 #endif
     return mask;
 }
 
-uint32_t Pipe::poll_write_events(cinux::proc::Task* waiter) {
+uint32_t Pipe::poll_write_events([[maybe_unused]] cinux::proc::Task* waiter) {
     auto     g    = lock_.irq_guard();
     uint32_t mask = 0;
     // POLLOUT while there is space; POLLERR once the reader closes (a further
@@ -388,26 +388,23 @@ uint32_t Pipe::poll_write_events(cinux::proc::Task* waiter) {
         wait_enqueue(write_waiters_, waiter);
     }
 #else
-    (void)waiter;
 #endif
     return mask;
 }
 
-void Pipe::remove_read_waiter(cinux::proc::Task* waiter) {
+void Pipe::remove_read_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(read_waiters_, waiter);
 #else
-    (void)waiter;
 #endif
 }
 
-void Pipe::remove_write_waiter(cinux::proc::Task* waiter) {
+void Pipe::remove_write_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     wait_remove(write_waiters_, waiter);
 #else
-    (void)waiter;
 #endif
 }
 

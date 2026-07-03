@@ -6,7 +6,7 @@
 #include "kernel/drivers/tty/console_tty.hpp"
 
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (console_tty_ioctl)
-#include "kernel/fs/inode.hpp"                  // kPollIn
+#include "kernel/fs/inode.hpp"                 // kPollIn
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/process.hpp"  // Task::pgid
 #include "kernel/proc/scheduler.hpp"
@@ -190,12 +190,15 @@ cinux::lib::ErrorOr<int64_t> console_tty_ioctl(uint32_t request, uint64_t arg) {
         return 0;
     }
     case kTiocsctty: {
-        // B3b: acquire the system console as the controlling terminal.  Minimal
-        // accept-without-steal semantics (a B3b follow-up item): busybox init
-        // calls this once right after setsid(), and the spawned ash needs to
-        // own /dev/console for input.  The full session-leader / steal
-        // enforcement PTY does (pty_device.cpp) is deferred -- /dev/console is
-        // not a PTY and does not route through task->controlling_tty.
+        // Acquire the built-in console as the controlling terminal.  This keeps
+        // /dev/tty meaningful in console-only boots where no PTY slave exists.
+        auto* task = cinux::proc::Scheduler::current();
+        if (task != nullptr) {
+            task->controlling_tty = kConsoleControllingTty;
+            if (ct.foreground_pgid() == 0 && task->pgid != 0) {
+                ct.set_foreground_pgid(task->pgid);
+            }
+        }
         return 0;
     }
     default:

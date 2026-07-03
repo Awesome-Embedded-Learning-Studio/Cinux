@@ -14,6 +14,8 @@
 
 #include <stdint.h>
 
+#include <memory>  // std::make_unique (RAII over raw new/delete; EXEMPT-reviewed)
+
 #include "kernel/errno.hpp"
 #include "kernel/fs/path.hpp"         // PathBuf
 #include "kernel/fs/tmpfs/tmpfs.hpp"  // TmpFs (the one supported runtime fstype)
@@ -29,10 +31,10 @@ using cinux::fs::TmpFs;
 using cinux::fs::vfs_mount_add;
 using cinux::lib::kprintf;
 
-int64_t do_mount_kernel(const char* source, const char* target, const char* fstype,
-                        uint64_t flags) {
-    (void)source;  // tmpfs has no backing device
-    (void)flags;   // MS_* mount flags not yet modelled
+int64_t do_mount_kernel([[maybe_unused]] const char* source, const char* target, const char* fstype,
+                        [[maybe_unused]] uint64_t flags) {
+    // tmpfs has no backing device
+    // MS_* mount flags not yet modelled
 
     if (target == nullptr || fstype == nullptr || target[0] == '\0') {
         return -kEinval;
@@ -40,37 +42,36 @@ int64_t do_mount_kernel(const char* source, const char* target, const char* fsty
 
     // fstype factory.  Only tmpfs is mountable at runtime today; anything else
     // is -ENODEV (Linux: "no such device" for an unknown filesystem type).
-    FileSystem* fs = nullptr;
-    if (strcmp(fstype, "tmpfs") == 0) {
-        auto* tfs = new TmpFs();
-        auto  m   = tfs->mount();
-        if (!m.ok()) {
-            kprintf("[SYS_MOUNT] tmpfs mount() failed: %s\n", cinux::lib::error_string(m.error()));
-            delete tfs;
-            return -to_errno(m.error());
-        }
-        fs = tfs;
-    } else {
+    if (strcmp(fstype, "tmpfs") != 0) {
         kprintf("[SYS_MOUNT] unknown filesystem type '%s'\n", fstype);
         return -kEnodev;
     }
 
-    // owned=true: sys_umount2 will delete this backend when the mount comes down.
+    // unique_ptr owns the TmpFs until mount() succeeds; on failure it is
+    // auto-freed without a manual delete on every error leg.
+    std::unique_ptr<TmpFs> tfs(new TmpFs());
+    auto                   m = tfs->mount();
+    if (!m.ok()) {
+        kprintf("[SYS_MOUNT] tmpfs mount() failed: %s\n", cinux::lib::error_string(m.error()));
+        return -to_errno(m.error());
+    }
+
+    // Hand ownership to the mount table (owned=true: sys_umount2 deletes on unmount).
+    FileSystem* fs = tfs.release();
     if (!vfs_mount_add(target, fs, /*owned=*/true)) {
         kprintf("[SYS_MOUNT] mount table full, cannot mount '%s'\n", target);
-        delete fs;  // reclaim the just-allocated backend
+        delete fs;  // mount table did not take ownership; reclaim
         return -kEnomem;
     }
     return 0;
 }
 
-int64_t sys_mount(uint64_t source_virt, uint64_t target_virt, uint64_t fstype_virt, uint64_t flags,
-                  uint64_t data, uint64_t) {
-    (void)data;  // mount options string -- not yet parsed
+int64_t sys_mount([[maybe_unused]] uint64_t source_virt, uint64_t target_virt, uint64_t fstype_virt, uint64_t flags,
+                  [[maybe_unused]] uint64_t data, uint64_t) {
+    // mount options string -- not yet parsed
 
     // source is unused for tmpfs; do not even read it (tolerates a NULL source,
     // which Linux permits for source-less filesystems like tmpfs).
-    (void)source_virt;
 
     cinux::fs::PathBuf target;
     if (!resolve_user_path(target_virt, target.data())) {

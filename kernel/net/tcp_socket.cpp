@@ -16,6 +16,8 @@
  */
 
 #include "kernel/net/tcp_socket.hpp"
+#include "kernel/net/byte_order.hpp"
+#include "kernel/net/wait_queue.hpp"  // shared intrusive wait queue (was 3-way duplicated)
 
 #include <cstdint>
 
@@ -26,73 +28,13 @@
 
 namespace cinux::net {
 
-namespace {
-/// Swap a 16-bit value host<->network (sockaddr_in::port is big-endian).
-constexpr uint16_t byte_swap16(uint16_t v) {
-    return static_cast<uint16_t>((v >> 8) | (v << 8));
-}
-}  // namespace
-
 #ifndef CINUX_HOST_TEST
-namespace {
 using cinux::proc::Scheduler;
 using cinux::proc::Task;
+#endif
 
-void wait_enqueue(Task*& head, Task* t) {
-    t->wait_next = nullptr;
-    if (head == nullptr) {
-        head = t;
-        return;
-    }
-    Task* x = head;
-    while (x->wait_next != nullptr) {
-        x = x->wait_next;
-    }
-    x->wait_next = t;
-}
 
-Task* wait_dequeue(Task*& head) {
-    Task* t = head;
-    if (t != nullptr) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-    }
-    return t;
-}
 
-void wake_one(Task*& head) {
-    if (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-void wake_all(Task*& head) {
-    while (Task* t = wait_dequeue(head)) {
-        Scheduler::unblock(t);
-    }
-}
-
-/// Unlink @p t from the wait queue (F8-M5 poll detach).  No-op if not queued.
-void wait_remove(Task*& head, Task* t) {
-    if (head == nullptr || t == nullptr) {
-        return;
-    }
-    if (head == t) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
-        return;
-    }
-    Task* prev = head;
-    while (prev->wait_next != nullptr && prev->wait_next != t) {
-        prev = prev->wait_next;
-    }
-    if (prev->wait_next == t) {
-        prev->wait_next = t->wait_next;
-        t->wait_next    = nullptr;
-    }
-}
-}  // namespace
-#endif  // CINUX_HOST_TEST
 
 TcpSocket::TcpSocket(TcpModule& tcp, Ipv4Module& ipv4, NetStack& stack, DevRoute route)
     : Socket(kAfInet, kSockStream), tcp_(tcp), ipv4_(ipv4), stack_(stack), route_(route) {}
@@ -319,7 +261,7 @@ void TcpSocket::close() {
     }
     if (connected_ && !peer_closed_) {
         NetDevice& dev = route_(remote_addr_);
-        (void)tcp_.close(dev, local_port_, remote_addr_, remote_port_, ipv4_, stack_);
+        static_cast<void>(tcp_.close(dev, local_port_, remote_addr_, remote_port_, ipv4_, stack_));
     }
     peer_closed_ = true;
 #ifndef CINUX_HOST_TEST
@@ -328,7 +270,7 @@ void TcpSocket::close() {
 #endif
 }
 
-uint32_t TcpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
+uint32_t TcpSocket::poll_events([[maybe_unused]] cinux::proc::Task* waiter, bool* registered) {
     auto g = lock_.irq_guard();
     if (registered != nullptr) {
         *registered = (waiter != nullptr);
@@ -357,12 +299,11 @@ uint32_t TcpSocket::poll_events(cinux::proc::Task* waiter, bool* registered) {
         }
     }
 #else
-        (void)waiter;
 #endif
     return mask;
 }
 
-void TcpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
+void TcpSocket::poll_detach_waiter([[maybe_unused]] cinux::proc::Task* waiter) {
 #ifndef CINUX_HOST_TEST
     auto g = lock_.irq_guard();
     // A poller parks on at most one of the two queues (per listening/connected
@@ -370,7 +311,6 @@ void TcpSocket::poll_detach_waiter(cinux::proc::Task* waiter) {
     wait_remove(recv_waiters_, waiter);
     wait_remove(accept_waiters_, waiter);
 #else
-        (void)waiter;
 #endif
 }
 

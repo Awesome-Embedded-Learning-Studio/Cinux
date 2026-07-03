@@ -25,6 +25,12 @@ set(BIG_KERNEL_COMPILE_OPTIONS
     -fno-pie
     -fstack-protector-strong -mstack-protector-guard=global  # F9 batch 6: stack canary
     -mcmodel=kernel
+    # Cancel the global _FORTIFY_SOURCE=2 (root CMakeLists CMAKE_CXX_FLAGS_RELEASE)
+    # for the freestanding kernel: gcc fortify rewrites memcpy/memset/memmove to
+    # __memcpy_chk/__memset_chk/__memmove_chk, which the kernel does not provide
+    # (no glibc) -> link failure. Host unit tests keep _FORTIFY_SOURCE (they link
+    # glibc and benefit from the overflow checks); kernel objects opt out here.
+    -U_FORTIFY_SOURCE
     -mno-red-zone
     -Wall
     -Wextra
@@ -117,58 +123,21 @@ add_subdirectory(syscall)
 add_subdirectory(ipc)
 add_subdirectory(net)
 
-# GUI mode: add compile definition and GUI-specific sources
+# Feature switches -> same-named PUBLIC compile definitions on big_kernel_common.
+# The list lives in cmake/options.cmake (CINUX_COMPILE_DEF_OPTS); adding a flag
+# there + a CINUX_COMPILE_DEF_OPTS entry wires a new switch through with no per-
+# flag if() here. CINUX_UBSAN stays separate (below) -- it needs more than a
+# define (sanitizer flag + stub exclusions).
+foreach(_opt IN LISTS CINUX_COMPILE_DEF_OPTS)
+    if(CINUX_${_opt})
+        target_compile_definitions(big_kernel_common PUBLIC CINUX_${_opt})
+    endif()
+endforeach()
+
+# GUI mode: the define above is not enough -- GUI also pulls its own sources
+# subtree (kernel/gui/) and links cinux-gui (see big_kernel / big_kernel_test).
 if(CINUX_GUI)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_GUI)
     add_subdirectory(gui)
-endif()
-
-# F5-M5 USB (xHCI + MSI-X): compile definition so #ifdef CINUX_USB guards in
-# kernel code (e.g. irq_handlers.cpp's default xhci_irq_handler) match the
-# CMake file gate in drivers/CMakeLists.txt.
-if(CINUX_USB)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_USB)
-endif()
-
-# F5-M6 e1000 NIC: compile definition so #ifdef CINUX_NET guards in the test
-# harness (main_test.cpp gates run_e1000_tests) match the CMake file gate in
-# drivers/CMakeLists.txt, and so a CINUX_NET=OFF build links cleanly.
-if(CINUX_NET)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_NET)
-endif()
-
-# F-INFRA I-10: opt-in lockdep checks (assert no spinlock held across schedule()).
-if(CINUX_LOCKDEP)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_LOCKDEP)
-endif()
-
-# F10-M1 batch 6: musl /hello ring-3 smoke in the test harness. After the
-# unit suites pass, the harness enters the real scheduler, forks + execves the
-# musl static /hello (from tools/musl/), and treats a clean exit as the
-# end-to-end pass for batches 3+4+5. Enabled by default; CI builds the artifact
-# before configure. Disable locally with -DCINUX_MUSL_HELLO_SMOKE=OFF.
-if(CINUX_MUSL_HELLO_SMOKE)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_MUSL_HELLO_SMOKE)
-endif()
-
-# F10-M2: musl dynamic /hello-dyn ring-3 smoke (PT_INTERP / interpreter-load path).
-# Off by default; enable locally: cmake -DCINUX_MUSL_DYN_SMOKE=ON ...
-if(CINUX_MUSL_DYN_SMOKE)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_MUSL_DYN_SMOKE)
-endif()
-
-# F-ECO: busybox ring-3 ecosystem smoke. Kept off by default so ordinary local
-# builds and the kernel matrix do not require a BusyBox artifact; the dedicated
-# CI busybox-smoke job builds one and enables this flag.
-if(CINUX_BUSYBOX_SMOKE)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_BUSYBOX_SMOKE)
-endif()
-
-# B4-B2: glibc-dynamic GCC toolchain ring-3 smoke (as --version, then
-# as hello.s -o hello.o). Off by default; enabled locally with
-# -DCINUX_GCC_TOOLCHAIN=ON (also stages the toolchain subset on the ext2 disk).
-if(CINUX_GCC_TOOLCHAIN)
-    target_compile_definitions(big_kernel_common PUBLIC CINUX_GCC_TOOLCHAIN)
 endif()
 
 # F-INFRA I-9: opt-in UBSan. -fsanitize=undefined at COMPILE only (the freestanding

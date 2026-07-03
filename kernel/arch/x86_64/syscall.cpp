@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/gdt.hpp"
+#include "kernel/arch/x86_64/msr.hpp"  // write_msr canonical (local anon-namespace copy removed)
 #include "kernel/errno.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/signal.hpp"
@@ -53,6 +54,7 @@
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
 #include "kernel/syscall/sys_ping.hpp"
+#include "kernel/syscall/sys_cinux_exit.hpp"  // F-USABILITY buildroot gate
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
 #include "kernel/syscall/sys_reboot.hpp"      // B3b: busybox init
@@ -101,12 +103,6 @@ SyscallFn syscall_table[cinux::syscall::SYSCALL_TABLE_SIZE] = {};
 
 uint64_t g_syscall_kernel_rsp = 0;
 
-void write_msr(uint32_t msr, uint64_t value) {
-    __asm__ volatile("wrmsr"
-                     :
-                     : "c"(msr), "a"(static_cast<uint32_t>(value & 0xFFFFFFFF)),
-                       "d"(static_cast<uint32_t>(value >> 32)));
-}
 
 /// Register all built-in syscall handlers into the dispatch table
 void register_builtin_handlers() {
@@ -185,6 +181,9 @@ void register_builtin_handlers() {
 
     // F7: ICMP echo (shell ping).
     syscall_register(SyscallNr::SYS_ping, sys_ping);
+
+    // F-USABILITY: QEMU isa-debug-exit gate (buildroot-usability test script).
+    syscall_register(SyscallNr::SYS_cinux_exit, sys_cinux_exit);
 
     // F7-M6: BSD socket API (Linux x86_64 numbers 41-50).
     syscall_register(SyscallNr::SYS_socket, sys_socket);

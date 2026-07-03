@@ -276,9 +276,10 @@ extern "C" void kernel_main() {
     Scheduler::init();
 
     // F7 follow-up: start the resident net RX poll-driver kthread (sti/hlt +
-    // NetStack::poll). Must come after the scheduler is up; queued here, it runs
-    // once run_first() begins dispatch. Lets ping() yield (default pump) instead
-    // of sti/hlt-ing inside the syscall (the #DF hazard). No-op if no NIC.
+    // NetStack::poll). Must come after the scheduler is up; it runs at low
+    // priority and yields cooperatively after each poll/sleep round. Lets ping()
+    // yield (default pump) instead of sti/hlt-ing inside the syscall (the #DF
+    // hazard). No-op if no NIC.
     cinux::net::start_poll_driver();
 
     auto* init_task =

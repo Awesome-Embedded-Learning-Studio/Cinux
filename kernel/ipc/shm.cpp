@@ -60,7 +60,6 @@ int ShmRegistry::find_free_locked() const {
 
 cinux::lib::ErrorOr<int> ShmRegistry::find_by_key(int key) const {
     auto g = lock_.guard();
-    (void)g;
     int i = find_key_locked(key);
     if (i < 0) {
         return cinux::lib::Error::NotFound;
@@ -71,7 +70,6 @@ cinux::lib::ErrorOr<int> ShmRegistry::find_by_key(int key) const {
 cinux::lib::ErrorOr<int> ShmRegistry::add(int key, uint64_t size, uint64_t phys_base,
                                           uint64_t page_count, uint16_t mode) {
     auto g = lock_.guard();
-    (void)g;
     int i = find_free_locked();
     if (i < 0) {
         return cinux::lib::Error::OutOfMemory;  // table full
@@ -103,7 +101,6 @@ ShmSegment* ShmRegistry::segment(int shmid) {
 
 cinux::lib::ErrorOr<ShmSegment> ShmRegistry::attach(int shmid, uint32_t tid) {
     auto g = lock_.guard();
-    (void)g;
     if (shmid < 0 || shmid >= static_cast<int>(kShmRegistryMax) || !entries_[shmid].used) {
         return cinux::lib::Error::NotFound;
     }
@@ -122,7 +119,6 @@ uint64_t ShmRegistry::detach(int shmid, uint32_t tid, uint64_t* out_count) {
         *out_count = 0;
     }
     auto g = lock_.guard();
-    (void)g;
     if (shmid < 0 || shmid >= static_cast<int>(kShmRegistryMax) || !entries_[shmid].used) {
         return 0;  // stale shmdt: benign no-op
     }
@@ -154,7 +150,6 @@ uint64_t ShmRegistry::mark_removal(int shmid, uint64_t* out_count) {
         *out_count = 0;
     }
     auto g = lock_.guard();
-    (void)g;
     if (shmid < 0 || shmid >= static_cast<int>(kShmRegistryMax) || !entries_[shmid].used) {
         return 0;  // already gone: report nothing to free
     }
@@ -181,7 +176,6 @@ cinux::lib::ErrorOr<void> ShmRegistry::stat(int shmid, shmid_ds* out) const {
         return cinux::lib::Error::InvalidArgument;
     }
     auto g = lock_.guard();
-    (void)g;
     if (shmid < 0 || shmid >= static_cast<int>(kShmRegistryMax) || !entries_[shmid].used) {
         return cinux::lib::Error::NotFound;
     }
@@ -197,7 +191,6 @@ cinux::lib::ErrorOr<void> ShmRegistry::stat(int shmid, shmid_ds* out) const {
 
 cinux::lib::ErrorOr<int> ShmRegistry::find_by_phys(uint64_t phys_base) const {
     auto g = lock_.guard();
-    (void)g;
     int i = find_phys_locked(phys_base);
     if (i < 0) {
         return cinux::lib::Error::NotFound;

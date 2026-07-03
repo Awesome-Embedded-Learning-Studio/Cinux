@@ -8,6 +8,7 @@
  */
 
 #include "mouse.hpp"
+#include "kernel/drivers/ps2/ps2.hpp"  // 8042 controller constants (shared with keyboard)
 
 #include <stdint.h>
 
@@ -25,27 +26,9 @@ using cinux::lib::kprintf;
 
 namespace cinux::drivers {
 
-// ============================================================
-// PS/2 Controller Constants (reused from keyboard, kept local)
-// ============================================================
-
-namespace Ps2Port {
-constexpr uint16_t DATA    = 0x60;  ///< PS/2 data register (read/write)
-constexpr uint16_t STATUS  = 0x64;  ///< PS/2 status register (read)
-constexpr uint16_t COMMAND = 0x64;  ///< PS/2 controller command (write)
-}  // namespace Ps2Port
-
-namespace Ps2Cmd {
-constexpr uint8_t READ_CONFIG  = 0x20;
-constexpr uint8_t WRITE_CONFIG = 0x60;
-constexpr uint8_t ENABLE_AUX   = 0xA8;  ///< Enable auxiliary device (mouse)
-constexpr uint8_t WRITE_AUX    = 0xD4;  ///< Send next byte to auxiliary device
-}  // namespace Ps2Cmd
-
-namespace Ps2Status {
-constexpr uint8_t OUTPUT_FULL = 0x01;
-constexpr uint8_t INPUT_FULL  = 0x02;
-}  // namespace Ps2Status
+// PS/2 controller constants (Ps2Port / Ps2Cmd / Ps2Status) live in
+// kernel/drivers/ps2/ps2.hpp -- shared with keyboard.cpp (the 8042 is one
+// controller wired to both devices).
 
 namespace MouseCmd {
 constexpr uint8_t ENABLE_STREAMING = 0xF4;  ///< Enable mouse streaming mode

@@ -381,10 +381,13 @@ void Scheduler::tick() {
     // for the pick below.
     timer_queue_tick();
 
-    // Preemption policy is owned by the task's scheduling class.  The class
-    // returns true when the running task should yield its time slice.
-    if (cur->sched_class != nullptr && cur->sched_class->task_tick(cur)) {
-        schedule();
+    // Account the running task's quantum, but do not context-switch inline from
+    // the timer IRQ.  context_switch.S enables IF before jumping to the next
+    // task; doing that while the old irq0 frame is still live lets the PIT
+    // re-enter recursively.  Real preemption needs a return-from-IRQ resched
+    // point; until then tasks switch via yield/block/exit only.
+    if (cur->sched_class != nullptr) {
+        (void)cur->sched_class->task_tick(cur);
     }
 }
 

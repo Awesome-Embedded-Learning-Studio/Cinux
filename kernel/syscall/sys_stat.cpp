@@ -47,7 +47,7 @@ int64_t do_stat_inode_kernel(cinux::fs::Inode* inode, cinux::fs::stat* kst) {
 }
 
 constexpr uint64_t kAtEmptyPath = 0x1000;  ///< AT_EMPTY_PATH: stat dirfd itself
-constexpr int64_t  kAtFdcwdStat = -100;    ///< AT_FDCWD
+[[maybe_unused]] constexpr int64_t  kAtFdcwdStat = -100;    ///< AT_FDCWD
 
 }  // anonymous namespace
 
@@ -115,7 +115,7 @@ int64_t sys_fstat(uint64_t fd, uint64_t st_virt, uint64_t, uint64_t, uint64_t, u
 // sys_newfstatat (F10-M1 batch 4) -- musl stat/fstat/lstat entry point
 // ============================================================
 
-int64_t sys_newfstatat(uint64_t dirfd, uint64_t path_virt, uint64_t st_virt, uint64_t flags,
+int64_t sys_newfstatat([[maybe_unused]] uint64_t dirfd, uint64_t path_virt, uint64_t st_virt, uint64_t flags,
                        uint64_t, uint64_t) {
     cinux::fs::stat kst;
     int64_t         rc;
@@ -130,8 +130,6 @@ int64_t sys_newfstatat(uint64_t dirfd, uint64_t path_virt, uint64_t st_virt, uin
         if (!resolve_user_path(path_virt, resolved.data())) {
             return -kEfault;
         }
-        (void)dirfd;
-        (void)kAtFdcwdStat;
         rc = do_stat_kernel(resolved.data(), &kst);
     }
 

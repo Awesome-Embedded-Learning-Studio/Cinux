@@ -150,7 +150,7 @@ void prepare_user_fork_context(Task* child, uint64_t parent_kernel_stack_top) {
 
 void prepare_kernel_fork_context(Task* child, uint64_t parent_stack_start,
                                  uint64_t parent_stack_top, uint64_t child_stack_start,
-                                 uint64_t parent_frame_base,
+                                 uint64_t                    parent_frame_base,
                                  const KernelForkCalleeRegs& caller_regs) {
     // ctx.rsp -> the fork/clone return-address slot (frame_base + 8) in the
     // copied stack; fork_child_trampoline does `xor rax,rax; ret`, so the child
@@ -203,7 +203,7 @@ void prepare_kernel_fork_context(Task* child, uint64_t parent_stack_start,
 
 __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     KernelForkCalleeRegs caller_regs = capture_kernel_fork_callee_regs();
-    auto* parent = Scheduler::current();
+    auto*                parent      = Scheduler::current();
     if (parent == nullptr) {
         cinux::lib::kprintf("[PROC] fork: no current task\n");
         return -1;
@@ -235,6 +235,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     child->cwd         = SharedCwd::create_copy(parent->cwd);
     child->fd_table    = nullptr;  // detached; rebuilt fresh below
     child->sig_pending = 0;
+    child->sig_forced  = 0;  // force tags are per-task; a child never inherits them
     if (child->sig_actions == nullptr || child->cwd == nullptr) {
         cinux::lib::kprintf("[PROC] fork: shared-state copy failed\n");
         delete child;
@@ -260,6 +261,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     // violates the guard's invariant.  See [[smp-migration-context-race]].
     child->on_cpu          = -1;
     child->parent          = parent;
+    child->vfork_parent    = nullptr;
     child->children        = nullptr;
     child->exit_status     = 0;
 
@@ -397,7 +399,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         // shared by pointer; their contents are demand-read in M4 (Page Cache).
         for (cinux::mm::VMA* v = parent->addr_space->vmas().first(); v != nullptr;
              v                 = parent->addr_space->vmas().next(v)) {
-            (void)child->addr_space->vmas().insert(v->start, v->end, v->flags);
+            static_cast<void>(child->addr_space->vmas().insert(v->start, v->end, v->flags));
             if (v->backing != nullptr) {
                 cinux::mm::VMA* cv = child->addr_space->vmas().find(v->start);
                 if (cv != nullptr) {

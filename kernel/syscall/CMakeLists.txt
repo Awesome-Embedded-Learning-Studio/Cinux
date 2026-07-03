@@ -43,6 +43,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_set_tid_address.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_clock_gettime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_ping.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_cinux_exit.cpp  # F-USABILITY: buildroot isa-debug-exit gate
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_socket.cpp
     # F-ECO batch 2: VFS metadata + dirent syscalls.
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_chmod.cpp

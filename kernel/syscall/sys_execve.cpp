@@ -35,11 +35,11 @@ namespace cinux::syscall {
 
 namespace {
 
-/// Max argument/env entries we will copy per vector (also bounds the on-stack
-/// pointer arrays, keeping the handler frame small).
-constexpr int    kMaxArgs     = 32;
+/// Max argument/env entries we will copy per vector. Real toolchain drivers
+/// (gcc -> collect2 -> ld) routinely exceed 32 argv entries even for hello.c.
+constexpr int    kMaxArgs     = 128;
 /// Heap string pool for path + argv + envp strings (avoids kernel-stack pressure).
-constexpr size_t kStrPoolSize = 16384;
+constexpr size_t kStrPoolSize = 65536;
 
 /// Read one NUL-terminated user string into the pool via get_user (byte by
 /// byte). Sets *out to the kernel copy. Returns false on access failure or if
@@ -146,23 +146,26 @@ int64_t sys_execve(uint64_t path_virt, uint64_t argv_virt, uint64_t envp_virt, u
     char*  pool_base = pool.get();
     size_t used      = 0;
 
-    const char* kpath               = nullptr;
-    const char* kargv[kMaxArgs + 1] = {};
-    const char* kenvp[kMaxArgs + 1] = {};
+    auto kargv = std::unique_ptr<const char*[]>(new const char*[kMaxArgs + 1]{});
+    auto kenvp = std::unique_ptr<const char*[]>(new const char*[kMaxArgs + 1]{});
+    if (kargv == nullptr || kenvp == nullptr) {
+        return -cinux::kEnomem;
+    }
+    const char* kpath = nullptr;
 
     if (!read_user_string(path_virt, pool_base, kStrPoolSize, used, &kpath) || kpath == nullptr) {
         cinux::lib::kprintf("[EXECVE] copy path failed -> EFAULT\n");
         return -cinux::kEfault;
     }
-    int argc = copy_strvec(argv_virt, kargv, pool_base, kStrPoolSize, used);
-    int envc = copy_strvec(envp_virt, kenvp, pool_base, kStrPoolSize, used);
+    int argc = copy_strvec(argv_virt, kargv.get(), pool_base, kStrPoolSize, used);
+    int envc = copy_strvec(envp_virt, kenvp.get(), pool_base, kStrPoolSize, used);
     cinux::lib::kprintf("[EXECVE] copy argc=%d envc=%d\n", argc, envc);
     if (argc < 0 || envc < 0) {
         cinux::lib::kprintf("[EXECVE] copy failed -> EINVAL\n");
         return -cinux::kEinval;  // argv/envp too large / inaccessible
     }
 
-    return do_execve_kernel(kpath, kargv, kenvp);
+    return do_execve_kernel(kpath, kargv.get(), kenvp.get());
 }
 
 }  // namespace cinux::syscall

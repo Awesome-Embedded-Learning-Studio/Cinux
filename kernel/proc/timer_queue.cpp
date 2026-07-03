@@ -56,7 +56,6 @@ bool timer_queue_arm(Task* task, uint64_t deadline_ns) {
         return false;
     }
     auto g = g_lock.irq_guard();
-    (void)g;
     // Replace an existing arm for this task (a re-park after a spurious wake).
     for (uint32_t i = 0; i < kMaxTimers; ++i) {
         if (g_entries[i].armed && g_entries[i].task == task) {
@@ -80,7 +79,6 @@ void timer_queue_disarm(Task* task) {
         return;
     }
     auto g = g_lock.irq_guard();
-    (void)g;
     for (uint32_t i = 0; i < kMaxTimers; ++i) {
         if (g_entries[i].armed && g_entries[i].task == task) {
             g_entries[i].armed = false;
@@ -96,7 +94,6 @@ void timer_queue_tick() {
     uint32_t nfired = 0;
     {
         auto g = g_lock.irq_guard();
-        (void)g;
         for (uint32_t i = 0; i < kMaxTimers; ++i) {
             if (g_entries[i].armed && g_entries[i].deadline_ns <= now) {
                 fired[nfired++]    = g_entries[i].task;

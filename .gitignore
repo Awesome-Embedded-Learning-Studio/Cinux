@@ -1,4 +1,7 @@
 build*/
+# rootfs/buildroot/ holds Buildroot defconfig SOURCE (cinuxos_base_defconfig),
+# not a cmake build dir; build*/ matches its name, so un-ignore it explicitly.
+!rootfs/buildroot/
 .cache
 helpers
 # Claude Code: 忽略本地态(settings.local.json 等)，但跟踪项目命令

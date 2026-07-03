@@ -2,6 +2,53 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F-USABILITY — 立项 2026-07-02（分支 `feat/f-usability`，从干净 main `6ba4a88`）
+
+> 横切弧（与 F-VERIFY / F-INFRA / F-ECO 同档）。**目标：证明 CinuxOS 真能跑真实 Linux 用户态**——从「手搓 rootfs 夹具」升级到「Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟」。用户决策（2026-07-02）：① Buildroot 只当 rootfs 骨架打包器（external toolchain + busybox + musl），**GCC 全拷贝不编译**（`tools/gcc-toolchain/extract.sh` 已落地 PR#62）；② CI = PR 内编 + 强缓存（key = defconfig + overlay hash）；③ 手搓 `tools/musl/` + `create_ext2_disk.sh` **并存**留快反馈；④ 只动 ext2 disk（真 rootfs），ext4/ahci 测试夹具 + `build_image.sh` 启动盘不动。
+
+> **可行性已实证**：99 syscall 覆盖 busybox rootfs 硬依赖 56/60，仅缺 `dup3/pipe2/recvmsg/sendmsg`（程序兜底）；**wait4 实际在 slot 61**（注册名 `SYS_waitpid`，handler 吃 4 实参，musl `waitpid` 传 `rusage=NULL` 兼容——之前 grep `SYS_wait4` 漏判）；busybox init PID1（F-ECO B3b）+ cc1→as→ld→./hello 全自举闭环（F12-M2 批4）均已跑通。双 libc 共存（musl 静态 busybox + glibc 动态 cc1）已 work，不用二选一。
+
+> **2026-07-02 接管阻塞修复**：Buildroot 动态 busybox base rootfs 已在 build-console 进入 `/ #`。根因不是 PIE 整体不支持，而是低地址 `MAP_FIXED`、`PROT_NONE` fault 权限、Linux fd 0/1/2 分配/stdin 安装三组语义缺口；同步把 kernel stack 固定 8 KiB 并加 static_assert。验证 run-kernel-test-all 两腿 `1101/0` + host `69/69`。详见 [note](../notes/2026-07-02-f-usability-buildroot-busybox-fix.md)。
+
+> **2026-07-03 production #DF + usability gate 收敛**：修 PIT/LAPIC timer IRQ inline schedule 重入窗口（tick 只记账+timer_queue wake，不在 hard IRQ 内 `schedule()`；timer EOI 移到 tick 后；`net_poll` 改低优先级合作式 yield），`run-buildroot-usability` 已闭环 PASS 并经 `cinux-exit 0` 退出；同步 inittab 用 `/bin/sh` 跑脚本、脚本用绝对 applet 路径。验证：production gate PASS + run-kernel-test-all 两腿 `1101/0` + full build + host `69/69`。 caveat：脚本里的 `PASS pipe` 暂为 console write smoke，真实 `echo | cat` 留 pipe EOF/BusyBox ash follow-up。详见 [note](../notes/2026-07-03-f-usability-pit-redf.md)。
+
+> **2026-07-03 批3 gcc driver 单命令闭环**：`gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out` 已在 Buildroot gcc rootfs 内跑通，输出 `Hello from GCC!` 并通过 `[usability] PASS gcc-compile-run`。修复横跨 forced SIGSEGV、`CLONE_VFORK` parent block + child exec detach、tmpfs truncate/create mode/chmod、file-backed VMA backing+offset 保真、`waitpid(-1)` 返回实际 child pid，以及 Arch GCC 的 `liblto_plugin.so`/`*_asneeded` staging。验证：`run-buildroot-usability` PASS + `run-kernel-test-all` 两腿 `1108/0`。详见 [note](../notes/2026-07-03-f-usability-b3-thread-gcc.md)。
+
+> **范围栅栏**：Buildroot 走 external toolchain（不 internal 编 GCC，那个 CI 顶不住）；target gcc 进 rootfs 一律走 `extract.sh` 拷 host 闭包（as/ld/cc1 + glibc runtime + crt + libgcc + `gcc -H` 头文件闭包），**绝非 Buildroot 编 target gcc**；profile 是 job 属性不进 build_type×sanitizer 矩阵。
+
+### 设计（三层分离，对齐 Buildroot/Yocto image-builder 范式）
+```
+Buildroot 产出(busybox+musl+目录骨架) ──┐
+                                        ├─→ assemble staging ─→ mkfs ─→ rootfs.img
+rootfs/overlay/(CinuxOS 专有:inittab    ─┤   (按 profile)
+  + 可用性测试脚本 + smoke 源码)         │
+extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
+```
+- `rootfs/buildroot/`：Buildroot defconfig（按 profile：base / gcc / g++）
+- `rootfs/overlay/`：checkin 的静态树（定制 inittab、`etc/cinux-usability-test.sh`、`smoke/hello.c`）
+- `scripts/assemble_rootfs.sh <profile> <staging>`：合成 staging 目录
+- `scripts/pack_rootfs.sh <staging> <img> [fstype]`：纯打包（`mkfs.ext2 -d` / mkfs.ext4 / squashfs），零内容
+- CMake 只消费 `rootfs.ext2` 一个文件，不知它怎么来 → 解耦
+
+### 批表
+| 批 | 阶段 | 范围 | 状态 | 验证 |
+|----|------|------|------|------|
+| 0 | 立项 | docs（本段）+ ROADMAP F-USABILITY + todo `f-usability/README.md` | ✅ `e12a386` | docs-only |
+| 1 | 0+1 验证+接管 | Buildroot base defconfig（external+busybox+musl）；`create_ext2_disk.sh` 手搓并存；本地 boot 到 ash；overlay 合并 | ✅ `21b1d6a` | build-console boot 动态 busybox ash `/ #` + 两 leg 1101/0 + host 69/69 |
+| 2 | 2 可用性测试 | overlay 内 `cinux-usability-test.sh`（ls/cat/uname/mkdir+rm/管道/fork-exec）；CI `buildroot-usability` job + `run-buildroot-usability` target（isa-debug-exit gate） | ✅ `33f187b`+`1e08083` | run-buildroot-usability 闭环 PASS + cinux-exit 0 SUCCESS + 两 leg 1101/0 + host 69/69 |
+| 3 | 3 gcc 冒烟 | gcc driver 单命令跑通（codex `ec6d4b0` 5 根因：CLONE_VFORK/forced SIGSEGV/VMA backing-offset/tmpfs O_CREAT mode/waitpid reaped_pid）+ force_sig SMP follow-up（`fb42a1d` per-task sig_forced）+ assemble 固化（`43ad667`）+ worktree 合并（`5deb904`等+`072a588`）+ CI gcc-smoke job（`f9e35cc`，待 push 验） | ✅ 本地 | `gcc -fno-pie -no-pie /hello.c` 输出 Hello from GCC! + gate PASS；两 leg 1108/0 + host 69/0；CI gate 待 push |
+| 4 | 4 g++ 冒烟 | 扩展 extract.sh 拷 cc1plus + libstdc++.so + headers；`g++ hello.cpp`；C++ 试金石（异常/STL/pthread） | ⏳ | CinuxOS 上 g++ 编译+运行，C++ 闭环 |
+| 5 | 5 扩包 | util-linux / coreutils 完整版 / dropbear sshd（按需） | ⏳ | 按需 |
+
+### 风险 / 陷阱
+- **CI 编译时间**：Buildroot external+busybox+musl 首次 5-10min（base profile）；gcc 闭包拷贝秒级。`build-rootfs` job 长 timeout（base 20min），强缓存 key=defconfig+overlay hash，命中秒过。批3 gcc-smoke 的 extract.sh 闭包拷贝秒级、不缓存也行。
+- **镜像体积**：base profile ~8MB ext2；gcc profile（+47MB cc1 + glibc runtime + 头文件闭包）需扩容，g++ 更甚。批3 起按需扩 IMAGE_SIZE 或切 squashfs（只读压缩，headers 文本多压缩比好；可写区走 /tmp tmpfs）。
+- **target vs cross 工具链（头号坑）**：进 rootfs 的 GCC 必须是 **native**（在 CinuxOS 跑、产 CinuxOS 二进制）。extract.sh 拷的是 host 的 cc1/as/ld——它们是 glibc 动态的 host 二进制，靠一起拷进来的 glibc `.so` + `/lib64/ld-linux` 在 CinuxOS 跑（已验证）。**绝不能**塞 Buildroot 的 cross compiler（host 程序，CinuxOS 跑不了，一跑 SIGSEGV 且难分辨是内核还是工具链塞错）。
+- **wait4 命名陷阱**：slot 61 注册名是 `SYS_waitpid` 但就是 Linux `__NR_wait4`（handler 4 实参）。别再 grep `SYS_wait4` 漏判。
+- **Buildroot 本机依赖**：make/gcc/g++/bison/flex ✅；rsync/cpio/ncurses-dev/libssl-dev 阶段0 前置核对。
+- **批3 follow-up（登记，留后续）**：①unhandled syscall stub 降噪（glibc probe：318 getcpu / 435 clone3 / 273 rseq / 334 / 302，现走 ENOSYS fallback 非致命，补 stub 改善 CI log 可读性）；②既有信号 SMP 债（sig_pending/sig_blocked 普通 uint64 无原子，SMP 投递竞态；批3a-2 只修 force_sig 新债 per-task sig_forced，既有债留独立 follow-up）；③gcc driver 残留（collect2 fork-exec + pipe 连 cc1/as/ld，B4-C2+批3 修了大头，残留 pipe EOF 对齐 BusyBox ash）；④CI gcc-smoke 真验（批3b-2 写完结构，push 后验 buildroot 下载/编译 + assemble + gate）；⑤**busybox echo/cat ✅批1+批3 根治（`6d21066`+`8bf1b6d`）**——深挖超 fd 污染，三真 bug：①File 独占语义→double-free，**批1 FileRef RAII**（File 加 `refcount` public 仿 inode + `FileRef` 值类型 copy +ref/析构 -ref 到 0 delete，无 friend，`FDTable` 持 `FileRef`；inode ref 留 FDTable 避栈 Inode 析构 UAF）；②`sys_pipe` 失败路径漏回滚 `do_pipe_kernel` alloc 的 2 fd（生产也漏），加 `tbl.close` 回滚；③`do_read fd=0` legacy `console_tty().read` NotNull-panic（测试 ring0 `current()==null`，short-circuit -EBADF）+ `test_socket_*` 漏 close。治标 close（`7e5f3b6` smoke entry）保留（fd 0/1/2 污染 echo fflush 仍需它清）。两 leg 1108/0 + busybox 14/14 + host 69/69。⭐"盾"现象：批1 绿部分因 pipe 漏 close 泄漏 fd 0/1 当盾（避 test do_open 拿 fd 0），修泄漏暴露 do_read 地雷。**批2（dup/fork/clone 共享 File 对齐 Linux offset，memory `f-eco-b3-b4`）+ reserve/legacy 根治（删治标 close）留 follow-up**，详见 [note](../notes/2026-07-03-f-usability-fileref-fd-pollution.md) + plan `~/.claude/plans/sunny-hopping-journal.md`。
+- **手搓并存纪律**：`tools/musl/` + `create_ext2_disk.sh` 保留作快反馈/调试载体；两条 rootfs 走不同 CMake option/profile，Buildroot 出问题时能定位是内核还是 rootfs 的锅。
+
 ## 🔄 GCC 自举主线 — 批1 tmpfs ✅ ＋ shm merge ✅ ＋ 批2 mount/tmp ✅ ＋ 批3a sys_access ✅ ＋ 批3b busybox init PID1 ✅（已合 main PR#61 `0b82e1b`）→ **批4-a GCC 工具链(glibc 动态)as+ld 自举 ✅ ＋ 批4-C2 cc1 编译→as→ld→./hello 全自举闭环 ✅**（分支 `feat/b4-gcc-toolchain`，未 push）
 
 > **批4-a 收敛（2026-07-02 会话三）**：前次 “as+ld ✅” 曾误判（`./hello` 实际是盘上预放 musl hello），随后 ld 自举拆出并修完 6 个屏蔽层：① file-backed MAP_PRIVATE writable demand-page 缺 CoW（as 重定位污染 libbfd page cache）✅；② file-backed page cache PTE 缺 mapcount ref（进程退出 free 共享 cache 页）✅；③ ext2 unlink indirect 释放中 `free_block` 覆盖单 `block_buf_` + double-indirect 漏释放 ✅；④ ext2 write 直写磁盘绕过 PageCache，as 写 `/hello.o` 后 ld mmap/read 命中 stale cached page ✅（`PageCache::invalidate_range`）；⑤ uaccess extable 早于懒缺页，`read()` 大 buffer 跨未触达 malloc/mmap 页被误判 `-EFAULT` ✅（有效 VMA not-present faults 先 demand-page 再恢复 `rep movsb`）；⑥ toolchain staging 漏 link-time `libc.so/libc_nonshared.a/libc.a` ✅。验证：手动 TCG 同一测试镜像 `1098 passed,0 failed` + `[B4-B3] ld /hello.o -o /hello PASS` + `Hello from GCC!` + `./hello PASS`。

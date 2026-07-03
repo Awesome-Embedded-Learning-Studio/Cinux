@@ -151,7 +151,7 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
             return -kEinval;
         }
         virt = a;
-        (void)task->addr_space->vmas().remove(virt, virt + len);  // drop any overlap
+        static_cast<void>(task->addr_space->vmas().remove(virt, virt + len));  // drop any overlap
     } else {
         const uint64_t hint = cinux::arch::USER_MMAP_BASE + cinux::lib::aslr_mmap_offset();
         auto           area = task->addr_space->vmas().find_free_area(hint, len);
@@ -190,9 +190,9 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
             for (uint64_t j = 0; j < i; ++j) {
                 const uint64_t pv = seg.phys_base + j * kPageSize;
                 task->addr_space->unmap(virt + j * kPageSize);
-                (void)cinux::mm::g_pmm.mapcount_dec_and_test(pv);  // undo the inc
+                static_cast<void>(cinux::mm::g_pmm.mapcount_dec_and_test(pv));  // undo the inc
             }
-            (void)task->addr_space->vmas().remove(virt, virt + len);
+            static_cast<void>(task->addr_space->vmas().remove(virt, virt + len));
             ShmRegistry::instance().detach(static_cast<int>(shmid), tid, nullptr);
             return -kEnomem;
         }
@@ -244,10 +244,10 @@ int64_t sys_shmdt(uint64_t addr, uint64_t, uint64_t, uint64_t, uint64_t, uint64_
         task->addr_space->unmap(v);
         // Undo the attach-time inc; the segment owns the frames (the alloc-set
         // ref keeps mapcount > 0), so dec never frees here.
-        (void)cinux::mm::g_pmm.mapcount_dec_and_test(p);
+        static_cast<void>(cinux::mm::g_pmm.mapcount_dec_and_test(p));
     }
 
-    (void)task->addr_space->vmas().remove(addr, addr + len);
+    static_cast<void>(task->addr_space->vmas().remove(addr, addr + len));
 
     // Drop the attach; if this was the last one on a marked segment, the
     // registry hands back the phys base for us to free.
