@@ -27,7 +27,8 @@
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/mm/page_cache.hpp"
-#include "kernel/mm/slab.hpp"  // P0b: kmalloc staging buffer
+#include "kernel/mm/slab.hpp"         // P0b: kmalloc staging buffer
+#include "kernel/proc/scheduler.hpp"  // Scheduler::current (fd=0 legacy stdin guard)
 
 namespace cinux::syscall {
 
@@ -60,6 +61,13 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
     // (F10-M3). console_tty_read() blocks until a line is committed or EOF (^D
     // on empty). It writes the KERNEL buffer; the block happens with AC=0.
     if (fd == 0) {
+        // console_tty().read blocks via prepare_to_wait, which needs a current
+        // task. The ring-0 unit-test harness runs without one, so a close+read
+        // on fd 0 (or any reach here with no current) must short-circuit to
+        // -EBADF instead of NotNull-panicking inside the TTY path.
+        if (cinux::proc::Scheduler::current() == nullptr) {
+            return -kEbadf;
+        }
         return static_cast<int64_t>(
             cinux::drivers::console_tty().read(reinterpret_cast<char*>(kbuf), count));
     }
