@@ -25,6 +25,7 @@
 #include "kernel/fs/path.hpp"
 #include "kernel/fs/stat.hpp"
 #include "kernel/fs/vfs_mount.hpp"
+#include "kernel/fs/vfs_lookup.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/syscall/path_util.hpp"
 
@@ -46,7 +47,8 @@ int64_t do_stat_inode_kernel(cinux::fs::Inode* inode, cinux::fs::stat* kst) {
     return 0;
 }
 
-constexpr uint64_t kAtEmptyPath = 0x1000;  ///< AT_EMPTY_PATH: stat dirfd itself
+constexpr uint64_t kAtEmptyPath       = 0x1000;  ///< AT_EMPTY_PATH: stat dirfd itself
+constexpr uint64_t kAtSymlinkNofollow = 0x100;   ///< AT_SYMLINK_NOFOLLOW: lstat semantics
 [[maybe_unused]] constexpr int64_t  kAtFdcwdStat = -100;    ///< AT_FDCWD
 
 }  // anonymous namespace
@@ -55,19 +57,22 @@ constexpr uint64_t kAtEmptyPath = 0x1000;  ///< AT_EMPTY_PATH: stat dirfd itself
 // do_*_kernel: pure kernel-to-kernel stat logic (no user memory)
 // ============================================================
 
-int64_t do_stat_kernel(const char* resolved_path, cinux::fs::stat* kst) {
-    const char*            rel_path = nullptr;
-    cinux::fs::FileSystem* fs       = cinux::fs::vfs_resolve(resolved_path, &rel_path);
-    if (fs == nullptr) {
-        kprintf("[SYS_STAT] No filesystem mounted for '%s'\n", resolved_path);
-        return -kEnoent;
+int64_t do_stat_kernel(const char* resolved_path, cinux::fs::stat* kst, bool follow) {
+    // stat(2) follows symlinks (lstat passes follow=false).  Following is
+    // essential: shells use S_ISREG() on stat() output to decide whether a
+    // PATH entry is an executable, and /bin/ls is a symlink -> busybox.
+    // Without follow, stat returns S_IFLNK and every symlinked applet is
+    // rejected ("Permission denied").
+    const uint32_t flags =
+        follow ? static_cast<uint32_t>(cinux::fs::LookupFlag::Follow)
+               : static_cast<uint32_t>(cinux::fs::LookupFlag::NoFollow);
+    auto lr = cinux::fs::vfs_lookup(resolved_path, flags, "/");
+    if (!lr.ok()) {
+        kprintf("[SYS_STAT] lookup failed: '%s' err=%d\n", resolved_path,
+                static_cast<int>(lr.error()));
+        return -to_errno(lr.error());
     }
-    auto inode_result = fs->lookup(rel_path);
-    if (!inode_result.ok()) {
-        kprintf("[SYS_STAT] File not found: '%s'\n", resolved_path);
-        return -to_errno(inode_result.error());
-    }
-    return do_stat_inode_kernel(inode_result.value(), kst);
+    return do_stat_inode_kernel(lr.value().target, kst);
 }
 
 int64_t do_fstat_kernel(int fd, cinux::fs::stat* kst) {
@@ -90,6 +95,24 @@ int64_t sys_stat(uint64_t path_virt, uint64_t st_virt, uint64_t, uint64_t, uint6
 
     cinux::fs::stat kst;
     int64_t         rc = do_stat_kernel(resolved.data(), &kst);
+    if (rc < 0) {
+        return rc;
+    }
+    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(st_virt), &kst, sizeof(kst))) {
+        return -kEfault;
+    }
+    return 0;
+}
+
+int64_t sys_lstat(uint64_t path_virt, uint64_t st_virt, uint64_t, uint64_t, uint64_t, uint64_t) {
+    // lstat(2): like stat but does NOT follow a trailing symlink.
+    cinux::fs::PathBuf resolved;
+    if (!resolve_user_path(path_virt, resolved.data())) {
+        return -kEfault;
+    }
+
+    cinux::fs::stat kst;
+    int64_t         rc = do_stat_kernel(resolved.data(), &kst, /*follow=*/false);
     if (rc < 0) {
         return rc;
     }
@@ -126,11 +149,13 @@ int64_t sys_newfstatat([[maybe_unused]] uint64_t dirfd, uint64_t path_virt, uint
     } else {
         // Path-based: resolve cwd-relative. A real dirfd would need per-fd path
         // tracking; AT_FDCWD (the only case musl passes) is handled correctly.
+        // AT_SYMLINK_NOFOLLOW selects lstat semantics (musl's lstat path).
         cinux::fs::PathBuf resolved;
         if (!resolve_user_path(path_virt, resolved.data())) {
             return -kEfault;
         }
-        rc = do_stat_kernel(resolved.data(), &kst);
+        const bool follow = (flags & kAtSymlinkNofollow) == 0;
+        rc = do_stat_kernel(resolved.data(), &kst, follow);
     }
 
     if (rc < 0) {
