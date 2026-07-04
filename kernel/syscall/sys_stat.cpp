@@ -72,7 +72,10 @@ int64_t do_stat_kernel(const char* resolved_path, cinux::fs::stat* kst, bool fol
                 static_cast<int>(lr.error()));
         return -to_errno(lr.error());
     }
-    return do_stat_inode_kernel(lr.value().target, kst);
+    cinux::fs::Inode* inode = lr.value().target;  // ref'd by vfs_lookup
+    int64_t           r     = do_stat_inode_kernel(inode, kst);
+    cinux::fs::inode_unref(inode);                // drop the lookup ref
+    return r;
 }
 
 int64_t do_fstat_kernel(int fd, cinux::fs::stat* kst) {

@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "kernel/errno.hpp"
+#include "kernel/fs/file.hpp"  // inode_unref
 #include "kernel/fs/stat.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/proc/process.hpp"    // Task::uid/gid
@@ -73,16 +74,19 @@ int64_t do_access_kernel(const char* resolved_path, uint32_t mode) {
     if (!inode_r.ok()) {
         return -to_errno(inode_r.error());
     }
-    cinux::fs::Inode* inode = inode_r.value();
+    cinux::fs::Inode* inode = inode_r.value();  // ref'd by lookup
     if (inode->ops == nullptr) {
+        cinux::fs::inode_unref(inode);
         return -kEio;
     }
     if (mode == kFOk) {
+        cinux::fs::inode_unref(inode);
         return 0;  // path resolved -> exists
     }
 
     cinux::fs::stat st;
     auto            s = inode->ops->stat(inode, &st);
+    cinux::fs::inode_unref(inode);  // drop the lookup ref (only the stat snapshot is needed below)
     if (!s.ok()) {
         return -to_errno(s.error());
     }

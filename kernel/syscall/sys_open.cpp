@@ -46,9 +46,15 @@ int64_t do_open_kernel(const char* resolved_path, uint64_t flags) {
     if (inode->ops != nullptr) {
         auto opened = inode->ops->open(inode, flags);
         if (!opened.ok()) {
+            cinux::fs::inode_unref(inode);
             return -to_errno(opened.error());
         }
-        inode = opened.value();
+        if (opened.value() != inode) {
+            // Cloning device returned a fresh inode; drop the lookup ref on the
+            // original and adopt the override's ref on the new one.
+            cinux::fs::inode_unref(inode);
+            inode = opened.value();
+        }
     }
 
     // Step 3: Convert flags to OpenFlags
@@ -68,8 +74,12 @@ int64_t do_open_kernel(const char* resolved_path, uint64_t flags) {
         break;
     }
 
-    // Step 4: Allocate a file descriptor
+    // Step 4: Allocate a file descriptor.  FDTable::alloc takes the fd's own
+    // ref on success; the lookup ref is dropped here regardless (on FD_NONE
+    // alloc did not ref, so this releases the lookup ref; on success the fd's
+    // ref keeps the inode alive).
     int fd = cinux::fs::current_fd_table().alloc(inode, open_flags);
+    cinux::fs::inode_unref(inode);  // drop the lookup/open ref
 
     if (fd == cinux::fs::FD_NONE) {
         cinux::lib::kprintf("[SYS_OPEN] FD table full, cannot open '%s'\n", resolved_path);
@@ -148,24 +158,29 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
         if (!plr.ok() || plr.value().parent == nullptr || plr.value().parent->ops == nullptr) {
             return plr.ok() ? -kEio : -to_errno(plr.error());
         }
-        auto create_result = plr.value().parent->ops->create(plr.value().parent, plr.value().leaf_name,
-                                                             plr.value().leaf_len);
+        cinux::fs::Inode* parent = plr.value().parent;  // ref'd by vfs_lookup(Parent)
+        auto create_result = parent->ops->create(parent, plr.value().leaf_name, plr.value().leaf_len);
+        cinux::fs::inode_unref(parent);  // drop the parent lookup ref now that create is done
         if (!create_result.ok()) {
             return -to_errno(create_result.error());
         }
         created = true;
-        auto lr2 = cinux::fs::vfs_lookup(resolved_path, kFollow, "/");
-        if (!lr2.ok()) {
-            return -to_errno(lr2.error());
-        }
-        inode = lr2.value().target;
+        inode   = create_result.value();  // create returns a ref'd inode (Ext2::create -> get_cached_inode)
     } else {
         inode = lr.value().target;
     }
 
+    // inode carries one lookup/create ref; chmod/O_TRUNC/alloc run against a
+    // refcount >= 1 inode.  Every early return drops the ref; on success
+    // FDTable::alloc takes the fd's own ref and the final inode_unref drops the
+    // lookup ref.  No manual inode_ref here -- vfs_lookup / create already
+    // returned a ref'd inode (the Linux inode model; the cache-slot aliasing
+    // UAF is fixed structurally in get_cached_inode, not patched here).
+
     if (created && inode->ops != nullptr) {
         auto chmod_result = inode->ops->chmod(inode, create_mode_from(mode));
         if (!chmod_result.ok() && chmod_result.error() != cinux::lib::Error::NotImplemented) {
+            cinux::fs::inode_unref(inode);
             return -to_errno(chmod_result.error());
         }
     }
@@ -177,11 +192,13 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
     if ((flags & kOTrunc) != 0 && inode->ops != nullptr) {
         auto tr = inode->ops->truncate(inode, 0);
         if (!tr.ok()) {
+            cinux::fs::inode_unref(inode);
             return -to_errno(tr.error());
         }
     }
 
     int fd = cinux::fs::current_fd_table().alloc(inode, access_to_open_flags(flags));
+    cinux::fs::inode_unref(inode);  // drop temporary pin (the fd's own ref keeps it)
     if (fd == cinux::fs::FD_NONE) {
         return -kEmfile;
     }

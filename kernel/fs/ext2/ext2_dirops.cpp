@@ -14,7 +14,6 @@
 
 #include "ext2.hpp"
 #include "ext2_extent.hpp"
-#include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 
 namespace cinux::fs {

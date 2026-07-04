@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/fs/file.hpp"     // inode_ref (lookup returns a ref'd Inode*)
 #include "kernel/lib/string.hpp"  // memcpy / memset / strlen
 
 namespace cinux::fs {
@@ -413,6 +414,7 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
 
     // Root directory: empty path or "/".
     if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
+        inode_ref(&root_->inode);
         return &root_->inode;
     }
     const char* p = path;
@@ -446,6 +448,7 @@ ErrorOr<Inode*> TmpFs::lookup(const char* path) {
             ++p;
         }
     }
+    inode_ref(&cur->inode);
     return &cur->inode;
 }
 
@@ -466,6 +469,7 @@ ErrorOr<Inode*> TmpFs::lookup_child(const Inode* parent, const char* name, uint3
     if (child == nullptr) {
         return Error::NotFound;
     }
+    inode_ref(&child->inode);
     return &child->inode;
 }
 
