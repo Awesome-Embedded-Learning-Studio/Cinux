@@ -314,10 +314,6 @@ void handle_pf(InterruptFrame* frame) {
                             // used to be).
                             cinux::mm::g_pmm.mapcount_inc(map_phys);
                         }
-                        kprintf("[VMM] File demand-read %p -> phys %p%s\n",
-                                reinterpret_cast<void*>(virt_page),
-                                reinterpret_cast<void*>(map_phys),
-                                (map_phys != gp.value()->phys) ? " (CoW)" : "");
                         return;
                     }
                     if (map_phys != gp.value()->phys) {
@@ -340,8 +336,6 @@ void handle_pf(InterruptFrame* frame) {
             uint64_t cur_cr3 = cinux::arch::read_cr3();
             bool     ok      = g_vmm.map_nolock(virt_page, phys, map_flags, &cur_cr3);
             if (ok) {
-                kprintf("[VMM] Demand-paged %p -> phys %p\n", reinterpret_cast<void*>(virt_page),
-                        reinterpret_cast<void*>(phys));
                 return;
             }
             cinux::mm::g_pmm.free_page_locked(phys);
