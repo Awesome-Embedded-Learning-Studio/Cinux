@@ -148,7 +148,7 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
         if (!plr.ok() || plr.value().parent == nullptr || plr.value().parent->ops == nullptr) {
             return plr.ok() ? -kEio : -to_errno(plr.error());
         }
-        auto create_result = plr.value().parent->ops->create(plr.value().parent, plr.value().leaf,
+        auto create_result = plr.value().parent->ops->create(plr.value().parent, plr.value().leaf_name,
                                                              plr.value().leaf_len);
         if (!create_result.ok()) {
             return -to_errno(create_result.error());
