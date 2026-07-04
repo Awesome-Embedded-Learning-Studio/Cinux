@@ -7,7 +7,7 @@
  * handlers own the page lifecycle the registry deliberately does not:
  *   - shmget allocates the frames and registers the segment;
  *   - shmat maps those frames into the current address space (eager, not
- *     demand-paged) and bumps each page's mapcount;
+ *     demand-paged) and bumps each page's pte_count;
  *   - shmdt tears the mapping down (the segment retains the pages until the
  *     last attachment plus IPC_RMID);
  *   - shmctl implements IPC_STAT (kernel-to-kernel variant exposed for tests)

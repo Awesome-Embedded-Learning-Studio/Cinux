@@ -4,7 +4,7 @@
  *
  * Pure table logic only -- no kprintf, no PMM, no AddressSpace -- so this TU
  * links cleanly into host unit tests exactly like fifo.cpp.  The physical-page
- * lifecycle (alloc_pages / free_pages / mapcount) lives in sys_shm.cpp; this
+ * lifecycle (alloc_pages / free_pages / pte_count) lives in sys_shm.cpp; this
  * file just owns the key -> segment bookkeeping and the attach / removal state
  * machine.
  */

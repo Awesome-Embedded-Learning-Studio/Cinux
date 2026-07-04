@@ -300,9 +300,9 @@ void handle_pf(InterruptFrame* frame) {
                     uint64_t cur_cr3 = cinux::arch::read_cr3();
                     if (g_vmm.map_nolock(virt_page, map_phys, fflags, &cur_cr3)) {
                         if (map_phys == gp.value()->phys) {
-                            // Sharing the page-cache page: claim a mapcount ref
+                            // Sharing the page-cache page: claim a pte_count ref
                             // for THIS PTE so the address-space teardown unmap
-                            // (free_subtree's mapcount_dec_and_test) does not
+                            // (free_subtree's pte_count_dec_and_test) does not
                             // drop it to 0 and free the page.  alloc_page gave
                             // the cache page its own ref (the "1" that stands
                             // for page-cache ownership); every mapping adds one
@@ -312,7 +312,7 @@ void handle_pf(InterruptFrame* frame) {
                             // freed libbfd's cached .text page, PMM reused the
                             // phys, and ld then read garbage where the ELF magic
                             // used to be).
-                            cinux::mm::g_pmm.mapcount_inc(map_phys);
+                            cinux::mm::g_pmm.pte_count_inc(map_phys);
                         }
                         return;
                     }
@@ -352,7 +352,7 @@ void handle_pf(InterruptFrame* frame) {
         if (cinux::proc::handle_cow_fault(fault_addr)) {
             return;
         }
-        // F-VERIFY M6-2: CoW resolution failed -- dump phys + mapcount to debugcon
+        // F-VERIFY M6-2: CoW resolution failed -- dump phys + pte_count to debugcon
         // (lock-free PTE walk; see dump_cow_fail_diagnostic).  Rare path, no noise
         // on the normal CoW-resolved path.
         dump_cow_fail_diagnostic(fault_addr);

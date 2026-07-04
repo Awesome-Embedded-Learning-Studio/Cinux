@@ -5,11 +5,11 @@
  * The syscall layer owns the physical-page plumbing the ShmRegistry avoids.
  * shmget allocates a contiguous run via the PMM; shmat maps it eagerly (the
  * pages already exist, so no demand-paging path is involved) and bumps each
- * page's mapcount so the segment's frames survive address-space teardown; shmdt
+ * page's pte_count so the segment's frames survive address-space teardown; shmdt
  * reverses the mapping and lets the registry free the pages once the last
  * attachment is gone alongside an IPC_RMID.
  *
- * mapcount model (mirrors fork CoW, kernel/proc/fork.cpp): alloc_pages sets
+ * pte_count model (mirrors fork CoW, kernel/proc/fork.cpp): alloc_pages sets
  * each page to 1 (the segment's own reference); shmat adds +1 per page; each
  * unmap / address-space teardown subtracts 1.  So teardown never reaches 0
  * while the segment exists -- only the segment's explicit free does.
@@ -100,7 +100,7 @@ int64_t sys_shmget(uint64_t key, uint64_t size, uint64_t shmflg, uint64_t, uint6
     }
 
     // Allocate the backing frames.  alloc_pages rounds up to a buddy order and
-    // sets mapcount=1 on every page in the block (the segment's own reference).
+    // sets pte_count=1 on every page in the block (the segment's own reference).
     uint64_t phys_base = cinux::mm::g_pmm.alloc_pages(page_count);
     if (phys_base == 0) {
         return -kEnomem;
@@ -180,7 +180,7 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
     }
 
     // Eagerly map each segment frame into this address space and bump its
-    // mapcount (+1 for this mapping; the alloc-set 1 is the segment's ref).
+    // pte_count (+1 for this mapping; the alloc-set 1 is the segment's ref).
     const uint64_t pte_flags = shm_pte_flags(readonly);
     for (uint64_t i = 0; i < seg.page_count; ++i) {
         const uint64_t v = virt + i * kPageSize;
@@ -190,13 +190,13 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
             for (uint64_t j = 0; j < i; ++j) {
                 const uint64_t pv = seg.phys_base + j * kPageSize;
                 task->addr_space->unmap(virt + j * kPageSize);
-                static_cast<void>(cinux::mm::g_pmm.mapcount_dec_and_test(pv));  // undo the inc
+                static_cast<void>(cinux::mm::g_pmm.pte_count_dec_and_test(pv));  // undo the inc
             }
             static_cast<void>(task->addr_space->vmas().remove(virt, virt + len));
             ShmRegistry::instance().detach(static_cast<int>(shmid), tid, nullptr);
             return -kEnomem;
         }
-        cinux::mm::g_pmm.mapcount_inc(p);
+        cinux::mm::g_pmm.pte_count_inc(p);
     }
 
     return static_cast<int64_t>(virt);
@@ -243,8 +243,8 @@ int64_t sys_shmdt(uint64_t addr, uint64_t, uint64_t, uint64_t, uint64_t, uint64_
         const uint64_t p = phys_base + i * kPageSize;
         task->addr_space->unmap(v);
         // Undo the attach-time inc; the segment owns the frames (the alloc-set
-        // ref keeps mapcount > 0), so dec never frees here.
-        static_cast<void>(cinux::mm::g_pmm.mapcount_dec_and_test(p));
+        // ref keeps pte_count > 0), so dec never frees here.
+        static_cast<void>(cinux::mm::g_pmm.pte_count_dec_and_test(p));
     }
 
     static_cast<void>(task->addr_space->vmas().remove(addr, addr + len));
