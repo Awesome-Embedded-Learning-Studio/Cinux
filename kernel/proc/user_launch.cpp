@@ -30,6 +30,16 @@ void enter_loaded_program(const char* path, const char* const argv[], const char
                           const ElfAuxInfo& elf_aux) {
     auto* task = Scheduler::current();
 
+    // execve replaces the program image, so reset FPU/SSE to a clean default
+    // (fninit + fxsave).  The new program must NOT inherit the previous image's
+    // SSE/XMM residue -- Linux does this in execve.  Without it a fork+execve
+    // child carries the parent's fpu_state (a TaskBuilder-spawned shell carries
+    // kernel-SSE residue from fxsave-at-build-time, vs init-fork which inherits
+    // a clean kernel fpu), and ldso/glibc tripping over the stale state returns
+    // from __libc_start_main (noreturn) into the _start hlt.
+    __asm__ volatile("fninit");
+    __asm__ volatile("fxsave %0" : : "m"(task->fpu_state));
+
     // User stack: pre-map the top USER_STACK_PAGES, then record the full
     // demand-growth Stack VMA under the F2-M5 hard gate. Accesses below
     // [USER_STACK_TOP - USER_STACK_GROWTH) hit no VMA -> segfault (guard).
