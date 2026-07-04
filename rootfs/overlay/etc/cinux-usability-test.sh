@@ -8,7 +8,6 @@
 # cinux-exit terminates QEMU so the run never reaches the respawn. If cinux-exit
 # itself fails the CI job times out (caught as a CI failure).
 set -u
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
 # Filesystem: ls / cat / mkdir / rmdir
 /bin/ls /
