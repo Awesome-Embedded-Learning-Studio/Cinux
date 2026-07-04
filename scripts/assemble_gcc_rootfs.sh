@@ -50,6 +50,34 @@ cp -a "$GCC_ROOT/." "$WORK/target/"
 cp "$REPO_ROOT/rootfs/overlay/etc/inittab" "$WORK/target/etc/inittab"
 cp "$REPO_ROOT/rootfs/overlay/etc/cinux-usability-test.sh" "$WORK/target/etc/cinux-usability-test.sh"
 
+# Defense (2026-07-04 regression): force the link-time crt objects to the gcc
+# toolchain's authoritative relocatable versions.  An executable crt1.o left in
+# the merged tree makes ld reject the link ("cannot use executable file 'crt1.o'
+# as input") with a cascade of spurious multiple-definition errors.  extract.sh
+# already stages these, but the buildroot-target merge has intermittently left
+# an executable crt1.o behind (root cause never pinned -- staging verifies
+# relocatable yet the packed rootfs came out executable).  Overwrite from the
+# gcc -print-file-name source + sanity-check so a future regression fails the
+# build loudly instead of shipping a broken rootfs.
+gccbin="${GCC_BIN:-gcc}"
+for f in crt1.o Scrt1.o crti.o crtn.o; do
+    src="$("$gccbin" -print-file-name="$f")"
+    if [ -n "$src" ] && [ "$src" != "$f" ] && [ -e "$src" ]; then
+        cp -aL "$src" "$WORK/target/usr/lib/$f"
+    fi
+done
+for c in "$WORK/target/usr/lib/crt1.o" "$WORK/target/lib/crt1.o"; do
+    [ -e "$c" ] || continue
+    case "$(file -b "$c")" in
+        *relocatable*) ;;
+        *)
+            echo "[assemble] ERROR: $c is not relocatable (would break ld):" >&2
+            file "$c" >&2
+            exit 1
+            ;;
+    esac
+done
+
 # 192 MB / 16384 inodes holds base (~5 MB) + the C/C++ GCC closure (~127 MB:
 # cc1 + cc1plus + libstdc++ + the C and C++ header trees).  Plain ext2 (-O none,
 # no extents): the ext2 driver only *reads* ext4 extents (F6-M5); extent writes
