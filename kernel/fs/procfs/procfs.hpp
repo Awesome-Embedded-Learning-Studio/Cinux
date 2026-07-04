@@ -77,6 +77,12 @@ public:
 
     cinux::lib::ErrorOr<void>   mount() override;
     cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
+    // Single-component lookup for the vfs_lookup resolver (F-USABILITY batch 4).
+    // vfs_lookup walks one component at a time and follows symlinks; without
+    // this override the FileSystem base returns ENOSYS and open("/proc/meminfo")
+    // fails -> busybox free reports "Function not implemented".
+    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
+                                             uint32_t namelen) override;
 
 private:
     // One InodeOps instance per inode kind, owned.  Allocated in mount(), freed

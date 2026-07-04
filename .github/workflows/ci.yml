@@ -224,7 +224,10 @@ jobs:
       - name: Run gcc gate
         run: |
           set -o pipefail
-          timeout 120 cmake --build build --target run-buildroot-usability 2>&1 | tee build/gcc-smoke.log
+          # 900s: g++ hello.cpp (cc1plus ~50MB + libstdc++ link) is heavy under
+          # TCG; CI runners have no /dev/kvm, so the g++ smoke (stage 4) takes
+          # far longer than gcc hello.c did (120s was the stage-3 budget).
+          timeout 900 cmake --build build --target run-buildroot-usability 2>&1 | tee build/gcc-smoke.log
 
       - name: Upload gcc-smoke log on failure
         if: failure()

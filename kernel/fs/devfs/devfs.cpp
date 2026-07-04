@@ -315,4 +315,43 @@ cinux::lib::ErrorOr<Inode*> DevFs::lookup(const char* path) {
     return cinux::lib::Error::NotFound;
 }
 
+cinux::lib::ErrorOr<Inode*> DevFs::lookup_child(const Inode* parent, const char* name,
+                                                 uint32_t namelen) {
+    if (parent == nullptr || name == nullptr || namelen == 0) {
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // DevFs is flat: only the root directory contains entries.
+    if (parent != &root_inode_) {
+        return cinux::lib::Error::NotFound;
+    }
+    // Match @p name (a non-NUL-terminated slice) against the static node table.
+    for (uint32_t i = 0; i < node_count_; ++i) {
+        const char* a = nodes_[i].name;
+        uint32_t    j = 0;
+        while (a[j] != '\0' && j < namelen) {
+            if (a[j] != name[j]) {
+                break;
+            }
+            ++j;
+        }
+        if (a[j] == '\0' && j == namelen) {
+            return &nodes_[i].inode;
+        }
+    }
+    // Defer to the dynamic resolver (PTY /dev/pts/<N>).  It takes a NUL-terminated
+    // name, so copy the slice into a local buffer first.
+    char buf[64];
+    if (namelen >= sizeof(buf)) {
+        return cinux::lib::Error::NotFound;
+    }
+    for (uint32_t i = 0; i < namelen; ++i) {
+        buf[i] = name[i];
+    }
+    buf[namelen] = '\0';
+    if (dynamic_lookup_ != nullptr) {
+        return dynamic_lookup_(buf);
+    }
+    return cinux::lib::Error::NotFound;
+}
+
 }  // namespace cinux::fs

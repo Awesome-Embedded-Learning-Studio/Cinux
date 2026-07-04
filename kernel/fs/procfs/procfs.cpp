@@ -459,4 +459,35 @@ ErrorOr<Inode*> ProcFs::lookup(const char* path) {
     return Error::NotFound;
 }
 
+ErrorOr<Inode*> ProcFs::lookup_child(const Inode* parent, const char* name, uint32_t namelen) {
+    if (parent == nullptr || name == nullptr || namelen == 0) {
+        return Error::InvalidArgument;
+    }
+    // parse_pid/strcmp need NUL termination; the resolver passes a slice.
+    char buf[64];
+    if (namelen >= sizeof(buf)) { return Error::NotFound; }
+    for (uint32_t i = 0; i < namelen; ++i) { buf[i] = name[i]; }
+    buf[namelen] = '\0';
+
+    if (parent == &root_inode_) {
+        if (strcmp(buf, "meminfo") == 0) { return &meminfo_inode_; }
+        int pid; const char* rest;
+        if (parse_pid(buf, &pid, &rest) && rest[0] == '\0' &&
+            pid >= 1 && pid <= kProcPidMax) {
+            if (signal_find_task_by_pid(pid) == nullptr) { return Error::NotFound; }
+            return &pid_dir_inodes_[pid];
+        }
+        return Error::NotFound;
+    }
+
+    // /proc/<pid>/ : parent->ino is the pid; name is stat/cmdline.
+    uint32_t pid = parent->ino;
+    if (pid >= 1 && pid <= kProcPidMax && parent == &pid_dir_inodes_[pid]) {
+        if (signal_find_task_by_pid(static_cast<int>(pid)) == nullptr) { return Error::NotFound; }
+        if (strcmp(buf, "stat") == 0) { return &stat_inodes_[pid]; }
+        if (strcmp(buf, "cmdline") == 0) { return &cmdline_inodes_[pid]; }
+    }
+    return Error::NotFound;
+}
+
 }  // namespace cinux::fs

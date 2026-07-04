@@ -5,10 +5,10 @@
 #       GCC_BIN=<gcc-binary> extract.sh ...   (default: gcc; CI pins gcc-13)
 #
 # NOT a self-built toolchain (user decision 2026-07-02: don't compile GCC). This
-# copies the host's glibc-dynamic as/ld + their runtime .so closure + the crt
-# objects + libgcc, laid out exactly as GCC's built-in specs expect (hardcoded
-# /usr/lib, /usr/lib/gcc/<triple>/<ver>, /lib64 paths). cc1 and headers are
-# deferred to B4-b -- as/ld do not read headers.
+# copies the host's glibc-dynamic as/ld + cc1/cc1plus + gcc/g++ drivers + their
+# runtime .so closure + crt/libgcc/libstdc++ + the C/C++ header closures, laid
+# out exactly as GCC's built-in specs expect (hardcoded /usr/lib,
+# /usr/lib/gcc/<triple>/<ver>, /lib64 paths).
 #
 # GCC_BIN selects which host GCC to mirror.  The whole closure -- driver, cc1,
 # collect2, libgcc, crt objects, liblto_plugin -- MUST come from one GCC version,
@@ -124,7 +124,8 @@ done
 #     cp_lib below is a harmless no-op).  collect2 runs at link time to wire
 #     .init_array constructors.  liblto_plugin.so is still needed because GCC's
 #     default link path passes -fuse-linker-plugin even for this tiny C smoke.
-#     cc1plus/lto1/lto-wrapper stay out: C-only smoke (g++ is a later batch). ---
+#     cc1plus + the g++ driver land in stage 4 (C++ smoke below); lto1/
+#     lto-wrapper still stay out (no -flto in the smoke). ---
 # The driver installs at the fixed PT_INTERP-independent name /usr/bin/gcc on the
 # rootfs (what CinuxOS users invoke), but is sourced from $GCC_BIN so it matches
 # cc1/collect2/libgcc -- one version end to end.
@@ -186,7 +187,97 @@ done
 # at features.h:518 "fatal error: stdc-predef.h: No such file or directory".
 [ -f /usr/include/stdc-predef.h ] && install -Dm0644 /usr/include/stdc-predef.h "$ROOT/usr/include/stdc-predef.h"
 
-echo "[extract] GCC toolchain subset staged at $ROOT (GCC_BIN=$GCC_BIN)"
+# --- F-USABILITY stage 4 (C++): cc1plus + g++ driver + libstdc++ + the C++
+#     header closure so `g++ -fno-pie -no-pie /hello.cpp` runs on CinuxOS.
+#     Mirrors the C path: stage the binary + .so closure + headers computed
+#     live via g++ -H.  libstdc++.so carries the EH runtime (__cxa_* / STL);
+#     libgcc_s.so (staged above) carries the DWARF unwinder (_Unwind_*).  No
+#     <thread>/pthread here -- that needs gettid/set_robust_list and is a
+#     separate batch. ---
+# GXX_BIN mirrors GCC_BIN for the version-matched g++ driver (gcc<->g++,
+# gcc-13<->g++-13).  Debian/Ubuntu: g++-N is its own package; fail up front
+# (like cc1) instead of a vague cp error below.
+GXX_BIN="${GXX_BIN:-${GCC_BIN/gcc/g++}}"
+if ! command -v "$GXX_BIN" >/dev/null 2>&1; then
+    echo "[extract] ERROR: GXX_BIN='$GXX_BIN' not found on PATH" >&2
+    echo "[extract]        apt-get install the matching g++ (e.g. g++-13)." >&2
+    exit 1
+fi
+GXX_DRIVER="$(command -v "$GXX_BIN")"
+
+# cc1plus (GCC C++ front end).  Resolved via g++'s own spec, never hardcoded.
+CC1PLUS="$("$GXX_BIN" -print-prog-name=cc1plus)"
+if [ ! -x "$CC1PLUS" ]; then
+    echo "[extract] ERROR: cc1plus not found at $CC1PLUS (GXX_BIN=$GXX_BIN)" >&2
+    echo "[extract]        On Debian/Ubuntu ensure g++-N is installed." >&2
+    exit 1
+fi
+copy_abs "$CC1PLUS"
+ldd "$CC1PLUS" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while read -r lib; do
+    cp_lib "$lib"
+done
+
+# g++ driver at /usr/bin/g++ (what CinuxOS users invoke).  Sourced from GXX_BIN
+# so it matches cc1plus/collect2/libstdc++ -- one GCC version end to end.
+cp -aL "$GXX_DRIVER" "$ROOT/usr/bin/g++"
+
+# libstdc++ runtime + EH: real .so.6.0.X + SONAME (.so.6, for ldso DT_NEEDED) +
+# dev symlink (.so, for ld -lstdc++ at g++ link time).  cp_lib installs the real
+# file and builds the SONAME symlink; the dev symlink we add explicitly.
+LIBSTDCXX_REAL="$(readlink -f "$("$GXX_BIN" -print-file-name=libstdc++.so.6)")"
+if [ -n "$LIBSTDCXX_REAL" ] && [ -f "$LIBSTDCXX_REAL" ]; then
+    cp_lib "$LIBSTDCXX_REAL"
+    ln -sf "$(basename "$LIBSTDCXX_REAL")" "$ROOT/usr/lib/libstdc++.so"
+    ln -sf "$(basename "$LIBSTDCXX_REAL")" "$ROOT/usr/lib/libstdc++.so.6"
+fi
+
+# libm (glibc): g++ links -lm (libstdc++ pulls libm).  Stage host glibc
+# libm.so.6 + a dev symlink.  NOTE: host glibc's libm.so.6 has NO version
+# suffix (the file IS the SONAME), so unlike libstdc++.so.6.0.X we must NOT add
+# a libm.so.6 symlink -- ln -sf libm.so.6 -> libm.so.6 is a self-loop that
+# overwrites the real file and breaks ldso ("cc1: cannot open libm.so.6").
+# cp_lib already lays down the SONAME link if the real name differs from it.
+LIBM_REAL="$(readlink -f "$("$GXX_BIN" -print-file-name=libm.so.6)")"
+if [ -n "$LIBM_REAL" ] && [ -f "$LIBM_REAL" ]; then
+    cp_lib "$LIBM_REAL"
+    ln -sf "$(basename "$LIBM_REAL")" "$ROOT/usr/lib/libm.so"
+fi
+
+# hello.cpp source: STL (vector/string) + exception (throw/catch) smoke.  No
+# <thread>/pthread (separate batch).  -fno-pie -no-pie: same non-PIE reason as
+# hello.c (CinuxOS loads ET_EXEC only; PIE is the ELF-base ASLR follow-up).
+cat > "$ROOT/hello.cpp" << 'EOF'
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+static void throw_test() { throw std::runtime_error("caught"); }
+
+int main() {
+    std::vector<std::string> words{"Hello", "from", "G++!"};
+    for (const auto& w : words) std::cout << w << ' ';
+    std::cout << '\n';
+    try {
+        throw_test();
+    } catch (const std::exception& e) {
+        std::cout << "exception: " << e.what() << '\n';
+    }
+    return 0;
+}
+EOF
+
+# hello.cpp's #include closure via g++ -H.  The host g++ resolves <iostream>/
+# <vector>/<string> + libstdc++'s <bits/*> + the C headers already staged; we
+# install exactly those files at their absolute paths (iostream pulls a few
+# hundred headers but still a small slice of the full C++ include tree).
+"$GXX_BIN" -H -fsyntax-only -fno-pie "$ROOT/hello.cpp" 2>&1 >/dev/null \
+    | sed -E 's/^[. ]+//' | grep -v '^$' | sort -u | while read -r h; do
+    [ -f "$h" ] || continue
+    install -Dm0644 "$h" "$ROOT$h"
+done
+
+echo "[extract] GCC toolchain subset staged at $ROOT (GCC_BIN=$GCC_BIN, GXX_BIN=$GXX_BIN)"
 du -sh "$ROOT"
 echo "[extract] binaries:"; ls "$ROOT/usr/bin"
 echo "[extract] /usr/lib (.so + crt):"; ls "$ROOT/usr/lib"

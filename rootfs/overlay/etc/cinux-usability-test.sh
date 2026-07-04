@@ -49,5 +49,22 @@ if [ -x /usr/bin/gcc ]; then
     fi
 fi
 
+# g++ smoke (stage 4): only when g++ ships (gcc profile + C++ closure).  Same
+# single-command path; g++ links libstdc++ + libgcc_s (DWARF EH) dynamically,
+# so hello.cpp exercises STL (vector/string) + exception (throw/catch) + the
+# .init_array constructors iostream needs.  Same -fno-pie -no-pie reason.
+# -fno-use-linker-plugin: skip collect2's dlopen(liblto_plugin.so) -- that dlopen
+# hits "invalid ELF header" on a second link in one boot (state-pollution class,
+# sibling to the B4-C2 VMA-inode UAF); C++ smoke does not need LTO.  Tracked as
+# a follow-up.  Skipped when no /usr/bin/g++; failure aborts via cinux-exit 1.
+if [ -x /usr/bin/g++ ]; then
+    if /usr/bin/g++ -fno-pie -no-pie -fno-use-linker-plugin /hello.cpp -o /tmp/cpp.out && /tmp/cpp.out; then
+        echo "[usability] PASS gpp-compile-run"
+    else
+        echo "[usability] FAIL gpp-compile-run"
+        /sbin/cinux-exit 1
+    fi
+fi
+
 echo "[usability] result: PASS"
 /sbin/cinux-exit 0

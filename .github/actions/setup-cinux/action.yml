@@ -68,13 +68,17 @@ runs:
       if: inputs.cache-buildroot == 'true'
       uses: actions/cache@v4
       with:
-        # src + dl (Bootlin toolchain tarball) + output (compiled rootfs) -- keyed
-        # by defconfig + overlay so a content change forces a rebuild.  Pin
-        # concrete files (no globs): a malformed hashFiles glob silently breaks
-        # composite-action injection and every job reports "Can't find
-        # action.yml".
+        # src + dl (Bootlin toolchain tarball) + output (compiled base target).
+        # Key ONLY on the defconfig: `make buildroot` reads the defconfig, not
+        # the overlay -- the overlay is merged at assemble time (assemble is not
+        # cached; assemble_gcc_rootfs.sh runs every build with the latest
+        # overlay). Keying on the overlay (as before) made every overlay tweak
+        # (e.g. F-USABILITY b4a adding the g++ smoke line to
+        # cinux-usability-test.sh) invalidate the cache and force a full ~5 min
+        # buildroot recompile for nothing. Pin concrete files (no globs): a
+        # malformed hashFiles glob silently breaks composite-action injection.
         path: build/buildroot-ci
-        key: buildroot-${{ runner.os }}-${{ hashFiles('rootfs/buildroot/cinuxos_base_defconfig', 'rootfs/overlay/etc/inittab', 'rootfs/overlay/etc/cinux-usability-test.sh', 'rootfs/overlay/sbin/cinux-exit') }}
+        key: buildroot-${{ runner.os }}-${{ hashFiles('rootfs/buildroot/cinuxos_base_defconfig') }}
 
     - name: Compiler version
       shell: bash
