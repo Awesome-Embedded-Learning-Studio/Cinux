@@ -119,10 +119,6 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
         cinux::mm::g_pmm.free_page(old_phys);
     }
 
-    cinux::lib::kprintf("[COW] resolved fault at vaddr=%p old_phys=%p new_phys=%p\n",
-                        reinterpret_cast<void*>(fault_vaddr), reinterpret_cast<void*>(old_phys),
-                        reinterpret_cast<void*>(new_phys));
-
     return true;
 }
 

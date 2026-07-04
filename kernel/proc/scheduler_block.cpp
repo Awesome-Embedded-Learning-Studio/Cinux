@@ -10,7 +10,6 @@
  */
 
 #include "kernel/arch/x86_64/smp.hpp"  // arch::wake_idle_ap (unblock)
-#include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/scheduler.hpp"
 
 namespace cinux::proc {
@@ -30,8 +29,11 @@ void Scheduler::block(lib::NotNull<Task*> task, const char* reason) {
         task->sched_class->dequeue(task);
     }
 
-    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' blocked: %s\n", task->tid, task->name,
-                        reason ? reason : "unknown");
+    // reason is a caller-supplied diagnostic tag (tests pass "mutex"/"test");
+    // the per-block kprintf was removed -- it fired on every wait (a PTY shell
+    // blocks on each read, so each keystroke produced a line), flooding the log
+    // the same way the demand-page kprintf did.
+    (void)reason;
 
     // Context-switch away only when the blocked task is the running one AND a
     // real dispatch loop is active.  Inside a NoRescheduleGuard (in-kernel test
@@ -61,7 +63,6 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
     }
     task->sched_class->enqueue(task);
 
-    cinux::lib::kprintf("[SCHED] Task tid=%lu '%s' unblocked\n", task->tid, task->name);
     // Wake an idle AP so it can pick up this freshly runnable task (F4-M4 M4-2).
     // No-op on a single-core system.
     arch::wake_idle_ap();
