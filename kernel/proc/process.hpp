@@ -153,12 +153,12 @@ struct Task {
     /** Per-process page tables (nullptr for kernel-only threads). */
     cinux::mm::AddressSpace* addr_space;
 
-    // Program break (user heap end).  brk is lazy: sys_brk only moves
+    // Program break (user heap end). brk is lazy: sys_brk only moves
     // brk_current; the Heap VMA (created by execve) covers [brk_initial,
-    // USER_BRK_MAX) and pages are demand-paged on first access.
+    // brk_max) and pages are demand-paged on first access.
     uint64_t brk_current{};  ///< Current heap end
     uint64_t brk_initial{};  ///< Heap start (ELF image end, set by execve)
-    uint64_t brk_max{};      ///< Heap ceiling (USER_BRK_MAX)
+    uint64_t brk_max{};      ///< Heap ceiling (USER_BRK_MAX low image / USER_MMAP_BASE PIE)
 
     // F3-M1: POSIX signal state.  The block mask (sig_blocked) is inherited
     // across fork(); pending signals are not (cleared in fork()).  F3-M2 batch
