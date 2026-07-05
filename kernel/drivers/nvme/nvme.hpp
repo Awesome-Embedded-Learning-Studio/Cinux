@@ -13,7 +13,8 @@
  *   2a -- controller enable (CC.EN <-> CSTS.RDY) + Admin SQ/CQ config.
  *   2b -- Identify Controller via the admin queue (doorbell + CQ poll).
  *   3  -- MSI-X (multi-instance MsixController @+0x74000; vector 0x41).
- *   4-5 -- IO queues, IBlockDevice adapter.
+ *   4a -- Identify Namespace + Create IO queues + admin_submit helper.
+ *   4b/c -- NVM Read/Write (PRP), IBlockDevice adapter.
  *
  * Namespace: cinux::drivers::nvme
  */
@@ -30,16 +31,20 @@
 
 namespace cinux::drivers::nvme {
 
+/// Fixed IDT vector for the NVMe MSI-X interrupt (entry 0). Clear of xHCI
+/// (0x40). Registered in irq_init; not fired until init_msi_x enables MSI-X.
+constexpr uint8_t kNvmeIrqVector = 0x41;
+
 /// Controller registers (NVMe 1.x, MMIO offset from BAR0).  Doorbell registers
 /// live at BAR0 + 0x1000 + queue_id * (2 * stride) and are computed in enable()
 /// from CAP.DSTRD; they are NOT part of this fixed struct.
 struct NvmeRegs {
-    uint32_t cap_lo;  ///< 0x00 CAP low  (MQES[15:0], CQR[16], AMS[18:17], TO[27:23], DSTRD[31:28])
-    uint32_t cap_hi;  ///< 0x04 CAP high (CSS, BPS, MPS8, ...)
-    uint32_t vs;      ///< 0x08 Version (MJR[31:16].MNR[15:8].TER[7:0]); e.g. 0x00010400 = NVMe 1.4
-    uint32_t intms;   ///< 0x0C Interrupt Mask Set
-    uint32_t intmc;   ///< 0x10 Interrupt Mask Clear
-    uint32_t cc;      ///< 0x14 Controller Configuration
+    uint32_t cap_lo;     ///< 0x00 CAP low  (MQES[15:0], CQR[16], AMS[18:17], TO[27:23], DSTRD[31:28])
+    uint32_t cap_hi;     ///< 0x04 CAP high (CSS, BPS, MPS8, ...)
+    uint32_t vs;         ///< 0x08 Version (MJR[31:16].MNR[15:8].TER[7:0]); e.g. 0x00010400 = NVMe 1.4
+    uint32_t intms;      ///< 0x0C Interrupt Mask Set
+    uint32_t intmc;      ///< 0x10 Interrupt Mask Clear
+    uint32_t cc;         ///< 0x14 Controller Configuration
     uint32_t reserved0;  ///< 0x18
     uint32_t csts;       ///< 0x1C Controller Status (RDY[0], CFS[1], SHST[4:2])
     uint32_t nssr;       ///< 0x20 NVM Subsystem Reset
@@ -90,6 +95,13 @@ struct IdentifyController {
 };
 static_assert(sizeof(IdentifyController) == 64, "IdentifyController header (vid/ssvid/sn/mn)");
 
+/// Decoded Identify Namespace fields (batch 4a).  The full structure is 4 KiB;
+/// we read nsze (offset 0x00) + the active LBA format's data size.
+struct NamespaceInfo {
+    uint64_t nsze;      ///< 0x00 Namespace Size (total LBAs)
+    uint32_t lba_size;  ///< Bytes per LBA (2^(lbaf[flbas] & 0xFFF))
+};
+
 class NvmeController {
 public:
     /// Map BAR0 into the MMIO window, enable Bus Master + Memory Space, and read
@@ -111,6 +123,15 @@ public:
     /// CPU interrupts off, so this only proves the Table maps + entry programs.
     cinux::lib::ErrorOr<void> init_msi_x();
 
+    /// Identify Namespace @p nsid (batch 4a): fill nsze + lba_size via the admin
+    /// queue (CNS=0x02).
+    cinux::lib::ErrorOr<void> identify_namespace(uint32_t nsid, NamespaceInfo& out);
+
+    /// Create IO SQ/CQ (batch 4a): Admin Create IO CQ (opcode 0x05) + Create IO
+    /// SQ (opcode 0x01), qid=1, size 64.  Leaves the IO doorbells ready for
+    /// batch 4b NVM Read/Write.
+    cinux::lib::ErrorOr<void> create_io_queues();
+
     bool present() const { return regs_ != nullptr; }
 
     /// CAP.MQES (0-based; the maximum queue size is MQES + 1).
@@ -125,21 +146,34 @@ public:
     volatile pci::msix::MsixTableEntry* msix_table() const { return msix_.table(); }
 
 private:
-    volatile NvmeRegs*             regs_ = nullptr;
-    pci::PCIDevice                 dev_{};  // saved for MSI-X config (bus/slot/func + BARs)
+    /// Submit @p cmd on the admin SQ and poll the admin CQ for its completion
+    /// (phase flip).  Returns the status field (SC/SCT, 0 = success) or
+    /// Error::TimedOut.  Shared by Identify/Create commands (batch 4a helper).
+    cinux::lib::ErrorOr<uint16_t> admin_submit(const NvmeCmd& cmd);
+
+    volatile NvmeRegs* regs_ = nullptr;
+    pci::PCIDevice     dev_{};  // saved for MSI-X config (bus/slot/func + BARs)
     // Admin SQ/CQ (4 KiB DMA each).  Batch 2a.
     cinux::drivers::dma::DmaBuffer admin_sq_buf_;
     cinux::drivers::dma::DmaBuffer admin_cq_buf_;
     // Admin doorbell pointers + ring state.  Batch 2b.
-    volatile uint32_t*             admin_sq_tdbell_ = nullptr;
-    volatile uint32_t*             admin_cq_hdbell_ = nullptr;
-    uint32_t                       admin_sq_tail_   = 0;
-    uint32_t                       admin_cq_head_   = 0;
-    uint8_t                        cq_phase_        = 1;  // NVMe CQ starts at phase = 1
-    uint32_t                       doorbell_stride_ = 0;
+    volatile uint32_t* admin_sq_tdbell_ = nullptr;
+    volatile uint32_t* admin_cq_hdbell_ = nullptr;
+    uint32_t           admin_sq_tail_   = 0;
+    uint32_t           admin_cq_head_   = 0;
+    uint8_t            cq_phase_        = 1;  // NVMe CQ starts at phase = 1
+    uint32_t           doorbell_stride_ = 0;
     // MSI-X (batch 3).  Second MsixController instance (xHCI owns the first).
-    pci::msix::MsixCap             msix_cap_{};
-    pci::msix::MsixController      msix_;
+    pci::msix::MsixCap        msix_cap_{};
+    pci::msix::MsixController msix_;
+    // IO SQ/CQ (batch 4a).  qid=1.
+    cinux::drivers::dma::DmaBuffer io_sq_buf_;
+    cinux::drivers::dma::DmaBuffer io_cq_buf_;
+    volatile uint32_t*             io_sq_tdbell_ = nullptr;
+    volatile uint32_t*             io_cq_hdbell_ = nullptr;
+    uint32_t                       io_sq_tail_   = 0;
+    uint32_t                       io_cq_head_   = 0;
+    uint8_t                        io_cq_phase_  = 1;
 };
 
 }  // namespace cinux::drivers::nvme

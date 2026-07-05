@@ -163,7 +163,8 @@ set(QEMU_TEST_EXTRA_FLAGS
     # F5-M3 NVMe: controller + 1 MB backing disk.  serial= is mandatory for
     # -device nvme; the kernel enumerates via PCI class 0x01/0x08.
     -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
-    -device nvme,drive=nvme-disk,serial=nvme0
+    -device nvme,id=nvme0,serial=nvme0
+    -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
 )
 
 # ============================================================

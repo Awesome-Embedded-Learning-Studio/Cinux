@@ -53,9 +53,15 @@ constexpr uint32_t kAssignedBar0 = 0xfeb40000;
 constexpr uint16_t kAdminQSize = 64;       // Admin SQ/CQ entries (well under MQES+1=2048)
 constexpr uint32_t kReadyIters = 1000000;  // CSTS.RDY spin budget (no IRQ until batch 3)
 constexpr uint32_t kCstsRdy    = 0x1;      // CSTS.RDY bit
-// CC: IOSQES[29:24]=6 (64 B SQ entry), IOCQES[21:16]=4 (16 B CQ entry), EN[0]=1;
-// MPS=0 (4 KiB), CSS=0 (NVM), AMS=0 (round robin).
-constexpr uint32_t kCcEnable   = (6u << 24) | (4u << 16) | 1u;
+// CC (NVMe 1.4): IOCQES[23:20]=4 (16 B CQ entry), IOSQES[19:16]=6 (64 B SQ
+// entry), EN[0]=1; MPS=0 (4 KiB), CSS=0 (NVM), AMS=0 (round robin), SHN=0.
+// Field positions per NVMe spec / QEMU hw/nvme (CC_IOSQES_SHIFT=16,
+// CC_IOCQES_SHIFT=20). The Admin queue uses fixed 64 B/16 B entries and
+// ignores these bits, so a wrong shift here passes every Admin command
+// (Identify, Create IO Cq pre-check) but fails Create IO Cq/SQ -- QEMU's
+// nvme_create_cq checks iosqes/iocqes first and returns NVME_MAX_QSIZE_EXCEEDED
+// (0x0102 | DNR -> CQE status_field 0x8205) on mismatch.
+constexpr uint32_t kCcEnable   = (4u << 20) | (6u << 16) | 1u;
 
 void zero_dma(void* p, uint64_t bytes) {
     auto b = static_cast<volatile uint64_t*>(p);
@@ -226,10 +232,13 @@ cinux::lib::ErrorOr<void> NvmeController::identify_controller(IdentifyController
                 cinux::lib::kprintf("[NVMe] Identify failed status=0x%x\n", status);
                 return cinux::lib::Error::IOError;
             }
-            const auto* id = static_cast<const IdentifyController*>(buf.virt());
-            out            = *id;
-            cinux::lib::kprintf("[NVMe] Identify: VID=0x%x SSVID=0x%x SN=%.20s MN=%.40s\n", id->vid,
-                                id->ssvid, id->sn, id->mn);
+            const auto*    id  = static_cast<const IdentifyController*>(buf.virt());
+            const auto*    raw = static_cast<const uint8_t*>(buf.virt());
+            const uint32_t nn  = *reinterpret_cast<const uint32_t*>(raw + 516);
+            out                = *id;
+            cinux::lib::kprintf(
+                "[NVMe] Identify: VID=0x%x SSVID=0x%x SN=%.20s MN=%.40s NN=%u\n", id->vid,
+                id->ssvid, id->sn, id->mn, nn);
             return {};
         }
     }
@@ -250,22 +259,146 @@ cinux::lib::ErrorOr<void> NvmeController::init_msi_x() {
     // maps + entry programs (mirroring xHCI batch 2C).
     constexpr uint64_t kNvmeMsixTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x74000;
     constexpr uint64_t kNvmeMsixPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x75000;
-    constexpr uint8_t  kNvmeIrqVector     = 0x41;
     auto               r = msix_.init(msix_cap_, dev_, kNvmeMsixTableVirt, kNvmeMsixPbaVirt);
     if (!r.ok()) {
         return cinux::lib::Error::OutOfMemory;
     }
     msix_.mask_all();
     msix_.program_vector(0, kNvmeIrqVector, 0);
-    // enable() is deferred to production (batch 4): enabling here would let the
-    // controller deliver vector 0x41 on the next admin completion, but the test
-    // kernel has no IDT[0x41] handler installed -- the message #PFs.  xHCI
-    // installs its ISR in batch 0C before enabling; NVMe does the same in prod.
-    cinux::lib::kprintf(
-        "[NVMe] MSI-X configured (entry 0 -> vector 0x%x, %u entries; enable "
-        "deferred to production)\n",
-        kNvmeIrqVector, msix_cap_.table_size);
+    msix_.program_vector(1, kNvmeIrqVector, 0);  // batch 4: IO Cq IV
+    msix_.enable();  // batch 4: IDT[kNvmeIrqVector] registered in irq_init
+    // Re-mask every entry. The test kernel runs IF=0 and never calls
+    // switch_to_apic(), so irq_eoi() still targets the 8259 PIC -- a no-op for
+    // MSI-X. An unmasked admin-completion MSI (vector 0x41) would enter the
+    // LAPIC IRR, be delivered on the next sti, run the ISR stub whose EOI is a
+    // PIC no-op, and strand 0x41 in the LAPIC ISR. That raises the processor
+    // priority above the LAPIC timer (vector 0x30) that e1000's ARP poll
+    // sti+hlt depends on (the bug interrupts.S:264 warns about), hanging every
+    // later e1000 test. Masked entries still verify the Table map + entry
+    // programming (msg_addr != 0) + MC.Enable bit; production (batch 4c)
+    // installs the ISR and switches to APIC before unmasking.
+    msix_.mask_all();
+    cinux::lib::kprintf("[NVMe] MSI-X enabled (entry 0 -> vector 0x%x, %u entries)\n",
+                        kNvmeIrqVector, msix_cap_.table_size);
+    return {};
+}
+
+cinux::lib::ErrorOr<uint16_t> NvmeController::admin_submit(const NvmeCmd& cmd) {
+    // Enqueue on the admin SQ at [tail] and ring the doorbell.
+    auto*      sq            = static_cast<NvmeCmd*>(admin_sq_buf_.virt());
+    sq[admin_sq_tail_]       = cmd;
+    admin_sq_tail_           = (admin_sq_tail_ + 1) % kAdminQSize;
+    *admin_sq_tdbell_        = admin_sq_tail_;
+
+    // Poll the admin CQ for this command's completion (phase tag flips).
+    auto* cq = reinterpret_cast<volatile NvmeCqe*>(admin_cq_buf_.virt());
+    for (uint32_t i = 0; i < kReadyIters; ++i) {
+        volatile NvmeCqe& cqe          = cq[admin_cq_head_];
+        const uint16_t    status_field = cqe.status;
+        if ((status_field & 0x1) == cq_phase_) {
+            const uint16_t status = static_cast<uint16_t>(status_field >> 1);
+            admin_cq_head_        = (admin_cq_head_ + 1) % kAdminQSize;
+            if (admin_cq_head_ == 0) {
+                cq_phase_ ^= 1;
+            }
+            *admin_cq_hdbell_ = admin_cq_head_;
+            return status;
+        }
+    }
+    return cinux::lib::Error::TimedOut;
+}
+
+cinux::lib::ErrorOr<void> NvmeController::identify_namespace(uint32_t nsid, NamespaceInfo& out) {
+    auto buf_r = cinux::drivers::dma::g_dma_pool.alloc(4096);
+    if (!buf_r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    cinux::drivers::dma::DmaBuffer buf = std::move(buf_r.value());
+    zero_dma(buf.virt(), buf.size());
+
+    NvmeCmd cmd{};
+    cmd.opcode = 0x06;  // Identify
+    cmd.nsid   = nsid;
+    cmd.prp1   = buf.phys();
+    cmd.cdw10  = 0x00;  // CNS=0x00 (Identify Namespace, nsid-specific)
+    auto sr    = admin_submit(cmd);
+    if (!sr.ok()) {
+        return sr.error();
+    }
+    if (sr.value() != 0) {
+        cinux::lib::kprintf("[NVMe] Identify Namespace %u failed status=0x%x\n", nsid, sr.value());
+        return cinux::lib::Error::IOError;
+    }
+
+    const auto*    data  = static_cast<const uint8_t*>(buf.virt());
+    const uint8_t  flbas = data[0x1A];
+    const uint32_t lbaf  = *reinterpret_cast<const uint32_t*>(data + 0x80 + (flbas & 0xF) * 4);
+    out.nsze             = *reinterpret_cast<const uint64_t*>(data);
+    out.lba_size         = 1u << ((lbaf >> 16) & 0xFF);  // LBADS = LBAF bits[23:16]
+    cinux::lib::kprintf("[NVMe] Namespace %u: nsze=%llu lba_size=%u\n", nsid,
+                        static_cast<unsigned long long>(out.nsze), out.lba_size);
+    return {};
+}
+
+cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
+    constexpr uint16_t kIoQSize       = 64;
+    constexpr uint16_t kIoQid         = 1;
+
+    auto sq_r = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kIoQSize) * 64);
+    auto cq_r = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kIoQSize) * 16);
+    if (!sq_r.ok() || !cq_r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    io_sq_buf_ = std::move(sq_r.value());
+    io_cq_buf_ = std::move(cq_r.value());
+    zero_dma(io_sq_buf_.virt(), io_sq_buf_.size());
+    zero_dma(io_cq_buf_.virt(), io_cq_buf_.size());
+
+    // Create IO CQ (opcode 0x05): PRP1=CQ phys, CDW10=QID|QSIZE, CDW11=IV|IEN|PC.
+    {
+        NvmeCmd cmd{};
+        cmd.opcode = 0x05;
+        cmd.prp1   = io_cq_buf_.phys();
+        cmd.cdw10  = (static_cast<uint32_t>(kIoQSize - 1) << 16) | kIoQid;
+        cmd.cdw11  = (1u << 16) | (1u << 1) | 1u;  // IV=1 (MSI-X entry 1), IEN=1, PC=1
+        auto sr    = admin_submit(cmd);
+        if (!sr.ok() || sr.value() != 0) {
+            cinux::lib::kprintf("[NVMe] Create IO CQ failed status=%d\n", sr.ok() ? sr.value() : -1);
+            return cinux::lib::Error::IOError;
+        }
+    }
+    // Create IO SQ (opcode 0x01): PRP1=SQ phys, CDW10=QID|QSIZE, CDW11=CQID|QPRIO|PC.
+    {
+        NvmeCmd cmd{};
+        cmd.opcode = 0x01;
+        cmd.prp1   = io_sq_buf_.phys();
+        cmd.cdw10  = (static_cast<uint32_t>(kIoQSize - 1) << 16) | kIoQid;
+        cmd.cdw11  = (static_cast<uint32_t>(kIoQid) << 16) | 1u;  // CQID=1, QPRIO=0, PC
+        auto sr    = admin_submit(cmd);
+        if (!sr.ok() || sr.value() != 0) {
+            cinux::lib::kprintf("[NVMe] Create IO SQ failed status=%d\n", sr.ok() ? sr.value() : -1);
+            return cinux::lib::Error::IOError;
+        }
+    }
+
+    // IO doorbells: SQ qid=1 tail @ BAR0+0x1000+2*1*stride, CQ qid=1 head @ +0x1000+3*stride.
+    const uintptr_t base = reinterpret_cast<uintptr_t>(regs_);
+    io_sq_tdbell_        = reinterpret_cast<volatile uint32_t*>(base + 0x1000 + 2 * doorbell_stride_);
+    io_cq_hdbell_        = reinterpret_cast<volatile uint32_t*>(base + 0x1000 + 3 * doorbell_stride_);
+    io_sq_tail_          = 0;
+    io_cq_head_          = 0;
+    io_cq_phase_         = 1;
+    cinux::lib::kprintf("[NVMe] IO queues created (qid=1 size=%u)\n", kIoQSize);
     return {};
 }
 
 }  // namespace cinux::drivers::nvme
+
+namespace cinux::arch {
+struct InterruptFrame;  // fwd decl for the ISR C handler signature
+}
+
+volatile uint64_t g_nvme_irq_count = 0;
+extern "C" void nvme_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
+    g_nvme_irq_count = g_nvme_irq_count + 1;  // EOI by ISR_IRQ stub
+}

@@ -68,6 +68,16 @@ void test_find_and_map() {
     TEST_ASSERT_TRUE(ctrl.msix_table() != nullptr);
     TEST_ASSERT_TRUE(ctrl.msix_table()[0].msg_addr_lower != 0);
 
+    // batch 4a: Identify Namespace 1 + Create IO queues.
+    nvme::NamespaceInfo          ns{};
+    cinux::lib::ErrorOr<void>    nr = ctrl.identify_namespace(1, ns);
+    TEST_ASSERT_TRUE(nr.ok());
+    TEST_ASSERT_GT(ns.nsze, 0u);
+    TEST_ASSERT_GT(ns.lba_size, 0u);
+
+    cinux::lib::ErrorOr<void> cr = ctrl.create_io_queues();
+    TEST_ASSERT_TRUE(cr.ok());
+
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or
     // unmapped read returns 0, so MQES > 0 proves the window is live and the
     // controller answered.  VS encodes MJR.MNR; QEMU nvme reports 1.x or later.
