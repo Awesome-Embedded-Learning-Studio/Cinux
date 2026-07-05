@@ -10,7 +10,7 @@
 3. TTY 子系统(伪终端 + 行规范)
 4. PTY 真终端会话(fork+execve-under-PTY;busybox sh 作消费者)
 
-> init 用 busybox init(批3b ✅,不自建 userland)。CFBox(自家 C++ userland)评估已移除——CinuxOS 用现成 busybox/gcc,不自建。
+> init 用 busybox init(批3b ✅)。CinuxOS 用现成 busybox/gcc,不自建 userland。
 
 ## Milestone 依赖
 
