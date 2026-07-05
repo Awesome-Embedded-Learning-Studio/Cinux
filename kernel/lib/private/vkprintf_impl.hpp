@@ -9,6 +9,7 @@
  * Supported specifiers:  %%  %c  %s  %d  %u  %o  %x  %X  %p
  * Length modifiers:      %ld  %lu  %lo  %lx  %lX  (long — 64-bit on LP64)
  *                        %lld %llu %llx %llX (long long — 64-bit)
+ *                        %zd  %zu  %zo  %zx  %zX  (size_t — 64-bit on LP64)
  * Width modifiers:       %Nd   (right-align, space-pad)
  *                        %0Nd  (right-align, zero-pad)
  *                        %-Nd  (left-align, space-pad for numbers)
@@ -233,11 +234,16 @@ void vkprintf_impl(OutputFn&& putc_fn, const char* fmt, va_list args) {
             }
         }
 
-        // Parse optional length modifier: l, ll
-        // On LP64 (x86_64 Linux) both long and long long are 64-bit.
+        // Parse optional length modifier: l, ll, z (size_t)
+        // On LP64 (x86_64) long, long long and size_t are all 64-bit, so 'z'
+        // selects the same 64-bit va_arg width as a single 'l'.
         int long_count = 0;
         while (*fmt == 'l') {
             long_count++;
+            fmt++;
+        }
+        if (*fmt == 'z') {
+            long_count = 1;
             fmt++;
         }
 

@@ -30,6 +30,7 @@
 #include "kernel/lib/kprintf.hpp"                 // kvprintf / kprintf
 #include "kernel/lib/string.hpp"                  // memcpy
 #include "kernel/mm/slab.hpp"                     // kmalloc / kfree
+#include "kernel/proc/sync.hpp"               // InterruptGuard (TEMP: PIT-tick probe)
 #include "third_party/Cinux-GUI/core/event.hpp"
 #include "third_party/Cinux-GUI/core/event_payload.hpp"
 #include "third_party/Cinux-GUI/core/font.hpp"       // PsfFont
@@ -66,6 +67,36 @@ HostState                   g_state;
 Host                        g_cinux_host{};
 cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here */
 GuiCore*                    g_core = nullptr; /* core-owned staging session  */
+
+/* ============================================================
+ * Corruption diagnosis (F13-B, temporary): font sits at HostState offset 0,
+ * and paint_list_.cmds_[4096] sits at the very end of g_state, immediately
+ * before g_cinux_host in BSS. A wild write crossing either boundary surfaces
+ * here. We snapshot font.glyphs_ + g_cinux_host.ctx at init and compare at
+ * every pump entry/exit -- the FIRST tag that reports a change localises the
+ * stomping step (dispatch vs render, entry vs exit).
+ * ============================================================ */
+const uint8_t* g_expected_glyphs = nullptr;
+void*          g_expected_ctx    = nullptr;
+
+void check_intact(const char* tag) {
+    const uint8_t* cur_glyphs = g_state.font.debug_glyphs_ptr();
+    if (cur_glyphs != g_expected_glyphs) {
+        cinux::lib::kprintf("[gui] %s: font.glyphs_ CORRUPT cur=%p exp=%p\n", tag,
+                            static_cast<const void*>(cur_glyphs),
+                            static_cast<const void*>(g_expected_glyphs));
+    }
+    if (g_cinux_host.ctx != g_expected_ctx) {
+        cinux::lib::kprintf("[gui] %s: host.ctx CORRUPT cur=%p exp=%p\n", tag,
+                            g_cinux_host.ctx, g_expected_ctx);
+    }
+    /* paint_list_ lives mid-g_state (cmds_[4096] ~128 KB); count_ sits just
+     * past cmds_, so a wild write over the tail surfaces here. */
+    const uint32_t pc = g_state.desktop.debug_paint_count();
+    if (pc > 4096u) {
+        cinux::lib::kprintf("[gui] %s: paint_list.count CORRUPT=%u\n", tag, pc);
+    }
+}
 
 constexpr uint32_t kWinW = 200;
 constexpr uint32_t kWinH = 160;
@@ -147,6 +178,8 @@ void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload)
         return;
     }
 
+    check_intact("dispatch:entry");
+
     auto* st = static_cast<HostState*>(ctx);
 
     switch (ev->type) {
@@ -156,8 +189,12 @@ void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload)
         }
         PointerPayload p;
         memcpy(&p, payload, sizeof(p));
-        st->desktop.dispatch_pointer(p);  // WM hit-test + drag/raise/close + cursor
-        return;
+        /* WM owns the cursor + Z-order/drag/close -- matches the fbdev host
+         * (host/linux_fbdev_main.cpp). Desktop::dispatch_pointer skips the cursor
+         * update (cursor_x_/y_ lives in the WM), so calling it instead of
+         * process_pointer was the F13-B "no visible cursor" regression. */
+        st->wm.process_pointer(p);
+        break;
     }
     case EventCode::kKeycode: {
         if (ev->payload_len < sizeof(KeycodePayload)) {
@@ -167,11 +204,12 @@ void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload)
         memcpy(&k, payload, sizeof(k));
         cinux::debug::trace_char("host.dispatch_key before desktop.dispatch_key", k.ascii);
         st->desktop.dispatch_key(k);  // route to focused widget
-        return;
+        break;
     }
     default:
-        return;
+        break;
     }
+    check_intact("dispatch:exit");
 }
 
 /* ============================================================
@@ -184,15 +222,57 @@ void cinux_render_frame(void* ctx, Frame* frame) {
     if (frame == nullptr) {
         return;
     }
+    check_intact("render:entry");
+    /* First-few-frames dump: staging vs g_state (BSS) overlap, Surface stride,
+     * and every font field. Compositor handlers receive pixel-like garbage
+     * while font.glyphs_ stays valid -- so the culprit is a wild pointer in the
+     * Surface stack object, a stomped paint_list cmd, or a font field other
+     * than glyphs_ (e.g. bytes_per_glyph_). */
+    static int s_render_n = 0;
+    if (s_render_n < 10) {
+        ++s_render_n;
+        const uint8_t* px         = static_cast<const uint8_t*>(frame->pixels);
+        const size_t   staging_sz = static_cast<size_t>(frame->stride) * frame->height;
+        const uint8_t* gs         = reinterpret_cast<const uint8_t*>(&g_state);
+        const bool     overlap    = (px < gs + sizeof(HostState)) && (px + staging_sz > gs);
+        cinux::lib::kprintf(
+            "[gui] render#%d staging=[%p..%p) sz=%zu | g_state=[%p..%p) sz=%zu | OVERLAP=%d | "
+            "frame.stride=%u | font glyphs=%p w=%u h=%u bpg=%u num=%u\n",
+            s_render_n, static_cast<const void*>(px), static_cast<const void*>(px + staging_sz),
+            staging_sz, static_cast<const void*>(gs),
+            static_cast<const void*>(gs + sizeof(HostState)), sizeof(HostState), overlap ? 1 : 0,
+            static_cast<uint32_t>(frame->stride),
+            static_cast<const void*>(g_state.font.debug_glyphs_ptr()), g_state.font.width(),
+            g_state.font.height(), g_state.font.bytes_per_glyph(), g_state.font.num_glyphs());
+    }
     auto*   st = static_cast<HostState*>(ctx);
     Surface s{frame->pixels, frame->width, frame->height, frame->stride, frame->format};
+    /* Per-frame Surface sanity: s lives on render_frame's stack and is passed by
+     * reference down to fill_rect/glyph_blit. If s.pixels or stride gets stomped
+     * mid-render the swraster writes a non-canonical address -> #GP. Snapshot the
+     * staging pointer on frame 1, then verify it (and stride) every frame. */
+    static const void* g_expected_staging = nullptr;
+    if (g_expected_staging == nullptr) {
+        g_expected_staging = s.pixels;
+    } else if (s.pixels != g_expected_staging || s.stride_bytes != 4096u) {
+        cinux::lib::kprintf("[gui] render: Surface CORRUPT s.pixels=%p(exp %p) stride=%u(exp 4096) "
+                            "frame.pixels=%p stride=%u\n",
+                            s.pixels, g_expected_staging, s.stride_bytes, frame->pixels, frame->stride);
+    }
     Region  dirty;
-    st->desktop.render(s, st->font, &dirty);  // widget tree -> staging (full-screen dirty)
+    {
+        /* TEMP probe: if disabling IRQs around desktop.render stops the crash,
+         * a PIT tick (100 Hz) was stomping the gui_worker stack mid-render. */
+        cinux::proc::InterruptGuard ig;
+        st->desktop.render(s, st->font, &dirty);  // widget tree -> staging
+    }
+    check_intact("render:after-desktop-render");
     const uint32_t n = dirty.count();
     for (uint32_t i = 0u; i < n && i < frame->max_rects; ++i) {
         frame->rects[i] = dirty.rects()[i];
     }
     frame->count = n;
+    check_intact("render:exit");
 }
 
 uint32_t cinux_now_ms([[maybe_unused]] void* ctx) {
@@ -325,6 +405,10 @@ void cinux_host_init(cinux::drivers::Framebuffer* fb) {
     g_cinux_host.core.log            = cinux_log;
     g_cinux_host.desktop             = nullptr;
     g_cinux_host.ctx                 = &g_state;
+
+    /* Snapshot intact state for corruption diagnosis (see check_intact). */
+    g_expected_glyphs = g_state.font.debug_glyphs_ptr();
+    g_expected_ctx    = g_cinux_host.ctx;
 
     /* Construct the GuiCore over the host table + display geometry. The core
      * allocates the staging buffer (w*h*4) via global new -> kmalloc (crt_stub
