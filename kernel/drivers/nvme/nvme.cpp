@@ -79,6 +79,12 @@ cinux::lib::ErrorOr<void> NvmeController::init(const pci::PCIDevice& dev) {
         pci::PCI::pci_write(dev.bus, dev.slot, dev.func, pci::PciReg::BAR0, kAssignedBar0);
         pci::PCI::pci_write(dev.bus, dev.slot, dev.func, pci::PciReg::BAR1, 0);
         bar0               = kAssignedBar0;
+        // read_bars() ran BEFORE the self-assign, so dev.bar[0] still holds the
+        // stale 0.  Update the saved copy so init_msi_x() computes the MSI-X
+        // Table phys from the real BAR0 (0xfeb40000), not 0+table_offset --
+        // otherwise the Table maps to low RAM and program_vector() overwrites
+        // it, corrupting nearby low-memory mappings (batch-3 #PF root cause).
+        dev_.bar[0]        = kAssignedBar0;
         const uint32_t rb0 = pci::PCI::pci_read(dev.bus, dev.slot, dev.func, pci::PciReg::BAR0);
         const uint32_t rb1 = pci::PCI::pci_read(dev.bus, dev.slot, dev.func, pci::PciReg::BAR1);
         cinux::lib::kprintf(

@@ -62,13 +62,11 @@ void test_find_and_map() {
     cinux::lib::kprintf("[NVMe] Identify mechanism: VID=0x%x SSVID=0x%x\n",
                         static_cast<unsigned>(id.vid), static_cast<unsigned>(id.ssvid));
 
-    // batch 3: MSI-X multi-instance (MsixController @+0x74000, entry 0 -> 0x41)
-    // is implemented (init_msi_x) but NOT exercised under the test kernel:
-    // running it disturbs a later clone test (#PF in handle_pf -- likely the
-    // residual MSI-X Table PTE @+0x74000 interacting with fork's page-table
-    // copy; root cause deferred to production bring-up, batch 4).  The
-    // MsixController multi-instance change itself is verified by the full build
-    // (back-compatible default args; xHCI unchanged) + xHCI batch-2C MSI-X.
+    // batch 3: MSI-X multi-instance (MsixController @+0x74000, entry 0 -> 0x41).
+    cinux::lib::ErrorOr<void> mr = ctrl.init_msi_x();
+    TEST_ASSERT_TRUE(mr.ok());
+    TEST_ASSERT_TRUE(ctrl.msix_table() != nullptr);
+    TEST_ASSERT_TRUE(ctrl.msix_table()[0].msg_addr_lower != 0);
 
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or
     // unmapped read returns 0, so MQES > 0 proves the window is live and the
