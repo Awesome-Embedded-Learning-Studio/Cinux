@@ -167,10 +167,11 @@ int main(void) {
     return 0;
 }
 EOF
-# -fno-pie: CinuxOS only loads non-PIE ET_EXEC so far (F10-M2 hello-dyn), so emit
-# a non-PIE assembly (absolute addressing, links with crt1.o + crtbegin.o under
-# ld -no-pie). PIE main (Scrt1/crtbeginS, ET_DYN) is a follow-up with ELF-base ASLR.
-"$GCC_BIN" -S -fno-pie -o "$ROOT/hello.s" /tmp/cinux_hello.c
+# gcc defaults to PIE on modern distros (--enable-default-pie); CinuxOS now loads
+# PIE main (ET_DYN + ELF-base ASLR, kernel PIE batch 1), so emit PIE assembly
+# (RIP-relative, links with Scrt1.o + crtbeginS.o under ld -pie) by leaving the
+# default alone. Forcing -fno-pie would yield the legacy ET_EXEC path.
+"$GCC_BIN" -S -o "$ROOT/hello.s" /tmp/cinux_hello.c
 cp /tmp/cinux_hello.c "$ROOT/hello.c"
 rm -f /tmp/cinux_hello.c
 
@@ -180,7 +181,7 @@ rm -f /tmp/cinux_hello.c
 #     ~249 MB of /usr/include.  cc1's built-in include search (/usr/include +
 #     GCC's private include dir) then resolves <stdio.h> et al.  [ -f ] filters the
 #     "Multiple include guards ..." non-path line gcc -H appends. ---
-"$GCC_BIN" -H -fsyntax-only -fno-pie "$ROOT/hello.c" 2>&1 >/dev/null \
+"$GCC_BIN" -H -fsyntax-only "$ROOT/hello.c" 2>&1 >/dev/null \
     | sed -E 's/^[. ]+//' | grep -v '^$' | sort -u | while read -r h; do
     [ -f "$h" ] || continue
     install -Dm0644 "$h" "$ROOT$h"
@@ -192,7 +193,7 @@ done
 [ -f /usr/include/stdc-predef.h ] && install -Dm0644 /usr/include/stdc-predef.h "$ROOT/usr/include/stdc-predef.h"
 
 # --- F-USABILITY stage 4 (C++): cc1plus + g++ driver + libstdc++ + the C++
-#     header closure so `g++ -fno-pie -no-pie /hello.cpp` runs on CinuxOS.
+#     header closure so `g++ /hello.cpp` runs on CinuxOS as a default-PIE binary.
 #     Mirrors the C path: stage the binary + .so closure + headers computed
 #     live via g++ -H.  libstdc++.so carries the EH runtime (__cxa_* / STL);
 #     libgcc_s.so (staged above) carries the DWARF unwinder (_Unwind_*).  No
@@ -248,8 +249,8 @@ if [ -n "$LIBM_REAL" ] && [ -f "$LIBM_REAL" ]; then
 fi
 
 # hello.cpp source: STL (vector/string) + exception (throw/catch) smoke.  No
-# <thread>/pthread (separate batch).  -fno-pie -no-pie: same non-PIE reason as
-# hello.c (CinuxOS loads ET_EXEC only; PIE is the ELF-base ASLR follow-up).
+# <thread>/pthread (separate batch).  No -fno-pie: like hello.c, the gcc/g++
+# default (PIE) is what we want -- kernel PIE batch 1 loads ET_DYN main.
 cat > "$ROOT/hello.cpp" << 'EOF'
 #include <iostream>
 #include <stdexcept>
@@ -275,7 +276,7 @@ EOF
 # <vector>/<string> + libstdc++'s <bits/*> + the C headers already staged; we
 # install exactly those files at their absolute paths (iostream pulls a few
 # hundred headers but still a small slice of the full C++ include tree).
-"$GXX_BIN" -H -fsyntax-only -fno-pie "$ROOT/hello.cpp" 2>&1 >/dev/null \
+"$GXX_BIN" -H -fsyntax-only "$ROOT/hello.cpp" 2>&1 >/dev/null \
     | sed -E 's/^[. ]+//' | grep -v '^$' | sort -u | while read -r h; do
     [ -f "$h" ] || continue
     install -Dm0644 "$h" "$ROOT$h"

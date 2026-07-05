@@ -11,11 +11,41 @@
 
 #include "ext2.hpp"
 #include "ext2_extent.hpp"
+#include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 #include "kernel/mm/page_cache.hpp"
 
 namespace cinux::fs {
+
+// B2.5: cumulative ext2 read I/O accounting for the periodic stats dump. The
+// gcc-compile curve (after B2's lazy load) still shows a ~5 s residual stall;
+// this attributes it to demand-PF I/O vs something else. handle_pf is IF=0 but
+// -smp 2 can fault concurrently, so the counters are atomic. Declared in
+// ext2.hpp; consumed by dump_memory_stats.
+namespace {
+uint64_t g_ext2_read_count = 0;
+uint64_t g_ext2_read_bytes = 0;
+uint64_t g_ext2_read_ns    = 0;
+
+/// RAII: time Ext2FileOps::read() from entry to exit (counts every return path).
+class Ext2ReadTimer {
+  public:
+    Ext2ReadTimer() : t0_(cinux::drivers::g_hpet.monotonic_ns()) {}
+    ~Ext2ReadTimer() {
+        __atomic_fetch_add(&g_ext2_read_ns, cinux::drivers::g_hpet.monotonic_ns() - t0_,
+                           __ATOMIC_RELAXED);
+        __atomic_fetch_add(&g_ext2_read_count, 1, __ATOMIC_RELAXED);
+    }
+
+  private:
+    uint64_t t0_;
+};
+}  // namespace
+
+uint64_t ext2_read_count() { return __atomic_load_n(&g_ext2_read_count, __ATOMIC_RELAXED); }
+uint64_t ext2_read_bytes() { return __atomic_load_n(&g_ext2_read_bytes, __ATOMIC_RELAXED); }
+uint64_t ext2_read_ns()    { return __atomic_load_n(&g_ext2_read_ns,    __ATOMIC_RELAXED); }
 
 // ============================================================
 // Ext2FileOps
@@ -29,6 +59,7 @@ bool Ext2FileOps::is_page_cacheable() const {
 
 cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offset, void* buf,
                                                uint64_t count) {
+    Ext2ReadTimer timer;  // B2.5: account this read's wall time to g_ext2_read_ns
     if (inode == nullptr || inode->fs_private == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -61,67 +92,8 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             chunk = to_read - total_read;
         }
 
-        uint32_t disk_block = 0;
-
-        // ext4 extent-mapped inode: resolve the logical block through the
-        // extent tree in i_block[0..14] instead of the classic indirect path.
-        if (inode_has_extent_tree(disk)) {
-            uint32_t           extent_block = 0;
-            ExtentLookupResult r =
-                extent_lookup_block(disk, static_cast<uint32_t>(file_block), extent_block);
-            if (r == ExtentLookupResult::Unsupported) {
-                break;  // depth>0 index tree -- follow-up; stop the read.
-            }
-            disk_block = (r == ExtentLookupResult::Mapped) ? extent_block : 0;
-        } else if (file_block < EXT2_DIRECT_BLOCKS) {
-            disk_block = disk.i_block[file_block];
-        } else if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
-            uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
-            if (indirect_block == 0) {
-                break;
-            }
-
-            if (!ext2_.read_block(indirect_block)) {
-                break;
-            }
-
-            uint32_t idx      = static_cast<uint32_t>(file_block - EXT2_DIRECT_BLOCKS);
-            auto*    indirect = reinterpret_cast<uint32_t*>(ext2_.block_buf());
-            disk_block        = indirect[idx];
-        } else if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block +
-                                    block_ptrs_per_block * block_ptrs_per_block) {
-            // Doubly-indirect: i_block[13] points at a block of indirect
-            // pointers, each of which points at a block of data pointers.
-            uint32_t double_block = disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK];
-            if (double_block == 0) {
-                break;
-            }
-            if (!ext2_.read_block(double_block)) {
-                break;
-            }
-
-            uint32_t di_offset =
-                static_cast<uint32_t>(file_block - EXT2_DIRECT_BLOCKS - block_ptrs_per_block);
-            uint32_t idx1           = di_offset / block_ptrs_per_block;
-            uint32_t idx2           = di_offset % block_ptrs_per_block;
-            auto*    double_ptrs    = reinterpret_cast<uint32_t*>(ext2_.block_buf());
-            uint32_t indirect_block = double_ptrs[idx1];
-            if (indirect_block == 0) {
-                break;
-            }
-            if (!ext2_.read_block(indirect_block)) {
-                break;
-            }
-
-            auto* child_ptrs = reinterpret_cast<uint32_t*>(ext2_.block_buf());
-            disk_block       = child_ptrs[idx2];
-            // disk_block == 0 here means a hole inside an allocated indirect
-            // block; the common path below zero-fills it (sparse-file read).
-        } else {
-            break;
-        }
-
-        if (disk_block == 0) {
+        uint32_t disk_block = resolve_disk_block_(disk, file_block, block_ptrs_per_block);
+        if (disk_block == 0) {  // hole / unmapped / extent-unsupported -> zero fill
             for (uint64_t i = 0; i < chunk; ++i) {
                 dst[total_read + i] = 0;
             }
@@ -129,16 +101,97 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             continue;
         }
 
-        if (!ext2_.read_block(disk_block)) {
-            break;
+        // B3a agg OFF (follow-up): agg>1 read_disk_range SIGILLs ld-linux at 0x377e (a
+        // legal `mov %rdx,0x8(%rax)`). Exhaustive trace: agg-on .text dst is byte-identical
+        // to host (verified at the SIGILL point 0x77e == 48 89 50 08 and all 4 block heads
+        // of ld-linux page 0x3000); read_disk_range dst == read_block block_buf_ for the
+        // same disk_block; ld-linux .dynamic/.data agg=1 (fragmented, per-block == agg-off).
+        // Yet agg-on executes wrong (rax from .bss _rtld_global+0xb50 is 0 -- ld-linux's
+        // relocate never set it). Logic is airtight, data is airtight, but execution
+        // diverges. Suspect an agg>1 side effect beyond dst (cache-page/refcount write?
+        // AHCI dma_buf_ shared state? ldso bring-up timing?). Keep agg=1 (== pre-B3) so the
+        // kernel works; re-enable after a deeper trace.
+        uint64_t agg = 1;
+        if (block_offset == 0) {  // B3a: agg re-enabled (audit+repair below)
+            while (agg < 4 && total_read + agg * bs <= to_read) {
+                uint32_t next = resolve_disk_block_(disk, file_block + agg, block_ptrs_per_block);
+                if (next != disk_block + agg) break;
+                agg++;
+            }
         }
 
-        auto* src = reinterpret_cast<const uint8_t*>(ext2_.block_buf()) + block_offset;
-        memcpy(dst + total_read, src, chunk);
-        total_read += chunk;
+        if (agg > 1) {
+            // Coalesce agg contiguous blocks via one DMA into block_buf_
+            // (scratch), then copy only the bytes the caller asked for. The
+            // tail of the last block can extend past `to_read` when count is
+            // not a block multiple (ELF PT_LOAD straddle pages, short reads) --
+            // writing those extra bytes to dst overruns the caller's buffer and
+            // clobbers adjacent data. That overrun was the B3a SIGILL: ldso's
+            // PT_LOAD RW straddle page (0x1003c000) is eager zero-filled, then
+            // read() fills the file tail (count 0x84c); the old agg>1 path DMA'd
+            // agg*bs = 2 KiB straight into dst, overwriting the .bss half
+            // (offset 0x84c..0xfff) with file bytes. _rtld_global+0xb50 then
+            // read a non-zero file byte as rax -> non-canonical -> #GP. Land the
+            // DMA in block_buf_ first, then a bounded memcpy.
+            if (!ext2_.read_disk_range(disk_block, agg, ext2_.block_buf()).ok()) break;
+            uint64_t take = agg * bs;
+            if (take > to_read - total_read) {
+                take = to_read - total_read;
+            }
+            memcpy(dst + total_read, ext2_.block_buf(), take);
+            total_read += take;
+        } else {
+            if (!ext2_.read_block(disk_block)) break;
+            const auto* src = reinterpret_cast<const uint8_t*>(ext2_.block_buf()) + block_offset;
+            memcpy(dst + total_read, src, chunk);
+            total_read += chunk;
+        }
     }
 
+    __atomic_fetch_add(&g_ext2_read_bytes, total_read, __ATOMIC_RELAXED);
     return static_cast<int64_t>(total_read);
+}
+
+// B3a: resolve file_block → on-disk block (0 = hole / unmapped / extent-unsupported /
+// I/O error). Extracted from read() so the coalescing loop can probe N contiguous
+// blocks. Clobbers block_buf_ (indirect-table reads); data I/O uses read_disk_range.
+// Note: extent depth>0 (Unsupported) collapses to 0 here (zero-fill) -- read() used
+// to break on it; ext4 depth>0 stays a follow-up and cc1's depth-0 extents are fine.
+uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
+                                          uint64_t block_ptrs_per_block) {
+    if (inode_has_extent_tree(disk)) {
+        uint32_t           extent_block = 0;
+        ExtentLookupResult r =
+            extent_lookup_block(disk, static_cast<uint32_t>(file_block), extent_block);
+        return (r == ExtentLookupResult::Mapped) ? extent_block : 0;
+    }
+    if (file_block < EXT2_DIRECT_BLOCKS) {
+        return disk.i_block[file_block];
+    }
+    if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
+        const uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
+        if (indirect_block == 0) return 0;
+        if (!ext2_.read_block(indirect_block)) return 0;
+        const auto* indirect = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        return indirect[file_block - EXT2_DIRECT_BLOCKS];
+    }
+    if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block +
+                         block_ptrs_per_block * block_ptrs_per_block) {
+        const uint32_t double_block = disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK];
+        if (double_block == 0) return 0;
+        if (!ext2_.read_block(double_block)) return 0;
+        const uint32_t di_offset =
+            static_cast<uint32_t>(file_block - EXT2_DIRECT_BLOCKS - block_ptrs_per_block);
+        const uint32_t idx1           = di_offset / block_ptrs_per_block;
+        const uint32_t idx2           = di_offset % block_ptrs_per_block;
+        const auto*    double_ptrs    = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        const uint32_t indirect_block = double_ptrs[idx1];
+        if (indirect_block == 0) return 0;
+        if (!ext2_.read_block(indirect_block)) return 0;
+        const auto* child_ptrs = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        return child_ptrs[idx2];
+    }
+    return 0;  // triple-indirect unsupported
 }
 
 cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, const void* buf,

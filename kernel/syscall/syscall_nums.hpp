@@ -97,7 +97,8 @@ enum class SyscallNr : uint64_t {
     SYS_openat          = 257,  ///< open relative to dirfd (musl open/openat; AT_FDCWD=-100)
     SYS_newfstatat      = 262,  ///< stat relative to dirfd (musl stat/fstat/lstat)
     SYS_ping            = 220,  ///< ICMP echo (F7 shell ping; Cinux-custom)
-    SYS_cinux_exit      = 221,  ///< QEMU isa-debug-exit gate (F-USABILITY buildroot-usability; Cinux-custom)
+    SYS_cinux_exit =
+        221,  ///< QEMU isa-debug-exit gate (F-USABILITY buildroot-usability; Cinux-custom)
     // --- F7-M6 socket API (Linux x86_64 numbers; slots 41-50 were free) ---
     SYS_socket          = 41,   ///< create a socket (AF_INET / SOCK_STREAM | SOCK_DGRAM)
     SYS_connect         = 42,   ///< initiate a connection (TCP) / set peer (UDP)
@@ -124,6 +125,15 @@ enum class SyscallNr : uint64_t {
     SYS_getgroups       = 115,  ///< list supplementary groups (F-ECO batch 8)
     SYS_setgroups       = 116,  ///< set supplementary groups (root-only) (F-ECO batch 8)
     SYS_utimensat       = 312,  ///< set access / modification times (touch)
+    // --- gcc/g++ self-host (2026-07-05): probed/missing Linux syscalls ---
+    SYS_sendfile        = 40,   ///< sendfile (stub -ENOSYS; cp falls back to read+write)
+    SYS_gettimeofday    = 96,   ///< wall-clock time (CLOCK_REALTIME; same source as clock_gettime)
+    SYS_set_robust_list = 273,  ///< robust-futex probe (stub 0; no real robust cleanup yet)
+    SYS_prlimit64       = 302,  ///< resource-limit probe (stub; reports RLIM_INFINITY)
+    SYS_getrandom       = 318,  ///< random bytes (KRandom PRNG)
+    SYS_rseq            = 334,  ///< restartable-sequence probe (stub -ENOSYS)
+    SYS_clone3          = 435,  ///< clone3 probe (stub -ENOSYS; libc falls back to clone)
+    SYS_time            = 201,  ///< time in seconds (CLOCK_REALTIME)
 };
 
 /// Dispatch table covers all assigned Linux x86_64 numbers (max ~440) with

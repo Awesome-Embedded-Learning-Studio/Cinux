@@ -35,12 +35,12 @@ echo "[usability] PASS fork-exec"
 
 # gcc smoke (stage 3): only when the gcc driver ships in this rootfs (gcc
 # profile).  Single-command path -- the driver forks cc1/as/ld/collect2 and
-# pipes their stderr, exercising fork-exec chains + pipe EOF.  -fno-pie -no-pie:
-# CinuxOS only loads non-PIE ET_EXEC so far (F10-M2); PIE main is the ELF-base
-# ASLR follow-up.  Skipped on the base profile (no /usr/bin/gcc).  gcc failure
-# must abort via cinux-exit 1 so the CI gate sees a real failure, not a PASS.
+# pipes their stderr, exercising fork-exec chains + pipe EOF.  No -fno-pie:
+# gcc defaults to PIE, and kernel PIE batch 1 loads the ET_DYN main (ELF-base
+# ASLR).  Skipped on the base profile (no /usr/bin/gcc).  gcc failure must
+# abort via cinux-exit 1 so the CI gate sees a real failure, not a PASS.
 if [ -x /usr/bin/gcc ]; then
-    if /usr/bin/gcc -fno-pie -no-pie /hello.c -o /tmp/a.out && /tmp/a.out; then
+    if /usr/bin/gcc /hello.c -o /tmp/a.out && /tmp/a.out; then
         echo "[usability] PASS gcc-compile-run"
     else
         echo "[usability] FAIL gcc-compile-run"
@@ -51,13 +51,13 @@ fi
 # g++ smoke (stage 4): only when g++ ships (gcc profile + C++ closure).  Same
 # single-command path; g++ links libstdc++ + libgcc_s (DWARF EH) dynamically,
 # so hello.cpp exercises STL (vector/string) + exception (throw/catch) + the
-# .init_array constructors iostream needs.  Same -fno-pie -no-pie reason.
+# .init_array constructors iostream needs.  Same no -fno-pie reason as gcc.
 # -fno-use-linker-plugin: skip collect2's dlopen(liblto_plugin.so) -- that dlopen
 # hits "invalid ELF header" on a second link in one boot (state-pollution class,
 # sibling to the B4-C2 VMA-inode UAF); C++ smoke does not need LTO.  Tracked as
 # a follow-up.  Skipped when no /usr/bin/g++; failure aborts via cinux-exit 1.
 if [ -x /usr/bin/g++ ]; then
-    if /usr/bin/g++ -fno-pie -no-pie -fno-use-linker-plugin /hello.cpp -o /tmp/cpp.out && /tmp/cpp.out; then
+    if /usr/bin/g++ -fno-use-linker-plugin /hello.cpp -o /tmp/cpp.out && /tmp/cpp.out; then
         echo "[usability] PASS gpp-compile-run"
     else
         echo "[usability] FAIL gpp-compile-run"

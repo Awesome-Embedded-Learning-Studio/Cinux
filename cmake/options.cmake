@@ -33,6 +33,15 @@ option(CINUX_LOCKDEP "Enable lockdep schedule-while-locked debug checks" OFF)
 # diagnostic path (see kernel/CMakeLists.txt).
 option(CINUX_UBSAN "Enable -fsanitize=undefined with freestanding UBSan stubs" OFF)
 
+# B1 (gcc-compile-stutter): spawn a resident low-priority kthread that prints
+# dump_memory_stats() (PMM free / slab pages / PageCache cached / cumulative
+# #PF) to the serial log every ~1 s.  For profiling a workload -- e.g. g++
+# hello.cpp -- to read the stutter root cause off the trend instead of guessing
+# (page_cache grow-only vs demand-page storm vs slab pressure).  Off by default:
+# it adds 1 Hz [MEM] lines to every boot log.  §14 file gate: ON links
+# stats_kthread.cpp, OFF links stats_kthread_stub.cpp (empty); no source #ifdef.
+option(CINUX_STATS_KTHREAD "Spawn periodic 1 Hz memory-stats kthread for ad-hoc profiling" OFF)
+
 # ---- 3. Ring-3 smoke tests (run-kernel-test harness; need artifacts) --------
 # F10-M1 batch 6 / P3: musl /hello ring-3 smoke -- the ONLY test that exercises
 # real user-space syscall paths under SMAP (run-kernel-test uses kernel
@@ -80,21 +89,18 @@ option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF
 # Rootfs profile (F-USABILITY stage 2)
 # =============================================================================
 # Selects the rootfs the `run` / `run-*` QEMU targets attach as the ext2 disk.
-#   handcrafted (default): create_ext2_disk.sh-built ext2.img (the kernel test
-#     rootfs with /hello, /forktest, busybox, ...).
-#   buildroot: an external Buildroot rootfs.ext2 pointed at by
-#     CINUX_ROOTFS_BUILDROOT_IMG (real Linux userland; the buildroot-usability
-#     CI gate). Back-compat: setting CINUX_ROOTFS_BUILDROOT_IMG on first
-#     configure without an explicit profile defaults the profile to "buildroot"
-#     (the F-USABILITY stage-1 workflow sets just the img path).
-set(CINUX_ROOTFS_BUILDROOT_IMG ""
-    CACHE FILEPATH "Buildroot rootfs.ext2 (used when CINUX_ROOTFS_PROFILE=buildroot); empty otherwise")
+#   buildroot (default): real Linux userland (busybox + optional gcc/g++
+#     closure) pointed at by CINUX_ROOTFS_BUILDROOT_IMG. The default for local
+#     `make run` -- a real userland, not the tiny handcrafted fs. Build the img
+#     first: `cmake --build build --target assemble-gcc-rootfs` (-> rootfs-gcc.ext2).
+#   handcrafted: create_ext2_disk.sh-built ext2.img (tiny: musl /hello, /forktest,
+#     busybox). NOT the `make run` default anymore; kept because run-kernel-test-all
+#     attaches ext2.img directly (EXT2_IMAGE, regardless of profile) for a fast
+#     2290-test gate + musl ring-3 SMAP smoke + kernel-vs-rootfs isolation.
+set(CINUX_ROOTFS_BUILDROOT_IMG "${CMAKE_BINARY_DIR}/rootfs-gcc.ext2"
+    CACHE FILEPATH "Buildroot rootfs.ext2 (default: gcc closure from assemble-gcc-rootfs)")
 if(NOT DEFINED CINUX_ROOTFS_PROFILE)
-    if(DEFINED CINUX_ROOTFS_BUILDROOT_IMG AND CINUX_ROOTFS_BUILDROOT_IMG)
-        set(CINUX_ROOTFS_PROFILE "buildroot")
-    else()
-        set(CINUX_ROOTFS_PROFILE "handcrafted")
-    endif()
+    set(CINUX_ROOTFS_PROFILE "buildroot")
 endif()
 set(CINUX_ROOTFS_PROFILE "${CINUX_ROOTFS_PROFILE}"
     CACHE STRING "rootfs profile: handcrafted | buildroot")

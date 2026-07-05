@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assemble the gcc-profile rootfs.ext2: buildroot base target + GCC toolchain
 # closure (extract.sh) + overlay, packed with mkfs.ext2 -d.  The result ships a
-# native gcc driver so `gcc -fno-pie -no-pie /hello.c` runs on CinuxOS.
+# native gcc driver so `gcc /hello.c` runs on CinuxOS as a default-PIE binary.
 #
 # Usage: assemble_gcc_rootfs.sh <output_img> [buildroot_target] [gcc_root]
 #   buildroot_target : buildroot output/target dir

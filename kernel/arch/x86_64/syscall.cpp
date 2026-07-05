@@ -22,6 +22,7 @@
 #include "kernel/syscall/sys_arch_prctl.hpp"
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_chdir.hpp"
+#include "kernel/syscall/sys_cinux_exit.hpp"  // F-USABILITY buildroot gate
 #include "kernel/syscall/sys_clock_gettime.hpp"
 #include "kernel/syscall/sys_clone.hpp"
 #include "kernel/syscall/sys_close.hpp"
@@ -54,7 +55,6 @@
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
 #include "kernel/syscall/sys_ping.hpp"
-#include "kernel/syscall/sys_cinux_exit.hpp"  // F-USABILITY buildroot gate
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_poll.hpp"        // F-ECO busybox sh smoke
 #include "kernel/syscall/sys_reboot.hpp"      // B3b: busybox init
@@ -86,6 +86,11 @@
 #include "kernel/syscall/sys_waitpid.hpp"
 #include "kernel/syscall/sys_write.hpp"
 #include "kernel/syscall/sys_yield.hpp"
+// gcc/g++ self-host (2026-07-05): probed/missing Linux syscalls.
+#include "kernel/syscall/sys_getrandom.hpp"
+#include "kernel/syscall/sys_linux_stubs.hpp"  // rseq / clone3 / set_robust_list / sendfile
+#include "kernel/syscall/sys_prlimit64.hpp"
+#include "kernel/syscall/sys_time.hpp"  // gettimeofday / time
 
 namespace cinux::arch {
 
@@ -221,6 +226,16 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_mount, sys_mount);
     syscall_register(SyscallNr::SYS_umount2, sys_umount2);
     syscall_register(SyscallNr::SYS_access, sys_access);  // F6 batch 3a
+
+    // gcc/g++ self-host (2026-07-05): probed/missing Linux syscalls.
+    syscall_register(SyscallNr::SYS_sendfile, sys_sendfile);
+    syscall_register(SyscallNr::SYS_gettimeofday, sys_gettimeofday);
+    syscall_register(SyscallNr::SYS_set_robust_list, sys_set_robust_list);
+    syscall_register(SyscallNr::SYS_prlimit64, sys_prlimit64);
+    syscall_register(SyscallNr::SYS_getrandom, sys_getrandom);
+    syscall_register(SyscallNr::SYS_rseq, sys_rseq);
+    syscall_register(SyscallNr::SYS_clone3, sys_clone3);
+    syscall_register(SyscallNr::SYS_time, sys_time);
 }
 
 }  // anonymous namespace

@@ -93,7 +93,16 @@ constexpr uint64_t USER_MMAP_END  = 0x600000000ULL;  // 24 GB
 /// 240 MB) and the mmap region (USER_MMAP_BASE = 4 GB) so it cannot collide
 /// with either the brk heap or user mmap allocations. The interpreter finds
 /// itself via __ehdr_start, so any base works; this is fixed for determinism
-/// (ASLR of the interpreter base is a follow-up, paired with PIE main).
+/// (ASLR of the interpreter base is a follow-up).
 constexpr uint64_t USER_INTERP_BASE = 0x10000000ULL;  // 256 MB
+
+/// Load base for a PIE main executable (ET_DYN). The main-program counterpart
+/// of USER_INTERP_BASE: a PIE binary's p_vaddr is base-relative, so the kernel
+/// maps PT_LOAD at USER_EXEC_BASE + aslr_exec_base_offset() + p_vaddr. Placed
+/// above the interpreter image (USER_INTERP_BASE = 256 MB + ldso size) and well
+/// below the mmap region (USER_MMAP_BASE = 4 GB); the 0 .. 16 MB ASLR window
+/// [0x20000000, 0x21000000) collides with neither. ET_EXEC mains are absolute
+/// and bypass this (the loader passes base 0).
+constexpr uint64_t USER_EXEC_BASE = 0x20000000ULL;  // 512 MB
 
 }  // namespace cinux::arch

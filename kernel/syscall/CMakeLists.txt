@@ -77,4 +77,9 @@ target_sources(big_kernel_common PRIVATE
     # F8-M5: real poll/select (shared do_poll_core engine).
     ${CMAKE_CURRENT_SOURCE_DIR}/poll_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_select.cpp
+    # gcc/g++ self-host (2026-07-05): probed/missing Linux syscalls.
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_getrandom.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_linux_stubs.cpp  # rseq/clone3/set_robust_list/sendfile
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_prlimit64.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_time.cpp  # gettimeofday + time
 )
