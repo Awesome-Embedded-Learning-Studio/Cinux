@@ -101,11 +101,13 @@ cinux::lib::ErrorOr<void> NvmeController::init(const pci::PCIDevice& dev) {
     regs_ = reinterpret_cast<volatile NvmeRegs*>(kNvmeMmioVirt);
 
     // 4. Read CAP/VS to confirm the window is live (mechanism test, batch 1).
+    //    DSTRD = CAP bits[31:28] (NVMe 1.4); bits[27:24] are TO's high nibble.
+    //    doorbell stride = 4 << DSTRD, computed in enable().
     const uint32_t cap_lo = regs_->cap_lo;
     const uint32_t vs     = regs_->vs;
     cinux::lib::kprintf("[NVMe] BAR0=0x%lx CAP.MQES=%u DSTRD=%u VS=%u.%u\n",
                         static_cast<unsigned long>(bar0), static_cast<unsigned>(cap_lo & 0xFFFF),
-                        static_cast<unsigned>((cap_lo >> 24) & 0xF),
+                        static_cast<unsigned>((cap_lo >> 28) & 0xF),
                         static_cast<unsigned>((vs >> 16) & 0xFFFF),
                         static_cast<unsigned>((vs >> 8) & 0xFF));  // MNR = VS bits[15:8]
     return {};
@@ -158,14 +160,72 @@ cinux::lib::ErrorOr<void> NvmeController::enable() {
     //    IOSQES=6 64 B).
     regs_->cc = kCcEnable;
 
-    // 6. Wait CSTS.RDY=1 (the controller processed CC.EN=1).
+    // 6. Wait CSTS.RDY=1 (the controller processed CC.EN=1), then derive the
+    //    admin doorbell pointers (batch 2b).  Admin SQ tail @ BAR0+0x1000,
+    //    Admin CQ head @ BAR0+0x1000+stride (stride = 4 << DSTRD).
     for (uint32_t i = 0; i < kReadyIters; ++i) {
         if (regs_->csts & kCstsRdy) {
-            cinux::lib::kprintf("[NVMe] controller enabled (admin queue=%u RDY=1)\n", kAdminQSize);
+            doorbell_stride_     = 4u << ((regs_->cap_lo >> 28) & 0xF);
+            const uintptr_t base = reinterpret_cast<uintptr_t>(regs_);
+            admin_sq_tdbell_     = reinterpret_cast<volatile uint32_t*>(base + 0x1000);
+            admin_cq_hdbell_ =
+                reinterpret_cast<volatile uint32_t*>(base + 0x1000 + doorbell_stride_);
+            cinux::lib::kprintf("[NVMe] enabled (admin queue=%u RDY=1 doorbell stride=%u)\n",
+                                kAdminQSize, doorbell_stride_);
             return {};
         }
     }
     cinux::lib::kprintf("[NVMe] enable timeout CSTS=0x%x\n", regs_->csts);
+    return cinux::lib::Error::TimedOut;
+}
+
+cinux::lib::ErrorOr<void> NvmeController::identify_controller(IdentifyController& out) {
+    // 4 KiB identify data buffer (PRP1).
+    auto buf_r = cinux::drivers::dma::g_dma_pool.alloc(4096);
+    if (!buf_r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    cinux::drivers::dma::DmaBuffer buf = std::move(buf_r.value());
+    zero_dma(buf.virt(), buf.size());
+
+    // Build Identify Controller (opcode 0x06, CNS=0x01) at SQ[tail].
+    auto*          sq             = static_cast<NvmeCmd*>(admin_sq_buf_.virt());
+    NvmeCmd&       cmd            = sq[admin_sq_tail_];
+    const uint8_t  kAdminIdentify = 0x06;
+    const uint32_t kCnsController = 0x01;
+    zero_dma(&cmd, sizeof(cmd));
+    cmd.opcode = kAdminIdentify;
+    cmd.nsid   = 0;
+    cmd.prp1   = buf.phys();
+    cmd.cdw10  = kCnsController;
+
+    admin_sq_tail_    = (admin_sq_tail_ + 1) % kAdminQSize;
+    *admin_sq_tdbell_ = admin_sq_tail_;  // ring Admin SQ tail doorbell
+
+    // Poll the Admin CQ for this command's completion (phase tag flips).
+    auto* cq = reinterpret_cast<volatile NvmeCqe*>(admin_cq_buf_.virt());
+    for (uint32_t i = 0; i < kReadyIters; ++i) {
+        volatile NvmeCqe& cqe          = cq[admin_cq_head_];
+        const uint16_t    status_field = cqe.status;
+        if ((status_field & 0x1) == cq_phase_) {
+            const uint16_t status = static_cast<uint16_t>(status_field >> 1);  // SC/SCT
+            admin_cq_head_        = (admin_cq_head_ + 1) % kAdminQSize;
+            if (admin_cq_head_ == 0) {
+                cq_phase_ ^= 1;  // phase wraps at CQ ring rollover
+            }
+            *admin_cq_hdbell_ = admin_cq_head_;
+            if (status != 0) {
+                cinux::lib::kprintf("[NVMe] Identify failed status=0x%x\n", status);
+                return cinux::lib::Error::IOError;
+            }
+            const auto* id = static_cast<const IdentifyController*>(buf.virt());
+            out            = *id;
+            cinux::lib::kprintf("[NVMe] Identify: VID=0x%x SSVID=0x%x SN=%.20s MN=%.40s\n", id->vid,
+                                id->ssvid, id->sn, id->mn);
+            return {};
+        }
+    }
+    cinux::lib::kprintf("[NVMe] Identify timeout\n");
     return cinux::lib::Error::TimedOut;
 }
 

@@ -54,6 +54,14 @@ void test_find_and_map() {
     TEST_ASSERT_TRUE(e.ok());
     TEST_ASSERT_TRUE((ctrl.regs()->csts & 0x1) != 0);  // CSTS.RDY set
 
+    // batch 2b: Identify Controller via the admin queue (doorbell + CQ poll).
+    nvme::IdentifyController  id{};
+    cinux::lib::ErrorOr<void> ir = ctrl.identify_controller(id);
+    TEST_ASSERT_TRUE(ir.ok());
+    TEST_ASSERT_GT(static_cast<unsigned>(id.vid), 0u);  // real vendor ID
+    cinux::lib::kprintf("[NVMe] Identify mechanism: VID=0x%x SSVID=0x%x\n",
+                        static_cast<unsigned>(id.vid), static_cast<unsigned>(id.ssvid));
+
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or
     // unmapped read returns 0, so MQES > 0 proves the window is live and the
     // controller answered.  VS encodes MJR.MNR; QEMU nvme reports 1.x or later.
