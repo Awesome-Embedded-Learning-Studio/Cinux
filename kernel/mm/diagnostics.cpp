@@ -13,6 +13,7 @@
 
 #include "kernel/arch/x86_64/fault_diag.hpp"  // pf_count (B1 gcc-stutter profiling)
 #include "kernel/drivers/hpet/hpet.hpp"       // g_hpet.monotonic_ns for dump timestamp
+#include "kernel/fs/ext2/ext2.hpp"            // ext2_read_* (B2.5 I/O accounting)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/page_cache.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -54,6 +55,22 @@ void dump_memory_stats() {
             static_cast<unsigned>(pf_total),
             static_cast<unsigned>(pf_total - last_pf));
     last_pf = pf_total;
+
+    // B2.5: cumulative ext2 read I/O (count + bytes + wall time) with delta --
+    // attributes the residual gcc-compile stall to demand-PF I/O vs syscall/TCG.
+    static uint64_t last_io_ns    = 0;
+    static uint64_t last_io_reads = 0;
+    const uint64_t io_ns          = cinux::fs::ext2_read_ns();
+    const uint64_t io_reads       = cinux::fs::ext2_read_count();
+    const uint64_t io_bytes       = cinux::fs::ext2_read_bytes();
+    kprintf("[MEM] I/O:        %u reads (+%u), %u KiB, %llu ms (+%llu ms)\n",
+            static_cast<unsigned>(io_reads),
+            static_cast<unsigned>(io_reads - last_io_reads),
+            static_cast<unsigned>(io_bytes / 1024),
+            static_cast<unsigned long long>(io_ns / 1000000),
+            static_cast<unsigned long long>((io_ns - last_io_ns) / 1000000));
+    last_io_ns    = io_ns;
+    last_io_reads = io_reads;
 }
 
 }  // namespace cinux::mm

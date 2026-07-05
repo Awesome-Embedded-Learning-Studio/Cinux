@@ -2,10 +2,9 @@
  * @file kernel/fs/ext2.hpp
  * @brief ext2 filesystem driver (inherits from FileSystem)
  *
- * Implements the VFS FileSystem interface for the ext2 filesystem.
- * Reads blocks from disk through a device-agnostic IBlockDevice (e.g. the
- * AHCIBlockDevice adapter), which owns any DMA plumbing.  Supports mount(),
- * lookup(), and InodeOps (read, readdir) for files and directories.
+ * Implements the VFS FileSystem interface for ext2: mount(), lookup(), and
+ * InodeOps (read, readdir) for files/dirs. Block I/O via IBlockDevice (e.g.
+ * AHCIBlockDevice, owns DMA plumbing).
  *
  * Usage:
  *   cinux::fs::Ext2 ext2(block_dev);
@@ -26,6 +25,10 @@
 #include "kernel/drivers/block_device.hpp"
 
 namespace cinux::fs {
+
+uint64_t ext2_read_count();   ///< cumulative ext2 read I/O (B2.5 dump_memory_stats)
+uint64_t ext2_read_bytes();
+uint64_t ext2_read_ns();
 
 // ============================================================
 // Ext2 Filesystem Driver Class

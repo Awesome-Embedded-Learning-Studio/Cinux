@@ -11,11 +11,41 @@
 
 #include "ext2.hpp"
 #include "ext2_extent.hpp"
+#include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 #include "kernel/mm/page_cache.hpp"
 
 namespace cinux::fs {
+
+// B2.5: cumulative ext2 read I/O accounting for the periodic stats dump. The
+// gcc-compile curve (after B2's lazy load) still shows a ~5 s residual stall;
+// this attributes it to demand-PF I/O vs something else. handle_pf is IF=0 but
+// -smp 2 can fault concurrently, so the counters are atomic. Declared in
+// ext2.hpp; consumed by dump_memory_stats.
+namespace {
+uint64_t g_ext2_read_count = 0;
+uint64_t g_ext2_read_bytes = 0;
+uint64_t g_ext2_read_ns    = 0;
+
+/// RAII: time Ext2FileOps::read() from entry to exit (counts every return path).
+class Ext2ReadTimer {
+  public:
+    Ext2ReadTimer() : t0_(cinux::drivers::g_hpet.monotonic_ns()) {}
+    ~Ext2ReadTimer() {
+        __atomic_fetch_add(&g_ext2_read_ns, cinux::drivers::g_hpet.monotonic_ns() - t0_,
+                           __ATOMIC_RELAXED);
+        __atomic_fetch_add(&g_ext2_read_count, 1, __ATOMIC_RELAXED);
+    }
+
+  private:
+    uint64_t t0_;
+};
+}  // namespace
+
+uint64_t ext2_read_count() { return __atomic_load_n(&g_ext2_read_count, __ATOMIC_RELAXED); }
+uint64_t ext2_read_bytes() { return __atomic_load_n(&g_ext2_read_bytes, __ATOMIC_RELAXED); }
+uint64_t ext2_read_ns()    { return __atomic_load_n(&g_ext2_read_ns,    __ATOMIC_RELAXED); }
 
 // ============================================================
 // Ext2FileOps
@@ -29,6 +59,7 @@ bool Ext2FileOps::is_page_cacheable() const {
 
 cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offset, void* buf,
                                                uint64_t count) {
+    Ext2ReadTimer timer;  // B2.5: account this read's wall time to g_ext2_read_ns
     if (inode == nullptr || inode->fs_private == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
@@ -138,6 +169,7 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
         total_read += chunk;
     }
 
+    __atomic_fetch_add(&g_ext2_read_bytes, total_read, __ATOMIC_RELAXED);
     return static_cast<int64_t>(total_read);
 }
 
