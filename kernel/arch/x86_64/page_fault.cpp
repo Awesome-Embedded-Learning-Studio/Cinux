@@ -314,7 +314,9 @@ void handle_pf(InterruptFrame* frame) {
                         return;
                     }
                     if (map_phys != gp.value()->phys) {
-                        cinux::mm::g_pmm.free_page_locked(map_phys);
+                        // batch 4: roll back the private CoW copy via its
+                        // ownership ref (alloc set refcount=1; dec -> 0 -> free).
+                        cinux::mm::g_pmm.refcount_dec_and_test(map_phys);
                     }
                 } else {
                     klog_warn("page cache read failed for file VMA @ %p",
@@ -336,7 +338,7 @@ void handle_pf(InterruptFrame* frame) {
                 cinux::mm::g_pmm.pte_count_inc(phys);  // batch 3: account for the new PTE
                 return;
             }
-            cinux::mm::g_pmm.free_page_locked(phys);
+            cinux::mm::g_pmm.refcount_dec_and_test(phys);  // batch 4: roll back alloc via ownership ref
         }
     }
 
