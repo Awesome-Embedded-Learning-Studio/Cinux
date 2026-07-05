@@ -36,7 +36,7 @@ Phase 0 [已完成] ─── CMake + 代码优化 + 注释
     │         ↓
     ├──→ F9  安全机制 ─── NX/SMEP/SMAP + ASLR + UID/GID + Stack Canary
     │         ↓
-    ├──→ F10 用户态运行时 ─── libc扩展 + ELF动态链接 + TTY + CFBox
+    ├──→ F10 用户态运行时 ─── libc扩展 + ELF动态链接 + TTY + PTY 真终端会话
     │         ↓
     ├──→ F11 启动与平台 ─── UEFI启动 + FAT32
     │         ↓
@@ -58,7 +58,7 @@ Phase 0 [已完成] ─── CMake + 代码优化 + 注释
 | [F7](f7-network/) | 网络协议栈 | M1 以太网, M2 ARP, M3 IPv4/ICMP, M4 UDP, M5 TCP, M6 Socket | 完整 TCP/IP + Socket API |
 | [F8](f8-ipc/) | IPC 扩展 | M1 Pipe增强, M2 FIFO, M3 Unix Socket, M4 共享内存, M5 epoll | ConditionVariable + PTY + shm + epoll |
 | [F9](f9-security/) | 安全机制 | M1 NX/SMEP/SMAP, M2 ASLR, M3 UID/GID, M4 Stack Canary | 硬件级保护 + ASLR + 权限 |
-| [F10](f10-userspace/) | 用户态运行时 | M1 libc扩展, M2 ELF动态链接, M3 TTY, M4 CFBox+init, M5 musl+glibc | 80+ syscall + ld.so + CFBox + musl |
+| [F10](f10-userspace/) | 用户态运行时 | M1 libc扩展, M2 ELF动态链接, M3 TTY, M4 PTY 真终端会话, M5 musl+glibc | 80+ syscall + ld.so + busybox + musl |
 | [F11](f11-platform/) | 启动与平台 | M1 FAT32, M2 UEFI启动 | BIOS + UEFI 双启动 |
 | [F12](f12-developer/) | 开发者生态 | M1 GDB/KALLSYMS, M2 Lua, M3 TinyCC, M4 编辑器+包管理 | 自举开发环境 |
 | [F13](f13-gui/) | GUI 分离 | M1 ABI定义, M2 Adapter, M3 解耦 | 独立 GUI 仓库 |
@@ -76,7 +76,7 @@ Phase 0 [已完成] ─── CMake + 代码优化 + 注释
 3. **F3 (信号)** → 阻塞 TTY job control、Shell 功能
 4. **F4 (SMP)** → 阻塞多核调度、APIC 中断路由
 5. **F5 (网卡驱动)** → 阻塞整个网络栈
-6. **F10 (libc + TTY)** → 阻塞 CFBox、Lua、TinyCC
+6. **F10 (libc + TTY)** → 阻塞上层 userland（Lua/TinyCC 等）
 
 ## 统计
 

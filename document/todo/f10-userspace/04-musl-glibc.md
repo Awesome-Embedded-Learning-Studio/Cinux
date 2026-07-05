@@ -38,8 +38,8 @@
 - [ ] socket + connect
 - [ ] DNS 解析（getaddrinfo）
 
-**CFBox 验证**：
-- [ ] CFBox 使用 musl 编译
+**busybox 验证**：
+- [ ] busybox 使用 musl 编译
 - [ ] 基本命令运行（ls, cat, cp, sh）
 - [ ] pipe + 重定向
 
