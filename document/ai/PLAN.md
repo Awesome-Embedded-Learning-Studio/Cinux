@@ -314,7 +314,7 @@ push/PR 归用户。
 | 2 | 接口缝（头号风险）：`InodeOps` 加 `ioctl()` virtual（默认 NotImplemented→-ENOTTY）+ `sys_ioctl` 改 fd→File→Inode→ops->ioctl 派发（fd≤2 console fallback 保行为零变）。`open()` virtual 推 B3 随 `/dev/ptmx` 落地 | ✅ `aadde89` | run-kernel-test-all 两 leg 977/0(零回归) + host 65/65 |
 | 3 | DevFS PTY 节点：`/dev/ptmx`（open 时 `InodeOps::open` 分配一对 PTY、返 master inode）+ `/dev/pts/N`（lookup 命中 slave ops）+ master/slave InodeOps（走 PTY）+ DevFS 动态节点 | ✅ `5e50572` | run-kernel-test-all 两 leg 984/0(977+7 PTY) + host 65/65 |
 | 4 | 控制终端语义：`TIOCSCTTY` 设 `controlling_tty` + 挂 PTY + `/dev/tty` 别名当前控制终端 + session 抢占语义（接 `process_group` 现成 pgid/sid）+ 负测（非 session leader 抢终端 → EPERM） | ⏳ | run-kernel-test-all 两 leg + 负测 |
-| 5 | 收官：`make run` boot 冒烟（PTY DevFs 装配零 panic）+ notes + ROADMAP F10-M3 Phase2 ✅。**fork+execve-under-PTY 全闭环推迟 F10-M4**（需 `sys_dup2` 缺 + ring0 不能调带 user 指针的 syscall；CFBox 是天然消费者） | ✅ | make run `[DEVFS] mounted at /dev (4 nodes)` 零 panic + run-kernel-test-all 986/0 两 leg |
+| 5 | 收官：`make run` boot 冒烟（PTY DevFs 装配零 panic）+ notes + ROADMAP F10-M3 Phase2 ✅。**fork+execve-under-PTY 全闭环推迟 F10-M4**（需 `sys_dup2` 缺 + ring0 不能调带 user 指针的 syscall；busybox sh 是天然消费者） | ✅ | make run `[DEVFS] mounted at /dev (4 nodes)` 零 panic + run-kernel-test-all 986/0 两 leg |
 
 ### 风险 / 陷阱
 - **B2 头号风险**：`InodeOps` 加 virtual 改公共头，牵连所有 FS 后端 mock。缓解：带默认实现（`open` 返原 inode、`ioctl` 返 -ENOTTY），旧子类零改；fd≤2 fallback 保行为零变，现有 console ioctl 测当回归网。**B2 首个动作**：查清 `sys_read fd==0` 是不是真 FDTable 项（决定 fallback 写法）。
@@ -452,7 +452,7 @@ push/PR 归用户。
 
 ## 🔄 F10-M1（用户态运行时 / musl 静态移植）— 2026-06-26 立项
 
-> Feature 域大弧。F9 安全地基已就位（NX/SMEP/SMAP + ASLR + 凭证 + Canary 全完成并合 main PR#38）。**方向决策（用户 2026-06-26）**：**不自建 libc 生态**——`user/libc`（syscall/string/printf 三件套）仅作 QEMU 测试壳保留，不扩；**直接移植 musl 作唯一 libc**。先自己源码编译 musl（自包含 sysroot），跑通后切 **musl-gcc** 当工具链驱动（CFBox 等一律 musl-gcc 编）。砍掉旧 M1「自建 libc 扩 80 syscall」（造轮子无意义）。旧 M5「musl+glibc」内容并入本 M1；glibc 静态兼容降为可选 stretch（比 musl 重得多）。分支 `feat/f10-musl`（从干净 main `fb25c89`）。
+> Feature 域大弧。F9 安全地基已就位（NX/SMEP/SMAP + ASLR + 凭证 + Canary 全完成并合 main PR#38）。**方向决策（用户 2026-06-26）**：**不自建 libc 生态**——`user/libc`（syscall/string/printf 三件套）仅作 QEMU 测试壳保留，不扩；**直接移植 musl 作唯一 libc**。先自己源码编译 musl（自包含 sysroot），跑通后切 **musl-gcc** 当工具链驱动（上层 userland 一律 musl-gcc 编）。砍掉旧 M1「自建 libc 扩 80 syscall」（造轮子无意义）。旧 M5「musl+glibc」内容并入本 M1；glibc 静态兼容降为可选 stretch（比 musl 重得多）。分支 `feat/f10-musl`（从干净 main `fb25c89`）。
 > 验证：每批 `timeout 40 cmake --build build --target run-kernel-test -j$(nproc)` 绿才提交；批1/2/4 改公共 syscall 接口补全量 `cmake --build build`；批6 加 `timeout 40 cmake --build build --target run` 冒烟（musl hello world 真输出）。
 
 ### 调研结论（决定打法，已读码核实）
@@ -1222,7 +1222,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 ## ✅ F3-M3（进程组/会话 + waitpid 阻塞）完成 — 2026-06-19（5 批，810→827）
 
-> 目标：为 Job Control / TTY 打地基 —— 进程组（pgid）+ 会话（sid）+ `setpgid`/`getpgid`/`getsid`/`setsid`/`killpg` + fork 继承，**顺带补 waitpid 阻塞**（闭环 F3 进程管理，shell/CFBox 不再忙等烧 CPU）。
+> 目标：为 Job Control / TTY 打地基 —— 进程组（pgid）+ 会话（sid）+ `setpgid`/`getpgid`/`getsid`/`setsid`/`killpg` + fork 继承，**顺带补 waitpid 阻塞**（闭环 F3 进程管理，shell/busybox 不再忙等烧 CPU）。
 > 决策（propose 已确认）：
 > - **#1 范围 = 进程组 + waitpid 阻塞**（非纯 todo 原样，也非全包 STOP/CONT 真调度）。STOP/CONT 真调度留 M4 调度器。
 > - **#2 继承规则方案 A + 可测 helper**：`inherit_process_identity`（process_internal.hpp），root fork（`parent->pgid==0`）自成组，否则继承父。fork/clone memcpy 后显式调用。init(pid=1) 自动满足（kernel_init pid=0 fork 出 pid=1 自成组）。
