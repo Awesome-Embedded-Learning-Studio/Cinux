@@ -79,6 +79,12 @@ public:
 
 private:
     Ext2& ext2_;
+
+    /// B3a: resolve @p file_block → on-disk block (0 = hole / unmapped / I/O error /
+    /// extent-unsupported). Extracted from read() so coalescing can probe N contiguous
+    /// blocks. Clobbers block_buf_ (indirect-table reads); data I/O uses read_disk_range.
+    uint32_t resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
+                                 uint64_t block_ptrs_per_block);
 };
 
 /**

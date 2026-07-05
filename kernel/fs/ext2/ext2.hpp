@@ -113,16 +113,13 @@ public:
      */
     uint8_t* block_buf();
 
-    /**
-     * @brief Read an ext2 block from disk into the block buffer
-     *
-     * Public wrapper used by InodeOps callbacks.  Afterwards the data is
-     * available via block_buf().
-     *
-     * @param block_num  ext2 block number (0-based)
-     * @return true on success, false on I/O error
-     */
+    /// Read an ext2 block from disk into block_buf_ (public; InodeOps callbacks use it).
+    /// @return true on success, false on I/O error.
     bool read_block(uint32_t block_num);
+    /// B3a: read @p block_count contiguous on-disk blocks straight into @p buf (one DMA,
+    /// skipping block_buf_). Callers guarantee contiguity + block_count ≤ dma_buf (4 blk).
+    cinux::lib::ErrorOr<void> read_disk_range(uint32_t start_disk_block, uint64_t block_count,
+                                              void* buf);
 
     /**
      * @brief Write the block buffer contents back to an ext2 block on disk

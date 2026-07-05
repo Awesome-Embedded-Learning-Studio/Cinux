@@ -55,6 +55,17 @@ bool Ext2::read_block(uint32_t block_num) {
     return true;
 }
 
+// B3a: contiguous block read straight into the caller's buffer (one DMA, skipping
+// block_buf_). Currently unused (Ext2FileOps::read keeps agg=1 pending the data-
+// corruption follow-up above); retained so the agg>1 path can be re-enabled after
+// the trace without re-plumbing the API.
+cinux::lib::ErrorOr<void> Ext2::read_disk_range(uint32_t start_disk_block, uint64_t block_count,
+                                                void* buf) {
+    const uint64_t lba     = static_cast<uint64_t>(start_disk_block) * sectors_per_block_;
+    const uint64_t sectors = block_count * sectors_per_block_;
+    return dev_->read_blocks(lba, sectors, buf);
+}
+
 bool Ext2::write_block(uint32_t block_num) {
     uint64_t lba = static_cast<uint64_t>(block_num) * sectors_per_block_;
 
