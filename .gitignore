@@ -74,6 +74,8 @@ cinux.img
 # TODO: 忽略 QEMU 串口日志
 #   模式: serial.log
 serial.log
+# 临时调试 log(IDE 打开的工具输出、stats 曲线 dump 等)
+/log_with_target_run.txt
 
 # ============================================================
 # 操作系统文件
