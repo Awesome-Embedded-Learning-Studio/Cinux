@@ -61,13 +61,14 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F5-M3 ⏳→🔄 + todo `02-nvme.md` 范围栅栏 | 🔄 | docs-only |
-| 1 | PCI 枚举 NVMe（`find_nvme` class=0x01/subclass=0x08）+ BAR0 映射 @+0x70000 + QEMU 加 `-device nvme` 独立盘 + 机制测读 CAP/VS 证映射真生效 | ⏳ | 两 leg 回归 + 机制测 |
+| 1 | PCI 枚举 NVMe（`find_nvme` class=0x01/subclass=0x08）+ BAR0 映射 @+0x70000 + QEMU 加 `-device nvme` 独立盘 + 机制测读 CAP/VS 证映射真生效 | ✅ `1b7fc5a`+nvme | 两 leg 886/0 + 机制测 MQES=2047 VS=1.4 |
 | 2 | 寄存器/队列：Controller init（CC.EN↔CSTS.RDY 握手）+ Admin SQ/CQ + doorbell + Identify Controller（轮询 CQ，无中断） | ⏳ | 两 leg + 机制测（Identify 拿 controller info） |
 | 3 | MSI-X 多实例：`MsixController::init` 加 base 参数（避碰 xHCI +0x40000，NVMe Table @+0x74000/PBA @+0x75000）+ NVMe MSI-X + IO CQ 中断绑 IDT 向量 | ⏳ | 两 leg + 机制测（IO 完成靠中断） |
 | 4 | IBlockDevice 接入：`NvmeBlockDevice`（抄 [AHCIBlockDevice](../../kernel/drivers/ahci/ahci_block_device.hpp) create 模式）+ NVMe Read/Write（PRP SGL）+ main.cpp Step 21c 注册（**并存**：NVMe 独立盘，生产仍 AHCI） | ⏳ | 两 leg + read/write round-trip |
 | 5 | perf 量收益：NVMe 盘跑 gcc/g++ 编译对比 AHCI 基线 [MEM] I/O（基线 ~6.2s gcc / ~7.4s g++）+ 收官 note + ROADMAP ✅ | ⏳ | NVMe vs AHCI I/O 时序对比 |
 
 ### 风险 / 陷阱
+- **⭐ SeaBIOS 不配 QEMU nvme BAR0（批1 踩坑，假绿）**：`dev.bar[0]=0x0`（SeaBIOS 配 AHCI/e1000 但跳过 QEMU nvme），读 CAP/VS 映射到 phys 0x0（低 RAM）返垃圾值恰好满足 "> 0" 断言 = **假绿**（MQES=65363/VS=0xf000e2c3）。修：NVMe init 加 BAR self-assign（probe size=16384 + 固定槽 `0xfeb40000`）+ **64-bit BAR 必须清 BAR1**（rb1=0 才使地址=0xfeb40000 < 4GB），读到真 MQES=2047/VS=1.4（NVMe 1.4）。教训：机制测断言要能区分真值 vs 垃圾（MQES 合理范围 + MJR>=1，不只 >0）。通用 PCI BAR 分配器留 PCI 框架 follow-up（批1 NVMe 内 self-assign）。
 - **sti-in-syscall #DF（致命 GOTCHA）**：NVMe 中断 ISR 绝不 inline schedule（同 sys-ping-df-sti-in-syscall / PIT IRQ 重入 #DF，批3 PIT/LAPIC timer inline schedule 重入窗口已修过）。中断只记账+唤醒，EOI 后再调度。
 - **MsixController 硬编码 +0x40000**（[msix_controller.cpp:30](../../kernel/drivers/pci/msix_controller.cpp#L30) `kMsixTableVirt`）：xHCI 专用，NVMe 要第二实例须给 `MsixController::init` 加 `table_virt/pba_virt` 参数（或构造注入）。**改公共接口，push 前全量编**（CI 盲区：run-kernel-test 不编 test/unit host 单测）。
 - **PRP SGL**：NVMe 用 PRP（Physical Region Page，4KB 对齐物理连续），第一 PRP + PRP list 链（>2 页传输）。复用 DmaPool（参考 [AHCIBlockDevice](../../kernel/drivers/ahci/ahci_block_device.hpp) 持单 DmaBuffer 模式）。

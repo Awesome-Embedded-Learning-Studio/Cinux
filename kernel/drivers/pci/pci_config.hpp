@@ -54,6 +54,7 @@ constexpr uint8_t CAPABILITIES_POINTER = 0x34;  ///< Pointer to first capability
 namespace PciClass {
 constexpr uint8_t MASS_STORAGE  = 0x01;
 constexpr uint8_t AHCI_SUBCLASS = 0x06;
+constexpr uint8_t NVME_SUBCLASS = 0x08;  ///< NVM controller (NVMe). PCI class 0x01/0x08.
 constexpr uint8_t SERIAL_BUS    = 0x0C;  ///< Serial bus controllers (USB, ...)
 constexpr uint8_t USB_SUBCLASS  = 0x03;  ///< USB host/controller
 constexpr uint8_t XHCI_PROG_IF  = 0x30;  ///< xHCI host controller interface

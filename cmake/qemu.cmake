@@ -48,6 +48,18 @@ add_custom_command(
     VERBATIM
 )
 
+# F5-M3 NVMe: test disk (1 MB raw).  The batch-1 mechanism test reads CAP/VS via
+# MMIO, so disk content is irrelevant -- the file just backs -device nvme so the
+# controller enumerates and its BAR0 maps.
+set(NVME_TEST_IMAGE "${CMAKE_BINARY_DIR}/nvme_test.img")
+add_custom_command(
+    OUTPUT ${NVME_TEST_IMAGE}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh ${NVME_TEST_IMAGE}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh
+    COMMENT "Creating NVMe test disk image"
+    VERBATIM
+)
+
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 
@@ -148,6 +160,10 @@ set(QEMU_TEST_EXTRA_FLAGS
     -device ide-hd,drive=ext2-disk,bus=ahci.1
     -drive file=${EXT4_IMAGE},format=raw,if=none,id=ext4-disk
     -device ide-hd,drive=ext4-disk,bus=ahci.2
+    # F5-M3 NVMe: controller + 1 MB backing disk.  serial= is mandatory for
+    # -device nvme; the kernel enumerates via PCI class 0x01/0x08.
+    -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
+    -device nvme,drive=nvme-disk,serial=nvme0
 )
 
 # ============================================================
@@ -237,7 +253,7 @@ function(cinux_qemu_test_target name)
                 ${_devs}
                 -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
         DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE}
-                regenerate-ext2-image ${EXT4_IMAGE}
+                regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
         USES_TERMINAL
         COMMENT "${ARG_COMMENT}"
         VERBATIM)
@@ -466,7 +482,7 @@ add_custom_target(run-kernel-test-all
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
     VERBATIM

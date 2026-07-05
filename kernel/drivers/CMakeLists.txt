@@ -24,6 +24,8 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ahci/ahci.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dma/dma_pool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ahci/ahci_block_device.cpp
+    # F5-M3: NVMe PCIe SSD controller (batch 1: PCI enumerate + BAR0 map + CAP/VS).
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvme/nvme.cpp
 )
 
 if(CINUX_GUI)
