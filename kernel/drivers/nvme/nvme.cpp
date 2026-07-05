@@ -20,8 +20,11 @@
 
 #include <stdint.h>
 
+#include <utility>
+
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
+#include "kernel/drivers/dma/dma_pool.hpp"
 #include "kernel/drivers/pci/pci_config.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/vmm.hpp"
@@ -45,6 +48,20 @@ constexpr uint64_t kMmioFlags =
 // but the QEMU register window is < 4 GB, so a 32-bit assign suffices (the high
 // 32 bits stay zero).
 constexpr uint32_t kAssignedBar0 = 0xfeb40000;
+
+// Admin queue geometry + enable constants (batch 2a).
+constexpr uint16_t kAdminQSize = 64;       // Admin SQ/CQ entries (well under MQES+1=2048)
+constexpr uint32_t kReadyIters = 1000000;  // CSTS.RDY spin budget (no IRQ until batch 3)
+constexpr uint32_t kCstsRdy    = 0x1;      // CSTS.RDY bit
+// CC: IOSQES[29:24]=6 (64 B SQ entry), IOCQES[21:16]=4 (16 B CQ entry), EN[0]=1;
+// MPS=0 (4 KiB), CSS=0 (NVM), AMS=0 (round robin).
+constexpr uint32_t kCcEnable   = (6u << 24) | (4u << 16) | 1u;
+
+void zero_dma(void* p, uint64_t bytes) {
+    auto b = static_cast<volatile uint64_t*>(p);
+    for (uint64_t i = 0; i < bytes / 8; ++i)
+        b[i] = 0;
+}
 }  // namespace
 
 cinux::lib::ErrorOr<void> NvmeController::init(const pci::PCIDevice& dev) {
@@ -92,6 +109,64 @@ cinux::lib::ErrorOr<void> NvmeController::init(const pci::PCIDevice& dev) {
                         static_cast<unsigned>((vs >> 16) & 0xFFFF),
                         static_cast<unsigned>((vs >> 8) & 0xFF));  // MNR = VS bits[15:8]
     return {};
+}
+
+cinux::lib::ErrorOr<void> NvmeController::enable() {
+    // 1. Disable (CC.EN=0 -> wait CSTS.RDY=0).  The QEMU controller boots
+    //    disabled, but a clean disable also handles the "already enabled" case.
+    regs_->cc = 0;
+    for (uint32_t i = 0; i < kReadyIters; ++i) {
+        if (!(regs_->csts & kCstsRdy)) {
+            break;
+        }
+        if (i + 1 == kReadyIters) {
+            cinux::lib::kprintf("[NVMe] disable timeout CSTS=0x%x\n", regs_->csts);
+            return cinux::lib::Error::TimedOut;
+        }
+    }
+
+    // 2. Allocate Admin SQ (kAdminQSize x 64 B) + CQ (kAdminQSize x 16 B).
+    //    The controller requires MQES+1 >= queue size.
+    if (mqes() + 1 < kAdminQSize) {
+        cinux::lib::kprintf("[NVMe] MQES=%u < admin queue size %u\n", mqes(), kAdminQSize);
+        return cinux::lib::Error::InvalidArgument;
+    }
+    auto sq_r = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kAdminQSize) * 64);
+    auto cq_r = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kAdminQSize) * 16);
+    if (!sq_r.ok() || !cq_r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    admin_sq_buf_ = std::move(sq_r.value());
+    admin_cq_buf_ = std::move(cq_r.value());
+
+    // 3. Zero both DMA buffers -- the controller reads CQ phase bits + SQ
+    //    entries from phys.  x86 DMA is cache-coherent, so no flush is needed.
+    zero_dma(admin_sq_buf_.virt(), admin_sq_buf_.size());
+    zero_dma(admin_cq_buf_.virt(), admin_cq_buf_.size());
+
+    // 4. Configure Admin Queue (AQA + ASQ + ACQ).  Size fields are 0-based.
+    regs_->aqa =
+        (static_cast<uint32_t>(kAdminQSize - 1) << 16) | static_cast<uint32_t>(kAdminQSize - 1);
+    const uint64_t sq_phys = admin_sq_buf_.phys();
+    const uint64_t cq_phys = admin_cq_buf_.phys();
+    regs_->asq_lo          = static_cast<uint32_t>(sq_phys);
+    regs_->asq_hi          = static_cast<uint32_t>(sq_phys >> 32);
+    regs_->acq_lo          = static_cast<uint32_t>(cq_phys);
+    regs_->acq_hi          = static_cast<uint32_t>(cq_phys >> 32);
+
+    // 5. Enable (CC.EN=1, MPS=0 4 KiB, CSS=0 NVM, AMS=0 RR, IOCQES=4 16 B,
+    //    IOSQES=6 64 B).
+    regs_->cc = kCcEnable;
+
+    // 6. Wait CSTS.RDY=1 (the controller processed CC.EN=1).
+    for (uint32_t i = 0; i < kReadyIters; ++i) {
+        if (regs_->csts & kCstsRdy) {
+            cinux::lib::kprintf("[NVMe] controller enabled (admin queue=%u RDY=1)\n", kAdminQSize);
+            return {};
+        }
+    }
+    cinux::lib::kprintf("[NVMe] enable timeout CSTS=0x%x\n", regs_->csts);
+    return cinux::lib::Error::TimedOut;
 }
 
 }  // namespace cinux::drivers::nvme

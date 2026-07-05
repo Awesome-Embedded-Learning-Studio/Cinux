@@ -49,6 +49,11 @@ void test_find_and_map() {
     TEST_ASSERT_TRUE(r.ok());
     TEST_ASSERT_TRUE(ctrl.present());
 
+    // batch 2a: controller enable (CC.EN <-> CSTS.RDY) + Admin SQ/CQ config.
+    cinux::lib::ErrorOr<void> e = ctrl.enable();
+    TEST_ASSERT_TRUE(e.ok());
+    TEST_ASSERT_TRUE((ctrl.regs()->csts & 0x1) != 0);  // CSTS.RDY set
+
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or
     // unmapped read returns 0, so MQES > 0 proves the window is live and the
     // controller answered.  VS encodes MJR.MNR; QEMU nvme reports 1.x or later.

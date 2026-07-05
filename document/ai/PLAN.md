@@ -62,7 +62,8 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 |----|------|------|------|
 | 0 | 立项 docs（本段）+ ROADMAP F5-M3 ⏳→🔄 + todo `02-nvme.md` 范围栅栏 | 🔄 | docs-only |
 | 1 | PCI 枚举 NVMe（`find_nvme` class=0x01/subclass=0x08）+ BAR0 映射 @+0x70000 + QEMU 加 `-device nvme` 独立盘 + 机制测读 CAP/VS 证映射真生效 | ✅ `1b7fc5a`+nvme | 两 leg 886/0 + 机制测 MQES=2047 VS=1.4 |
-| 2 | 寄存器/队列：Controller init（CC.EN↔CSTS.RDY 握手）+ Admin SQ/CQ + doorbell + Identify Controller（轮询 CQ，无中断） | ⏳ | 两 leg + 机制测（Identify 拿 controller info） |
+| 2a | Controller enable（CC.EN↔CSTS.RDY 握手）+ Admin SQ/CQ 配置（AQA/ASQ/ACQ + 4KB DmaBuffer） | ✅ | 两 leg 886/0 + CSTS.RDY=1 |
+| 2b | doorbell + Identify Controller（Admin SQ 提交 + 轮询 CQ）+ CAP.DSTRD 解码确认 | ⏳ | 两 leg + 机制测（Identify 拿 controller info） |
 | 3 | MSI-X 多实例：`MsixController::init` 加 base 参数（避碰 xHCI +0x40000，NVMe Table @+0x74000/PBA @+0x75000）+ NVMe MSI-X + IO CQ 中断绑 IDT 向量 | ⏳ | 两 leg + 机制测（IO 完成靠中断） |
 | 4 | IBlockDevice 接入：`NvmeBlockDevice`（抄 [AHCIBlockDevice](../../kernel/drivers/ahci/ahci_block_device.hpp) create 模式）+ NVMe Read/Write（PRP SGL）+ main.cpp Step 21c 注册（**并存**：NVMe 独立盘，生产仍 AHCI） | ⏳ | 两 leg + read/write round-trip |
 | 5 | perf 量收益：NVMe 盘跑 gcc/g++ 编译对比 AHCI 基线 [MEM] I/O（基线 ~6.2s gcc / ~7.4s g++）+ 收官 note + ROADMAP ✅ | ⏳ | NVMe vs AHCI I/O 时序对比 |
