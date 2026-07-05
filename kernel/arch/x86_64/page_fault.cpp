@@ -299,20 +299,17 @@ void handle_pf(InterruptFrame* frame) {
 
                     uint64_t cur_cr3 = cinux::arch::read_cr3();
                     if (g_vmm.map_nolock(virt_page, map_phys, fflags, &cur_cr3)) {
+                        // batch 3: every install PTE bumps the mapping counter
+                        // so teardown (pte_count_dec_and_test) can reach 0 and
+                        // drop the ownership ref.  Mapping the page-cache page
+                        // also takes a map-ownership refcount -- the cache's own
+                        // ref (set by CachePhysRef::alloc) survives teardown so
+                        // the page is not freed while still cached (the ld/crt1
+                        // corruption root cause).  A private CoW copy takes no
+                        // extra refcount: its alloc baseline IS its ownership.
+                        cinux::mm::g_pmm.pte_count_inc(map_phys);
                         if (map_phys == gp.value()->phys) {
-                            // Sharing the page-cache page: claim a pte_count ref
-                            // for THIS PTE so the address-space teardown unmap
-                            // (free_subtree's pte_count_dec_and_test) does not
-                            // drop it to 0 and free the page.  alloc_page gave
-                            // the cache page its own ref (the "1" that stands
-                            // for page-cache ownership); every mapping adds one
-                            // more, so the cache page always survives teardown
-                            // and the next process hits real file contents
-                            // (root cause #2 of the ld SEGV/127: as's teardown
-                            // freed libbfd's cached .text page, PMM reused the
-                            // phys, and ld then read garbage where the ELF magic
-                            // used to be).
-                            cinux::mm::g_pmm.pte_count_inc(map_phys);
+                            cinux::mm::g_pmm.refcount_inc(map_phys);
                         }
                         return;
                     }
@@ -336,6 +333,7 @@ void handle_pf(InterruptFrame* frame) {
             uint64_t cur_cr3 = cinux::arch::read_cr3();
             bool     ok      = g_vmm.map_nolock(virt_page, phys, map_flags, &cur_cr3);
             if (ok) {
+                cinux::mm::g_pmm.pte_count_inc(phys);  // batch 3: account for the new PTE
                 return;
             }
             cinux::mm::g_pmm.free_page_locked(phys);

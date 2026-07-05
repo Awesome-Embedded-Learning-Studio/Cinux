@@ -180,7 +180,9 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
     }
 
     // Eagerly map each segment frame into this address space and bump its
-    // pte_count (+1 for this mapping; the alloc-set 1 is the segment's ref).
+    // batch 3: install bumps the mapping counter (pte_count) AND takes a
+    // map-ownership ref (refcount); the segment's own ref (alloc baseline=1)
+    // keeps the page alive across shmdt so only the final IPC_RMID frees it.
     const uint64_t pte_flags = shm_pte_flags(readonly);
     for (uint64_t i = 0; i < seg.page_count; ++i) {
         const uint64_t v = virt + i * kPageSize;
@@ -190,13 +192,14 @@ int64_t sys_shmat(uint64_t shmid, uint64_t addr, uint64_t shmflg, uint64_t, uint
             for (uint64_t j = 0; j < i; ++j) {
                 const uint64_t pv = seg.phys_base + j * kPageSize;
                 task->addr_space->unmap(virt + j * kPageSize);
-                static_cast<void>(cinux::mm::g_pmm.pte_count_dec_and_test(pv));  // undo the inc
+                static_cast<void>(cinux::mm::g_pmm.pte_count_dec_and_test(pv));  // undo install
             }
             static_cast<void>(task->addr_space->vmas().remove(virt, virt + len));
             ShmRegistry::instance().detach(static_cast<int>(shmid), tid, nullptr);
             return -kEnomem;
         }
         cinux::mm::g_pmm.pte_count_inc(p);
+        cinux::mm::g_pmm.refcount_inc(p);
     }
 
     return static_cast<int64_t>(virt);
