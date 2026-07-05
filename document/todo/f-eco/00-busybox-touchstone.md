@@ -3,11 +3,10 @@
 > 用 busybox(C,musl 静态)当 CI 试金石,普及 syscall,持续声明「Cinux 能跑 core utilities」。
 > 范围:功能 + 并发稳定性(-smp)。时间性 soak / 资源边界 不在本关(见 [README](README.md) 稳定性三划分)。
 
-## 为什么 busybox 当第一关(不是 CFBox)
+## 为什么 busybox 当试金石
 
 - **C 干净**:musl 直接编,CinuxOS 已跑通 musl C(hello / hello-dyn),零新变量。
-- **信号纯**:崩了基本就是 syscall 缺口,定位干净(不像 CFBox 叠加 C++ 运行时未知)。
-- **syscall 复用**:busybox 补的 syscall,CFBox 直接白捡(CFBox 是 busybox 替代,applet 同构)。
+- **信号纯**:崩了基本就是 syscall 缺口,定位干净(无额外运行时变量)。
 - **梯度不丢**:busybox `menuconfig` 照样选 applet 子集(minimal → full)。
 
 ## 8 批排序(以 syscall 普及为第一轴,busybox applet 当验收刻度)
