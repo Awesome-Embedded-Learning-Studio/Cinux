@@ -55,11 +55,24 @@ bool vma_allows_fault(cinux::mm::VMA* vma, uint64_t error_code) {
     return cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Read) ||
            cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write);
 }
+
+// Cumulative #PF count for ad-hoc profiling (B1 gcc-compile-stutter).  handle_pf
+// runs at IF=0 but multiple CPUs can fault concurrently under -smp 2, so a plain
+// ++ would race; an atomic add is cheap and correct.
+uint64_t g_pf_count = 0;
 }  // namespace
+
+// Total #PF since boot (atomically bumped by handle_pf).  Defined next to the
+// counter; declared in fault_diag.hpp so dump_memory_stats can read it without
+// dragging in the whole PF handler.
+uint64_t pf_count() {
+    return __atomic_load_n(&g_pf_count, __ATOMIC_RELAXED);
+}
 
 extern "C" {
 
 void handle_pf(InterruptFrame* frame) {
+    __atomic_fetch_add(&g_pf_count, 1, __ATOMIC_RELAXED);
     uint64_t fault_addr;
     __asm__ volatile("movq %%cr2, %0" : "=r"(fault_addr));
 

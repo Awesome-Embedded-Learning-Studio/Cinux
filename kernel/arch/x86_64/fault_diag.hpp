@@ -29,6 +29,11 @@ void capture_first_gp(const cinux::arch::InterruptFrame* frame);
 // debugcon exactly once.  Called from handle_pf on PRESENT faults only.
 void capture_first_pf(const cinux::arch::InterruptFrame* frame, uint64_t cr2);
 
+// Cumulative #PF count since boot (B1 gcc-compile-stutter profiling).  Atomically
+// bumped at handle_pf entry; read by dump_memory_stats for the periodic stats
+// thread.  Defined in page_fault.cpp.
+uint64_t pf_count();
+
 // F-VERIFY M6-2: lock-free PTE walk that prints the CoW-fault backing phys + its
 // pte_count to debugcon.  Called only on the CoW-resolution-FAIL path (rare).
 void dump_cow_fail_diagnostic(uint64_t fault_addr);

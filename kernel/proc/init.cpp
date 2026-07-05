@@ -13,6 +13,7 @@
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
+#include "kernel/mm/diagnostics.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/pid.hpp"
@@ -81,6 +82,11 @@ void kernel_init_thread() {
     // compiled out (usb_stub.cpp is linked).  (The GUI build's desktop_launch
     // spawns a separate gui_worker, so USB ordering there is unchanged.)
     cinux::drivers::usb::init();
+
+    // B1 gcc-stutter profiling: spawn the periodic memory-stats kthread.  No-op
+    // when CINUX_STATS_KTHREAD=OFF (stub); prints a 1 Hz PMM/slab/PageCache/#PF
+    // curve to the serial log when ON, for narrowing gcc/g++ compile-stutter.
+    cinux::mm::start_stats_thread();
 
     // Bring up userspace.  GUI build: desktop + gui_worker thread
     // (kernel/gui/desktop_launch.cpp).  Non-GUI build: execve /sbin/init as

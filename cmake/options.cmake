@@ -33,6 +33,15 @@ option(CINUX_LOCKDEP "Enable lockdep schedule-while-locked debug checks" OFF)
 # diagnostic path (see kernel/CMakeLists.txt).
 option(CINUX_UBSAN "Enable -fsanitize=undefined with freestanding UBSan stubs" OFF)
 
+# B1 (gcc-compile-stutter): spawn a resident low-priority kthread that prints
+# dump_memory_stats() (PMM free / slab pages / PageCache cached / cumulative
+# #PF) to the serial log every ~1 s.  For profiling a workload -- e.g. g++
+# hello.cpp -- to read the stutter root cause off the trend instead of guessing
+# (page_cache grow-only vs demand-page storm vs slab pressure).  Off by default:
+# it adds 1 Hz [MEM] lines to every boot log.  §14 file gate: ON links
+# stats_kthread.cpp, OFF links stats_kthread_stub.cpp (empty); no source #ifdef.
+option(CINUX_STATS_KTHREAD "Spawn periodic 1 Hz memory-stats kthread for ad-hoc profiling" OFF)
+
 # ---- 3. Ring-3 smoke tests (run-kernel-test harness; need artifacts) --------
 # F10-M1 batch 6 / P3: musl /hello ring-3 smoke -- the ONLY test that exercises
 # real user-space syscall paths under SMAP (run-kernel-test uses kernel
