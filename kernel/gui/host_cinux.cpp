@@ -1,12 +1,18 @@
 /**
  * @file kernel/gui/host_cinux.cpp
- * @brief Cinux host adapter -- fills Host for the in-kernel desktop
+ * @brief Cinux host adapter -- fills Host for the in-kernel desktop (F13-B)
  *
- * See host_cinux.hpp. Every callback forwards to an existing in-tree
- * facility; no new behaviour is introduced. The poll_event callback is the
- * only non-trivial one: it dequeues a cinux::gui::Event from the unified mouse
- * queue and serialises it into a EventHeader + typed payload so the
- * (host-agnostic) pump body can consume it.
+ * F13-B (2026-07-05): switched to the new Cinux-GUI core (P0-P7). render_frame
+ * now drives Desktop::render over a widget tree (WindowManager + Window +
+ * Label) into the CORE-owned staging buffer (the old visor-pump wm.composite()
+ * + screen->back_buffer() path is gone -- Scene was retired in P6-d).
+ * dispatch_event feeds PointerPayload/KeycodePayload straight to the Desktop
+ * (no Event-union detour). desktop=NULL here (spawn arrives in B2 with a real
+ * kernel PTY + TerminalWidget).
+ *
+ * poll_event / flush / now_ms / alloc / free / log are unchanged: F13 §3b/§4c
+ * already aligned them to the new ABI wire format (EventHeader +
+ * PointerPayload/KeycodePayload; flush takes the staging base + dirty rect).
  *
  * Compile condition: CINUX_GUI.
  */
@@ -19,27 +25,55 @@
 #include "kernel/drivers/mouse/mouse.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/video/framebuffer.hpp"  // Framebuffer (flush target)
-#include "kernel/gui/event.hpp"
-#include "kernel/gui/gui_init.hpp"        // create_shell_terminal
-#include "kernel/gui/terminal.hpp"        // Terminal (render_frame polls it)
-#include "kernel/gui/window_manager.hpp"  // WindowManager (dispatch + render)
-#include "kernel/lib/echo_trace.hpp"
-#include "kernel/lib/kprintf.hpp"  // kvprintf / kprintf
-#include "kernel/lib/string.hpp"   // memcpy
-#include "kernel/mm/slab.hpp"      // kmalloc / kfree
+#include "kernel/gui/event.hpp"                   // Event / EventType (Mouse queue element)
+#include "kernel/lib/echo_trace.hpp"              // trace_char (dispatch_key diagnostic)
+#include "kernel/lib/kprintf.hpp"                 // kvprintf / kprintf
+#include "kernel/lib/string.hpp"                  // memcpy
+#include "kernel/mm/slab.hpp"                     // kmalloc / kfree
 #include "third_party/Cinux-GUI/core/event.hpp"
 #include "third_party/Cinux-GUI/core/event_payload.hpp"
-#include "third_party/Cinux-GUI/core/region.hpp"  // cinux::gui::Region (dirty rects -> Rect)
+#include "third_party/Cinux-GUI/core/font.hpp"       // PsfFont
+#include "third_party/Cinux-GUI/core/gui_core.hpp"   // GuiCore
+#include "third_party/Cinux-GUI/core/region.hpp"     // Region (dirty rects)
+#include "third_party/Cinux-GUI/core/swraster.hpp"   // Surface
+#include "third_party/Cinux-GUI/core/theme.hpp"      // Theme / material_dark
+#include "third_party/Cinux-GUI/core/widget.hpp"     // Desktop
+#include "third_party/Cinux-GUI/core/widget/label.hpp"
+#include "third_party/Cinux-GUI/core/widget/window.hpp"
+#include "third_party/Cinux-GUI/core/widget/window_manager.hpp"
 
 namespace cinux::gui {
 namespace {
 
-HostDesktop                  g_cinux_desktop{};
-Host                         g_cinux_host{};
-cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here (§4c) */
+/* ============================================================
+ * HostState: the static widget tree + core session.
+ *
+ * Default-constructed at static init (Widget/PsfFont default ctors are
+ * side-effect-free), configured once by cinux_host_init(). Mirrors the
+ * Cinux-GUI host/linux_fbdev_main.cpp HostState layout so the kernel desktop
+ * exercises the SAME widget tree the standalone fbdev host does.
+ * ============================================================ */
+struct HostState {
+    PsfFont       font{};
+    Theme         theme{};
+    WindowManager wm{};
+    Window        win{};
+    Label         content{};
+    Desktop       desktop{};
+};
+
+HostState                   g_state;
+Host                        g_cinux_host{};
+cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here */
+GuiCore*                    g_core = nullptr; /* core-owned staging session  */
+
+constexpr uint32_t kWinW = 200;
+constexpr uint32_t kWinH = 160;
 
 /* ============================================================
- * L2 Input: dequeue one cinux::gui::Event and serialise it to a cinux::gui event.
+ * L2 Input: dequeue one cinux::gui::Event from the unified mouse queue and
+ * serialise it to a cinux::gui EventHeader + typed payload. Unchanged from
+ * F13 §3b -- already aligned to the new ABI wire format.
  * ============================================================ */
 bool cinux_poll_event([[maybe_unused]] void* ctx, EventHeader* out, uint16_t out_cap) {
     if (out == nullptr || out_cap < sizeof(EventHeader)) {
@@ -85,10 +119,6 @@ bool cinux_poll_event([[maybe_unused]] void* ctx, EventHeader* out, uint16_t out
             return false;
         }
         out->type  = EventCode::kKeycode;
-        /* Derive press/release from the dispatch type_ (not ev.key.pressed) so the
-         * switch that accepted this event and the PRESSED flag the deserialiser
-         * reads are authoritative from one source -- the two can never diverge
-         * even if a producer ever lets type_ and key.pressed disagree. */
         out->flags = (ev.type_ == EventType::KeyDown) ? kEventFlagPressed : 0;
         KeycodePayload k;
         k.ascii    = ev.key.ascii;
@@ -101,34 +131,23 @@ bool cinux_poll_event([[maybe_unused]] void* ctx, EventHeader* out, uint16_t out
         break;
     }
     default:
-        /* An EventType with no serialiser case is dropped here. Adding a new
-         * EventType in event.hpp requires updating BOTH this serialiser and
-         * cinux_dispatch_event's deserialiser switch. */
         return false;
     }
     return true;
 }
 
 /* ============================================================
- * L4 Frame work: the host side of the host-neutral pump.
- *
- * dispatch_event: deserialise a cinux::gui event (the pump drained it via
- * poll_event) back into a cinux::gui::Event and apply it to the window
- * manager. This is the other half of the poll_event serialiser -- together
- * they exercise the event ABI so the same pump body is host-neutral.
- * render_frame: do all per-frame cinux work (deferred icon spawn, terminal
- * poll, cursor footprint, composite) and report the dirty rects + the staging
- * back buffer. count==0 = idle (nothing changed, the pump flushes nothing).
+ * L4 dispatch: deserialise PointerPayload/KeycodePayload and feed them to the
+ * widget tree via Desktop. (F13-B: was wm.handle_mouse/handle_key + Event union
+ * round-trip -- the new core takes the payloads directly.)
  * ============================================================ */
-void cinux_dispatch_event([[maybe_unused]] void* ctx, const EventHeader* ev, const void* payload) {
+void cinux_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) {
     if (ev == nullptr || payload == nullptr || ev->magic != kEventMagic ||
         ev->version != kAbiVersion) {
         return;
     }
 
-    auto&             wm   = WindowManager::instance();
-    const uint8_t*    tail = static_cast<const uint8_t*>(payload);
-    cinux::gui::Event out;
+    auto* st = static_cast<HostState*>(ctx);
 
     switch (ev->type) {
     case EventCode::kPointer: {
@@ -136,29 +155,8 @@ void cinux_dispatch_event([[maybe_unused]] void* ctx, const EventHeader* ev, con
             return;
         }
         PointerPayload p;
-        memcpy(&p, tail, sizeof(p));
-        switch (p.kind) {
-        case kPointerKindMove:
-            out.type_ = EventType::MouseMove;
-            break;
-        case kPointerKindDown:
-            out.type_ = EventType::MouseDown;
-            break;
-        case kPointerKindUp:
-            out.type_ = EventType::MouseUp;
-            break;
-        default:
-            return; /* corrupt kind */
-        }
-        out.mouse.x       = p.x;
-        out.mouse.y       = p.y;
-        out.mouse.dx      = p.dx;
-        out.mouse.dy      = p.dy;
-        out.mouse.buttons = p.buttons;
-        out.mouse.left    = (p.buttons & 0x1u) != 0;
-        out.mouse.right   = (p.buttons & 0x2u) != 0;
-        out.mouse.middle  = (p.buttons & 0x4u) != 0;
-        wm.handle_mouse(out);
+        memcpy(&p, payload, sizeof(p));
+        st->desktop.dispatch_pointer(p);  // WM hit-test + drag/raise/close + cursor
         return;
     }
     case EventCode::kKeycode: {
@@ -166,104 +164,37 @@ void cinux_dispatch_event([[maybe_unused]] void* ctx, const EventHeader* ev, con
             return;
         }
         KeycodePayload k;
-        memcpy(&k, tail, sizeof(k));
-        const bool pressed = (ev->flags & kEventFlagPressed) != 0;
-        out.type_          = pressed ? EventType::KeyDown : EventType::KeyUp;
-        out.key.ascii      = k.ascii;
-        out.key.scancode   = k.scancode;
-        out.key.pressed    = pressed;
-        out.key.shift      = (k.modifiers & kKeymodShift) != 0;
-        out.key.ctrl       = (k.modifiers & kKeymodCtrl) != 0;
-        out.key.alt        = (k.modifiers & kKeymodAlt) != 0;
-        cinux::debug::trace_char("host.dispatch_key before wm.handle_key", out.key.ascii);
-        wm.handle_key(out);
+        memcpy(&k, payload, sizeof(k));
+        cinux::debug::trace_char("host.dispatch_key before desktop.dispatch_key", k.ascii);
+        st->desktop.dispatch_key(k);  // route to focused widget
         return;
     }
     default:
-        return; /* event type with no deserialiser -- drop */
+        return;
     }
 }
 
-void cinux_render_frame([[maybe_unused]] void* ctx, Frame* frame) {
+/* ============================================================
+ * L4 render: paint the widget tree into the CORE-owned staging buffer and
+ * report the dirty rects. (F13-B: was wm.composite() + Terminal::poll_output
+ * + screen->back_buffer() -- now a single Desktop::render call, exactly like
+ * host/linux_fbdev_main.cpp.) count==0 = idle -> pump flushes nothing.
+ * ============================================================ */
+void cinux_render_frame(void* ctx, Frame* frame) {
     if (frame == nullptr) {
         return;
     }
-    frame->count = 0;
-
-    auto& wm = WindowManager::instance();
-
-    /* 1. Deferred desktop-icon click -> spawn a shell (structural change). */
-    if (wm.consume_pending_icon_action() == IconAction::OpenShell) {
-        create_shell_terminal();
-        wm.invalidate_all();
+    auto*   st = static_cast<HostState*>(ctx);
+    Surface s{frame->pixels, frame->width, frame->height, frame->stride, frame->format};
+    Region  dirty;
+    st->desktop.render(s, st->font, &dirty);  // widget tree -> staging (full-screen dirty)
+    const uint32_t n = dirty.count();
+    for (uint32_t i = 0u; i < n && i < frame->max_rects; ++i) {
+        frame->rects[i] = dirty.rects()[i];
     }
-
-    /* 2. Poll terminal output + refresh each terminal's own canvas. */
-    for (uint32_t i = 0; i < wm.window_count(); i++) {
-        Window* win = wm.window_at(i);
-        if (win != nullptr && win->is_terminal()) {
-            auto* term = static_cast<Terminal*>(win);
-            if (term->poll_output()) {
-                if (cinux::debug::kEchoTrace) {
-                    cinux::lib::kprintf(
-                        "[ECHO_TRACE] host.render_frame terminal poll_output "
-                        "changed window=%d\n",
-                        static_cast<int>(i));
-                }
-                wm.invalidate_all();
-            }
-            if (term->consume_content_dirty()) {
-                if (cinux::debug::kEchoTrace) {
-                    cinux::lib::kprintf("[ECHO_TRACE] host.render_frame content_dirty window=%d\n",
-                                        static_cast<int>(i));
-                }
-                wm.invalidate_all(); /* pipe-less terminal direct key echo (§4c) */
-            }
-            term->render_to_canvas();
-        }
-    }
-
-    /* 3. Cursor footprint (mark old + new rects if the mouse moved). */
-    wm.invalidate_cursor_move();
-
-    /* 4. Idle: nothing changed -> skip composite, report no dirty rects. */
-    if (wm.dirty().empty()) {
-        return;
-    }
-
-    /* 5. Render the frame into the staging back buffer. */
-    wm.composite();
-
-    cinux::drivers::Canvas* screen = wm.screen();
-    if (screen == nullptr || screen->back_buffer() == nullptr) {
-        return;
-    }
-
-    /* 6. Report dirty rects + staging layout. If the region has more rects than
-     *    the core's buffer, collapse to the bounding box (over-cover, never
-     *    under-cover). The region already self-collapses at kMaxRects, so this
-     *    is just defense. */
-    const cinux::gui::Region& dirty = wm.dirty();
-    uint32_t                  n     = dirty.count();
-    if (n > frame->max_rects) {
-        const cinux::gui::Rect b = dirty.bounds();
-        frame->rects[0]          = Rect{b.x0, b.y0, b.x1, b.y1};
-        n                        = 1;
-    } else {
-        for (uint32_t i = 0; i < n; i++) {
-            const cinux::gui::Rect& r = dirty.rects()[i];
-            frame->rects[i]           = Rect{r.x0, r.y0, r.x1, r.y1};
-        }
-    }
-    frame->count  = n;
-    frame->pixels = screen->back_buffer();
-    frame->stride = screen->pitch();
-    frame->width  = screen->width();
-    frame->height = screen->height();
-    frame->format = PixelFormat::kXrgb8888;
-
-    wm.clear_dirty();
+    frame->count = n;
 }
+
 uint32_t cinux_now_ms([[maybe_unused]] void* ctx) {
     return static_cast<uint32_t>(cinux::drivers::PIT::get_uptime_ms());
 }
@@ -289,17 +220,15 @@ __attribute__((format(printf, 2, 3))) void cinux_log([[maybe_unused]] void* ctx,
 /* ============================================================
  * L1 Display: flush a dirty rect from the staging buffer to the framebuffer.
  *
- * §4c: the cinux::gui pump renders into the screen canvas's back buffer (the
- * staging Surface) and pushes only the dirty rects through this callback.
- * @p pixels is the staging buffer base; the rect at display coords (x,y,w,h)
- * lives at row offset y*stride + x*4 within it. We copy each row into the VBE
- * framebuffer (volatile MMIO), respecting its own pitch (VBE line alignment
- * may exceed width*4). This replaces the old Canvas::flip() full-frame copy --
- * identical pixels, but only the dirty rects are transferred and the display
- * path now runs through the Host ABI (host-agnostic).
+ * The core owns the staging buffer (allocated in GuiCore) and pushes only the
+ * dirty rects through this callback. @p pixels is the staging buffer base; the
+ * rect at display coords (x,y,w,h) lives at row offset y*stride + x*4 within
+ * it. We copy each row into the VBE framebuffer (volatile MMIO), respecting
+ * its own pitch. Identical algorithm to the old §4c flush -- only the staging
+ * owner changed (core now, host adapter before).
  * ============================================================ */
-void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
-                 PixelFormat fmt) {
+void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const void* pixels,
+                 uint32_t stride, PixelFormat fmt) {
     if (g_fb == nullptr || pixels == nullptr || w <= 0 || h <= 0) {
         return;
     }
@@ -310,24 +239,14 @@ void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const v
     const uint32_t fb_pitch = g_fb->pitch();
     const uint32_t fb_w     = g_fb->width();
     const uint32_t fb_h     = g_fb->height();
-    /* Clamp the rect to the framebuffer: a rect larger than the screen is
-     * ill-formed, and this also bounds w before the *4u below so a pathological
-     * caller (the flush is the single hard host seam) cannot wrap bytes_per_row. */
     if (w > static_cast<int>(fb_w)) {
         w = static_cast<int>(fb_w);
     }
     if (h > static_cast<int>(fb_h)) {
         h = static_cast<int>(fb_h);
     }
-    /* XRGB8888: the framebuffer is 32-bit aligned (Framebuffer::data() is a
-     * volatile uint32_t*), both strides (staging pitch + VBE pitch) are whole-
-     * pixel multiples, and dirty rects are pixel-aligned -- so every row
-     * transfers an integral number of uint32 stores with no byte tail. Writing
-     * one uint32 (4 bytes) per store instead of one byte cuts the volatile
-     * store count -- and with it any uncached/MMIO write cost -- by 4x. The
-     * compiler cannot widen these stores itself: every volatile access is an
-     * observable side effect it must preserve verbatim, so the old byte loop
-     * stayed a byte loop even under -O2. */
+    /* XRGB8888: every row transfers an integral number of uint32 stores. See
+     * the old §4c flush comment for why we widen to uint32 stores by hand. */
     const uint32_t     src_stride_px = stride / 4u;
     const uint32_t     dst_stride_px = fb_pitch / 4u;
     const uint32_t     px_w          = static_cast<uint32_t>(w);
@@ -336,8 +255,6 @@ void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const v
 
     for (int row = 0; row < h; row++) {
         const int py = y + row;
-        /* Dirty rects are clipped to screen bounds by WindowManager::invalidate;
-         * defend against a misbehaving caller regardless. */
         if (py < 0 || static_cast<uint32_t>(py) >= fb_h || x < 0 ||
             static_cast<uint32_t>(x) >= fb_w) {
             continue;
@@ -354,34 +271,49 @@ void cinux_flush([[maybe_unused]] void* ctx, int x, int y, int w, int h, const v
     }
 }
 
-/* ============================================================
- * Desktop extension: spawn.
- *
- * §3b: forwards to the in-tree shell-terminal helper. path / argv / fd are
- * accepted for ABI completeness but ignored -- a generic spawn(path, argv)
- * returning real stdio handles is §4+ work. Today there is exactly one
- * desktop action (open a shell), and create_shell_terminal() does exactly
- * that, so behaviour matches the non-cinux::gui gui_pump() path.
- * ============================================================ */
-int cinux_spawn([[maybe_unused]] void* ctx, [[maybe_unused]] const char* path, [[maybe_unused]] char* const argv[], int* stdin_fd, int* stdout_fd) {
-    if (stdin_fd != nullptr) {
-        *stdin_fd = -1;
-    }
-    if (stdout_fd != nullptr) {
-        *stdout_fd = -1;
-    }
-    create_shell_terminal();
-    return 0;
-}
-
 }  // namespace
 
 Host& cinux_host() {
     return g_cinux_host;
 }
 
+GuiCore& cinux_core() {
+    return *g_core;
+}
+
 void cinux_host_init(cinux::drivers::Framebuffer* fb) {
-    g_fb                             = fb;
+    g_fb = fb;
+
+    /* Widget tree (mirrors Cinux-GUI host/linux_fbdev_main.cpp): a centered
+     * titled Window hosting a Label, rooted at a full-screen WindowManager.
+     * The new core PsfFont carries its own PSF2 data (font_psf_data.hpp). */
+    g_state.font.init();
+    g_state.theme = material_dark();
+
+    const uint32_t fb_w = (fb != nullptr) ? fb->width() : 1024u;
+    const uint32_t fb_h = (fb != nullptr) ? fb->height() : 768u;
+
+    g_state.wm.set_rect(0, 0, fb_w, fb_h);
+    g_state.wm.set_theme(&g_state.theme);
+
+    const int32_t wx0 = static_cast<int32_t>(fb_w) / 2 - static_cast<int32_t>(kWinW) / 2;
+    const int32_t wy0 = static_cast<int32_t>(fb_h) / 2 - static_cast<int32_t>(kWinH) / 2;
+    g_state.win.set_title("Cinux");
+    g_state.win.set_theme(&g_state.theme);
+    g_state.win.set_rect(wx0, wy0, kWinW, kWinH);
+    g_state.content.set_text("Hello\nCinux-GUI");
+    g_state.content.set_color(g_state.theme.on_surface);
+    g_state.win.set_content(&g_state.content);
+    g_state.win.layout();
+    g_state.wm.add_window(&g_state.win);
+    g_state.desktop.set_root(&g_state.wm);
+
+    /* Mouse screen bounds (was gui_start's job; the host adapter owns display
+     * geometry now that the old WindowManager singleton is gone). */
+    cinux::drivers::Mouse::set_screen_bounds(fb_w, fb_h);
+
+    /* Fill the host table. desktop=NULL in B1 -- spawn arrives in B2 with a
+     * real kernel PTY + TerminalWidget (HostDesktop::spawn signature). */
     g_cinux_host.core.poll_event     = cinux_poll_event;
     g_cinux_host.core.dispatch_event = cinux_dispatch_event;
     g_cinux_host.core.render_frame   = cinux_render_frame;
@@ -391,12 +323,15 @@ void cinux_host_init(cinux::drivers::Framebuffer* fb) {
     g_cinux_host.core.alloc          = cinux_alloc;
     g_cinux_host.core.free           = cinux_free;
     g_cinux_host.core.log            = cinux_log;
+    g_cinux_host.desktop             = nullptr;
+    g_cinux_host.ctx                 = &g_state;
 
-    g_cinux_desktop.spawn = cinux_spawn;
-    g_cinux_host.desktop  = &g_cinux_desktop;
-    g_cinux_host.ctx      = nullptr;
+    /* Construct the GuiCore over the host table + display geometry. The core
+     * allocates the staging buffer (w*h*4) via global new -> kmalloc (crt_stub
+     * redirects operator new to kmalloc). */
+    g_core = new GuiCore(&g_cinux_host, fb_w, fb_h, PixelFormat::kXrgb8888);
 
-    cinux::lib::kprintf("[gui] Cinux host ABI adapter initialised\n");
+    cinux::lib::kprintf("[gui] Cinux host adapter initialised (F13-B widget tree, new core)\n");
 }
 
 }  // namespace cinux::gui
