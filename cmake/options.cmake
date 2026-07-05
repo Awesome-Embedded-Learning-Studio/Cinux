@@ -89,21 +89,18 @@ option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF
 # Rootfs profile (F-USABILITY stage 2)
 # =============================================================================
 # Selects the rootfs the `run` / `run-*` QEMU targets attach as the ext2 disk.
-#   handcrafted (default): create_ext2_disk.sh-built ext2.img (the kernel test
-#     rootfs with /hello, /forktest, busybox, ...).
-#   buildroot: an external Buildroot rootfs.ext2 pointed at by
-#     CINUX_ROOTFS_BUILDROOT_IMG (real Linux userland; the buildroot-usability
-#     CI gate). Back-compat: setting CINUX_ROOTFS_BUILDROOT_IMG on first
-#     configure without an explicit profile defaults the profile to "buildroot"
-#     (the F-USABILITY stage-1 workflow sets just the img path).
-set(CINUX_ROOTFS_BUILDROOT_IMG ""
-    CACHE FILEPATH "Buildroot rootfs.ext2 (used when CINUX_ROOTFS_PROFILE=buildroot); empty otherwise")
+#   buildroot (default): real Linux userland (busybox + optional gcc/g++
+#     closure) pointed at by CINUX_ROOTFS_BUILDROOT_IMG. The default for local
+#     `make run` -- a real userland, not the tiny handcrafted fs. Build the img
+#     first: `cmake --build build --target assemble-gcc-rootfs` (-> rootfs-gcc.ext2).
+#   handcrafted: create_ext2_disk.sh-built ext2.img (tiny: musl /hello, /forktest,
+#     busybox). NOT the `make run` default anymore; kept because run-kernel-test-all
+#     attaches ext2.img directly (EXT2_IMAGE, regardless of profile) for a fast
+#     2290-test gate + musl ring-3 SMAP smoke + kernel-vs-rootfs isolation.
+set(CINUX_ROOTFS_BUILDROOT_IMG "${CMAKE_BINARY_DIR}/rootfs-gcc.ext2"
+    CACHE FILEPATH "Buildroot rootfs.ext2 (default: gcc closure from assemble-gcc-rootfs)")
 if(NOT DEFINED CINUX_ROOTFS_PROFILE)
-    if(DEFINED CINUX_ROOTFS_BUILDROOT_IMG AND CINUX_ROOTFS_BUILDROOT_IMG)
-        set(CINUX_ROOTFS_PROFILE "buildroot")
-    else()
-        set(CINUX_ROOTFS_PROFILE "handcrafted")
-    endif()
+    set(CINUX_ROOTFS_PROFILE "buildroot")
 endif()
 set(CINUX_ROOTFS_PROFILE "${CINUX_ROOTFS_PROFILE}"
     CACHE STRING "rootfs profile: handcrafted | buildroot")
