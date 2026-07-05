@@ -210,7 +210,15 @@ void handle_gp(InterruptFrame* frame) {
                    reinterpret_cast<void*>(frame->rip), reinterpret_cast<void*>(frame->cs),
                    reinterpret_cast<void*>(frame->rsp), reinterpret_cast<void*>(frame->error_code),
                    reinterpret_cast<void*>(cr2));
-        cinux::proc::signal_send(task, cinux::proc::Signal::kSigill);
+        // Force-deliver: a synchronous #GP must terminate the task even if it
+        // blocked SIGILL (gcc does this in its abort path via rt_sigprocmask).
+        // Without force, signal_pick filters SIGILL through sig_blocked, the
+        // signal never delivers, and the faulting task livelocks at the same
+        // rip -- taking the shell/OS down with it.  Mirrors handle_pf's
+        // force_send for #PF; Linux force_sig_info does the same for synchronous
+        // faults (force_send sets sig_forced, which signal_pick merges into
+        // `avail` past sig_blocked).
+        cinux::proc::signal_force_send(task, cinux::proc::Signal::kSigill);
         return;
     }
     if (from_user) {

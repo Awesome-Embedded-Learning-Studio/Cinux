@@ -15,11 +15,11 @@
  * name) and Pipe (buffer) in F8-M2.  Pure logic, no kprintf / no I/O, so the TU
  * links cleanly into host unit tests like fifo.cpp.
  *
- * mapcount lifecycle (the part that matters here): alloc_pages() sets each
- * page's mapcount to 1 (the segment's own reference); each shmat does +1 per
+ * pte_count lifecycle (the part that matters here): alloc_pages() sets each
+ * page's pte_count to 1 (the segment's own reference); each shmat does +1 per
  * page; each address-space teardown / shmdt does -1.  So teardown never drives
  * the count to 0 while the segment exists -- only IPC_RMID's explicit free
- * returns the pages.  sys_shm.cpp drives mapcount_inc / mapcount_dec_and_test.
+ * returns the pages.  sys_shm.cpp drives pte_count_inc / pte_count_dec_and_test.
  *
  * shmid = the table index (0 .. SHM_REGISTRY_MAX-1).  Linux embeds a sequence
  * number to avoid rapid reuse; a teaching kernel's fixed table is fine and

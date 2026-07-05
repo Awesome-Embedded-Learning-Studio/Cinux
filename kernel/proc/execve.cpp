@@ -17,6 +17,7 @@
 #include "kernel/arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"  // F9 batch 1: USER_SIGRETURN_PAGE
+#include "kernel/fs/inode_ref.hpp"           // InodeRef: RAII over the lookup ref
 #include "kernel/fs/vfs_lookup.hpp"         // F-USABILITY batch 1c: symlink-following lookup
 #include "kernel/lib/aslr.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -119,12 +120,11 @@ void clear_user_mappings(cinux::mm::AddressSpace& space) {
                         continue;
 
                     uint64_t data_phys = pt[l].phys_addr();
-                    // Q4b-2 (DEBT-003): only free if this was the last mapping.
-                    // A CoW-shared page (fork) has mapcount > 1 here; freeing
-                    // it would leave the other process's PTE dangling (UAF).
-                    if (cinux::mm::g_pmm.mapcount_dec_and_test(data_phys)) {
-                        cinux::mm::g_pmm.free_page(data_phys);
-                    }
+                    // batch 3: drop the mapping ref; pte_count_dec_and_test
+                    // frees internally on the last ownership ref, so a CoW-
+                    // shared (fork) or page-cache page keeps refcount > 0 and
+                    // survives (was a two-step dec_and_test + free_page).
+                    cinux::mm::g_pmm.pte_count_dec_and_test(data_phys);
                     pt[l].raw = 0;
                 }
 
@@ -181,7 +181,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         cinux::lib::kprintf("[EXECVE] lookup failed: %s\n", path);
         return ExecveResult::FileNotFound;
     }
-    auto* inode = lr.value().target;
+    cinux::fs::InodeRef inode(lr.value().target);  // RAII: lookup ref dropped at every return
 
     if (inode->type != cinux::fs::InodeType::Regular) {
         cinux::lib::kprintf("[EXECVE] not a regular file: %s\n", path);
@@ -201,7 +201,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         return ExecveResult::ReadFailed;
     }
 
-    auto nread = inode->ops->read(inode, 0, ehdr_buf, ELF_HEADER_SIZE);
+    auto nread = inode->ops->read(inode.get(), 0, ehdr_buf, ELF_HEADER_SIZE);
     if (!nread.ok() || nread.value() < static_cast<int64_t>(ELF_HEADER_SIZE)) {
         cinux::lib::kprintf("[EXECVE] failed to read ELF header\n");
         return ExecveResult::ReadFailed;
@@ -224,7 +224,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         return ExecveResult::MapFailed;
     }
 
-    nread = inode->ops->read(inode, phdr_offset, phdrs, phdr_bytes);
+    nread = inode->ops->read(inode.get(), phdr_offset, phdrs, phdr_bytes);
     if (!nread.ok() || nread.value() < static_cast<int64_t>(phdr_bytes)) {
         cinux::lib::kprintf("[EXECVE] failed to read program headers\n");
         delete[] phdrs;
@@ -257,7 +257,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
     // path below; it returns the phdr VA, brk end, and entry for this image.
     LoadedImage  main_img{};
     ExecveResult load_res =
-        load_elf_image(*task->addr_space, inode, ehdr, phdrs, phnum, /*base=*/0, main_img);
+        load_elf_image(*task->addr_space, inode.get(), ehdr, phdrs, phnum, /*base=*/0, main_img);
     if (load_res != ExecveResult::Ok) {
         delete[] phdrs;
         return load_res;
@@ -280,7 +280,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
             delete[] phdrs;
             return ExecveResult::BadElfHeaders;
         }
-        auto pread = inode->ops->read(inode, phdrs[i].p_offset, interp_path, plen);
+        auto pread = inode->ops->read(inode.get(), phdrs[i].p_offset, interp_path, plen);
         if (!pread.ok() || pread.value() < static_cast<int64_t>(plen)) {
             cinux::lib::kprintf("[EXECVE] PT_INTERP path read failed\n");
             delete[] phdrs;
@@ -370,9 +370,10 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         constexpr uint64_t kSigretFlags = cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_USER;
         if (!task->addr_space->map(cinux::arch::USER_SIGRETURN_PAGE, sigret_phys, kSigretFlags)) {
             cinux::lib::kprintf("[EXECVE] sigreturn page map failed\n");
-            cinux::mm::g_pmm.free_page(sigret_phys);
+            cinux::mm::g_pmm.refcount_dec_and_test(sigret_phys);  // batch 4: roll back alloc
             return ExecveResult::MapFailed;
         }
+        cinux::mm::g_pmm.pte_count_inc(sigret_phys);  // batch 3: account for the installed PTE
     }
 
     if (aux_out != nullptr) {

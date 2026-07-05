@@ -101,7 +101,9 @@ static void shell_child_entry() {
     // No -i: the PTY slave is a real tty, so isatty(0)==true and busybox ash
     // enters interactive mode on its own (prompt + echo via the TTY discipline).
     const char* argv[] = {info->path, nullptr};
-    const char* envp[] = {"PATH=/bin", nullptr};
+    // Standard Linux PATH (matches busybox init's default) so the shell finds
+    // /usr/bin/gcc, /usr/bin/g++, /usr/sbin/* without a per-script export.
+    const char* envp[] = {"PATH=/bin:/sbin:/usr/bin:/usr/sbin", nullptr};
     // Load the program, set up the user stack, and jump to user mode.
     // Consolidated with the non-GUI shell launch in init.cpp into
     // launch_user_program(); never returns (jumps to user mode or exits).

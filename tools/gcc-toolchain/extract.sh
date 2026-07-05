@@ -91,15 +91,19 @@ ldd /usr/bin/as /usr/bin/ld 2>/dev/null | grep '=> /' | awk '{print $3}' | sort 
     cp_lib "$lib"
 done
 # Arch GCC's default link specs pass -lgcc_s_asneeded and
-# -latomic_asneeded through collect2/ld.  Stage both linker scripts and their
-# targets so the single-command gcc path resolves exactly as it does on host.
+# -latomic_asneeded through collect2/ld.  The plain .so targets live in
+# /usr/lib (glibc/gcc shared), but the *_asneeded linker scripts live in GCC's
+# private libdir ($prefix/lib/gcc/<tuple>/<ver>/), NOT /usr/lib -- a hardcoded
+# /usr/lib path silently fails (cp_lib || true) and ld later can't find them
+# ("cannot find -lgcc_s_asneeded").  Resolve via gcc -print-file-name.
 for f in /usr/lib/libgcc_s.so /usr/lib/libgcc_s.so.1 \
-         /usr/lib/libgcc_s_asneeded.so \
-         /usr/lib/libatomic.so /usr/lib/libatomic.so.1 /usr/lib/libatomic.so.1.2.0 \
-         /usr/lib/libatomic_asneeded.so; do
+         /usr/lib/libatomic.so /usr/lib/libatomic.so.1 /usr/lib/libatomic.so.1.2.0; do
     cp_lib "$f"
 done
 cp -a /usr/lib/libatomic.a "$ROOT/usr/lib/" 2>/dev/null || true
+for f in libgcc_s_asneeded.so libatomic_asneeded.so libatomic_asneeded.a; do
+    copy_gcc_file "$f"
+done
 
 # --- B4-C1: cc1 (GCC C front end, ~47 MB) + its .so closure.  cc1 pulls
 #     libisl/libmpc/libmpfr/libgmp/libm on top of as/ld's libz/libzstd/libc.

@@ -126,7 +126,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_getcwd, sys_getcwd);
     syscall_register(SyscallNr::SYS_stat, sys_stat);
     syscall_register(SyscallNr::SYS_fstat, sys_fstat);
-    syscall_register(SyscallNr::SYS_lstat, sys_stat);  // F-ECO b1: lstat = stat (no symlinks yet)
+    syscall_register(SyscallNr::SYS_lstat, sys_lstat);  // lstat: stat without symlink follow
     syscall_register(SyscallNr::SYS_pipe, sys_pipe);
     syscall_register(SyscallNr::SYS_dup, sys_dup);              // F-ECO batch 4
     syscall_register(SyscallNr::SYS_dup2, sys_dup2);            // F-ECO batch 4
