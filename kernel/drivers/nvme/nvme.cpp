@@ -65,6 +65,8 @@ void zero_dma(void* p, uint64_t bytes) {
 }  // namespace
 
 cinux::lib::ErrorOr<void> NvmeController::init(const pci::PCIDevice& dev) {
+    dev_ = dev;  // save for MSI-X config (bus/slot/func + BARs)
+
     // 1. Ensure BAR0 has an MMIO address.  If the BIOS left it unassigned
     //    (dev.bar[0] == 0 -- SeaBIOS skips the QEMU nvme controller), probe the
     //    size and assign a fixed slot ourselves.
@@ -227,6 +229,37 @@ cinux::lib::ErrorOr<void> NvmeController::identify_controller(IdentifyController
     }
     cinux::lib::kprintf("[NVMe] Identify timeout\n");
     return cinux::lib::Error::TimedOut;
+}
+
+cinux::lib::ErrorOr<void> NvmeController::init_msi_x() {
+    msix_cap_ = pci::msix::find_capability(dev_.bus, dev_.slot, dev_.func, &pci::PCI::pci_read);
+    if (!msix_cap_.found) {
+        cinux::lib::kprintf("[NVMe] no MSI-X capability\n");
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // Second MsixController instance: map Table/PBA at +0x74000/+0x75000 (the
+    // default +0x40000/+0x41000 is taken by xHCI).  Entry 0 -> vector 0x41
+    // (xHCI owns 0x40); ISR install is deferred to production (batch 4) -- the
+    // test kernel keeps CPU interrupts off, so this batch only proves the Table
+    // maps + entry programs (mirroring xHCI batch 2C).
+    constexpr uint64_t kNvmeMsixTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x74000;
+    constexpr uint64_t kNvmeMsixPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x75000;
+    constexpr uint8_t  kNvmeIrqVector     = 0x41;
+    auto               r = msix_.init(msix_cap_, dev_, kNvmeMsixTableVirt, kNvmeMsixPbaVirt);
+    if (!r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    msix_.mask_all();
+    msix_.program_vector(0, kNvmeIrqVector, 0);
+    // enable() is deferred to production (batch 4): enabling here would let the
+    // controller deliver vector 0x41 on the next admin completion, but the test
+    // kernel has no IDT[0x41] handler installed -- the message #PFs.  xHCI
+    // installs its ISR in batch 0C before enabling; NVMe does the same in prod.
+    cinux::lib::kprintf(
+        "[NVMe] MSI-X configured (entry 0 -> vector 0x%x, %u entries; enable "
+        "deferred to production)\n",
+        kNvmeIrqVector, msix_cap_.table_size);
+    return {};
 }
 
 }  // namespace cinux::drivers::nvme

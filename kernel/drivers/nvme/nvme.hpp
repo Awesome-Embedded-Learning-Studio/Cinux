@@ -6,13 +6,14 @@
  * Memory Space, maps BAR0 into the MMIO window, and reads CAP/VS to confirm the
  * register window is live.  Modelled on XHCIController (instance + init(const
  * PCIDevice&)) -- NOT all-static, because NVMe carries per-controller mutable
- * state (admin/IO queues, doorbells).
+ * state (admin/IO queues, doorbells, MSI-X).
  *
  * Batches:
  *   1  -- PCI find + BAR0 self-assign + map + CAP/VS read.
  *   2a -- controller enable (CC.EN <-> CSTS.RDY) + Admin SQ/CQ config.
  *   2b -- Identify Controller via the admin queue (doorbell + CQ poll).
- *   3-5 -- MSI-X, IO queues, IBlockDevice adapter.
+ *   3  -- MSI-X (multi-instance MsixController @+0x74000; vector 0x41).
+ *   4-5 -- IO queues, IBlockDevice adapter.
  *
  * Namespace: cinux::drivers::nvme
  */
@@ -24,6 +25,7 @@
 #include <cinux/expected.hpp>
 
 #include "kernel/drivers/dma/dma_buffer.hpp"
+#include "kernel/drivers/pci/msix.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 
 namespace cinux::drivers::nvme {
@@ -103,6 +105,12 @@ public:
     /// for completion (batch 2b).  Fills @p out with the identify data.
     cinux::lib::ErrorOr<void> identify_controller(IdentifyController& out);
 
+    /// Configure MSI-X (batch 3): map the Table/PBA at +0x74000/+0x75000 (the
+    /// default +0x40000 is taken by xHCI), program entry 0 -> vector 0x41, and
+    /// enable.  ISR install is deferred to production -- the test kernel keeps
+    /// CPU interrupts off, so this only proves the Table maps + entry programs.
+    cinux::lib::ErrorOr<void> init_msi_x();
+
     bool present() const { return regs_ != nullptr; }
 
     /// CAP.MQES (0-based; the maximum queue size is MQES + 1).
@@ -113,8 +121,12 @@ public:
 
     volatile NvmeRegs* regs() const { return regs_; }
 
+    /// MSI-X Table (entry 0 programmed by init_msi_x).  Test hook.
+    volatile pci::msix::MsixTableEntry* msix_table() const { return msix_.table(); }
+
 private:
     volatile NvmeRegs*             regs_ = nullptr;
+    pci::PCIDevice                 dev_{};  // saved for MSI-X config (bus/slot/func + BARs)
     // Admin SQ/CQ (4 KiB DMA each).  Batch 2a.
     cinux::drivers::dma::DmaBuffer admin_sq_buf_;
     cinux::drivers::dma::DmaBuffer admin_cq_buf_;
@@ -125,6 +137,9 @@ private:
     uint32_t                       admin_cq_head_   = 0;
     uint8_t                        cq_phase_        = 1;  // NVMe CQ starts at phase = 1
     uint32_t                       doorbell_stride_ = 0;
+    // MSI-X (batch 3).  Second MsixController instance (xHCI owns the first).
+    pci::msix::MsixCap             msix_cap_{};
+    pci::msix::MsixController      msix_;
 };
 
 }  // namespace cinux::drivers::nvme
