@@ -23,10 +23,10 @@
 #include "idt.hpp"
 #include "irq_backend.hpp"
 #include "kernel/drivers/apic/local_apic.hpp"
+#include "kernel/drivers/nvme/nvme.hpp"  // F5-M3 batch 4: kNvmeIrqVector
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/usb/xhci_irq.hpp"
-#include "kernel/drivers/nvme/nvme.hpp"             // F5-M3 batch 4: kNvmeIrqVector
-#include "kernel/drivers/virtio/virtio.hpp"         // F5-M2 batch 3: kVirtioBlkIrqVector
+#include "kernel/drivers/virtio/virtio.hpp"  // F5-M2 batch 3: kVirtioBlkIrqVector
 #include "kernel/lib/kprintf.hpp"
 #include "pic.hpp"
 #include "smp.hpp"
@@ -177,22 +177,28 @@ extern "C" void irq_init() {
 
     // NVMe MSI-X interrupt (F5-M3 batch 4, vector kNvmeIrqVector=0x41). Registered
     // at boot so the shared IDT has the entry before APs start; MSI-X is not
-    // enabled until init_msi_x, so it never fires prematurely.
+    // enabled until init_msi_x, so it never fires prematurely.  IST 2 -- same as
+    // PIT/xHCI/LAPIC timer.  F13-B (54f6392) flipped those four IRQ vectors to
+    // IST 2 but missed the three MSI-X vectors (NVMe/VirtIO-blk/net); leaving
+    // ist=0 lands the ISR's fxsave+frame on the interrupted task's stack, which
+    // corrupts it under gcc/g++ loads (NVMe is the boot disk, so its IRQ fires
+    // densely on every rootfs read) -> the same intermittent IST-family panic.
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::nvme::kNvmeIrqVector),
-                      nvme_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+                      nvme_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
 
     // VirtIO-blk MSI-X interrupt (F5-M2 batch 3, vector kVirtioBlkIrqVector=0x42).
     // Registered at boot so the shared IDT has the entry before APs start; MSI-X
     // is not enabled until init_msi_x (production only), so it never fires
-    // prematurely, and the test kernel never enables MSI-X.
+    // prematurely, and the test kernel never enables MSI-X.  IST 2 -- see NVMe
+    // above (one of the three MSI-X vectors 54f6392 missed).
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::virtio::kVirtioBlkIrqVector),
-                      virtio_blk_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+                      virtio_blk_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
 
     // VirtIO-net MSI-X interrupt (F5-M2 batch 5, vector kVirtioNetIrqVector=0x43).
     // Single-vector mode (RX/TX share entry 0).  Registered at boot; MSI-X not
-    // enabled until init_msi_x (production only).
+    // enabled until init_msi_x (production only).  IST 2 -- see NVMe above.
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::virtio::kVirtioNetIrqVector),
-                      virtio_net_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+                      virtio_net_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
 
     // LAPIC timer (F5-M5 -smp, vector kLapicTimerVector).  Registered into the
     // shared IDT so APs can take it; the BSP is preempted by the PIT and never
