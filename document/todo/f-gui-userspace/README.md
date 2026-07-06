@@ -34,7 +34,8 @@
 | 1a | mm 基建：VMA `IoPhys`+`phys_base` + fault 分支（FLAG_PCD，不 PMM）+ `InodeOps::mmap` 钩子 + `sys_mmap` 接设备 + `sys_munmap` 分流 + fork PCD 跳过 CoW/带 phys_base + `fb_dev` + `/dev/fb0` 注册 | ✅ `d19524d` | big_kernel + big_kernel_test 全量绿 + 两 leg **917/0** + SMP AP wake（零回归） |
 | 1b | fb mmap 端到端 ring3 smoke（fb_mmap_test.c + build-fb-mmap-test.sh + options/qemu/create_ext2/main_test 注入链）真触发 IoPhys fault | ✅ `cc72585` | 两腿 917/0 + fb_mmap_test 5/5 PASS（单核 + SMP，IoPhys fault 端到端，fb phys 0xfd000000 readback 一致） |
 | 2 | `/dev/event0` evdev-like 字符设备(`InputEventDevice` MPSC ring + Spinlock + 阻塞 read/poll),mouse 7 处 + kbd listener 双写 push | ✅ `45378a1` | 两腿 1906/0 + input_event_test 5/5 PASS(单核 + SMP;read/poll 阻塞范式照 PTY/Pipe;smoke_entry mock push MouseMove+KeyDown)|
-| 3 | 用户态 GUI 进程:Cinux-GUI core + CinuxOS host adapter(open `/dev/fb0` + mmap + 读输入设备),`fork+execve` 启动 | ⏳ | 用户态 GUI 进程跑出桌面(图标 + 光标 + 鼠标响应) |
+| 3a | 用户态 host adapter:`user/cinux_gui_host/`(main 抄 linux_fbdev_main+host_cinux 换 syscall + crt_stub operator new stub)+ g++ 静态 musl 编 core 21 源 + smoke fork+execve /cinux_gui_host 100 + readback 非 0 | ✅ `fe9ba6f` | 两腿 1906/0 + cinux_gui_host 5/5 PASS(单核 + SMP;core 零 libstdc++ 依赖 Plan nm 验)|
+| 3b | production 启动:launch_userspace fork+execve(替 gui_worker)+ poll_event 接 event0(O_NONBLOCK)+ 桌面验证 | ⏳ | 桌面图标 + 光标 + 鼠标响应(用户启 GUI QEMU)|
 | 4 | kernel `gui_worker` 退役:`host_cinux.cpp` 删,kernel 只剩 fb 驱动 + 输入驱动 + 调度 | ⏳ | 桌面正常 + 内核无 gui_worker task + GUI bug 只崩进程 |
 
 ## 批1 详细设计(fb mmap 缝点)
