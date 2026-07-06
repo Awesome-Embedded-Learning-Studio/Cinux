@@ -96,6 +96,32 @@ constexpr bool is_nvme_device(uint8_t cls, uint8_t sub) {
     return cls == PciClass::MASS_STORAGE && sub == PciClass::NVME_SUBCLASS;
 }
 
+/**
+ * @brief True iff vendor/device identify a VirtIO Block device
+ *
+ * Matched on vendor 0x1AF4 + device (legacy 0x1001 OR modern 0x1042).  QEMU's
+ * -device virtio-blk-pci defaults to transitional (PCI device_id = 0x1001) but
+ * still exposes the modern capability list, so both IDs must be accepted; the
+ * transport is always driven modern.  Pure (host-testable).
+ */
+constexpr bool is_virtio_block_device(uint16_t vendor, uint16_t device) {
+    return vendor == VirtioPci::VENDOR &&
+           (device == VirtioPci::BLOCK_LEGACY || device == VirtioPci::BLOCK_MODERN);
+}
+
+/**
+ * @brief True iff vendor/device identify a VirtIO Net NIC
+ *
+ * Matched on vendor 0x1AF4 + device (legacy 0x1000 OR modern 0x1041).  Same
+ * transitional/modern rationale as is_virtio_block_device().  Does NOT bind the
+ * e1000 NIC (vendor 0x8086), so the two can coexist for an A/B comparison.
+ * Pure (host-testable).
+ */
+constexpr bool is_virtio_net_device(uint16_t vendor, uint16_t device) {
+    return vendor == VirtioPci::VENDOR &&
+           (device == VirtioPci::NET_LEGACY || device == VirtioPci::NET_MODERN);
+}
+
 // ============================================================
 // PCI Class
 // ============================================================
@@ -189,6 +215,31 @@ public:
      * @return     true if an NVMe controller was found, false otherwise
      */
     bool find_nvme(PCIDevice& out) const;
+
+    /**
+     * @brief Enumerate PCI buses and locate a VirtIO Block device
+     *
+     * Scans for a device matching is_virtio_block_device() (vendor 0x1AF4 +
+     * device 0x1001/0x1042).  The first match is written to @p out with BARs
+     * decoded; the modern capability list (common_cfg/notify/isr/device_cfg)
+     * is walked later by the VirtIO transport layer.
+     *
+     * @param out  Reference to a PCIDevice to fill with the match
+     * @return     true if a VirtIO Block device was found, false otherwise
+     */
+    bool find_virtio_block(PCIDevice& out) const;
+
+    /**
+     * @brief Enumerate PCI buses and locate a VirtIO Net NIC
+     *
+     * Scans for a device matching is_virtio_net_device() (vendor 0x1AF4 +
+     * device 0x1000/0x1041).  The first match is written to @p out with BARs
+     * decoded.
+     *
+     * @param out  Reference to a PCIDevice to fill with the match
+     * @return     true if a VirtIO Net NIC was found, false otherwise
+     */
+    bool find_virtio_net(PCIDevice& out) const;
 
     /**
      * @brief Read all six BAR values from a PCI device

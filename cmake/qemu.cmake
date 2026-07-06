@@ -60,6 +60,19 @@ add_custom_command(
     VERBATIM
 )
 
+# F5-M2 VirtIO-blk: test disk (1 MB raw).  The batch-1 mechanism test reads the
+# PCI capability list + does a virtqueue round-trip, so disk content is
+# irrelevant -- the file just backs -device virtio-blk-pci so the controller
+# enumerates and its BAR/cap-list map.
+set(VIRTIO_BLK_TEST_IMAGE "${CMAKE_BINARY_DIR}/virtio_blk_test.img")
+add_custom_command(
+    OUTPUT ${VIRTIO_BLK_TEST_IMAGE}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh ${VIRTIO_BLK_TEST_IMAGE}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh
+    COMMENT "Creating VirtIO-blk test disk image"
+    VERBATIM
+)
+
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 
@@ -165,6 +178,10 @@ set(QEMU_TEST_EXTRA_FLAGS
     -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
     -device nvme,id=nvme0,serial=nvme0
     -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
+    # F5-M2 VirtIO-blk: controller + 1 MB backing disk.  Enumerated via PCI
+    # vendor 0x1AF4 + device 0x1001/0x1042; modern capability transport.
+    -drive file=${VIRTIO_BLK_TEST_IMAGE},format=raw,if=none,id=virtio-blk-disk
+    -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0
 )
 
 # ============================================================
@@ -255,6 +272,7 @@ function(cinux_qemu_test_target name)
                 -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
         DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE}
                 regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
+                ${VIRTIO_BLK_TEST_IMAGE}
         USES_TERMINAL
         COMMENT "${ARG_COMMENT}"
         VERBATIM)
@@ -487,7 +505,7 @@ add_custom_target(run-kernel-test-all
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE} ${VIRTIO_BLK_TEST_IMAGE}
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
     VERBATIM

@@ -1,192 +1,42 @@
-# M2: VirtIO 框架 + VirtIO Block
+# M2: VirtIO 传输层 + VirtIO Block 驱动
 
-> 实现 VirtIO 传输层框架（PCI 配置 + VirtQueue）。
-> 在此基础上实现 VirtIO Block 驱动（IBlockDevice）。
+> F5 设备驱动第二里程碑。VirtIO modern PCI 传输层(capability + split virtqueue)+ virtio-blk 块设备驱动(IBlockDevice)。**与 M7 VirtIO-Net 同弧**(`feat/f5-virtio-blk-net`,2026-07-06 从干净 main `17798fa`),传输层两设备共享。接 F5-M1 AHCI ✅ / F5-M3 NVMe ✅(IBlockDevice + DmaPool + MSI-X 多实例参考)/ F5-M5 xHCI ✅(MSI-X 参考)。
 
-## 目标
+## 范围栅栏(不投机)
 
-VirtIO 是 QEMU/KVM 半虚拟化框架。实现核心框架后，Block 和 Net 驱动共享基础设施。
+**做**:VirtIO modern transport(PCI cap 遍历 common_cfg/notify/isr/device_cfg)+ split virtqueue(desc/avail/used + submit/wait/notify)+ virtio-blk 驱动(read/write/flush + IBlockDevice 适配)+ **polling 跑稳后直接真异步 MSI-X 中断 + SMP 验证**(用户约束,不留 follow-up)。
 
-## 任务清单
+**不做**:packed virtqueue(split 够);scatter-gather 多描述符链(先单缓冲,抄 NvmeBlockDevice);legacy transport(QEMU 默认 transitional 但走 modern cap);boot disk 切换(留 perf 批);VirtIO-Net(M7,批4-5)。
 
-### T1: VirtIO PCI 配置
+## 现有基建复用(NVMe 弧趟过)
 
-**文件**: `kernel/drivers/virtio/virtio.hpp`, `kernel/drivers/virtio/virtio_pci.cpp`
+| 基建 | 文件 | 复用 |
+|------|------|------|
+| PCI 框架 | `pci.hpp` `find_device` 模板 | 加 `find_virtio_block` |
+| MSI-X 多实例 | `msix_controller.cpp`(`table_virt/pba_virt` 参数) | 第 3 实例,Table @+0x84000 |
+| DMA | `dma_pool.hpp` / `dma_buffer.hpp` | virtqueue 三表 + 单传输缓冲 |
+| IBlockDevice | `block_device.hpp` / `nvme_block_device.cpp` | VirtIOBlock 抄 NvmeBlockDevice |
+| MMIO 窗 | `memory_layout.hpp` KMEM_MMIO 2MB | virtio-blk BAR @+0x80000(NVMe 占到 +0x75FFF) |
 
-VirtIO 设备通过 PCI 发现（vendor_id = 0x1AF4）：
+## PCI 设备识别
 
-```cpp
-namespace cinux::drivers::virtio {
+vendor 0x1AF4。device_id:virtio-blk transitional 0x1001 / modern 0x1042;virtio-net transitional 0x1000 / modern 0x1041。QEMU `-device virtio-blk-pci` 默认 transitional(读 0x1001)但有 modern capability。`find_virtio_block` 两 ID 都接,transport 一律 modern(legacy transport 不做)。
 
-enum DeviceID : uint16_t {
-    Block    = 0x1001,   // 块设备
-    Network  = 0x1000,   // 网卡
-    Console  = 0x1003,
-    Input    = 0x1052,   // 输入设备
-};
+## 批表
 
-class VirtIODevice {
-public:
-    void init(const pci::PCIDevice& pci_dev);
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 0 | 立项 docs + `CINUX_VIRTIO` option + QEMU virtio-blk-pci + PCI `find_virtio_block` | 🔄 | 全量编 + 两 leg 零回归 |
+| 1 | 传输层(`virtio.hpp` cap + feature + status)+ virtqueue(split queue)+ polling 机制测 | ⏳ | 两 leg + cap offset 回读 + queue round-trip |
+| 2 | virtio-blk 驱动(read/write/flush + IBlockDevice + main.cpp 注册)polling | ⏳ | 两 leg + round-trip byte-compare + Ext2 mount |
+| 3 | ⭐真中断 + SMP(MSI-X 0x42 unmask + ISR flag/wake + Spinlock DmaBuffer/virtqueue + -smp 2) | ⏳ | 两 leg(单核 + -smp 2)+ 并发 read 不出 garbage |
+| 5 | perf 对比 virtio-blk vs NVMe vs AHCI(归 M7 收官批) | ⏳ | I/O 数据 |
 
-    // 配置空间访问
-    uint32_t read_config(uint32_t offset);
-    void write_config(uint32_t offset, uint32_t value);
+## 风险 / 陷阱
 
-    // 特性协商
-    uint64_t read_device_features();
-    void write_driver_features(uint64_t features);
-    bool negotiate_features(uint64_t wanted);
-
-    // 状态控制
-    void set_status(uint8_t status);
-    void reset();
-
-    uint8_t  irq() const;
-    DeviceID device_id() const;
-
-protected:
-    pci::PCIDevice pci_dev_;
-    uint64_t common_cfg_base_;  // MMIO 基地址
-    uint64_t notify_base_;
-    uint64_t isr_base_;
-    uint64_t device_cfg_base_;
-};
-
-} // namespace cinux::drivers::virtio
-```
-
-**初始化流程**:
-1. Reset 设备（status = 0）
-2. 设置 ACKNOWLEDGE | DRIVER 位
-3. 协商 features
-4. 设置 FEATURES_OK 位
-5. 分配并注册 VirtQueues
-6. 设置 DRIVER_OK 位 → 设备激活
-
-- [ ] VirtIODevice 基类
-- [ ] PCI 配置空间读写
-- [ ] 特性协商机制
-- [ ] 状态机管理
-
-### T2: VirtQueue 实现
-
-**文件**: `kernel/drivers/virtio/virtqueue.hpp`, `kernel/drivers/virtio/virtqueue.cpp`
-
-VirtQueue 是 VirtIO 的核心数据结构（三张表 + 可用/使用环）：
-
-```cpp
-struct VirtQueueBuffers {
-    struct Desc {
-        uint64_t addr;      // 物理地址
-        uint32_t len;       // 缓冲区长度
-        uint16_t flags;     // VRING_DESC_F_NEXT / WRITE
-        uint16_t next;      // 下一个 desc 索引
-    };
-
-    struct Available {
-        uint16_t flags;
-        uint16_t idx;
-        uint16_t ring[];
-        uint16_t used_event;
-    };
-
-    struct UsedElem {
-        uint32_t id;
-        uint32_t len;
-    };
-
-    struct Used {
-        uint16_t flags;
-        uint16_t idx;
-        UsedElem ring[];
-        uint16_t avail_event;
-    };
-};
-
-class VirtQueue {
-public:
-    void init(uint32_t queue_index, uint16_t queue_size, VirtIODevice* dev);
-
-    // 提交请求
-    uint16_t submit(const ScatterGatherEntry* entries, size_t count,
-                    bool writable);
-
-    // 等待完成
-    bool wait_completion(uint16_t desc_idx, uint32_t* out_len);
-
-    // 中断处理
-    void process_used();
-
-    // 通知设备
-    void notify();
-
-private:
-    VirtQueueBuffers::Desc*  desc_table_;
-    VirtQueueBuffers::Available* available_;
-    VirtQueueBuffers::Used*  used_;
-    uint16_t queue_size_;
-    uint16_t last_used_idx_;
-    VirtIODevice* dev_;
-    uint32_t queue_index_;
-    DmaBuffer dma_buf_;   // 整个 VirtQueue 的 DMA 缓冲
-};
-```
-
-- [ ] 分配 desc/available/used 三张表（DMA Pool，页对齐）
-- [ ] submit() — 构建描述符链，更新 available ring
-- [ ] notify() — 写 notify 寄存器
-- [ ] process_used() — 处理完成事件
-- [ ] 等待队列集成（阻塞 + 中断唤醒）
-
-### T3: VirtIO Block 驱动
-
-**文件**: `kernel/drivers/virtio/virtio_block.hpp`, `kernel/drivers/virtio/virtio_block.cpp`
-
-```cpp
-class VirtIOBlock : public IBlockDevice {
-public:
-    void init(const pci::PCIDevice& pci_dev);
-
-    bool read_blocks(uint64_t block, uint64_t count, void* buf) override;
-    bool write_blocks(uint64_t block, uint64_t count, const void* buf) override;
-    uint64_t block_count() const override;
-    uint64_t block_size() const override { return 512; }
-
-private:
-    VirtIODevice vdev_;
-    VirtQueue    request_queue_;
-    uint64_t     capacity_;  // 块数量
-};
-```
-
-**VirtIO Block 请求格式**:
-```cpp
-struct BlockRequest {
-    uint32_t type;       // VIRTIO_BLK_T_IN / VIRTIO_BLK_T_OUT / VIRTIO_BLK_T_FLUSH
-    uint32_t reserved;
-    uint64_t sector;     // 起始扇区
-    uint8_t  data[];     // 数据
-    uint8_t  status;     // 返回状态（VIRTIO_BLK_S_OK / S_IOERR / S_UNSUPP）
-};
-```
-
-- [ ] init — PCI 发现 + VirtQueue 初始化
-- [ ] read_blocks — 构建请求 → submit → wait → 拷贝结果
-- [ ] write_blocks — 类似，方向相反
-- [ ] block_count — 从设备配置读取 capacity
-- [ ] 注册到内核驱动管理器
-
-### T4: 单元测试
-
-- [ ] VirtQueue submit + process_used 流程
-- [ ] VirtIO Block 在 QEMU 中读写验证
-- [ ] 通过 IBlockDevice 接口挂载 ext2 测试
-
-## 产出物
-
-- [ ] `kernel/drivers/virtio/virtio.hpp` / `virtio_pci.cpp` — VirtIO 框架
-- [ ] `kernel/drivers/virtio/virtqueue.hpp` / `.cpp` — VirtQueue
-- [ ] `kernel/drivers/virtio/virtio_block.hpp` / `.cpp`
-- [ ] `kernel/drivers/virtio/CMakeLists.txt`
-- [ ] QEMU VirtIO Block + ext2 验证
+- **⭐ polling→真中断(用户约束)**:polling 稳后紧接上真异步 MSI-X(NVMe 停在 mask_all polling 留 follow-up,本弧不留)。ISR 只 flag+wake,**不 inline schedule**(避 #DF,同 sys-ping-df / PIT IRQ 重入)。
+- **⭐ -smp 章态(NVMe `749e7db`)**:DmaBuffer + virtqueue 环第一天就 Spinlock。-smp 2 多核并发覆盖单 DmaBuffer → garbage → ext2 坏。两 leg 含 -smp 2。
+- **modern cap 遍历**:common_cfg/notify/isr/device_cfg(cap_id=0x09 子类型 1/2/3/4)offset 要全。批1 机制测证 cap offset 真值(对标 NVMe 批1 假绿)。
+- **向量避撞**:0x42,避 0x41(NVMe 曾污染 LAPIC)/0x40(xHCI)/0x30(LAPIC timer)。
+- **smoke 默认 ON 挂死**:本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`。
+- **VNC 避让**:多 AI 会话共 -vnc :0 互杀,验证临时 sed -vnc :5,跑完 git checkout。
