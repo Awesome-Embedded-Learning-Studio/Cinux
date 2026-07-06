@@ -37,6 +37,8 @@
 #include "third_party/Cinux-GUI/core/swraster.hpp"   // Surface
 #include "third_party/Cinux-GUI/core/theme.hpp"      // Theme / material_dark
 #include "third_party/Cinux-GUI/core/widget.hpp"     // Desktop
+#include "third_party/Cinux-GUI/core/icon_data.hpp"             // k_shell_icon / k_calc_icon
+#include "third_party/Cinux-GUI/core/widget/desktop_icon.hpp"   // DesktopIcon
 #include "third_party/Cinux-GUI/core/widget/label.hpp"
 #include "third_party/Cinux-GUI/core/widget/window.hpp"
 #include "third_party/Cinux-GUI/core/widget/window_manager.hpp"
@@ -58,10 +60,22 @@ struct HostState {
     WindowManager wm{};
     Window        win{};
     Label         content{};
+    DesktopIcon   shell_icon{};  // F13-B: desktop icons (amber, legacy shape)
+    DesktopIcon   calc_icon{};
     Desktop       desktop{};
 };
 
 HostState                   g_state;
+
+/* F13-B: desktop icon click stub. PTY 真终端 (B2) replaces this with
+ * spawn /bin/sh for Shell, etc. */
+static char kShellIconName[] = "Shell";
+static char kCalcIconName[]  = "Calculator";
+
+static void icon_activate_cb(void* ctx, DesktopIcon* /*self*/) {
+    cinux::lib::kprintf("[gui] desktop icon '%s' activated (stub; PTY 批2 接真终端)\n",
+                        ctx != nullptr ? static_cast<const char*>(ctx) : "?");
+}
 Host                        g_cinux_host{};
 cinux::drivers::Framebuffer* g_fb = nullptr; /* flush forwards dirty rects here */
 GuiCore*                    g_core = nullptr; /* core-owned staging session  */
@@ -321,6 +335,31 @@ void cinux_host_init(cinux::drivers::Framebuffer* fb) {
     g_state.win.set_content(&g_state.content);
     g_state.win.layout();
     g_state.wm.add_window(&g_state.win);
+
+    /* F13-B: desktop icons (Shell / Calculator) -- amber palette, shape lifted
+     * from the legacy desktop. Click fires icon_activate_cb (a kprintf stub;
+     * PTY 真终端 in B2 will spawn /bin/sh for Shell). */
+    constexpr int32_t kIconW = 32;
+    constexpr int32_t kIconH = 32 + 18;  // bitmap + one label row
+    g_state.shell_icon.set_bitmap(icons::data::k_shell_icon.data(),
+                                  icons::data::k_shell_mask.data(), 32u, 32u);
+    g_state.shell_icon.set_label(kShellIconName);
+    g_state.shell_icon.set_label_color(g_state.theme.on_surface);
+    g_state.shell_icon.set_rect(40, 40, static_cast<uint32_t>(kIconW),
+                                static_cast<uint32_t>(kIconH));
+    g_state.shell_icon.set_on_activate(icon_activate_cb, kShellIconName);
+
+    g_state.calc_icon.set_bitmap(icons::data::k_calc_icon.data(),
+                                 icons::data::k_calc_mask.data(), 32u, 32u);
+    g_state.calc_icon.set_label(kCalcIconName);
+    g_state.calc_icon.set_label_color(g_state.theme.on_surface);
+    g_state.calc_icon.set_rect(40, 120, static_cast<uint32_t>(kIconW),
+                               static_cast<uint32_t>(kIconH));
+    g_state.calc_icon.set_on_activate(icon_activate_cb, kCalcIconName);
+
+    g_state.wm.add_icon(&g_state.shell_icon);
+    g_state.wm.add_icon(&g_state.calc_icon);
+
     g_state.desktop.set_root(&g_state.wm);
 
     /* Mouse screen bounds (was gui_start's job; the host adapter owns display
