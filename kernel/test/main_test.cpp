@@ -93,24 +93,13 @@ void run_clone_tests();
 void run_sync_concurrent_tests();
 void run_canvas_tests();
 void run_mouse_event_tests();
-void run_window_tests();
-void run_window_manager_tests();
-void run_gui_integration_tests();
-void run_bitmap_icon_tests();
-void run_desktop_tests();
-void run_terminal_tests();
-void run_gui_swraster_tests();
-void run_gui_region_tests();
-void run_gui_dirty_tests();
 void run_pipe_tests();
 void run_sys_pipe_tests();
 void run_fifo_tests();
 void run_shm_tests();
 void run_poll_tests();
-void run_terminal_shell_tests();
 void run_fork_exec_tests();
 void run_process_group_tests();
-void run_multi_terminal_tests();
 void run_kprintf_format_tests();
 void run_concurrent_ring_buffer_tests();
 void run_klog_tests();
@@ -938,21 +927,6 @@ extern "C" void kernel_main() {
     run_fifo_tests();
     run_canvas_tests();
     run_mouse_event_tests();
-    run_window_tests();
-    run_window_manager_tests();
-    run_gui_integration_tests();
-    run_bitmap_icon_tests();
-    run_desktop_tests();
-    run_terminal_tests();
-#ifdef CINUX_GUI
-    run_terminal_shell_tests();
-    // F13 cinux::gui §4a: SwRaster primitive unit tests.
-    run_gui_swraster_tests();
-    // F13 cinux::gui §4b: region algebra unit tests.
-    run_gui_region_tests();
-    // F13 cinux::gui §4c: dirty-region + flush path tests.
-    run_gui_dirty_tests();
-#endif
     cinux::mm::AddressSpace::init_kernel();
     run_address_space_tests();
     run_vma_tests();
@@ -998,11 +972,6 @@ extern "C" void kernel_main() {
 
     run_fork_exec_tests();
     run_process_group_tests();
-#ifdef CINUX_GUI
-    // Multi-terminal tests (035): multiple concurrent terminals with
-    // independent pipes, destructor cleanup, WM iteration, tick callback
-    run_multi_terminal_tests();
-#endif
     // Shell tests (024): verifies kernel-side infrastructure for user shell
     run_shell_tests();
 

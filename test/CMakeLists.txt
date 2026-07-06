@@ -141,14 +141,8 @@ add_cinux_test(syscall_ext2)
 add_cinux_test(shell_write)
 add_cinux_test(cwd_stat)
 add_cinux_test(canvas)
-add_cinux_test(bitmap_icon)
 add_cinux_test(mouse)
 add_cinux_test(event_queue)
-add_cinux_test(window)
-add_cinux_test(window_manager)
-add_cinux_test(desktop)
-add_cinux_test(terminal)
-add_cinux_test(multi_terminal)
 
 # Cinux-Base leaf types (header-only) — proves the submodule is usable from the
 # host test build before any kernel migration relies on it. Only the include

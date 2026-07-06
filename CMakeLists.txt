@@ -68,7 +68,16 @@ if(CINUX_GUI)
     # (no TLS canary slot); the legacy PF handler's zero-page demand-paging
     # masked it (read 0, canary 0==0 false-OK), so pump() silently ran with a
     # dead canary. Point the canary at the kernel's global __stack_chk_guard.
-    target_compile_options(cinux-gui PRIVATE -mstack-protector-guard=global)
+    target_compile_options(cinux-gui PRIVATE
+        -mstack-protector-guard=global
+        # F13-B: match the kernel's freestanding C++ discipline. cinux-gui is
+        # added at the root, so it does NOT inherit kernel/CMakeLists.txt's
+        # -fno-rtti -fno-exceptions. Without this the widget tree's virtual
+        # dispatch generates typeinfo referencing __cxxabiv1 symbols the kernel
+        # does not link (crt_stub provides __cxa_atexit/guard/pure_virtual +
+        # operator new/delete, but no class_type_info vtable).
+        -fno-rtti
+        -fno-exceptions)
 endif()
 add_subdirectory(kernel)
 

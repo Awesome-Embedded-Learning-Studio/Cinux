@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED (2026-07-05)**:本目录(visor 七层草案)已被 **Cinux-GUI 独立仓**([Awesome-Embedded-Learning-Studio/Cinux-GUI](https://github.com/Awesome-Embedded-Learning-Studio/Cinux-GUI))的 P0-P7 实现超越。`visor` 名已废(→ Cinux-GUI),M0-M9 编号 → P0-P9。**当前权威**:Cinux-GUI 仓 `document/ai/{ROADMAP,PLAN,DIRECTIVES}.md`。F13 在 CinuxOS 侧收窄为 host adapter 重写,见 CinuxOS `document/ai/PLAN.md` 🔄 F13-B 段。本目录保留作历史背景(visor 设计演进 + 外部审查 `review-external.md`)。
+
 # F13: GUI 分离 → visor 跨平台 GUI 库（DRAFT）
 
 > ⚠️ **DRAFT v2 / 草稿（2026-06-21）**。方向可能调整。来源:11-agent workflow 调研 + 3-lens 对抗验证 + 用户 4 决策 + **外部 AI 审查(`review.md`)v2 采纳**。
