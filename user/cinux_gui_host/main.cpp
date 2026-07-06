@@ -1,24 +1,16 @@
 /**
  * @file user/cinux_gui_host/main.cpp
- * @brief CinuxOS userspace GUI host adapter (F-GUI-USERSPACE b3a + b3b step1)
+ * @brief CinuxOS userspace GUI host (F-GUI-USERSPACE b3a/b3b/b4)
  *
- * Drives the Cinux-GUI host-neutral core (21 freestanding C++ sources) as a
- * userspace process: opens /dev/fb0 (mmap display) + /dev/event0 (input),
- * builds a widget tree (WindowManager + Window + Label + Desktop), and pumps
- * GuiCore which drains input, renders into the staging buffer, and flushes
- * dirty rects to the mmap'd framebuffer. The Host ABI table (core/host.hpp)
- * is the only seam to the core.
+ * b4: full desktop (DesktopIcon Shell/Calculator + cursor) + Shell icon spawn
+ * /bin/sh on a CinuxOS PTY (open /dev/ptmx + fork + execve + TerminalWidget +
+ * PTY drain + keyboard→master). User clicks Shell → terminal window → gcc
+ * compiles in the GUI.
  *
- * b3a: fb mmap + render + readback smoke (poll_event NULL).
- * b3b step1: poll_event reads /dev/event0 via poll(0) (non-blocking) and maps
- * kernel Events to EventHeader + Pointer/Keycode payloads; dispatch_event feeds
- * them to the WM/Desktop. Open with O_RDONLY; poll(0) returns 0 when idle so
- * pump never blocks.
- *
- * Smoke mode: argv[1] = pump count (0 = forever). After N pumps read back the
- * fb center pixel and exit 0 if non-zero. Mirrors host/linux_fbdev_main.cpp +
- * kernel/gui/host_cinux.cpp (ABI fill + widget tree + flush row-blit +
- * poll_event payload map).
+ * Mirrors kernel/gui/host_cinux.cpp widget tree (DesktopIcons line 342-361) +
+ * host/linux_fbdev_main.cpp pump + host/posix_spawn.cpp PTY (but CinuxOS manual
+ * path: no libc forkpty -- open /dev/ptmx + ioctl TIOCGPTN + fork + child opens
+ * /dev/pts/N).
  */
 
 #include <fcntl.h>
@@ -40,11 +32,14 @@
 #include "font.hpp"
 #include "gui_core.hpp"
 #include "host.hpp"
+#include "icon_data.hpp"  // icons::data::k_shell_icon/k_calc_icon + masks
 #include "region.hpp"
 #include "swraster.hpp"
 #include "theme.hpp"
 #include "widget.hpp"
+#include "widget/desktop_icon.hpp"
 #include "widget/label.hpp"
+#include "widget/terminal.hpp"
 #include "widget/window.hpp"
 #include "widget/window_manager.hpp"
 
@@ -57,16 +52,21 @@ struct fb_screen_info {
     uint32_t bpp;
 };
 
+// CinuxOS PTY ioctl (Linux TIOCGPTN); musl <sys/ioctl.h> may not expose it.
+#ifndef TIOCGPTN
+#    define TIOCGPTN 0x80045430
+#endif
+
 namespace {
 
 using namespace cinux::gui;
 
-constexpr uint32_t kWinW = 200;
-constexpr uint32_t kWinH = 160;
+constexpr uint32_t kWinW     = 200;
+constexpr uint32_t kWinH     = 160;
+constexpr uint32_t kTermCols = 80;
+constexpr uint32_t kTermRows = 25;
 
-// Mirror of kernel/gui/event.hpp cinux::gui::Event -- the /dev/event0 wire
-// format (batch 2 InputEventDeviceOps::read returns this struct raw). CinuxOS
-// and this host are both gcc/SysV x86_64, so the C++ POD layout matches.
+// Mirror of kernel/gui/event.hpp cinux::gui::Event (/dev/event0 wire format).
 enum kernel_event_type : uint8_t {
     kMove      = 0,
     kMouseDown = 1,
@@ -101,21 +101,39 @@ struct kernel_event {
 };
 
 struct HostState {
-    uint8_t*      fb;  // mmap'd /dev/fb0 base
-    uint32_t      fb_w;
-    uint32_t      fb_h;
-    uint32_t      fb_pitch;
-    int           ev_fd;  // /dev/event0 (-1 if absent -> poll_event no-op)
-    PsfFont       font;
-    Theme         theme;
-    WindowManager wm;
-    Window        win;
-    Label         content;
-    Desktop       desktop;
+    uint8_t*       fb;
+    uint32_t       fb_w;
+    uint32_t       fb_h;
+    uint32_t       fb_pitch;
+    int            ev_fd;
+    PsfFont        font;
+    Theme          theme;
+    WindowManager  wm;
+    Window         win;
+    Label          content;
+    DesktopIcon    shell_icon;
+    DesktopIcon    calc_icon;
+    Desktop        desktop;
+    // b4: shell terminal, created on Shell icon click
+    Window         term_win;
+    TerminalWidget term;
+    int            sh_master_fd = -1;  // PTY master (-1 = no shell yet)
 };
 
+// File-scope HostState (BSS) -- NOT a function-local static, to avoid emitting
+// __cxa_guard (no libstdc++ in this freestanding link). Widget/PsfFont default
+// ctors are side-effect-free (host_cinux.cpp makes the same assumption).
+HostState st;
+
+void host_log(void* /*ctx*/, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    putchar('\n');
+}
+
 // L1 Display: flush one dirty rect from staging to the mmap'd framebuffer.
-// Mirrors host_cinux.cpp::cinux_flush (clamp + row-blit) but non-volatile target.
 void host_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
                 PixelFormat fmt) {
     auto* st = static_cast<HostState*>(ctx);
@@ -157,11 +175,19 @@ void host_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint3
     }
 }
 
-// L4 render: paint the widget tree into the core-owned staging + report dirty.
+// L4 render: drain PTY master → TerminalWidget, then paint the widget tree.
 void host_render_frame(void* ctx, Frame* frame) {
     auto* st = static_cast<HostState*>(ctx);
     if (frame == nullptr) {
         return;
+    }
+    // b4: drain shell output (non-blocking; O_NONBLOCK set at spawn) → TerminalWidget.
+    if (st->sh_master_fd >= 0) {
+        char    buf[512];
+        ssize_t n;
+        while ((n = read(st->sh_master_fd, buf, sizeof(buf))) > 0) {
+            st->term.write(buf, static_cast<uint32_t>(n));
+        }
     }
     Surface s{frame->pixels, frame->width, frame->height, frame->stride, frame->format};
     Region  dirty;
@@ -173,10 +199,7 @@ void host_render_frame(void* ctx, Frame* frame) {
     frame->count = n;
 }
 
-// L2 Input: drain one event from /dev/event0. poll(0) makes it non-blocking
-// (returns false when idle); only read when POLLIN is set. Mirrors
-// host_cinux.cpp::cinux_poll_event payload mapping (kernel Event -> EventHeader
-// + Pointer/Keycode payload).
+// L2 Input: drain one event from /dev/event0 (poll(0) non-blocking).
 bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
     auto* st = static_cast<HostState*>(ctx);
     if (out == nullptr || st->ev_fd < 0 || cap < sizeof(EventHeader)) {
@@ -187,7 +210,7 @@ bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
     pfd.events  = POLLIN;
     pfd.revents = 0;
     if (poll(&pfd, 1, 0) <= 0) {
-        return false;  // idle
+        return false;
     }
     kernel_event kev;
     ssize_t      n = read(st->ev_fd, &kev, sizeof(kev));
@@ -242,7 +265,7 @@ bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
     return true;
 }
 
-// L4 dispatch: apply one event to the widget tree (WM pointer / Desktop key).
+// L4 dispatch: pointer → WM (cursor/drag/icon-click); keycode → shell PTY.
 void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) {
     auto* st = static_cast<HostState*>(ctx);
     if (ev == nullptr || payload == nullptr || ev->magic != kEventMagic) {
@@ -254,14 +277,24 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         PointerPayload p;
         memcpy(&p, payload, sizeof(p));
-        st->wm.process_pointer(p);  // cursor + drag/raise/close
+        st->wm.process_pointer(p);  // cursor + drag + icon click (on_activate)
     } else if (ev->type == EventCode::kKeycode) {
         if (ev->payload_len < sizeof(KeycodePayload)) {
             return;
         }
         KeycodePayload k;
         memcpy(&k, payload, sizeof(k));
-        st->desktop.dispatch_key(k);
+        // b4: route key to the shell PTY (printable + Enter + Backspace).
+        if (st->sh_master_fd >= 0 && (ev->flags & kEventFlagPressed)) {
+            if (k.ascii == '\r' || k.ascii == '\n') {
+                write(st->sh_master_fd, "\r", 1);
+            } else if (k.scancode == 0x0e) {         // set-1 Backspace
+                write(st->sh_master_fd, "\x7f", 1);  // DEL (line discipline)
+            } else if (k.ascii != 0) {
+                char c = k.ascii;
+                write(st->sh_master_fd, &c, 1);
+            }
+        }
     }
 }
 
@@ -270,25 +303,77 @@ uint32_t host_now_ms(void* /*ctx*/) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u);
 }
-
 void* host_alloc(void* /*ctx*/, size_t n) {
     return malloc(n);
 }
 void host_free(void* /*ctx*/, void* p) {
     free(p);
 }
-void host_log(void* /*ctx*/, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vprintf(fmt, ap);
-    va_end(ap);
-    putchar('\n');
+
+// b4: Shell icon click → spawn /bin/sh on a CinuxOS PTY + open a terminal window.
+void shell_activate(void* ctx, DesktopIcon* /*self*/) {
+    auto* st = static_cast<HostState*>(ctx);
+    if (st->sh_master_fd >= 0) {
+        return;  // already open
+    }
+    int master = open("/dev/ptmx", O_RDWR | O_NOCTTY);
+    if (master < 0) {
+        host_log(st, "[gui] shell: open /dev/ptmx failed");
+        return;
+    }
+    unsigned int pty_num = 0;
+    if (ioctl(master, TIOCGPTN, &pty_num) < 0) {
+        close(master);
+        host_log(st, "[gui] shell: TIOCGPTN failed");
+        return;
+    }
+    char slave[32];
+    snprintf(slave, sizeof(slave), "/dev/pts/%u", pty_num);
+    pid_t pid = fork();
+    if (pid == 0) {
+        // child: slave becomes stdio, then exec /bin/sh
+        close(master);
+        int sfd = open(slave, O_RDWR);
+        if (sfd >= 0) {
+            dup2(sfd, 0);
+            dup2(sfd, 1);
+            dup2(sfd, 2);
+            if (sfd > 2) {
+                close(sfd);
+            }
+        }
+        char* argv[] = {const_cast<char*>("sh"), nullptr};
+        char* envp[] = {const_cast<char*>("TERM=xterm-256color"), nullptr};
+        execve("/bin/sh", argv, envp);
+        _exit(127);
+    }
+    if (pid < 0) {
+        close(master);
+        host_log(st, "[gui] shell: fork failed");
+        return;
+    }
+    fcntl(master, F_SETFL, O_NONBLOCK);
+    st->sh_master_fd = master;
+    // build terminal window over the TerminalWidget
+    st->term.set_cols_rows(kTermCols, kTermRows);
+    st->term.set_theme(&st->theme);
+    st->term_win.set_title("Shell");
+    st->term_win.set_theme(&st->theme);
+    st->term_win.set_rect(80, 60, kTermCols * TerminalWidget::kGlyphW,
+                          kTermRows * TerminalWidget::kGlyphH);
+    st->term_win.set_content(&st->term);
+    st->term_win.layout();
+    st->wm.add_window(&st->term_win);
+    host_log(st, "[gui] shell spawned pid=%d master=%d", static_cast<int>(pid), master);
+}
+
+void calc_activate(void* /*ctx*/, DesktopIcon* /*self*/) {
+    // stub (calculator not wired in b4)
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    // 1) framebuffer: open + geometry + mmap (mirrors fb_mmap_test.c).
     int fb_fd = open("/dev/fb0", O_RDWR);
     if (fb_fd < 0) {
         return 1;
@@ -303,13 +388,8 @@ int main(int argc, char** argv) {
     if (fb == reinterpret_cast<uint8_t*>(-1)) {
         return 3;
     }
-
-    // 2) input: /dev/event0 (optional -- smoke/prod need it; absent -> poll_event
-    //    no-ops). O_RDONLY + poll(0) keeps the pump non-blocking.
     int ev_fd = open("/dev/event0", O_RDONLY);
 
-    // 3) pump count: argv[1]; 0 = forever (production). Default 1. Parsed by
-    //    hand (host glibc wraps strtoul as __isoc23_strtoul, absent from musl).
     unsigned long n_pump = 1;
     if (argc > 1 && argv[1] != nullptr) {
         const char*   s = argv[1];
@@ -321,8 +401,7 @@ int main(int argc, char** argv) {
         n_pump = v;
     }
 
-    // 4) widget tree (mirrors host_cinux.cpp::cinux_host_init, minimal: no icons).
-    HostState st{};
+    // HostState st is the file-scope global above (BSS).
     st.fb       = fb;
     st.fb_w     = info.width;
     st.fb_h     = info.height;
@@ -332,6 +411,8 @@ int main(int argc, char** argv) {
     st.theme = material_dark();
     st.wm.set_rect(0, 0, info.width, info.height);
     st.wm.set_theme(&st.theme);
+
+    // "Hello" window (centered).
     const int32_t wx0 = static_cast<int32_t>(info.width) / 2 - static_cast<int32_t>(kWinW) / 2;
     const int32_t wy0 = static_cast<int32_t>(info.height) / 2 - static_cast<int32_t>(kWinH) / 2;
     st.win.set_title("Cinux");
@@ -342,9 +423,28 @@ int main(int argc, char** argv) {
     st.win.set_content(&st.content);
     st.win.layout();
     st.wm.add_window(&st.win);
+
+    // b4: DesktopIcons Shell/Calculator (mirror host_cinux.cpp:342-361).
+    constexpr int32_t kIconW = 32;
+    constexpr int32_t kIconH = 32 + 18;
+    st.shell_icon.set_bitmap(icons::data::k_shell_icon.data(), icons::data::k_shell_mask.data(),
+                             32u, 32u);
+    st.shell_icon.set_label("Shell");
+    st.shell_icon.set_label_color(st.theme.on_surface);
+    st.shell_icon.set_rect(40, 40, static_cast<uint32_t>(kIconW), static_cast<uint32_t>(kIconH));
+    st.shell_icon.set_on_activate(shell_activate, &st);
+
+    st.calc_icon.set_bitmap(icons::data::k_calc_icon.data(), icons::data::k_calc_mask.data(), 32u,
+                            32u);
+    st.calc_icon.set_label("Calculator");
+    st.calc_icon.set_label_color(st.theme.on_surface);
+    st.calc_icon.set_rect(40, 120, static_cast<uint32_t>(kIconW), static_cast<uint32_t>(kIconH));
+    st.calc_icon.set_on_activate(calc_activate, &st);
+
+    st.wm.add_icon(&st.shell_icon);
+    st.wm.add_icon(&st.calc_icon);
     st.desktop.set_root(&st.wm);
 
-    // 5) host table.
     Host host{};
     host.core.flush          = host_flush;
     host.core.poll_event     = (ev_fd >= 0) ? host_poll_event : nullptr;
@@ -359,13 +459,11 @@ int main(int argc, char** argv) {
 
     auto* core = new GuiCore(&host, info.width, info.height, PixelFormat::kXrgb8888);
 
-    // 6) pump loop.
     unsigned long iter = (n_pump == 0) ? ~0UL : n_pump;
     for (unsigned long i = 0; i < iter; ++i) {
         core->pump();
     }
 
-    // 7) readback smoke: center pixel non-zero (rendered bg + widget).
     int rc = 0;
     if (n_pump > 0) {
         uint32_t        cx = info.width / 2;
@@ -373,7 +471,7 @@ int main(int argc, char** argv) {
         const uint32_t* px = reinterpret_cast<const uint32_t*>(fb) +
                              static_cast<size_t>(cy) * (info.pitch / 4u) + cx;
         if (*px == 0u) {
-            rc = 5;  // fb blank -- render/flush path broke
+            rc = 5;
         }
     }
 
