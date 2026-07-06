@@ -35,7 +35,8 @@ MUSL_LDSO_ELF="$6"
 BUSYBOX_ELF="$7"
 FB_MMAP_TEST_ELF="$8"
 INPUT_EVENT_TEST_ELF="$9"
-GCC_ROOT="${10}"
+CINUX_GUI_HOST_ELF="${10}"
+GCC_ROOT="${11}"
 
 if [ -z "$OUTPUT" ]; then
     echo "Usage: $0 <output_image> [shell_elf] ..." >&2
@@ -118,6 +119,10 @@ fi
 # F-GUI-USERSPACE batch 2: optional musl static /dev/event0 input smoke.
 if [ -n "$INPUT_EVENT_TEST_ELF" ] && [ -f "$INPUT_EVENT_TEST_ELF" ]; then
     cp -p "$INPUT_EVENT_TEST_ELF" "$ROOT/input_event_test"
+fi
+# F-GUI-USERSPACE batch 3a: optional musl static userspace GUI host.
+if [ -n "$CINUX_GUI_HOST_ELF" ] && [ -f "$CINUX_GUI_HOST_ELF" ]; then
+    cp -p "$CINUX_GUI_HOST_ELF" "$ROOT/cinux_gui_host"
 fi
 # F10-M2: optional musl dynamic hello + its interpreter at the PT_INTERP path.
 if [ -n "$MUSL_HELLO_DYN_ELF" ] && [ -f "$MUSL_HELLO_DYN_ELF" ] && \
