@@ -37,6 +37,20 @@ PLAN 段 + ROADMAP 横切弧行/焦点行 + `todo/f-gui-userspace/README.md`(范
 - big_kernel + big_kernel_test + mini_kernel_test gcc 全量绿(stale clangd 错全假)。
 - `run-kernel-test-all` 两腿 **917 passed, 0 failed** + SMP AP1 wake + readback PASS(零回归,不破现有 mm/fork/mmap/DevFs)。
 
+## 批1b fb mmap 端到端 ring3 smoke(`cc72585`)
+
+批1a mm 基建回归 917/0 但没真触发 IoPhys(fb0 注册没人 mmap)。批1b 加 ring3 smoke 端到端验证。
+
+- `tools/musl/fb_mmap_test.c`:open /dev/fb0 + ioctl FBIOGET_SCREENINFO + mmap + 写红像素(0,0)+ readback + 写绿像素(末行)+ return 0。第一次访问 fault IoPhys VMA。
+- 注入链(照 musl hello smoke):`build-fb-mmap-test.sh` + `options.cmake`(CINUX_FB_MMAP_SMOKE + CINUX_COMPILE_DEF_OPTS wire)+ `qemu.cmake`(FB_MMAP_TEST_ELF + 两处 create_ext2 传参)+ `create_ext2_disk.sh`($8 = fb_mmap_test)+ `main_test.cpp`(#if gate + fb smoke 段 fork+execve /fb_mmap_test + exit_code 加 !fb_ok + devfs::init 重挂 /dev + fb init)。
+
+**踩坑**:
+- ⭐ **GCC_ROOT 空参折叠**:CMake `${GCC_ROOT}` 空展开参数消失,fb_mmap_test 落 $8(GCC_ROOT 位置)被当 gcc root(create_ext2 `[ -d ]` 跳过),FB_MMAP_TEST_ELF="$9"=空。解法:fb_mmap_test 参序放 GCC_ROOT **前**($8,gcc 空 在末尾折叠不影响)。
+- ⭐ **smoke_entry `vfs_mount_init()` 清 mount 表**后只挂 / + procfs,/dev 没挂 → open /dev/fb0 ENOENT(fb_mmap_test exit 1)。加 `devfs::init()` 重挂(DevFs::mount idempotent,mirrors ProcFs)。
+- ⭐ **test kernel 不跑 production main.cpp fb init**:smoke_entry 手动 `Framebuffer::init(*BootInfo@0x7000) + set_system_framebuffer(&g_test_fb)`,否则 fb_dev ioctl 返 NotImplemented → ENOTTY(fb_mmap_test exit 2)。
+
+**验证**:run-kernel-test-all 两腿 917/0 + fb_mmap_test 5/5 PASS(单核 + SMP)。`[F-GUI] test fb init: 1024x768 pitch=4096 phys=0xfd000000`;写像素 readback 一致 → IoPhys fault 路径(fb phys 0xfd000000,FLAG_PCD uncached 映射)端到端工作。fb_mmap_test status 256(open fail)→ 512(ioctl fail)→ 0(PASS)的修复链正是上述三踩坑。
+
 ## follow-up
 
 - **批1b**:fb mmap 端到端 ring3 smoke(open/mmap `/dev/fb0` 写屏 + cinux-exit)真触发 IoPhys fault 路径(回归 917/0 不触发 IoPhys,逻辑靠 review)。走 musl hello smoke 链:程序(`tools/musl/`)+ CMake + `create_ext2_disk.sh` 注入 + `kernel/test/main_test.cpp` `fb_mmap_smoke_entry` + `CINUX_FB_MMAP_SMOKE` option。
