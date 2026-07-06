@@ -96,6 +96,11 @@ set(MUSL_FORKTEST_ELF "${CMAKE_BINARY_DIR}/musl/forktest")
 # /hello: the script includes them iff the files exist (absent in CI).
 set(MUSL_HELLO_DYN_ELF "${CMAKE_BINARY_DIR}/musl/hello-dyn")
 set(MUSL_LDSO_ELF "${CMAKE_BINARY_DIR}/musl-sysroot/lib/libc.so")
+
+# F-GUI-USERSPACE batch 1b: static musl /dev/fb0 mmap smoke (exercises the
+# IoPhys VMA fault path). Built by tools/musl/build-fb-mmap-test.sh (not a CMake
+# target), so conditional on the file existing at run-kernel-test time.
+set(FB_MMAP_TEST_ELF "${CMAKE_BINARY_DIR}/musl/fb_mmap_test")
 # F-ECO batch 0: minimal static busybox at /bin/busybox when present (built by
 # clang --target=x86_64-linux-musl, not a CMake target). The ring-3 smoke
 # fork+execves it to run echo/cat/ls applets -- the first ecosystem touchstone.
@@ -131,7 +136,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
             ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
-            ${BUSYBOX_ELF} ${GCC_ROOT}
+            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${GCC_ROOT}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
     COMMENT "Creating ext2 image with /bin/sh (+ GCC toolchain if CINUX_GCC_TOOLCHAIN)"
     VERBATIM
@@ -443,7 +448,7 @@ add_custom_target(regenerate-ext2-image
     COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
             ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
-            ${BUSYBOX_ELF} ${GCC_ROOT}
+            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${GCC_ROOT}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM

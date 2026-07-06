@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
-#include "boot/boot_info.h"
+#include "boot/boot_info.h"  // F-GUI b1b: BootInfo for test-fb init
 #include "kernel/arch/x86_64/extable.hpp"  // F-EXTABLE: sort_extable before tests
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
@@ -28,6 +28,8 @@
 #include "kernel/drivers/ahci/ahci_block_device.hpp"  // F10-M1 batch 6: ext2 mount
 #include "kernel/drivers/apic/local_apic.hpp"         // F5-M6: g_lapic (e1000 poll timer)
 #include "kernel/drivers/pci/pci.hpp"                 // F10-M1 batch 6: PCI->AHCI for ext2
+#include "kernel/drivers/video/framebuffer.hpp"       // F-GUI b1b: Framebuffer for /dev/fb0
+#include "kernel/fs/devfs/devfs.hpp"                  // F-GUI b1b: devfs::init (/dev for fb0)
 #include "kernel/fs/ext2/ext2.hpp"                    // F10-M1 batch 6: ext2 mount
 #include "kernel/fs/file.hpp"                         // FDTable::close to clear polluted fd 0/1/2
 #include "kernel/fs/procfs/procfs.hpp"                // F-ECO busybox: procfs::init (/proc)
@@ -152,7 +154,7 @@ static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
 // dynamic /hello-dyn phases are gated independently inside, so each can run
 // alone (CINUX_MUSL_HELLO_SMOKE / CINUX_MUSL_DYN_SMOKE).
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
 static int g_unit_test_failures = 0;
 
 static void musl_hello_smoke_entry() {
@@ -164,6 +166,17 @@ static void musl_hello_smoke_entry() {
             __asm__ volatile("cli; hlt");
     }
     task->children = nullptr;
+
+    // F-GUI-USERSPACE b1b: init the framebuffer so /dev/fb0's mmap + ioctl have
+    // a backing Framebuffer.  The test kernel's kernel_main does NOT run the
+    // production main.cpp fb init, so system_framebuffer() is null until we do
+    // it here.  BootInfo is still at phys 0x7000 (the loader placed it there).
+    static cinux::drivers::Framebuffer g_test_fb;
+    g_test_fb.init(*reinterpret_cast<const BootInfo*>(BOOT_INFO_PHYS));
+    cinux::drivers::set_system_framebuffer(&g_test_fb);
+    cinux::lib::kprintf("[F-GUI] test fb init: %ux%u pitch=%u phys=0x%lx\n", g_test_fb.width(),
+                        g_test_fb.height(), g_test_fb.pitch(),
+                        static_cast<unsigned long>(g_test_fb.phys_base()));
 
     // Ring-0 unit tests share one global fd table, and some leak an open fd
     // onto slot 0/1/2: CinuxOS FDTable does NOT reserve stdin/stdout/stderr,
@@ -207,6 +220,8 @@ static void musl_hello_smoke_entry() {
                         ext2->is_mounted() ? 1 : 0, blk_dev != nullptr ? 1 : 0);
     // F-ECO busybox acceptance: mount /proc so procps applets (ps/free) work.
     // ProcFS is on this branch (F6-M2); without /proc, busybox ps/free exit 1.
+    cinux::fs::devfs::init();  // F-GUI-USERSPACE b1b: re-mount /dev (vfs_mount_init cleared it) so
+                               // /dev/fb0 resolves
     cinux::fs::procfs::init();
 
 #    ifdef CINUX_MUSL_HELLO_SMOKE
@@ -265,6 +280,58 @@ static void musl_hello_smoke_entry() {
                         hello_ok ? "PASS" : "FAIL");
 #    else
     bool hello_ok = true;  // static phase compiled out (only CINUX_MUSL_DYN_SMOKE on)
+#    endif
+
+#    ifdef CINUX_FB_MMAP_SMOKE
+    // F-GUI-USERSPACE batch 1b: /dev/fb0 mmap smoke -- fork+execve /fb_mmap_test
+    // (opens /dev/fb0, ioctls geometry, mmaps the fb, writes+reads a pixel,
+    // exits 0).  This is the ONLY test that exercises the batch-1a IoPhys VMA
+    // fault path; the ring-0 suite never triggers it (fb0 is registered but
+    // nothing mmaps it).
+    int           fb_pass  = 0;
+    int           fb_fail  = 0;
+    constexpr int kFbIters = 5;
+    cinux::lib::kprintf("[F-GUI] fb mmap ring-3 smoke: %d iterations\n", kFbIters);
+    for (int fi = 0; fi < kFbIters; ++fi) {
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {"/fb_mmap_test", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program("/fb_mmap_test", argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     status   = -1;
+        int64_t reap_ret = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            int                        kstatus = 0;
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                status   = kstatus;
+                reap_ret = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap_ret = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        if (reap_ret > 0 && status == 0) {
+            ++fb_pass;
+        } else {
+            ++fb_fail;
+            cinux::lib::kprintf("[F-GUI] smoke: fb_mmap_test iter %d FAIL (status=%d reap=%lld)\n",
+                                fi, status, static_cast<long long>(reap_ret));
+        }
+    }
+    bool fb_ok = (fb_fail == 0);
+    cinux::lib::kprintf("[F-GUI] smoke: fb_mmap_test %d/%d iters PASS -> %s\n", fb_pass, kFbIters,
+                        fb_ok ? "PASS" : "FAIL");
+#    else
+    bool fb_ok = true;  // fb mmap phase compiled out
 #    endif
 
 #    ifdef CINUX_MUSL_DYN_SMOKE
@@ -500,9 +567,8 @@ static void musl_hello_smoke_entry() {
     // -O2 constructors) from the header/compile question (B4-C2).  Gate on
     // exit==0 like the as smoke; stdout is not console-wired so do not gate on
     // the version text.
-    static constexpr const char* kCc1Path =
-        "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/cc1";
-    bool cc1_ok = false;
+    static constexpr const char* kCc1Path = "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/cc1";
+    bool                         cc1_ok   = false;
     {
         int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
         if (child_pid == 0) {
@@ -689,7 +755,7 @@ static void musl_hello_smoke_entry() {
     // self-host loop closes. The crash is a B4-b follow-up (recurs when cc1 drives
     // ld; may share a root with mmap demand-paging on large arenas). Gate on
     // as + ./hello (the self-host proof), not ld's own exit.
-    int exit_code = (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok ||
+    int exit_code = (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok || !fb_ok ||
                      !busybox_ok || !cc1_ok || !cc1_compile_ok || !as_ok || !gcc_hello_ok)
                         ? 1
                         : 0;
@@ -722,7 +788,7 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
     r.sfmask = cinux::arch::read_msr(0xC0000084);
     r.magic  = cinux::arch::kApSelfcheckMagic;
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
     // Smoke will run the scheduler -- let this AP participate (cross-core CoW).
     return true;
 #else
@@ -1098,7 +1164,7 @@ extern "C" void kernel_main() {
     }
 
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
     // F10-M1 batch 6 / F10-M2 batch 3: enter the real scheduler and run the musl
     // The worker task signals QEMU exit itself (isa-debug-exit), so control
     // does not return here.  CI builds without the flag take the normal path.

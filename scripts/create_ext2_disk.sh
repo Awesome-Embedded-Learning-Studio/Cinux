@@ -33,7 +33,8 @@ MUSL_FORKTEST_ELF="$4"
 MUSL_HELLO_DYN_ELF="$5"
 MUSL_LDSO_ELF="$6"
 BUSYBOX_ELF="$7"
-GCC_ROOT="$8"
+FB_MMAP_TEST_ELF="$8"
+GCC_ROOT="$9"
 
 if [ -z "$OUTPUT" ]; then
     echo "Usage: $0 <output_image> [shell_elf] ..." >&2
@@ -108,6 +109,10 @@ fi
 # F-VERIFY M5-2: optional musl static forktest at /forktest (SMP CoW reproducer).
 if [ -n "$MUSL_FORKTEST_ELF" ] && [ -f "$MUSL_FORKTEST_ELF" ]; then
     cp -p "$MUSL_FORKTEST_ELF" "$ROOT/forktest"
+fi
+# F-GUI-USERSPACE batch 1b: optional musl static /dev/fb0 mmap smoke (IoPhys VMA).
+if [ -n "$FB_MMAP_TEST_ELF" ] && [ -f "$FB_MMAP_TEST_ELF" ]; then
+    cp -p "$FB_MMAP_TEST_ELF" "$ROOT/fb_mmap_test"
 fi
 # F10-M2: optional musl dynamic hello + its interpreter at the PT_INTERP path.
 if [ -n "$MUSL_HELLO_DYN_ELF" ] && [ -f "$MUSL_HELLO_DYN_ELF" ] && \
