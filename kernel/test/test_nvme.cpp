@@ -18,6 +18,7 @@
 #include "big_kernel_test.h"
 #include "kernel/drivers/dma/dma_pool.hpp"
 #include "kernel/drivers/nvme/nvme.hpp"
+#include "kernel/drivers/nvme/nvme_block_device.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/lib/kprintf.hpp"
 
@@ -114,6 +115,35 @@ void test_find_and_map() {
         TEST_ASSERT_TRUE(match);
         cinux::lib::kprintf("[NVMe] Read/Write round-trip: %u bytes OK\n",
                             static_cast<unsigned>(ns.lba_size));
+    }
+
+    // batch 4c: NvmeBlockDevice (IBlockDevice adapter) round-trip -- writes via
+    // the IBlockDevice* interface (slba=2, distinct from batch 4b's slba=0).
+    {
+        auto bd_r = NvmeBlockDevice::create(ctrl, 1, ns.nsze, ns.lba_size);
+        TEST_ASSERT_TRUE(bd_r.ok());
+        auto bd = std::move(bd_r.value());
+
+        uint8_t wpat[512];
+        for (uint32_t i = 0; i < sizeof(wpat); ++i) {
+            wpat[i] = static_cast<uint8_t>(0x3C ^ (i & 0x1F));
+        }
+        uint8_t rpat[512] = {0};
+        TEST_ASSERT_TRUE(bd.write_blocks(2, 1, wpat).ok());
+        TEST_ASSERT_TRUE(bd.read_blocks(2, 1, rpat).ok());
+
+        bool match = true;
+        for (uint32_t j = 0; j < sizeof(wpat); ++j) {
+            if (rpat[j] != wpat[j]) {
+                cinux::lib::kprintf("[NVMe] NvmeBlockDevice mismatch @%u: w=0x%x r=0x%x\n",
+                                    j, wpat[j], rpat[j]);
+                match = false;
+                break;
+            }
+        }
+        TEST_ASSERT_TRUE(match);
+        cinux::lib::kprintf("[NVMe] NvmeBlockDevice round-trip OK (block_size=%llu)\n",
+                            static_cast<unsigned long long>(bd.block_size()));
     }
 
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or

@@ -54,6 +54,8 @@
 #include "kernel/drivers/hpet/hpet.hpp"
 #include "kernel/drivers/keyboard/keyboard.hpp"
 #include "kernel/drivers/net/e1000_init.hpp"
+#include "kernel/drivers/nvme/nvme.hpp"
+#include "kernel/drivers/nvme/nvme_block_device.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/rtc/rtc.hpp"
@@ -260,6 +262,38 @@ extern "C" void kernel_main() {
         }
     } else {
         cinux::lib::kprintf("[AHCI] No AHCI controller found.\n");
+    }
+
+    // Step 21a (F5-M3): NVMe controller -- 并存 independent second disk.
+    // Production rootfs stays on AHCI (init.cpp mounts Ext2 over AHCIBlockDevice);
+    // this brings up an NvmeBlockDevice for the batch-5 perf comparison and any
+    // future NVMe-backed Ext2.  Polling mode: init_msi_x masks every entry, so
+    // the ISR stub at IDT[0x41] (installed in irq_init) never fires -- io_submit
+    // polls the IO CQ directly.  switch_to_apic ran at Step 17, so a later batch
+    // can safely unmask for true async IRQ if desired.
+    static cinux::drivers::nvme::NvmeController nvme_ctrl;
+    cinux::drivers::pci::PCIDevice              nvme_dev;
+    if (pci.find_nvme(nvme_dev)) {
+        cinux::drivers::nvme::NamespaceInfo ns{};
+        // init_msi_x MUST precede create_io_queues: QEMU's nvme_create_cq checks
+        // msix_enabled (returns NVME_INVALID_IRQ_VECTOR if MSI-X is off and the
+        // IO CQ carries a non-zero IV).  init_msi_x enables MSI-X (then masks
+        // every entry for polling mode), so the check passes.
+        if (nvme_ctrl.init(nvme_dev).ok() && nvme_ctrl.enable().ok() &&
+            nvme_ctrl.init_msi_x().ok() &&
+            nvme_ctrl.identify_namespace(1, ns).ok() && nvme_ctrl.create_io_queues().ok()) {
+            auto bd =
+                cinux::drivers::nvme::NvmeBlockDevice::create(nvme_ctrl, 1, ns.nsze, ns.lba_size);
+            if (bd.ok()) {
+                // Leak into a static so the device outlives this scope; batch 5
+                // exposes an accessor for the perf comparison.
+                static cinux::drivers::nvme::NvmeBlockDevice nvme_blk = std::move(bd.value());
+                (void)nvme_blk;
+                cinux::lib::kprintf("[NVMe] NvmeBlockDevice ready (nsze=%llu lba_size=%llu)\n",
+                                    static_cast<unsigned long long>(ns.nsze),
+                                    static_cast<unsigned long long>(ns.lba_size));
+            }
+        }
     }
 
     // Step 21b: Bring up the e1000 NIC (if present).  §14 file gate: net::init()

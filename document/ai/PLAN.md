@@ -67,7 +67,7 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 | 3 | MSI-X 多实例：`MsixController::init` 加 table_virt/pba_virt 默认参数（xHCI 用默认 +0x40000 不变；NVMe 传 +0x74000/+0x75000）+ NVMe `init_msi_x`（entry 0 -> vector 0x41）| ✅ | 全量编绿（xHCI 不破）+ 两 leg 886/0 + init_msi_x 真验（msix_table[0] 编程）；⭐dev_.bar[0] stale 治（read_bars 在 self-assign 前→MSI-X Table phys 算低内存→写低 RAM 破坏 0x1234 区→clone acquire #PF；修 init 更新 dev_.bar[0]）|
 | 4a | Identify Namespace（CNS=0x00）+ admin_submit helper + Create IO Cq/SQ + ISR（IDT[0x41]）+ enable MSI-X | ✅ | 两 leg 1844/0 + Create IO Cq/SQ status=0；⭐根因 CC 字段位错（IOSQES=[19:16]/IOCQES=[23:20]，非 [29:24]/[21:16]；0x8205=MAX_QSIZE_EXCEEDED SC=2 非 IV SC=8，IV 是误诊）+ NVMe MSI 污染 LAPIC（test kernel 没 switch_to_apic→0x41 占 ISR 阻塞 e1000 timer；修 init_msi_x mask_all）。note `2026-07-06-f5-m3-b4a-create-io-queue.md` |
 | 4b | NVM Read/Write（单页 PRP1，opcode 0x02/0x01）+ io_submit + round-trip 机制测 | ✅ | 两 leg 1844/0 + Read/Write round-trip 512 bytes OK；note `2026-07-06-f5-m3-b4b-nvm-read-write.md`。PRP list（>1 页）留批4c |
-| 4c | NvmeBlockDevice（IBlockDevice，抄 AHCIBlockDevice）+ main.cpp Step 21c 注册（并存）| ⏳ | 两 leg + IBlockDevice round-trip |
+| 4c | NvmeBlockDevice（IBlockDevice 适配，抄 AHCIBlockDevice）+ main.cpp Step 21a 注册（并存）+ test round-trip | ✅ | 两 leg 1844/0 + NvmeBlockDevice round-trip OK；production boot 待用户 GUI 验。note `2026-07-06-f5-m3-b4c-nvme-block-device.md`。ISR install（批4a）+ mask_all polling；unmask 真异步 IRQ 留 follow-up |
 | 5 | perf 量收益：NVMe 盘跑 gcc/g++ 编译对比 AHCI 基线 [MEM] I/O（基线 ~6.2s gcc / ~7.4s g++）+ 收官 note + ROADMAP ✅ | ⏳ | NVMe vs AHCI I/O 时序对比 |
 
 ### 风险 / 陷阱

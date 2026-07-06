@@ -288,8 +288,13 @@ function(cinux_qemu_run_target name)
                 -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
                 -device ide-hd,drive=ahci-disk,bus=ahci.0
                 -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
-                -device ide-hd,drive=ext2-disk,bus=ahci.1)
-        list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS})
+                -device ide-hd,drive=ext2-disk,bus=ahci.1
+                # F5-M3 NVMe: independent second disk (并存; production rootfs stays
+                # on AHCI, NVMe is the perf-comparison / future-NVMe-Ext2 target).
+                -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
+                -device nvme,id=nvme0,serial=nvme0
+                -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0)
+        list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS} ${NVME_TEST_IMAGE})
     endif()
     add_custom_target(${name}
         COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${_smp} ${QEMU_DEVELOP_FLAG} ${_dbg}
