@@ -44,6 +44,7 @@ cinux::lib::ErrorOr<void> NvmeBlockDevice::read_blocks(uint64_t block, uint64_t 
     if (count == 0) {
         return {};
     }
+    auto g = lock_.guard();  // SMP: serialise dma_buf_ + NVMe IO across CPUs
     if (!dma_buf_.valid()) {
         return cinux::lib::Error::IOError;  // no DMA buffer (create-time alloc failed)
     }
@@ -65,6 +66,7 @@ cinux::lib::ErrorOr<void> NvmeBlockDevice::write_blocks(uint64_t block, uint64_t
     if (count == 0) {
         return {};
     }
+    auto g = lock_.guard();  // SMP: serialise dma_buf_ + NVMe IO across CPUs
     if (!dma_buf_.valid()) {
         return cinux::lib::Error::IOError;
     }

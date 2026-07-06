@@ -28,6 +28,7 @@
 
 #include "kernel/drivers/block_device.hpp"
 #include "kernel/drivers/dma/dma_buffer.hpp"
+#include "kernel/proc/sync.hpp"
 #include "nvme.hpp"
 
 namespace cinux::drivers::nvme {
@@ -71,6 +72,11 @@ private:
     uint64_t                       capacity_blocks_;
     uint64_t                       lba_size_;
     cinux::drivers::dma::DmaBuffer dma_buf_;
+    // Serialises read_blocks/write_blocks across SMP CPUs: the single dma_buf_
+    // + io_submit polling path must not overlap (production -smp 2 + gcc fork
+    // chain exposed DmaBuffer corruption -> garbage ext2 block numbers -> NVMe
+    // CAP_EXCEEDED on a wild slba).
+    cinux::proc::Spinlock          lock_;
 };
 
 /**
