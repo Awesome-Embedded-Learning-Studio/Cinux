@@ -41,6 +41,10 @@ namespace cinux::drivers::virtio {
 /// NVMe (0x41) / xHCI (0x40) / LAPIC timer (0x30). Registered in irq_init;
 /// fires once init_msi_x enables + unmasks MSI-X.
 constexpr uint8_t kVirtioBlkIrqVector = 0x42;
+/// VirtIO-net MSI-X vector (batch 5).  Single-vector mode: RX/TX share entry 0
+/// (multi-vector 0x43-0x45 is a follow-up; the single path proves the real
+/// async IRQ seam).  Clear of blk (0x42) / NVMe (0x41) / xHCI (0x40).
+constexpr uint8_t kVirtioNetIrqVector = 0x43;
 
 // ============================================================
 // VirtIO device_status bits (common_cfg + 0x14)

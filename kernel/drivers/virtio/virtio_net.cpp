@@ -135,3 +135,19 @@ cinux::lib::ErrorOr<void> VirtIONetDevice::send_l3(const cinux::net::EthAddr& ne
 }
 
 }  // namespace cinux::drivers::virtio
+
+// ============================================================
+// MSI-X interrupt handler (F5-M2 batch 5, vector 0x43 kVirtioNetIrqVector)
+// ============================================================
+// Single-vector mode: RX/TX completions both raise entry 0 -> 0x43.  Counts
+// only (the polling path in poll_rx/send_l3 independently observes the rings).
+// NO schedule() in ISR (sti-in-syscall #DF).  EOI by the ISR_IRQ asm stub.
+// Production only (test kernel has no switch_to_apic -- see virtio_blk handler).
+namespace cinux::arch {
+struct InterruptFrame;
+}
+
+volatile uint64_t g_virtio_net_irq_count = 0;
+extern "C" void virtio_net_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
+    g_virtio_net_irq_count = g_virtio_net_irq_count + 1;
+}

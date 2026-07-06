@@ -57,6 +57,7 @@
 #include "kernel/drivers/nvme/nvme.hpp"
 #include "kernel/drivers/nvme/nvme_block_device.hpp"
 #include "kernel/drivers/virtio/virtio_blk.hpp"
+#include "kernel/drivers/virtio/virtio_net.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/rtc/rtc.hpp"
@@ -324,6 +325,31 @@ extern "C" void kernel_main() {
                     cinux::drivers::virtio::set_virtio_block_device(&virtio_blk);
                     cinux::lib::kprintf("[VirtIO-blk] ready (capacity=%llu sectors)\n",
                                         static_cast<unsigned long long>(capacity));
+                }
+            }
+        }
+    }
+
+    // Step 21a3 (F5-M2 batch 5): VirtIO-net NIC (production, real interrupt path).
+    // Driver + transport + MSI-X unmask in place; NetStack attach (supplement/
+    // replace e1000) + SLIRP ping is a follow-up integration gate.
+    static cinux::drivers::virtio::VirtIODevice virtio_net_dev;
+    cinux::drivers::pci::PCIDevice              virtio_net_pci;
+    if (pci.find_virtio_net(virtio_net_pci)) {
+        if (virtio_net_dev.init(virtio_net_pci).ok()) {
+            auto fr = virtio_net_dev.negotiate_features(
+                cinux::drivers::virtio::Feature::VERSION_1);
+            if (fr.ok()) {
+                auto mr = virtio_net_dev.init_msi_x(cinux::drivers::virtio::kVirtioNetIrqVector);
+                if (!mr.ok()) {
+                    cinux::lib::kprintf("[VirtIO-net] MSI-X init failed -- polling mode\n");
+                }
+                auto nr = cinux::drivers::virtio::VirtIONetDevice::create(virtio_net_dev);
+                if (nr.ok()) {
+                    static cinux::drivers::virtio::VirtIONetDevice virtio_net = std::move(nr.value());
+                    virtio_net_dev.set_status(cinux::drivers::virtio::Status::DRIVER_OK);
+                    cinux::lib::kprintf("[VirtIO-net] ready (real IRQ path 0x%x)\n",
+                                        cinux::drivers::virtio::kVirtioNetIrqVector);
                 }
             }
         }

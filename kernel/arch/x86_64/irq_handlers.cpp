@@ -67,6 +67,7 @@ void reschedule_ipi_stub();  // F4-M4 M4-2: reschedule IPI (vector 0xE0)
 void xhci_irq_stub();        // F5-M5 Batch 0C: xHCI event-ring MSI-X (vector 0x40)
 void nvme_irq_stub();        // F5-M3 batch 4: NVMe MSI-X (vector 0x41)
 void virtio_blk_irq_stub();  // F5-M2 batch 3: VirtIO-blk MSI-X (vector 0x42)
+void virtio_net_irq_stub();  // F5-M2 batch 5: VirtIO-net MSI-X (vector 0x43)
 void lapic_timer_stub();     // F5-M5 -smp: per-CPU LAPIC timer (vector 0x30)
 void net_timer_stub();       // F5-M6: e1000 RX-poll wakeup timer (vector 0x30, test kernel)
 }  // extern "C"
@@ -186,6 +187,12 @@ extern "C" void irq_init() {
     // prematurely, and the test kernel never enables MSI-X.
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::virtio::kVirtioBlkIrqVector),
                       virtio_blk_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+
+    // VirtIO-net MSI-X interrupt (F5-M2 batch 5, vector kVirtioNetIrqVector=0x43).
+    // Single-vector mode (RX/TX share entry 0).  Registered at boot; MSI-X not
+    // enabled until init_msi_x (production only).
+    g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::virtio::kVirtioNetIrqVector),
+                      virtio_net_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
 
     // LAPIC timer (F5-M5 -smp, vector kLapicTimerVector).  Registered into the
     // shared IDT so APs can take it; the BSP is preempted by the PIT and never
