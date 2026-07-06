@@ -129,6 +129,14 @@ public:
     /// @p out_len (optional) receives the bytes-written count.
     cinux::lib::ErrorOr<void> wait_completion(uint16_t avail_idx, uint32_t* out_len = nullptr);
 
+    /// True if the device has posted a used entry since last_used_idx_.
+    /// Non-blocking; for RX poll paths (virtio-net poll_rx).
+    bool has_completion() const;
+
+    /// Consume the next used entry (advance last_used_idx_) and return the
+    /// byte count the device wrote.  Caller MUST check has_completion() first.
+    uint32_t consume_completion();
+
     uint16_t size() const { return qsize_; }
     uint16_t last_used_idx() const { return last_used_idx_; }
     uint16_t avail_idx() const { return avail_idx_; }

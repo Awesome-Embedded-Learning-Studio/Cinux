@@ -114,5 +114,6 @@ if(CINUX_VIRTIO)
         ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtqueue.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio_blk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio_net.cpp
     )
 endif()

@@ -1,13 +1,10 @@
 /**
  * @file kernel/test/test_virtio.cpp
- * @brief QEMU in-kernel integration tests for VirtIO (F5-M2 batch 1+2)
+ * @brief QEMU in-kernel integration tests for VirtIO (F5-M2 batch 1+2+4)
  *
- * Batch 1: transport bring-up (PCI find + cap parse + feature + queue config).
- * Batch 2: virtio-blk read/write round-trip via VirtIOBlock (3-desc chain).
- *
- * Each test does its own PCI find + init + reset so they are independent (the
- * second test's init() resets the device, clearing the queue config the first
- * test set, then reconfigures cleanly).
+ * Batch 1: transport bring-up.  Batch 2: virtio-blk read/write round-trip.
+ * Batch 4: virtio-net bring-up (MAC + RX/TX queue config).  SLIRP traffic is
+ * a production/follow-up gate (the test attaches no netdev to virtio-net-pci).
  */
 
 #include <stdint.h>
@@ -16,8 +13,10 @@
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/virtio/virtio.hpp"
 #include "kernel/drivers/virtio/virtio_blk.hpp"
+#include "kernel/drivers/virtio/virtio_net.hpp"
 #include "kernel/drivers/virtio/virtqueue.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/net/net_types.hpp"
 
 using cinux::drivers::pci::PCIDevice;
 using cinux::drivers::pci::PCI;
@@ -25,10 +24,6 @@ using namespace cinux::drivers;
 using namespace cinux::drivers::virtio;
 
 namespace test_virtio {
-
-// ============================================================
-// Test 1: PCI find + cap parse + feature negotiation + queue config
-// ============================================================
 
 void test_transport_bringup() {
     PCI pci;
@@ -68,10 +63,6 @@ void test_transport_bringup() {
                         static_cast<unsigned long long>(fr.value()), vdev.status());
 }
 
-// ============================================================
-// Test 2: virtio-blk read/write round-trip (3-desc chain, byte-compare)
-// ============================================================
-
 void test_blk_round_trip() {
     PCI pci;
     pci.init();
@@ -86,7 +77,7 @@ void test_blk_round_trip() {
     TEST_ASSERT_TRUE(vdev.init(dev).ok());
     TEST_ASSERT_TRUE(vdev.negotiate_features(Feature::VERSION_1).ok());
 
-    const uint64_t capacity = vdev.device_cfg_read64(0);  // virtio-blk capacity (sectors)
+    const uint64_t capacity = vdev.device_cfg_read64(0);
     TEST_ASSERT_GT(capacity, 0u);
 
     auto br = VirtIOBlock::create(vdev, capacity);
@@ -94,9 +85,6 @@ void test_blk_round_trip() {
     auto blk = std::move(br.value());
     vdev.set_status(Status::DRIVER_OK);
 
-    // Write sector 0 + read back + byte-compare (1 sector = 512 B).  The test
-    // disk (VIRTIO_BLK_TEST_IMAGE) is regenerated fresh per build, so writing
-    // sector 0 is safe.
     static uint8_t wpat[512];
     static uint8_t rpat[512];
     for (uint32_t i = 0; i < sizeof(wpat); ++i) {
@@ -121,11 +109,46 @@ void test_blk_round_trip() {
                         static_cast<unsigned long long>(capacity));
 }
 
+void test_net_bringup() {
+    PCI pci;
+    pci.init();
+
+    PCIDevice dev{};
+    if (!pci.find_virtio_net(dev)) {
+        cinux::lib::kprintf("[VirtIO-net] no device -- skipping bringup\n");
+        return;
+    }
+
+    VirtIODevice vdev;
+    TEST_ASSERT_TRUE(vdev.init(dev).ok());
+    TEST_ASSERT_TRUE(vdev.negotiate_features(Feature::VERSION_1).ok());
+
+    auto nr = VirtIONetDevice::create(vdev);
+    TEST_ASSERT_TRUE(nr.ok());
+    auto net = std::move(nr.value());
+    vdev.set_status(Status::DRIVER_OK);
+
+    cinux::net::EthAddr mac{};
+    TEST_ASSERT_TRUE(net.mac(mac));
+    // A real NIC has a non-zero MAC (QEMU virtio-net-pci assigns one).
+    bool mac_nonzero = false;
+    for (int i = 0; i < 6; ++i) {
+        if (mac.oct[i] != 0) {
+            mac_nonzero = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(mac_nonzero);
+    cinux::lib::kprintf("[VirtIO-net] bringup OK MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                        mac.oct[0], mac.oct[1], mac.oct[2], mac.oct[3], mac.oct[4], mac.oct[5]);
+}
+
 }  // namespace test_virtio
 
 extern "C" void run_virtio_tests() {
     TEST_SECTION("VirtIO");
     RUN_TEST(test_virtio::test_transport_bringup);
     RUN_TEST(test_virtio::test_blk_round_trip);
+    RUN_TEST(test_virtio::test_net_bringup);
     TEST_SUMMARY();
 }

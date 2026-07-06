@@ -143,4 +143,20 @@ cinux::lib::ErrorOr<void> VirtQueue::wait_completion(uint16_t target, uint32_t* 
     return cinux::lib::Error::TimedOut;
 }
 
+bool VirtQueue::has_completion() const {
+    auto*          used    = static_cast<volatile uint8_t*>(used_buf_.virt());
+    const uint16_t used_idx =
+        *reinterpret_cast<volatile uint16_t*>(used + UsedOff::IDX);
+    return used_idx != last_used_idx_;
+}
+
+uint32_t VirtQueue::consume_completion() {
+    auto*          used = static_cast<volatile uint8_t*>(used_buf_.virt());
+    const uint16_t slot = static_cast<uint16_t>(last_used_idx_ % qsize_);
+    auto*          ring = reinterpret_cast<volatile VqUsedElem*>(used + UsedOff::RING);
+    const uint32_t len  = ring[slot].len;
+    last_used_idx_ = static_cast<uint16_t>(last_used_idx_ + 1);
+    return len;
+}
+
 }  // namespace cinux::drivers::virtio

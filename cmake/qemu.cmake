@@ -182,6 +182,10 @@ set(QEMU_TEST_EXTRA_FLAGS
     # vendor 0x1AF4 + device 0x1001/0x1042; modern capability transport.
     -drive file=${VIRTIO_BLK_TEST_IMAGE},format=raw,if=none,id=virtio-blk-disk
     -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0
+    # F5-M2 batch 4: virtio-net NIC (PCI device only -- no SLIRP netdev here;
+    # the mechanism test validates bring-up + MAC + RX/TX queue config, not
+    # traffic. SLIRP ping is a production/follow-up gate).
+    -device virtio-net-pci,id=virtio-net0
 )
 
 # ============================================================
