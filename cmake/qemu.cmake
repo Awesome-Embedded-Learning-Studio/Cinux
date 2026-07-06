@@ -101,6 +101,11 @@ set(MUSL_LDSO_ELF "${CMAKE_BINARY_DIR}/musl-sysroot/lib/libc.so")
 # IoPhys VMA fault path). Built by tools/musl/build-fb-mmap-test.sh (not a CMake
 # target), so conditional on the file existing at run-kernel-test time.
 set(FB_MMAP_TEST_ELF "${CMAKE_BINARY_DIR}/musl/fb_mmap_test")
+# F-GUI-USERSPACE batch 2: static musl /dev/event0 input smoke (reads mouse +
+# key events pushed by smoke_entry). Built by tools/musl/build-input-event-test.sh.
+# Listed BEFORE ${GCC_ROOT} in the create_ext2 call below so an empty GCC_ROOT
+# (CINUX_GCC_TOOLCHAIN off) does not collapse this arg into $9.
+set(INPUT_EVENT_TEST_ELF "${CMAKE_BINARY_DIR}/musl/input_event_test")
 # F-ECO batch 0: minimal static busybox at /bin/busybox when present (built by
 # clang --target=x86_64-linux-musl, not a CMake target). The ring-3 smoke
 # fork+execves it to run echo/cat/ls applets -- the first ecosystem touchstone.
@@ -136,7 +141,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
             ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
-            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${GCC_ROOT}
+            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${INPUT_EVENT_TEST_ELF} ${GCC_ROOT}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
     COMMENT "Creating ext2 image with /bin/sh (+ GCC toolchain if CINUX_GCC_TOOLCHAIN)"
     VERBATIM
@@ -448,7 +453,7 @@ add_custom_target(regenerate-ext2-image
     COMMAND ${CMAKE_COMMAND} -E env IMAGE_SIZE=${EXT2_DISK_SIZE} INODES=${EXT2_DISK_INODES}
             ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${EXT2_IMAGE} ${USER_SHELL_ELF}
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
-            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${GCC_ROOT}
+            ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${INPUT_EVENT_TEST_ELF} ${GCC_ROOT}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM

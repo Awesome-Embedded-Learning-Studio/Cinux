@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "kernel/drivers/input/input_event_device.hpp"  // /dev/event0 (F-GUI-USERSPACE b2)
 #include "kernel/drivers/serial/serial.hpp"
 #include "kernel/drivers/tty/console_tty.hpp"  // console_tty + console_tty_ioctl (B3b)
 #include "kernel/drivers/tty/pty_device.hpp"   // /dev/ptmx clone + /dev/pts/N
@@ -160,6 +161,9 @@ bool init() {
     // F-GUI-USERSPACE batch 1: /dev/fb0 -- mmap binds a user VMA to the VBE
     // framebuffer physical memory.
     g_devfs.add_node("fb0", &cinux::drivers::framebuffer_dev_ops());
+    // F-GUI-USERSPACE batch 2: /dev/event0 -- userspace input device.  Mouse +
+    // keyboard ISRs (via gui_init's listener) push Events; userspace reads them.
+    g_devfs.add_node("event0", &cinux::input::input_event_device_ops());
     g_devfs.set_dynamic_lookup(&devfs_dynamic_lookup);
     if (!vfs_mount_add("/dev", &g_devfs)) {
         cinux::lib::kprintf("[DEVFS] vfs_mount_add /dev failed (table full?)\n");

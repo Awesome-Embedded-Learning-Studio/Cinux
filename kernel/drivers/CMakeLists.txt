@@ -4,6 +4,10 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/keyboard/keyboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/framebuffer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/fb_dev.cpp
+    # F-GUI-USERSPACE batch 2: /dev/event0 userspace input device (mouse + kbd
+    # events via push_event).  Kernel-only -- pulls copy_to_user + scheduler
+    # wait primitives, so it lives here beside fb_dev.cpp (not host-linkable).
+    ${CMAKE_CURRENT_SOURCE_DIR}/input/input_event_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/font_data.S
     ${CMAKE_CURRENT_SOURCE_DIR}/video/console.cpp

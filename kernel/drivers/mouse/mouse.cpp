@@ -8,12 +8,13 @@
  */
 
 #include "mouse.hpp"
-#include "kernel/drivers/ps2/ps2.hpp"  // 8042 controller constants (shared with keyboard)
 
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/io.hpp"
 #include "kernel/arch/x86_64/pic.hpp"
+#include "kernel/drivers/input/input_event_device.hpp"  // /dev/event0 push (F-GUI b2)
+#include "kernel/drivers/ps2/ps2.hpp"  // 8042 controller constants (shared with keyboard)
 #include "kernel/lib/kprintf.hpp"
 
 using cinux::arch::PIC;
@@ -275,6 +276,9 @@ void Mouse::update_absolute(int32_t new_x, int32_t new_y, int32_t ev_dx, int32_t
         ev.type_ = EventType::MouseMove;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
 
     // Enqueue MouseDown events for newly pressed buttons
@@ -283,18 +287,27 @@ void Mouse::update_absolute(int32_t new_x, int32_t new_y, int32_t ev_dx, int32_t
         ev.type_ = EventType::MouseDown;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
     if (pressed & Packet0::RIGHT_BTN) {
         Event ev{};
         ev.type_ = EventType::MouseDown;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
     if (pressed & Packet0::MIDDLE_BTN) {
         Event ev{};
         ev.type_ = EventType::MouseDown;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
 
     // Enqueue MouseUp events for newly released buttons
@@ -303,18 +316,27 @@ void Mouse::update_absolute(int32_t new_x, int32_t new_y, int32_t ev_dx, int32_t
         ev.type_ = EventType::MouseUp;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
     if (released & Packet0::RIGHT_BTN) {
         Event ev{};
         ev.type_ = EventType::MouseUp;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
     if (released & Packet0::MIDDLE_BTN) {
         Event ev{};
         ev.type_ = EventType::MouseUp;
         ev.mouse = me;
         g_event_queue_.enqueue(ev);
+        // F-GUI-USERSPACE batch 2: mirror every mouse event into /dev/event0
+        // for userspace consumption (dual-write with the kernel GUI queue).
+        cinux::input::InputEventDevice::instance().push_event(ev);
     }
 
     // Update state for next packet

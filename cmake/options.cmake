@@ -60,6 +60,12 @@ option(CINUX_MUSL_DYN_SMOKE "Enable musl dynamic /hello-dyn ring-3 smoke in run-
 # CMake target). Default OFF (CI has no sysroot).
 option(CINUX_FB_MMAP_SMOKE "Enable /dev/fb0 mmap ring-3 smoke in run-kernel-test" OFF)
 
+# F-GUI-USERSPACE batch 2: /dev/event0 input ring-3 smoke (ISR push -> ring ->
+# copy_to_user -- the only test that exercises the userspace input device).
+# Requires the musl sysroot + /input_event_test on ext2
+# (tools/musl/build-input-event-test.sh; not a CMake target). Default OFF.
+option(CINUX_INPUT_SMOKE "Enable /dev/event0 input ring-3 smoke in run-kernel-test" OFF)
+
 # F-ECO: busybox ring-3 ecosystem smoke. fork+execve /bin/busybox to run a
 # spread of applets -- the first "run real programs" touchstone. Requires the
 # busybox ELF at build/musl/busybox (tools/musl/build-busybox.sh; not a CMake
@@ -123,4 +129,5 @@ set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
 # =============================================================================
 set(CINUX_COMPILE_DEF_OPTS
     GUI USB NET LOCKDEP
-    MUSL_HELLO_SMOKE MUSL_DYN_SMOKE BUSYBOX_SMOKE GCC_TOOLCHAIN FB_MMAP_SMOKE)
+    MUSL_HELLO_SMOKE MUSL_DYN_SMOKE BUSYBOX_SMOKE GCC_TOOLCHAIN FB_MMAP_SMOKE
+    INPUT_SMOKE)

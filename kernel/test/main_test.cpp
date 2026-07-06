@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
-#include "boot/boot_info.h"  // F-GUI b1b: BootInfo for test-fb init
+#include "boot/boot_info.h"                // F-GUI b1b: BootInfo for test-fb init
 #include "kernel/arch/x86_64/extable.hpp"  // F-EXTABLE: sort_extable before tests
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/idt.hpp"
@@ -25,15 +25,17 @@
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/drivers/acpi/acpi.hpp"  // F-VERIFY M3-1: real acpi::init (firmware SMP topology)
 #include "kernel/drivers/ahci/ahci.hpp"  // F10-M1 batch 6: ext2 mount
-#include "kernel/drivers/ahci/ahci_block_device.hpp"  // F10-M1 batch 6: ext2 mount
-#include "kernel/drivers/apic/local_apic.hpp"         // F5-M6: g_lapic (e1000 poll timer)
-#include "kernel/drivers/pci/pci.hpp"                 // F10-M1 batch 6: PCI->AHCI for ext2
-#include "kernel/drivers/video/framebuffer.hpp"       // F-GUI b1b: Framebuffer for /dev/fb0
-#include "kernel/fs/devfs/devfs.hpp"                  // F-GUI b1b: devfs::init (/dev for fb0)
-#include "kernel/fs/ext2/ext2.hpp"                    // F10-M1 batch 6: ext2 mount
-#include "kernel/fs/file.hpp"                         // FDTable::close to clear polluted fd 0/1/2
-#include "kernel/fs/procfs/procfs.hpp"                // F-ECO busybox: procfs::init (/proc)
-#include "kernel/fs/vfs_mount.hpp"                    // F10-M1 batch 6: VFS mount
+#include "kernel/drivers/ahci/ahci_block_device.hpp"    // F10-M1 batch 6: ext2 mount
+#include "kernel/drivers/apic/local_apic.hpp"           // F5-M6: g_lapic (e1000 poll timer)
+#include "kernel/drivers/input/input_event_device.hpp"  // F-GUI b2: InputEventDevice (mock push)
+#include "kernel/drivers/pci/pci.hpp"                   // F10-M1 batch 6: PCI->AHCI for ext2
+#include "kernel/drivers/video/framebuffer.hpp"         // F-GUI b1b: Framebuffer for /dev/fb0
+#include "kernel/fs/devfs/devfs.hpp"                    // F-GUI b1b: devfs::init (/dev for fb0)
+#include "kernel/fs/ext2/ext2.hpp"                      // F10-M1 batch 6: ext2 mount
+#include "kernel/fs/file.hpp"                           // FDTable::close to clear polluted fd 0/1/2
+#include "kernel/fs/procfs/procfs.hpp"                  // F-ECO busybox: procfs::init (/proc)
+#include "kernel/fs/vfs_mount.hpp"                      // F10-M1 batch 6: VFS mount
+#include "kernel/gui/event.hpp"                         // F-GUI b2: cinux::gui::Event layout
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/not_null.hpp"  // F10-M1 batch 6: NotNull<Task*>
@@ -154,7 +156,8 @@ static constexpr uintptr_t BOOT_INFO_PHYS = 0x7000;
 // dynamic /hello-dyn phases are gated independently inside, so each can run
 // alone (CINUX_MUSL_HELLO_SMOKE / CINUX_MUSL_DYN_SMOKE).
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) ||                                \
+    defined(CINUX_FB_MMAP_SMOKE) || defined(CINUX_INPUT_SMOKE)
 static int g_unit_test_failures = 0;
 
 static void musl_hello_smoke_entry() {
@@ -332,6 +335,75 @@ static void musl_hello_smoke_entry() {
                         fb_ok ? "PASS" : "FAIL");
 #    else
     bool fb_ok = true;  // fb mmap phase compiled out
+#    endif
+
+#    ifdef CINUX_INPUT_SMOKE
+    // F-GUI-USERSPACE batch 2: /dev/event0 input smoke.  Per iteration push two
+    // known events (MouseMove + KeyDown), then fork+execve /input_event_test,
+    // which reads them back and verifies type + payload (push_event -> ring ->
+    // sys_read -> copy_to_user).  The test kernel has no real mouse/keyboard in
+    // QEMU automation, so we mock the producer side here (same idea as the fb
+    // init mock above).  Seeded inside the loop so every child's first reads
+    // return at once -- a blocking read on an empty queue would hang the child.
+    int           input_pass  = 0;
+    int           input_fail  = 0;
+    constexpr int kInputIters = 5;
+    cinux::lib::kprintf("[F-GUI] input ring-3 smoke: %d iterations\n", kInputIters);
+    for (int ii = 0; ii < kInputIters; ++ii) {
+        cinux::gui::Event mev{};
+        mev.type_         = cinux::gui::EventType::MouseMove;
+        mev.mouse.x       = 123;
+        mev.mouse.y       = 45;
+        mev.mouse.dx      = 123;
+        mev.mouse.dy      = 45;
+        mev.mouse.buttons = 0;
+        cinux::input::InputEventDevice::instance().push_event(mev);
+        cinux::gui::Event kev{};
+        kev.type_       = cinux::gui::EventType::KeyDown;
+        kev.key.ascii   = 'A';
+        kev.key.pressed = true;
+        cinux::input::InputEventDevice::instance().push_event(kev);
+
+        int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
+        if (child_pid == 0) {
+            auto* child        = cinux::proc::Scheduler::current();
+            child->addr_space  = new cinux::mm::AddressSpace();
+            const char* argv[] = {"/input_event_test", nullptr};
+            const char* envp[] = {nullptr};
+            cinux::proc::launch_user_program("/input_event_test", argv, envp);
+            cinux::proc::Scheduler::exit_current();  // unreachable
+        }
+        int     status   = -1;
+        int64_t reap_ret = 0;
+        for (int spins = 0; spins < 50'000'000; ++spins) {
+            int                        kstatus = 0;
+            cinux::proc::WaitpidResult wr =
+                cinux::proc::waitpid(child_pid, &kstatus, 1, cinux::proc::g_pid_alloc);
+            if (wr == cinux::proc::WaitpidResult::Ok) {
+                status   = kstatus;
+                reap_ret = child_pid;
+                break;
+            }
+            if (wr != cinux::proc::WaitpidResult::NotExited) {
+                reap_ret = static_cast<int64_t>(wr);
+                break;
+            }
+            cinux::proc::Scheduler::yield();
+        }
+        if (reap_ret > 0 && status == 0) {
+            ++input_pass;
+        } else {
+            ++input_fail;
+            cinux::lib::kprintf(
+                "[F-GUI] smoke: input_event_test iter %d FAIL (status=%d reap=%lld)\n", ii, status,
+                static_cast<long long>(reap_ret));
+        }
+    }
+    bool input_ok = (input_fail == 0);
+    cinux::lib::kprintf("[F-GUI] smoke: input_event_test %d/%d iters PASS -> %s\n", input_pass,
+                        kInputIters, input_ok ? "PASS" : "FAIL");
+#    else
+    bool input_ok = true;  // input phase compiled out
 #    endif
 
 #    ifdef CINUX_MUSL_DYN_SMOKE
@@ -755,10 +827,11 @@ static void musl_hello_smoke_entry() {
     // self-host loop closes. The crash is a B4-b follow-up (recurs when cc1 drives
     // ld; may share a root with mmap demand-paging on large arenas). Gate on
     // as + ./hello (the self-host proof), not ld's own exit.
-    int exit_code = (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok || !fb_ok ||
-                     !busybox_ok || !cc1_ok || !cc1_compile_ok || !as_ok || !gcc_hello_ok)
-                        ? 1
-                        : 0;
+    int exit_code =
+        (g_unit_test_failures > 0 || !hello_ok || !dyn_ok || !forktest_ok || !fb_ok ||
+         !busybox_ok || !cc1_ok || !cc1_compile_ok || !as_ok || !gcc_hello_ok || !input_ok)
+            ? 1
+            : 0;
     __asm__ volatile("outl %0, $0xf4" : : "a"(exit_code));
     while (1)
         __asm__ volatile("cli; hlt");
@@ -788,7 +861,8 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
     r.sfmask = cinux::arch::read_msr(0xC0000084);
     r.magic  = cinux::arch::kApSelfcheckMagic;
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) ||                                \
+    defined(CINUX_FB_MMAP_SMOKE) || defined(CINUX_INPUT_SMOKE)
     // Smoke will run the scheduler -- let this AP participate (cross-core CoW).
     return true;
 #else
@@ -1164,7 +1238,8 @@ extern "C" void kernel_main() {
     }
 
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
-    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) || defined(CINUX_FB_MMAP_SMOKE)
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) ||                                \
+    defined(CINUX_FB_MMAP_SMOKE) || defined(CINUX_INPUT_SMOKE)
     // F10-M1 batch 6 / F10-M2 batch 3: enter the real scheduler and run the musl
     // The worker task signals QEMU exit itself (isa-debug-exit), so control
     // does not return here.  CI builds without the flag take the normal path.
