@@ -244,16 +244,11 @@ cinux::lib::ErrorOr<void> VirtIODevice::init(const pci::PCIDevice& dev) {
     device_slot_                     = next_device_slot++;
 
     // Enable PCI Bus Master + Memory Space so the device may master DMA and
-    // expose its MMIO window, and disable legacy INTx.  The driver polls the
-    // rings (no IRQ dependency), and production later switches to MSI-X via
-    // init_msi_x (independent of INTx).  Without DIS_INTX the device keeps INTx
-    // asserted when the kernel never takes its ISR: the test kernel polls and
-    // never calls init_msi_x, so INTx would stay asserted and on some QEMU
-    // revisions (8.x) stall other devices' BHs (e1000 TX completion).
+    // expose its MMIO window.  (QEMU firmware assigns the BAR; no self-assign
+    // needed, unlike NVMe whose BAR SeaBIOS skips.)
     const uint32_t cmd = pci::PCI::pci_read(dev.bus, dev.slot, dev.func, pci::PciReg::COMMAND);
-    pci::PCI::pci_write(
-        dev.bus, dev.slot, dev.func, pci::PciReg::COMMAND,
-        cmd | pci::PciCmd::BUS_MASTER | pci::PciCmd::MEM_SPACE | pci::PciCmd::DIS_INTX);
+    pci::PCI::pci_write(dev.bus, dev.slot, dev.func, pci::PciReg::COMMAND,
+                        cmd | pci::PciCmd::BUS_MASTER | pci::PciCmd::MEM_SPACE);
 
     parse_capabilities();
     if (!caps_.found_common) {
