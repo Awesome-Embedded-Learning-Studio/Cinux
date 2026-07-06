@@ -2,6 +2,32 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 F-GUI-USERSPACE（GUI 用户态化）— 立项 2026-07-06（worktree `worktree-gui-userspace`，从干净 origin/main `bb2e9ac`）
+
+> 横切弧（同 F-USABILITY / F-VERIFY 档）。**目标**：把 GUI 从**内核线程**（`gui_worker` ring0，visor 时代遗留）迁**用户态进程**。理由（2026-07-06 拍板）：spawn 自然（PTY 批2 `fork+execve /bin/sh` 是一行正常代码，内核线程 fork 用户态 shell 边界拧）+ 安全隔离（SMAP/SMEP/F9 整套做隔离，GUI 代码量最大留内核 = 白隔离；用户态崩进程，内核稳）+ Linux 范式（X/Wayland 全用户态）+ 基建齐（F10 ring3 + F2 mmap + F8 IPC + F9 安全全 ✅）。详见 todo `f-gui-userspace/README.md`。
+
+> **现状资产**：Cinux-GUI core host-neutral（子模块 pin `0b0c135` F13-B 收官），`host/linux_fbdev_main.cpp`（用户态 Linux fbdev host）+ evdev + posix_spawn 是 CinuxOS host 的参考样板；`kernel/gui/host_cinux.cpp` 内核态 adapter（批4 退役）。core **一行不改**就能在用户态跑——Host ABI 是唯一硬缝。
+
+> **批1 摸底确认**：mmap 现只有 anonymous（懒分配）+ file-backed（page cache），**无 device/phys 映射机制**（无 remap_pfn / VMA phys 字段 / vm_ops->fault）。批1 新加缝点：`Framebuffer` 加 `phys_base()` accessor + VMA 加 `phys_base` 字段（同步 `static_assert(sizeof(VMA))` 56→64）+ `VmaFlags::IoPhys` + fault handler 加 IoPhys 分支（不 PMM / 不 page cache / 不 pte_count_inc）+ `InodeOps::mmap` 钩子（默认 ENODEV）+ `sys_mmap` 接设备（调钩子拿 phys，建 IoPhys VMA）+ `FramebufferDevOps`（`/dev/fb0` + `ioctl FBIOGET_VSCREENINFO`）+ DevFs 注册 + `sys_munmap` IoPhys 不 free（设备内存非 PMM 页）+ fork 路径带 phys_base。fb 用户态映射用 `FLAG_PCD`（uncached，跟其他 MMIO 一致，真硬件安全；WC/PAT 留 follow-up）。
+
+### 批表
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 0 | 立项 docs（本段 + ROADMAP + todo README + 范围栅栏） | 🔄 | docs-only |
+| 1 | `/dev/fb0` mmap：VMA IoPhys + fault 分支 + InodeOps::mmap + sys_mmap 接设备 + fb_dev + DevFs 注册 + munmap/fork IoPhys 分流 | ⏳ | ring3 open/mmap `/dev/fb0` 写全屏红 + cinux-exit；两 leg + GUI 冒烟不破 |
+| 2 | 输入到用户态：`/dev/input/event*`，ISR→queue→用户 read/poll（SPSC 保持 + 阻塞唤醒） | ⏳ | 用户态读鼠标/键盘 round-trip |
+| 3 | 用户态 GUI 进程：Cinux-GUI core + CinuxOS host adapter（抄 linux_fbdev_main）+ fork+execve 启动 | ⏳ | 用户态进程跑出桌面（图标 + 光标 + 鼠标） |
+| 4 | kernel `gui_worker` 退役：host_cinux 删，kernel 只剩 fb + 输入 + 调度 | ⏳ | 桌面正常 + 无 gui_worker task + GUI bug 只崩进程 |
+
+### 风险 / 陷阱
+- **VMA 布局断言**：加 `phys_base` 字段同步 `static_assert(sizeof(VMA))` 56→64（F-INFRA R11 锁布局，漏改编译断）。
+- **IoPhys munmap 误 free**：设备内存非 PMM 页，`sys_munmap` 现对每页 `pte_count_dec_and_test`——必须按 VMA 类型分流，否则 PMM 把 fb 物理帧当普通页 free → 灾难。
+- **fault 分支不 PMM**：IoPS fault 不分配新页 / 不走 page cache / 不 pte_count_inc；fork 漏带 phys_base → 子进程 phys=0 → 映射低 RAM 假绿/崩。
+- **core host-neutral 不动**：子模块 core 一行不改；批3 只写 CinuxOS host adapter。
+- **GUI 验证用户自启**：Claude 不 background 启 `cmake --target run`/GUI QEMU，只准备环境（GUI=ON + rebuild + assemble rootfs）；console gate（run-kernel-test-all / run-buildroot-usability）正常跑。
+- **VNC 避让** + **sti-in-syscall #DF**（批2 输入 ISR 只记账+唤醒，EOI 后调度）：老 GOTCHA。
+- **范围栅栏**：批1 只做 fb mmap 机制 + 机制测，不迁桌面（批3-4）；X11/Wayland 远期（需 DRM/Xorg 交叉编译），本弧止于自研用户态 GUI 进程；WC/PAT、fb 多进程、SMP 别名留 follow-up。
+
 ## 🔄 F-USABILITY — 立项 2026-07-02（分支 `feat/f-usability`，从干净 main `6ba4a88`）
 
 > 横切弧（与 F-VERIFY / F-INFRA / F-ECO 同档）。**目标：证明 CinuxOS 真能跑真实 Linux 用户态**——从「手搓 rootfs 夹具」升级到「Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟」。用户决策（2026-07-02）：① Buildroot 只当 rootfs 骨架打包器（external toolchain + busybox + musl），**GCC 全拷贝不编译**（`tools/gcc-toolchain/extract.sh` 已落地 PR#62）；② CI = PR 内编 + 强缓存（key = defconfig + overlay hash）；③ 手搓 `tools/musl/` + `create_ext2_disk.sh` **并存**留快反馈；④ 只动 ext2 disk（真 rootfs），ext4/ahci 测试夹具 + `build_image.sh` 启动盘不动。
