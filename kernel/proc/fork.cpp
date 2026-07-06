@@ -83,6 +83,16 @@ void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level) {
         } else {
             uint64_t entry_flags = src_table[i].raw & FLAG_MASK;
 
+            // F-GUI-USERSPACE batch 1: device (IoPhys) pages -- identified by
+            // FLAG_PCD, which only uncached device mappings carry -- are shared
+            // verbatim: NO CoW (writing the framebuffer must hit the real fb,
+            // not a private RAM copy) and NO pte_count (device memory is not
+            // PMM-managed, so there is nothing to bump and nothing to free).
+            if (entry_flags & FLAG_PCD) {
+                dst_table[i].raw = src_table[i].raw;
+                continue;
+            }
+
             dst_table[i].raw = src_table[i].raw;
             // Q4b-2 (DEBT-003): both PTEs now point at the same physical page
             // (writable-CoW or read-only-shared). Bump its pte_count so a later
@@ -400,12 +410,13 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         for (cinux::mm::VMA* v = parent->addr_space->vmas().first(); v != nullptr;
              v                 = parent->addr_space->vmas().next(v)) {
             static_cast<void>(child->addr_space->vmas().insert(v->start, v->end, v->flags));
-            if (v->backing != nullptr) {
-                cinux::mm::VMA* cv = child->addr_space->vmas().find(v->start);
-                if (cv != nullptr) {
-                    cv->backing     = v->backing;
-                    cv->file_offset = v->file_offset;
-                }
+            cinux::mm::VMA* cv = child->addr_space->vmas().find(v->start);
+            if (cv != nullptr) {
+                cv->backing     = v->backing;  // null for anonymous / IoPhys
+                cv->file_offset = v->file_offset;
+                // F-GUI-USERSPACE batch 1: carry the device physical base so the
+                // child's IoPhys VMA faults on the same device memory.
+                cv->phys_base   = v->phys_base;
             }
         }
     }

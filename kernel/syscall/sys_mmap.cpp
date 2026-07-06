@@ -109,6 +109,23 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
 
     const uint64_t aligned_len = align_up(length);
 
+    // F-GUI-USERSPACE batch 1: device mmap probe.  For a fd-backed mapping,
+    // ask the inode's mmap hook whether it is device memory (e.g. /dev/fb0
+    // returns the framebuffer's VBE physical base).  A device mmap binds the
+    // VMA to that fixed physical range (IoPhys, uncached, not PMM-managed);
+    // NotImplemented means "ordinary file" -> take the page-cache path below.
+    bool     device_mmap = false;
+    uint64_t device_phys = 0;
+    if (backing_inode != nullptr && backing_inode->ops != nullptr) {
+        auto mp = backing_inode->ops->mmap(backing_inode, offset, aligned_len);
+        if (mp.ok()) {
+            device_mmap = true;
+            device_phys = mp.value();
+        } else if (mp.error() != cinux::lib::Error::NotImplemented) {
+            return -to_errno(mp.error());
+        }
+    }
+
     uint64_t map_addr = 0;
     if ((flags & MAP_FIXED) != 0) {
         // Honour the exact user address. MAP_FIXED may intentionally replace a
@@ -136,20 +153,32 @@ int64_t sys_mmap(uint64_t addr, uint64_t length, uint64_t prot, uint64_t flags, 
         }
     }
 
-    auto ir = task->addr_space->vmas().insert(map_addr, map_addr + aligned_len,
-                                              to_vma_flags(prot, flags));
+    // Device mmap overrides the anonymous/file-backed flags: it is its own VMA
+    // kind (IoPhys), never page-cache-backed.
+    cinux::mm::VmaFlags vflags = to_vma_flags(prot, flags);
+    if (device_mmap) {
+        vflags |= cinux::mm::VmaFlags::IoPhys;
+    }
+    auto ir = task->addr_space->vmas().insert(map_addr, map_addr + aligned_len, vflags);
     if (!ir.ok()) {
         return -to_errno(ir.error());
     }
 
-    // Attach the file backing (if any) to the freshly recorded VMA.  Contents
-    // are demand-read via the Page Cache in M4; here we only remember the inode.
-    // Take an inode reference so the backing stays alive for the lifetime of the
-    // mapping (the fd that mmap'd it may close, but the VMA persists); the VMA
-    // store drops the ref when the node is freed (clear/split/remove in vma.cpp).
-    if (backing_inode != nullptr) {
-        cinux::mm::VMA* v = task->addr_space->vmas().find(map_addr);
-        if (v != nullptr) {
+    cinux::mm::VMA* v = task->addr_space->vmas().find(map_addr);
+    if (v != nullptr) {
+        if (device_mmap) {
+            // Bind the VMA to device memory.  No inode ref: device memory is
+            // not page cache and the VMA is not file-backed in the PageCache
+            // sense; phys_base is the per-page physical source for the fault
+            // handler.  backing/file_offset stay null/0.
+            v->phys_base = device_phys;
+        } else if (backing_inode != nullptr) {
+            // Attach the file backing (if any) to the freshly recorded VMA.
+            // Contents are demand-read via the Page Cache in M4; here we only
+            // remember the inode.  Take an inode reference so the backing stays
+            // alive for the lifetime of the mapping (the fd that mmap'd it may
+            // close, but the VMA persists); the VMA store drops the ref when
+            // the node is freed (clear/split/remove in vma.cpp).
             v->backing     = backing_inode;
             v->file_offset = offset;
             cinux::fs::inode_ref(backing_inode);
@@ -173,6 +202,16 @@ int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t,
         return -kEinval;
     }
 
+    // F-GUI-USERSPACE batch 1: a device (IoPhys) mapping's pages are device
+    // memory, not PMM-managed, so munmap only drops their PTEs -- never
+    // pte_count_dec_and_test (which would hand the framebuffer physical page
+    // back to the PMM and cause mayhem on the next allocation).  We assume the
+    // range lies in a single VMA (the normal case: munmap the whole mapping);
+    // partial split of an IoPhys VMA is a follow-up.
+    const cinux::mm::VMA* vma = task->addr_space->vmas().find(addr);
+    const bool            device_unmap =
+        vma != nullptr && cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::IoPhys);
+
     // Free any demand-paged physical pages in the range and drop their PTEs.
     // These are user pages, not the higher-half direct map, so unmapping is
     // safe (cf. GOTCHA #7 -- never unmap phys+KERNEL_VMA).
@@ -180,6 +219,9 @@ int64_t sys_munmap(uint64_t addr, uint64_t length, uint64_t, uint64_t, uint64_t,
         const uint64_t phys = task->addr_space->translate(v);
         if (phys != 0) {
             task->addr_space->unmap(v);
+            if (device_unmap) {
+                continue;  // device memory: PTE dropped, no PMM accounting
+            }
             // batch 3: drop the mapping ref; pte_count_dec_and_test frees the
             // page internally on the last ownership ref.  A file-backed
             // page-cache phys keeps refcount > 0 (cache own) and is NOT freed

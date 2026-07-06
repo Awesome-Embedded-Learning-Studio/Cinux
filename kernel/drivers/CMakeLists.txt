@@ -3,6 +3,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/serial/serial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/keyboard/keyboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/framebuffer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/video/fb_dev.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/video/font_data.S
     ${CMAKE_CURRENT_SOURCE_DIR}/video/console.cpp

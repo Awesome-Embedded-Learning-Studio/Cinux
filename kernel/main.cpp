@@ -185,6 +185,7 @@ extern "C" void kernel_main() {
     // Step 13: Initialise framebuffer from BootInfo
     Framebuffer fb;
     fb.init(*boot_info);
+    cinux::drivers::set_system_framebuffer(&fb);  // F-GUI-USERSPACE b1: /dev/fb0 mmap
     cinux::lib::kprintf("[BIG] Framebuffer initialised: %ux%u %ubpp\n", fb.width(), fb.height(),
                         boot_info->fb_bpp);
 
@@ -280,8 +281,8 @@ extern "C" void kernel_main() {
         // IO CQ carries a non-zero IV).  init_msi_x enables MSI-X (then masks
         // every entry for polling mode), so the check passes.
         if (nvme_ctrl.init(nvme_dev).ok() && nvme_ctrl.enable().ok() &&
-            nvme_ctrl.init_msi_x().ok() &&
-            nvme_ctrl.identify_namespace(1, ns).ok() && nvme_ctrl.create_io_queues().ok()) {
+            nvme_ctrl.init_msi_x().ok() && nvme_ctrl.identify_namespace(1, ns).ok() &&
+            nvme_ctrl.create_io_queues().ok()) {
             auto bd =
                 cinux::drivers::nvme::NvmeBlockDevice::create(nvme_ctrl, 1, ns.nsze, ns.lba_size);
             if (bd.ok()) {
