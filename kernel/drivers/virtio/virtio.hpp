@@ -77,11 +77,11 @@ constexpr uint8_t VENDOR     = 6;
 // Bits 24+ are transport-independent.
 namespace Feature {
 constexpr uint64_t RING_INDIRECT_DESC = 1ULL << 28;  ///< chained indirect desc
-constexpr uint64_t RING_EVENT_IDX      = 1ULL << 29;  ///< used/avail event idx
-constexpr uint64_t VERSION_1           = 1ULL << 32;  ///< VirtIO 1.0 (modern) device
-constexpr uint64_t ACCESS_PLATFORM     = 1ULL << 33;
-constexpr uint64_t RING_PACKED         = 1ULL << 34;  ///< packed virtqueue (unused)
-constexpr uint64_t IN_ORDER            = 1ULL << 35;
+constexpr uint64_t RING_EVENT_IDX     = 1ULL << 29;  ///< used/avail event idx
+constexpr uint64_t VERSION_1          = 1ULL << 32;  ///< VirtIO 1.0 (modern) device
+constexpr uint64_t ACCESS_PLATFORM    = 1ULL << 33;
+constexpr uint64_t RING_PACKED        = 1ULL << 34;  ///< packed virtqueue (unused)
+constexpr uint64_t IN_ORDER           = 1ULL << 35;
 }  // namespace Feature
 
 /// Decoded locations of the four modern-transport register blocks.  Each block
@@ -153,9 +153,9 @@ public:
     /// Read the device_status byte.
     uint8_t status() const;
     /// OR bits into device_status.
-    void set_status(uint8_t bits);
+    void    set_status(uint8_t bits);
     /// Clear bits from device_status.
-    void clear_status(uint8_t bits);
+    void    clear_status(uint8_t bits);
 
     /// Configure a queue: select it, set queue_size, and write the desc/avail/
     /// used ring DMA addresses.  The rings must already be allocated + zeroed
@@ -177,13 +177,13 @@ public:
     uint8_t read_isr() const;
 
     /// Read the device-specific config region (device_cfg) at byte @p off.
-    uint8_t device_cfg_read8(uint32_t off) const;
+    uint8_t  device_cfg_read8(uint32_t off) const;
     uint32_t device_cfg_read32(uint32_t off) const;
     uint64_t device_cfg_read64(uint32_t off) const;
 
-    bool present() const { return common_cfg_ != nullptr; }
+    bool                      present() const { return common_cfg_ != nullptr; }
     const VirtioCapLocations& caps() const { return caps_; }
-    uint16_t negotiated() const { return static_cast<uint16_t>(negotiated_); }
+    uint16_t                  negotiated() const { return static_cast<uint16_t>(negotiated_); }
 
 private:
     /// Walk the PCI capability list (from offset 0x34) collecting VirtIO
@@ -212,15 +212,24 @@ private:
     uint8_t  common_read8(uint32_t off) const;
     void     common_write8(uint32_t off, uint8_t v);
 
-    pci::PCIDevice      dev_{};
-    VirtioCapLocations  caps_{};
-    uint64_t            negotiated_ = 0;
+    pci::PCIDevice     dev_{};
+    VirtioCapLocations caps_{};
+    uint64_t           negotiated_ = 0;
+
+    /// Per-instance slot (assigned in init() from a monotonic counter) so each
+    /// VirtIO device gets a DISTINCT MMIO slot for its self-assigned transport
+    /// BAR phys + virt, and its MSI-X Table/PBA virt.  Without this, blk + net
+    /// both self-assign the same fixed BAR4 phys (0xfeb60000) + virt (+0x90000)
+    /// + MSI-X Table virt (+0x84000) -- the second device's init clobbers the
+    /// first's mapping.  Slot N gets transport BAR phys 0xfeb60000+N*0x10000,
+    /// virt +0x80000+N*0x10000+bar*0x4000, MSI-X Table +0x84000+N*0x2000.
+    unsigned device_slot_ = 0;
 
     /// Per-BAR MMIO virt base (0 = unmapped).  VirtIO modern typically uses a
     /// single BAR for all of common/notify/isr/device, but we cache per-BAR so
-    /// a split layout still resolves.  Mapped at KMEM_MMIO + 0x80000 + bar*0x1000.
-    static constexpr uint8_t kMaxBars = 6;
-    uint64_t bar_virt_[kMaxBars] = {};
+    /// a split layout still resolves.  Mapped at KMEM_MMIO + 0x80000 + slot*0x10000 + bar*0x4000.
+    static constexpr uint8_t kMaxBars            = 6;
+    uint64_t                 bar_virt_[kMaxBars] = {};
 
     // MSI-X (batch 3).  Third MsixController instance (xHCI @+0x40000, NVMe
     // @+0x74000); VirtIO-blk Table @+0x84000, PBA @+0x85000.

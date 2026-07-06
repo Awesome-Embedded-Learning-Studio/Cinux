@@ -53,7 +53,7 @@ constexpr uint32_t QUEUE_USED_LO         = 0x30;  ///< RW used-ring phys
 constexpr uint32_t QUEUE_USED_HI         = 0x34;
 }  // namespace CfgOff
 
-constexpr uint32_t kCapListMax = 64;     ///< cap-list walk safety bound (anti loop)
+constexpr uint32_t kCapListMax = 64;      ///< cap-list walk safety bound (anti loop)
 constexpr uint32_t kResetIters = 100000;  ///< reset spin budget (no IRQ in batch 1)
 
 }  // namespace
@@ -96,9 +96,13 @@ volatile uint8_t* VirtIODevice::map_bar(uint8_t bar_index) {
     }
     // Map 4 pages (16 KiB) -- the VirtIO modern register window spans
     // common(+0)/isr(+0x1000)/device(+0x2000)/notify(+0x3000) in one BAR.
-    constexpr uint64_t kBarPages = 4;
-    constexpr uint64_t kBarSlot  = kBarPages * 0x1000;  // 0x4000 per BAR slot
-    const uint64_t virt = kVirtioMmioBase + static_cast<uint64_t>(bar_index) * kBarSlot;
+    constexpr uint64_t kBarPages     = 4;
+    constexpr uint64_t kBarSlot      = kBarPages * 0x1000;  // 0x4000 per BAR slot
+    // Per-device stride (0x10000 = 64 KiB headroom for the 6 BAR slots) so blk
+    // and net don't both land at +0x90000 for BAR4.
+    constexpr uint64_t kDeviceStride = 0x10000;
+    const uint64_t virt = kVirtioMmioBase + static_cast<uint64_t>(device_slot_) * kDeviceStride +
+                          static_cast<uint64_t>(bar_index) * kBarSlot;
     for (uint64_t i = 0; i < kBarPages; ++i) {
         if (!cinux::mm::g_vmm.map(virt + i * 0x1000, phys + i * 0x1000, kMmioFlags)) {
             cinux::lib::kprintf("[VirtIO] BAR%u map failed at page %u (phys=0x%lx)\n", bar_index,
@@ -124,17 +128,21 @@ void VirtIODevice::self_assign_bar(uint8_t bar_index) {
     const uint32_t probe = pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, off);
     const uint32_t size  = ~(probe & pci::BAR_ADDR_MASK_32) + 1;
 
-    // Assign a fixed 32-bit MMIO slot, clear of NVMe BAR0 (0xfeb40000) and the
-    // AHCI BAR5 window (0xfebf1000).  64-bit BARs get the upper word zeroed so
+    // Assign a per-device 32-bit MMIO slot, clear of NVMe BAR0 (0xfeb40000) and
+    // the AHCI BAR5 window (0xfebf1000).  device_slot_ gives each instance a
+    // distinct 64 KiB region (blk -> 0xfeb60000, net -> 0xfeb70000) so the two
+    // modern BAR4s no longer collide.  64-bit BARs get the upper word zeroed so
     // the address stays < 4 GB (the QEMU register window is tiny anyway).
-    constexpr uint32_t kAssigned = 0xfeb60000;
+    constexpr uint32_t kBase     = 0xfeb60000;
+    const uint32_t     kAssigned = kBase + static_cast<uint32_t>(device_slot_) * 0x10000;
     pci::PCI::pci_write(dev_.bus, dev_.slot, dev_.func, off, kAssigned);
     if (is_64) {
         pci::PCI::pci_write(dev_.bus, dev_.slot, dev_.func, off + 4, 0);
     }
     dev_.bar[bar_index] = kAssigned;
-    cinux::lib::kprintf("[VirtIO] BAR%u self-assigned 0x%x (size=%u, 64-bit=%c)\n", bar_index,
-                        kAssigned, static_cast<unsigned>(size), is_64 ? 'Y' : 'N');
+    cinux::lib::kprintf("[VirtIO] BAR%u self-assigned 0x%x (slot=%u, size=%u, 64-bit=%c)\n",
+                        bar_index, kAssigned, device_slot_, static_cast<unsigned>(size),
+                        is_64 ? 'Y' : 'N');
 }
 
 bool VirtIODevice::resolve_cfg_pointers() {
@@ -166,18 +174,18 @@ bool VirtIODevice::resolve_cfg_pointers() {
 // ============================================================
 
 void VirtIODevice::parse_capabilities() {
-    uint8_t next = static_cast<uint8_t>(pci::PCI::pci_read(
-        dev_.bus, dev_.slot, dev_.func, pci::PciReg::CAPABILITIES_POINTER));
+    uint8_t next = static_cast<uint8_t>(
+        pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, pci::PciReg::CAPABILITIES_POINTER));
     for (uint32_t guard = 0; next != 0 && guard < kCapListMax; ++guard) {
         // virtio_pci_cap layout (VirtIO 1.1 sec 5.2):
         //   b0 cap_vndr(0x09) | b1 cap_next | b2 cap_len | b3 cfg_type
         //   b4 bar | b5..7 padding
         //   b8..11 offset (le32) | b12..15 length (le32)
         //   b16..19 notify_off_multiplier (le32, NOTIFY only; cap_len >= 20)
-        const uint32_t w0 = pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, next);
-        const uint8_t cap_id   = static_cast<uint8_t>(w0 & 0xFF);
-        const uint8_t cap_next = static_cast<uint8_t>((w0 >> 8) & 0xFF);
-        const uint8_t cap_len  = static_cast<uint8_t>((w0 >> 16) & 0xFF);
+        const uint32_t w0       = pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, next);
+        const uint8_t  cap_id   = static_cast<uint8_t>(w0 & 0xFF);
+        const uint8_t  cap_next = static_cast<uint8_t>((w0 >> 8) & 0xFF);
+        const uint8_t  cap_len  = static_cast<uint8_t>((w0 >> 16) & 0xFF);
         if (cap_id == pci::PciCapId::VIRTIO) {
             const uint8_t  cfg_type = static_cast<uint8_t>((w0 >> 24) & 0xFF);
             const uint32_t w4       = pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, next + 4);
@@ -187,11 +195,15 @@ void VirtIODevice::parse_capabilities() {
             switch (cfg_type) {
             case CfgType::COMMON:
                 caps_.found_common = true;
-                caps_.common_bar = bar; caps_.common_off = offset; caps_.common_len = length;
+                caps_.common_bar   = bar;
+                caps_.common_off   = offset;
+                caps_.common_len   = length;
                 break;
             case CfgType::NOTIFY:
                 caps_.found_notify = true;
-                caps_.notify_bar = bar; caps_.notify_off = offset; caps_.notify_len = length;
+                caps_.notify_bar   = bar;
+                caps_.notify_off   = offset;
+                caps_.notify_len   = length;
                 if (cap_len >= 20) {
                     caps_.notify_off_multiplier =
                         pci::PCI::pci_read(dev_.bus, dev_.slot, dev_.func, next + 16);
@@ -199,13 +211,18 @@ void VirtIODevice::parse_capabilities() {
                 break;
             case CfgType::ISR:
                 caps_.found_isr = true;
-                caps_.isr_bar = bar; caps_.isr_off = offset; caps_.isr_len = length;
+                caps_.isr_bar   = bar;
+                caps_.isr_off   = offset;
+                caps_.isr_len   = length;
                 break;
             case CfgType::DEVICE:
                 caps_.found_device = true;
-                caps_.device_bar = bar; caps_.device_off = offset; caps_.device_len = length;
+                caps_.device_bar   = bar;
+                caps_.device_off   = offset;
+                caps_.device_len   = length;
                 break;
-            default: break;  // SHARED_MEM / VENDOR -- unused
+            default:
+                break;  // SHARED_MEM / VENDOR -- unused
             }
         }
         next = cap_next;
@@ -218,6 +235,13 @@ void VirtIODevice::parse_capabilities() {
 
 cinux::lib::ErrorOr<void> VirtIODevice::init(const pci::PCIDevice& dev) {
     dev_ = dev;
+
+    // Assign this instance a distinct MMIO slot (see device_slot_ doc) -- boot
+    // is single-threaded, so a function-local counter is enough.  blk (first
+    // init) -> slot 0, net (second) -> slot 1; each gets a unique BAR phys/virt
+    // + MSI-X Table/PBA virt so the two no longer clobber each other.
+    static unsigned next_device_slot = 0;
+    device_slot_                     = next_device_slot++;
 
     // Enable PCI Bus Master + Memory Space so the device may master DMA and
     // expose its MMIO window.  (QEMU firmware assigns the BAR; no self-assign
@@ -252,9 +276,8 @@ cinux::lib::ErrorOr<void> VirtIODevice::init(const pci::PCIDevice& dev) {
         "[VirtIO] transport ready: common BAR%u+0x%x notify BAR%u+0x%x (mult=%u) "
         "isr=%c device=%c num_queues=%u features=0x%llx\n",
         caps_.common_bar, caps_.common_off, caps_.notify_bar, caps_.notify_off,
-        caps_.notify_off_multiplier, caps_.found_isr ? 'Y' : 'N',
-        caps_.found_device ? 'Y' : 'N', num_queues,
-        static_cast<unsigned long long>(feats));
+        caps_.notify_off_multiplier, caps_.found_isr ? 'Y' : 'N', caps_.found_device ? 'Y' : 'N',
+        num_queues, static_cast<unsigned long long>(feats));
     return {};
 }
 
@@ -264,15 +287,17 @@ cinux::lib::ErrorOr<void> VirtIODevice::init_msi_x(uint8_t vector) {
         cinux::lib::kprintf("[VirtIO] no MSI-X capability\n");
         return cinux::lib::Error::InvalidArgument;
     }
-    // Third MsixController instance: Table/PBA @+0x84000/+0x85000 (xHCI owns
-    // +0x40000, NVMe +0x74000).  Entry 0 -> @p vector; program_vector unmasks.
-    // LEAVE entry 0 unmasked -- real async IRQ (the batch-3 delta over NVMe's
-    // mask_all polling, which stranded real IRQ as a follow-up).  Production
-    // only: the test kernel has no switch_to_apic, so an unmasked MSI would
-    // strand in the LAPIC ISR (NVMe batch-3 root cause).
-    constexpr uint64_t kTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x84000;
-    constexpr uint64_t kPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x85000;
-    auto               r          = msix_.init(msix_cap_, dev_, kTableVirt, kPbaVirt);
+    // Per-device MSI-X Table/PBA virt: blk (slot 0) -> +0x84000/+0x85000, net
+    // (slot 1) -> +0x86000/+0x87000 (xHCI owns +0x40000, NVMe +0x74000).  Each
+    // device gets a distinct 0x2000 slot so the two Tables no longer collide at
+    // +0x84000 (the plan's intent, now actually implemented).  Entry 0 ->
+    // @p vector; program_vector unmasks.  LEAVE entry 0 unmasked -- real async
+    // IRQ.  Production only (test kernel has no switch_to_apic -> MSI would
+    // strand in the LAPIC ISR, NVMe batch-3 root cause).
+    const uint64_t kTableVirt =
+        cinux::arch::KMEM_MMIO_BASE + 0x84000 + static_cast<uint64_t>(device_slot_) * 0x2000;
+    const uint64_t kPbaVirt = kTableVirt + 0x1000;
+    auto           r        = msix_.init(msix_cap_, dev_, kTableVirt, kPbaVirt);
     if (!r.ok()) {
         return cinux::lib::Error::OutOfMemory;
     }
@@ -337,7 +362,8 @@ void VirtIODevice::set_status(uint8_t bits) {
     common_write8(CfgOff::DEVICE_STATUS, static_cast<uint8_t>(status() | bits));
 }
 void VirtIODevice::clear_status(uint8_t bits) {
-    common_write8(CfgOff::DEVICE_STATUS, static_cast<uint8_t>(status() & static_cast<uint8_t>(~bits)));
+    common_write8(CfgOff::DEVICE_STATUS,
+                  static_cast<uint8_t>(status() & static_cast<uint8_t>(~bits)));
 }
 
 // ============================================================
@@ -345,8 +371,8 @@ void VirtIODevice::clear_status(uint8_t bits) {
 // ============================================================
 
 cinux::lib::ErrorOr<uint16_t> VirtIODevice::setup_queue(uint16_t queue_index, uint16_t size,
-                                                       uint64_t desc_phys, uint64_t avail_phys,
-                                                       uint64_t used_phys) {
+                                                        uint64_t desc_phys, uint64_t avail_phys,
+                                                        uint64_t used_phys) {
     common_write16(CfgOff::QUEUE_SELECT, queue_index);
     common_write16(CfgOff::QUEUE_SIZE, size);
     // Bind this queue to MSI-X entry 0 so completions raise vector 0x42 once

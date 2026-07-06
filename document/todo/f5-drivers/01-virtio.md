@@ -26,11 +26,23 @@ vendor 0x1AF4。device_id:virtio-blk transitional 0x1001 / modern 0x1042;virtio-
 
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
-| 0 | 立项 docs + `CINUX_VIRTIO` option + QEMU virtio-blk-pci + PCI `find_virtio_block` | 🔄 | 全量编 + 两 leg 零回归 |
-| 1 | 传输层(`virtio.hpp` cap + feature + status)+ virtqueue(split queue)+ polling 机制测 | ⏳ | 两 leg + cap offset 回读 + queue round-trip |
-| 2 | virtio-blk 驱动(read/write/flush + IBlockDevice + main.cpp 注册)polling | ⏳ | 两 leg + round-trip byte-compare + Ext2 mount |
-| 3 | ⭐真中断 + SMP(MSI-X 0x42 unmask + ISR flag/wake + Spinlock DmaBuffer/virtqueue + -smp 2) | ⏳ | 两 leg(单核 + -smp 2)+ 并发 read 不出 garbage |
-| 5 | perf 对比 virtio-blk vs NVMe vs AHCI(归 M7 收官批) | ⏳ | I/O 数据 |
+| 0 | 立项 docs + `CINUX_VIRTIO` option + QEMU virtio-blk-pci + PCI `find_virtio_block` | ✅ | 全量编 + 两 leg 零回归 |
+| 1 | 传输层(`virtio.hpp` cap + feature + status)+ virtqueue(split queue)+ polling 机制测 | ✅ | 两 leg + cap offset 回读 + queue round-trip |
+| 2 | virtio-blk 驱动(read/write/flush + IBlockDevice + main.cpp 注册)polling | ✅ | 两 leg + round-trip byte-compare |
+| 3 | ⭐真中断 + SMP(MSI-X 0x42 unmask + ISR + Spinlock) | ✅ | 两 leg 889/0;production gcc 崩根因 = IST 缺失(非本弧),并 origin/main IST2 修后稳定 |
+| 5 | perf 对比 virtio-blk vs NVMe vs AHCI | ⏳ | I/O 数据(post-finale 任务,见下) |
+
+## Post-finale 迭代任务(2026-07-06 后)
+
+production `run` 加 virtio-blk-pci(`89ce47a`)+ IST 修(merge `eab66a0`)后,下列是整个 VirtIO 迭代未竟的真实任务:
+
+| # | 任务 | 范围 | 阻塞 |
+|---|------|------|------|
+| 1 | **blk↔net BAR 撞修** | `self_assign_bar` 写死 `kAssigned=0xfeb60000` + `map_bar` 写死 `+0x80000+bar*0x4000`,blk/net 两实例 common BAR4 落同址同 virt → net init 踩坏 blk 映射。改 per-device 独立 MMIO slot(phys + virt) | 阻塞 #2 |
+| 2 | **SLIRP ping** | virtio-net 进 `run`(独立 SLIRP netdev,不拆 e1000)+ NetStack attach + ping 10.0.2.2 | 依赖 #1 |
+| 3 | **virtio-blk vs NVMe vs AHCI perf** | I/O 对比 harness(production rootfs + round-trip 计时) | 独立 |
+
+接 [finale note](../../notes/2026-07-06-f5-virtio-finale.md) + [IST 根因 note](../../notes/2026-07-06-f5-virtio-production-crash-ist-rootcause.md)。
 
 ## 风险 / 陷阱
 
