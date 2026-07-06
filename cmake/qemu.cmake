@@ -283,7 +283,7 @@ function(cinux_qemu_test_target name)
 endfunction()
 
 function(cinux_qemu_run_target name)
-    set(opts SMP DEV_NET DEV_XHCI DEBUG)
+    set(opts SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEBUG)
     cmake_parse_arguments(ARG "${opts}" "COMMENT" "" ${ARGN})
     set(_smp)
     if(ARG_SMP)
@@ -302,6 +302,17 @@ function(cinux_qemu_run_target name)
         list(APPEND _devs -device qemu-xhci,id=xhci
                           -device usb-kbd,bus=xhci.0
                           -device usb-tablet,bus=xhci.0)
+    endif()
+    if(ARG_DEV_VIRTIO_BLK)
+        # F5-M2 production: virtio-blk-pci as an independent third disk (not the
+        # boot disk -- NVMe owns rootfs).  Backed by the 1 MB test image; content
+        # is irrelevant, the file just backs -device so the controller enumerates
+        # and Step 21a2 (PCI find + transport + init_msi_x unmask + IBlockDevice
+        # create + DRIVER_OK) actually runs in production.  First time the
+        # batch-3 real-interrupt path (vector 0x42) is exercised in GUI.
+        list(APPEND _devs -drive file=${VIRTIO_BLK_TEST_IMAGE},format=raw,if=none,id=virtio-blk-disk
+                          -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0)
+        list(APPEND _deps ${VIRTIO_BLK_TEST_IMAGE})
     endif()
     if(NOT ARG_DEBUG)
         # Boot disk = NVMe (rootfs on NVMe for perf; F5-M3 batch 5). AHCI port 0
@@ -327,7 +338,7 @@ function(cinux_qemu_run_target name)
         VERBATIM)
 endfunction()
 
-cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI COMMENT "Starting QEMU (serial: stdio)")
+cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK COMMENT "Starting QEMU (serial: stdio)")
 
 # Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
 # fork #DF saga is -smp-2-only; single-CPU is stable, so this is the path to
