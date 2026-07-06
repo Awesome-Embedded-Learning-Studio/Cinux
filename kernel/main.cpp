@@ -56,8 +56,6 @@
 #include "kernel/drivers/net/e1000_init.hpp"
 #include "kernel/drivers/nvme/nvme.hpp"
 #include "kernel/drivers/nvme/nvme_block_device.hpp"
-#include "kernel/drivers/virtio/virtio_blk.hpp"
-#include "kernel/drivers/virtio/virtio_net.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/rtc/rtc.hpp"
@@ -65,6 +63,8 @@
 #include "kernel/drivers/video/console.hpp"
 #include "kernel/drivers/video/font.hpp"
 #include "kernel/drivers/video/framebuffer.hpp"
+#include "kernel/drivers/virtio/virtio_blk.hpp"
+#include "kernel/drivers/virtio/virtio_net.hpp"
 #include "kernel/lib/kallsyms.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/random.hpp"  // F9 batch 7: g_random
@@ -282,8 +282,8 @@ extern "C" void kernel_main() {
         // IO CQ carries a non-zero IV).  init_msi_x enables MSI-X (then masks
         // every entry for polling mode), so the check passes.
         if (nvme_ctrl.init(nvme_dev).ok() && nvme_ctrl.enable().ok() &&
-            nvme_ctrl.init_msi_x().ok() &&
-            nvme_ctrl.identify_namespace(1, ns).ok() && nvme_ctrl.create_io_queues().ok()) {
+            nvme_ctrl.init_msi_x().ok() && nvme_ctrl.identify_namespace(1, ns).ok() &&
+            nvme_ctrl.create_io_queues().ok()) {
             auto bd =
                 cinux::drivers::nvme::NvmeBlockDevice::create(nvme_ctrl, 1, ns.nsze, ns.lba_size);
             if (bd.ok()) {
@@ -306,8 +306,7 @@ extern "C" void kernel_main() {
     cinux::drivers::pci::PCIDevice              virtio_blk_pci;
     if (pci.find_virtio_block(virtio_blk_pci)) {
         if (virtio_blk_dev.init(virtio_blk_pci).ok()) {
-            auto fr = virtio_blk_dev.negotiate_features(
-                cinux::drivers::virtio::Feature::VERSION_1);
+            auto fr = virtio_blk_dev.negotiate_features(cinux::drivers::virtio::Feature::VERSION_1);
             if (fr.ok()) {
                 // Enable MSI-X real interrupt (batch 3): entry 0 -> 0x42, unmasked.
                 // Production only -- the test kernel has no switch_to_apic, so an
@@ -337,8 +336,7 @@ extern "C" void kernel_main() {
     cinux::drivers::pci::PCIDevice              virtio_net_pci;
     if (pci.find_virtio_net(virtio_net_pci)) {
         if (virtio_net_dev.init(virtio_net_pci).ok()) {
-            auto fr = virtio_net_dev.negotiate_features(
-                cinux::drivers::virtio::Feature::VERSION_1);
+            auto fr = virtio_net_dev.negotiate_features(cinux::drivers::virtio::Feature::VERSION_1);
             if (fr.ok()) {
                 auto mr = virtio_net_dev.init_msi_x(cinux::drivers::virtio::kVirtioNetIrqVector);
                 if (!mr.ok()) {
@@ -346,10 +344,25 @@ extern "C" void kernel_main() {
                 }
                 auto nr = cinux::drivers::virtio::VirtIONetDevice::create(virtio_net_dev);
                 if (nr.ok()) {
-                    static cinux::drivers::virtio::VirtIONetDevice virtio_net = std::move(nr.value());
+                    static cinux::drivers::virtio::VirtIONetDevice virtio_net =
+                        std::move(nr.value());
+                    cinux::drivers::virtio::set_virtio_net_device(
+                        &virtio_net);  // F5-M2 task 2: net::init() attaches it
                     virtio_net_dev.set_status(cinux::drivers::virtio::Status::DRIVER_OK);
-                    cinux::lib::kprintf("[VirtIO-net] ready (real IRQ path 0x%x)\n",
-                                        cinux::drivers::virtio::kVirtioNetIrqVector);
+                    // F5-M2 task 2: pre-fill one RX buffer so the first SLIRP ARP
+                    // reply has somewhere to land (else dropped before poll_rx
+                    // supplies one -> ping stalls on ARP resolve).
+                    if (!virtio_net.prime_rx().ok()) {
+                        cinux::lib::kprintf("[VirtIO-net] RX prime failed\n");
+                    }
+                    {
+                        cinux::net::EthAddr vmac{};
+                        virtio_net.mac(vmac);
+                        cinux::lib::kprintf(
+                            "[VirtIO-net] ready (IRQ 0x%x) MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
+                            cinux::drivers::virtio::kVirtioNetIrqVector, vmac.oct[0], vmac.oct[1],
+                            vmac.oct[2], vmac.oct[3], vmac.oct[4], vmac.oct[5]);
+                    }
                 }
             }
         }

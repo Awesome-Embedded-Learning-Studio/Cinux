@@ -283,7 +283,7 @@ function(cinux_qemu_test_target name)
 endfunction()
 
 function(cinux_qemu_run_target name)
-    set(opts SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEBUG)
+    set(opts SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEV_VIRTIO_NET DEBUG)
     cmake_parse_arguments(ARG "${opts}" "COMMENT" "" ${ARGN})
     set(_smp)
     if(ARG_SMP)
@@ -314,6 +314,13 @@ function(cinux_qemu_run_target name)
                           -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0)
         list(APPEND _deps ${VIRTIO_BLK_TEST_IMAGE})
     endif()
+    if(ARG_DEV_VIRTIO_NET)
+        # F5-M2 task 2: virtio-net-pci on its own SLIRP netdev (net1).  e1000
+        # (net0) stays for coexistence; net::init() attaches both, dev_for()
+        # prefers virtio-net so `ping 10.0.2.2` exercises virtio RX/TX.
+        list(APPEND _devs -device virtio-net-pci,netdev=net1,id=virtio-net0
+                          -netdev user,id=net1)
+    endif()
     if(NOT ARG_DEBUG)
         # Boot disk = NVMe (rootfs on NVMe for perf; F5-M3 batch 5). AHCI port 0
         # keeps the test disk (boot-signature mechanism + legacy fallback path).
@@ -338,7 +345,7 @@ function(cinux_qemu_run_target name)
         VERBATIM)
 endfunction()
 
-cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK COMMENT "Starting QEMU (serial: stdio)")
+cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEV_VIRTIO_NET COMMENT "Starting QEMU (serial: stdio)")
 
 # Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
 # fork #DF saga is -smp-2-only; single-CPU is stable, so this is the path to

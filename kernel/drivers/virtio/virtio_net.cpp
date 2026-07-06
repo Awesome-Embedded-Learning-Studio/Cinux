@@ -40,7 +40,7 @@ cinux::lib::ErrorOr<VirtIONetDevice> VirtIONetDevice::create(VirtIODevice& dev) 
     }
     VirtQueue rx;
     VirtQueue tx;
-    auto rr = rx.init(&dev, 0, net::kQueueSize);  // RX = queue 0
+    auto      rr = rx.init(&dev, 0, net::kQueueSize);  // RX = queue 0
     if (!rr.ok()) {
         return rr.error();
     }
@@ -60,14 +60,28 @@ cinux::lib::ErrorOr<VirtIONetDevice> VirtIONetDevice::create(VirtIODevice& dev) 
 }
 
 VirtIONetDevice::VirtIONetDevice(VirtIODevice* dev, cinux::net::EthAddr mac,
-                                  dma::DmaBuffer&& rx_buf, dma::DmaBuffer&& tx_buf,
-                                  VirtQueue&& rx, VirtQueue&& tx)
+                                 dma::DmaBuffer&& rx_buf, dma::DmaBuffer&& tx_buf, VirtQueue&& rx,
+                                 VirtQueue&& tx)
     : dev_(dev),
       mac_(mac),
       rx_buf_(std::move(rx_buf)),
       tx_buf_(std::move(tx_buf)),
       rx_queue_(std::move(rx)),
       tx_queue_(std::move(tx)) {}
+
+cinux::lib::ErrorOr<void> VirtIONetDevice::prime_rx() {
+    auto g = lock_.guard();
+    if (rx_in_flight_) {
+        return {};  // already primed
+    }
+    auto sr = rx_queue_.submit_one(rx_buf_.phys(), static_cast<uint32_t>(kRxBufSize), true);
+    if (!sr.ok()) {
+        return sr.error();
+    }
+    rx_queue_.kick();
+    rx_in_flight_ = true;
+    return {};
+}
 
 bool VirtIONetDevice::poll_rx(cinux::net::Packet& out) {
     auto g = lock_.guard();
@@ -86,7 +100,7 @@ bool VirtIONetDevice::poll_rx(cinux::net::Packet& out) {
         return false;
     }
     const uint32_t len = rx_queue_.consume_completion();
-    rx_in_flight_ = false;
+    rx_in_flight_      = false;
     if (len < net::kHdrBytes) {
         return false;  // malformed (device wrote < hdr)
     }
@@ -103,13 +117,13 @@ bool VirtIONetDevice::poll_rx(cinux::net::Packet& out) {
 }
 
 cinux::lib::ErrorOr<void> VirtIONetDevice::send_l3(const cinux::net::EthAddr& next_hop,
-                                                    uint16_t ethertype, const uint8_t* l3,
-                                                    uint32_t len) {
-    auto g = lock_.guard();
-    auto* base = static_cast<uint8_t*>(tx_buf_.virt());
+                                                   uint16_t ethertype, const uint8_t* l3,
+                                                   uint32_t len) {
+    auto  g     = lock_.guard();
+    auto* base  = static_cast<uint8_t*>(tx_buf_.virt());
     // virtio_net_hdr at 0..11: zero (no csum/gso offload).
-    auto* hdr = reinterpret_cast<VirtioNetHdr*>(base);
-    *hdr      = {};
+    auto* hdr   = reinterpret_cast<VirtioNetHdr*>(base);
+    *hdr        = {};
     // Ethernet II wire frame at +12: dst(6) + src(6) + ethertype(2 big-endian)
     // + l3 payload.  Built byte-wise (EthHdr is a HOST-order view, NOT a wire
     // overlay -- see net_types.hpp).
@@ -118,20 +132,31 @@ cinux::lib::ErrorOr<void> VirtIONetDevice::send_l3(const cinux::net::EthAddr& ne
         frame[i]     = next_hop.oct[i];
         frame[6 + i] = mac_.oct[i];
     }
-    frame[12] = static_cast<uint8_t>(ethertype >> 8);     // hi byte first (wire order)
+    frame[12] = static_cast<uint8_t>(ethertype >> 8);  // hi byte first (wire order)
     frame[13] = static_cast<uint8_t>(ethertype & 0xFF);
     if (len > 0) {
         memcpy(frame + 14, l3, len);
     }
-    const uint32_t total = net::kHdrBytes + 14 + len;
+    const uint32_t total  = net::kHdrBytes + 14 + len;
     // TX: one device-read chain (virtio-net TX has no status byte, unlike blk).
-    SgEntry out_sg = {tx_buf_.phys(), total};
-    auto    sr     = tx_queue_.submit_chain(&out_sg, 1, nullptr, 0);
+    SgEntry        out_sg = {tx_buf_.phys(), total};
+    auto           sr     = tx_queue_.submit_chain(&out_sg, 1, nullptr, 0);
     if (!sr.ok()) {
         return sr.error();
     }
     tx_queue_.kick();
     return tx_queue_.wait_completion(sr.value());
+}
+
+namespace {
+VirtIONetDevice* g_virtio_net = nullptr;  ///< set from main.cpp Step 21a3
+}  // namespace
+
+VirtIONetDevice* virtio_net_device() {
+    return g_virtio_net;
+}
+void set_virtio_net_device(VirtIONetDevice* dev) {
+    g_virtio_net = dev;
 }
 
 }  // namespace cinux::drivers::virtio
@@ -148,6 +173,6 @@ struct InterruptFrame;
 }
 
 volatile uint64_t g_virtio_net_irq_count = 0;
-extern "C" void virtio_net_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
+extern "C" void   virtio_net_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
     g_virtio_net_irq_count = g_virtio_net_irq_count + 1;
 }
