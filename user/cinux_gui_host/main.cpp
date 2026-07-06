@@ -1,34 +1,42 @@
 /**
  * @file user/cinux_gui_host/main.cpp
- * @brief CinuxOS userspace GUI host adapter (F-GUI-USERSPACE b3a)
+ * @brief CinuxOS userspace GUI host adapter (F-GUI-USERSPACE b3a + b3b step1)
  *
  * Drives the Cinux-GUI host-neutral core (21 freestanding C++ sources) as a
- * userspace process: opens /dev/fb0 (mmap display), builds a minimal widget
- * tree (WindowManager + Window + Label + Desktop), and pumps GuiCore which
- * renders into the core-owned staging buffer and flushes dirty rects to the
- * mmap'd framebuffer. The Host ABI table (core/host.hpp) is the only seam to
- * the core -- swapping host = swapping the table fill.
+ * userspace process: opens /dev/fb0 (mmap display) + /dev/event0 (input),
+ * builds a widget tree (WindowManager + Window + Label + Desktop), and pumps
+ * GuiCore which drains input, renders into the staging buffer, and flushes
+ * dirty rects to the mmap'd framebuffer. The Host ABI table (core/host.hpp)
+ * is the only seam to the core.
  *
- * Smoke mode: argv[1] = pump count (0 = forever for production). After N
- * pumps the smoke reads back the fb center pixel and exits 0 if non-zero
- * (rendered background/widget), 5 otherwise. Exit 1-3 = open/ioctl/mmap fail.
+ * b3a: fb mmap + render + readback smoke (poll_event NULL).
+ * b3b step1: poll_event reads /dev/event0 via poll(0) (non-blocking) and maps
+ * kernel Events to EventHeader + Pointer/Keycode payloads; dispatch_event feeds
+ * them to the WM/Desktop. Open with O_RDONLY; poll(0) returns 0 when idle so
+ * pump never blocks.
  *
- * Mirrors host/linux_fbdev_main.cpp + kernel/gui/host_cinux.cpp (ABI fill +
- * widget tree + flush row-blit). poll_event is NULL in b3a (smoke skips input
- * to avoid /dev/event0 blocking); b3b fills it with O_NONBLOCK read.
+ * Smoke mode: argv[1] = pump count (0 = forever). After N pumps read back the
+ * fb center pixel and exit 0 if non-zero. Mirrors host/linux_fbdev_main.cpp +
+ * kernel/gui/host_cinux.cpp (ABI fill + widget tree + flush row-blit +
+ * poll_event payload map).
  */
 
 #include <fcntl.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/types.h>
 
+#include "event.hpp"          // EventHeader, EventCode, kEventMagic, kAbiVersion
+#include "event_payload.hpp"  // PointerPayload, KeycodePayload, kPointerKind*, kKeymod*
 #include "font.hpp"
 #include "gui_core.hpp"
 #include "host.hpp"
@@ -56,11 +64,48 @@ using namespace cinux::gui;
 constexpr uint32_t kWinW = 200;
 constexpr uint32_t kWinH = 160;
 
+// Mirror of kernel/gui/event.hpp cinux::gui::Event -- the /dev/event0 wire
+// format (batch 2 InputEventDeviceOps::read returns this struct raw). CinuxOS
+// and this host are both gcc/SysV x86_64, so the C++ POD layout matches.
+enum kernel_event_type : uint8_t {
+    kMove      = 0,
+    kMouseDown = 1,
+    kMouseUp   = 2,
+    kKeyDown   = 3,
+    kKeyUp     = 4,
+};
+struct kernel_mouse_event {
+    int32_t x;
+    int32_t y;
+    int32_t dx;
+    int32_t dy;
+    uint8_t buttons;
+    bool    left;
+    bool    right;
+    bool    middle;
+};
+struct kernel_key_event {
+    char    ascii;
+    uint8_t scancode;
+    bool    pressed;
+    bool    shift;
+    bool    ctrl;
+    bool    alt;
+};
+struct kernel_event {
+    uint8_t type_;
+    union {
+        kernel_mouse_event mouse;
+        kernel_key_event   key;
+    };
+};
+
 struct HostState {
     uint8_t*      fb;  // mmap'd /dev/fb0 base
     uint32_t      fb_w;
     uint32_t      fb_h;
     uint32_t      fb_pitch;
+    int           ev_fd;  // /dev/event0 (-1 if absent -> poll_event no-op)
     PsfFont       font;
     Theme         theme;
     WindowManager wm;
@@ -69,10 +114,8 @@ struct HostState {
     Desktop       desktop;
 };
 
-// L1 Display: flush one dirty rect from the core staging buffer to the mmap'd
-// framebuffer. Mirrors host_cinux.cpp::cinux_flush (clamp negative origin +
-// bounds; row-blit uint32 stores) but targets non-volatile RAM (the IoPhys VMA
-// backing /dev/fb0) instead of volatile MMIO.
+// L1 Display: flush one dirty rect from staging to the mmap'd framebuffer.
+// Mirrors host_cinux.cpp::cinux_flush (clamp + row-blit) but non-volatile target.
 void host_flush(void* ctx, int x, int y, int w, int h, const void* pixels, uint32_t stride,
                 PixelFormat fmt) {
     auto* st = static_cast<HostState*>(ctx);
@@ -130,6 +173,98 @@ void host_render_frame(void* ctx, Frame* frame) {
     frame->count = n;
 }
 
+// L2 Input: drain one event from /dev/event0. poll(0) makes it non-blocking
+// (returns false when idle); only read when POLLIN is set. Mirrors
+// host_cinux.cpp::cinux_poll_event payload mapping (kernel Event -> EventHeader
+// + Pointer/Keycode payload).
+bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
+    auto* st = static_cast<HostState*>(ctx);
+    if (out == nullptr || st->ev_fd < 0 || cap < sizeof(EventHeader)) {
+        return false;
+    }
+    struct pollfd pfd;
+    pfd.fd      = st->ev_fd;
+    pfd.events  = POLLIN;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, 0) <= 0) {
+        return false;  // idle
+    }
+    kernel_event kev;
+    ssize_t      n = read(st->ev_fd, &kev, sizeof(kev));
+    if (n != static_cast<ssize_t>(sizeof(kev))) {
+        return false;
+    }
+    out->magic   = kEventMagic;
+    out->version = kAbiVersion;
+    out->flags   = 0;
+    auto* tail   = reinterpret_cast<uint8_t*>(out) + sizeof(EventHeader);
+    switch (kev.type_) {
+    case kMove:
+    case kMouseDown:
+    case kMouseUp: {
+        if (cap < sizeof(EventHeader) + sizeof(PointerPayload)) {
+            return false;
+        }
+        out->type = EventCode::kPointer;
+        PointerPayload p;
+        p.kind    = (kev.type_ == kMouseDown) ? kPointerKindDown
+                    : (kev.type_ == kMouseUp) ? kPointerKindUp
+                                              : kPointerKindMove;
+        p.x       = kev.mouse.x;
+        p.y       = kev.mouse.y;
+        p.dx      = kev.mouse.dx;
+        p.dy      = kev.mouse.dy;
+        p.buttons = kev.mouse.buttons;
+        memcpy(tail, &p, sizeof(p));
+        out->payload_len = sizeof(p);
+        break;
+    }
+    case kKeyDown:
+    case kKeyUp: {
+        if (cap < sizeof(EventHeader) + sizeof(KeycodePayload)) {
+            return false;
+        }
+        out->type  = EventCode::kKeycode;
+        out->flags = (kev.type_ == kKeyDown) ? kEventFlagPressed : 0;
+        KeycodePayload k;
+        k.ascii     = kev.key.ascii;
+        k.scancode  = kev.key.scancode;
+        k.modifiers = static_cast<uint8_t>((kev.key.shift ? kKeymodShift : 0u) |
+                                           (kev.key.ctrl ? kKeymodCtrl : 0u) |
+                                           (kev.key.alt ? kKeymodAlt : 0u));
+        memcpy(tail, &k, sizeof(k));
+        out->payload_len = sizeof(k);
+        break;
+    }
+    default:
+        return false;
+    }
+    return true;
+}
+
+// L4 dispatch: apply one event to the widget tree (WM pointer / Desktop key).
+void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) {
+    auto* st = static_cast<HostState*>(ctx);
+    if (ev == nullptr || payload == nullptr || ev->magic != kEventMagic) {
+        return;
+    }
+    if (ev->type == EventCode::kPointer) {
+        if (ev->payload_len < sizeof(PointerPayload)) {
+            return;
+        }
+        PointerPayload p;
+        memcpy(&p, payload, sizeof(p));
+        st->wm.process_pointer(p);  // cursor + drag/raise/close
+    } else if (ev->type == EventCode::kKeycode) {
+        if (ev->payload_len < sizeof(KeycodePayload)) {
+            return;
+        }
+        KeycodePayload k;
+        memcpy(&k, payload, sizeof(k));
+        st->desktop.dispatch_key(k);
+    }
+}
+
 uint32_t host_now_ms(void* /*ctx*/) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -169,9 +304,12 @@ int main(int argc, char** argv) {
         return 3;
     }
 
-    // 2) pump count: argv[1]; 0 = forever (production). Default 1. Parsed by
-    //    hand to avoid strtoul -- host glibc <stdlib.h> wraps it as the C23
-    //    __isoc23_strtoul symbol, which musl libc.a does not provide.
+    // 2) input: /dev/event0 (optional -- smoke/prod need it; absent -> poll_event
+    //    no-ops). O_RDONLY + poll(0) keeps the pump non-blocking.
+    int ev_fd = open("/dev/event0", O_RDONLY);
+
+    // 3) pump count: argv[1]; 0 = forever (production). Default 1. Parsed by
+    //    hand (host glibc wraps strtoul as __isoc23_strtoul, absent from musl).
     unsigned long n_pump = 1;
     if (argc > 1 && argv[1] != nullptr) {
         const char*   s = argv[1];
@@ -183,12 +321,13 @@ int main(int argc, char** argv) {
         n_pump = v;
     }
 
-    // 3) widget tree (mirrors host_cinux.cpp::cinux_host_init, minimal: no icons).
+    // 4) widget tree (mirrors host_cinux.cpp::cinux_host_init, minimal: no icons).
     HostState st{};
     st.fb       = fb;
     st.fb_w     = info.width;
     st.fb_h     = info.height;
     st.fb_pitch = info.pitch;
+    st.ev_fd    = ev_fd;
     st.font.init();
     st.theme = material_dark();
     st.wm.set_rect(0, 0, info.width, info.height);
@@ -205,12 +344,11 @@ int main(int argc, char** argv) {
     st.wm.add_window(&st.win);
     st.desktop.set_root(&st.wm);
 
-    // 4) host table. poll_event NULL: smoke skips input (avoid /dev/event0
-    //    blocking); pump NULL-checks every callback, render+flush still run.
+    // 5) host table.
     Host host{};
     host.core.flush          = host_flush;
-    host.core.poll_event     = nullptr;
-    host.core.dispatch_event = nullptr;
+    host.core.poll_event     = (ev_fd >= 0) ? host_poll_event : nullptr;
+    host.core.dispatch_event = (ev_fd >= 0) ? host_dispatch_event : nullptr;
     host.core.render_frame   = host_render_frame;
     host.core.now_ms         = host_now_ms;
     host.core.alloc          = host_alloc;
@@ -221,13 +359,13 @@ int main(int argc, char** argv) {
 
     auto* core = new GuiCore(&host, info.width, info.height, PixelFormat::kXrgb8888);
 
-    // 5) pump loop.
+    // 6) pump loop.
     unsigned long iter = (n_pump == 0) ? ~0UL : n_pump;
     for (unsigned long i = 0; i < iter; ++i) {
         core->pump();
     }
 
-    // 6) readback smoke: center pixel must be non-zero (rendered bg + widget).
+    // 7) readback smoke: center pixel non-zero (rendered bg + widget).
     int rc = 0;
     if (n_pump > 0) {
         uint32_t        cx = info.width / 2;
