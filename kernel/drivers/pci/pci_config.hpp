@@ -68,6 +68,12 @@ namespace PciCmd {
 constexpr uint32_t IO_SPACE   = 0x01;  ///< Bit 0: I/O space access enable
 constexpr uint32_t BUS_MASTER = 0x02;  ///< Bit 1: bus master enable (DMA)
 constexpr uint32_t MEM_SPACE  = 0x04;  ///< Bit 2: memory space access enable (MMIO)
+/// Bit 10: disable legacy INTx.  Set when the driver polls (no IRQ) or uses
+/// MSI/MSI-X, so the device never raises the legacy INTx line.  Without it, a
+/// device whose ISR the kernel never EOIs (e.g. the virtio test kernel, which
+/// polls and never calls init_msi_x) leaves INTx asserted -> poisons the shared
+/// IRQ subsystem and stalls other devices' BHs on some QEMU revisions.
+constexpr uint32_t DIS_INTX   = 0x0400;
 }  // namespace PciCmd
 
 // ============================================================
