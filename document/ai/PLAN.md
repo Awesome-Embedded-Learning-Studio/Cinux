@@ -14,7 +14,8 @@
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
 | 0 | 立项 docs（本段 + ROADMAP + todo README + 范围栅栏） | 🔄 | docs-only |
-| 1 | `/dev/fb0` mmap：VMA IoPhys + fault 分支 + InodeOps::mmap + sys_mmap 接设备 + fb_dev + DevFs 注册 + munmap/fork IoPhys 分流 | ⏳ | ring3 open/mmap `/dev/fb0` 写全屏红 + cinux-exit；两 leg + GUI 冒烟不破 |
+| 1a | mm 基建：VMA `IoPhys`+`phys_base` + fault 分支（FLAG_PCD，不 PMM）+ `InodeOps::mmap` 钩子 + `sys_mmap` 接设备 + `sys_munmap` 分流 + fork PCD 跳过 CoW/带 phys_base + `fb_dev` + `/dev/fb0` 注册 | ✅ `d19524d` | big_kernel + big_kernel_test 全量绿 + 两 leg **917/0** + SMP AP wake（零回归） |
+| 1b | fb mmap 端到端 ring3 smoke（open/mmap `/dev/fb0` 写屏 + cinux-exit）真触发 IoPhys fault | ⏳ | ring3 smoke PASS |
 | 2 | 输入到用户态：`/dev/input/event*`，ISR→queue→用户 read/poll（SPSC 保持 + 阻塞唤醒） | ⏳ | 用户态读鼠标/键盘 round-trip |
 | 3 | 用户态 GUI 进程：Cinux-GUI core + CinuxOS host adapter（抄 linux_fbdev_main）+ fork+execve 启动 | ⏳ | 用户态进程跑出桌面（图标 + 光标 + 鼠标） |
 | 4 | kernel `gui_worker` 退役：host_cinux 删，kernel 只剩 fb + 输入 + 调度 | ⏳ | 桌面正常 + 无 gui_worker task + GUI bug 只崩进程 |
