@@ -112,7 +112,7 @@ extern "C" void kernel_main() {
 
     // Step 3: Initialise the GDT (must come before IDT)
     cinux::arch::gdt_blocks[0].init();
-    cinux::lib::kprintf("[BIG] GDT loaded (TSS with IST1 Double Fault stack).\n");
+    cinux::lib::kprintf("[BIG] GDT loaded (TSS with IST1 #DF + IST2 IRQ stacks).\n");
 
     // Step 4: Initialise the IDT (depends on GDT selectors)
     cinux::arch::g_idt.init();
