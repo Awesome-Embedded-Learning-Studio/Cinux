@@ -105,3 +105,15 @@ else()
         ${CMAKE_CURRENT_SOURCE_DIR}/net/net_stub.cpp
     )
 endif()
+
+# F5-M2 VirtIO: PCI modern transport + split virtqueue (batch 1).  §14 file
+# gate like USB/NET.  virtio-blk/net device drivers (batch 2+) append their
+# own .cpp under the same gate.
+if(CINUX_VIRTIO)
+    target_sources(big_kernel_common PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtqueue.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio_blk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio_net.cpp
+    )
+endif()

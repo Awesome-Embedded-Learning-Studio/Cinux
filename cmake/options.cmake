@@ -19,6 +19,7 @@
 option(CINUX_GUI "Enable GUI mode (window manager + terminal + host adapter)" ON)
 option(CINUX_USB "Enable USB (xHCI host controller + PCI MSI-X) driver" ON)
 option(CINUX_NET "Enable e1000 Intel NIC driver + L3/L4 stack" ON)
+option(CINUX_VIRTIO "Enable VirtIO PCI modern transport + virtio-blk/net driver" ON)
 
 # ---- 2. Debug instrumentation (opt-in, zero cost when off) ------------------
 # F-INFRA I-10: assert no spinlock is held across schedule() (would deadlock
@@ -116,5 +117,5 @@ set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
 # if() per flag. CINUX_UBSAN is intentionally absent (see comment above).
 # =============================================================================
 set(CINUX_COMPILE_DEF_OPTS
-    GUI USB NET LOCKDEP
+    GUI USB NET VIRTIO LOCKDEP
     MUSL_HELLO_SMOKE MUSL_DYN_SMOKE BUSYBOX_SMOKE GCC_TOOLCHAIN)

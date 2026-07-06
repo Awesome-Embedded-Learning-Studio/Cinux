@@ -88,7 +88,8 @@ void run_ext4_extents_tests();
 void run_shell_write_tests();
 void run_cwd_stat_tests();
 void run_shared_resources_tests();
-void run_nvme_tests();  // F5-M3: NVMe controller (PCI find + BAR0 map + CAP/VS)
+void run_nvme_tests();    // F5-M3: NVMe controller (PCI find + BAR0 map + CAP/VS)
+void run_virtio_tests();  // F5-M2 batch 1: VirtIO transport (PCI find + cap parse + feature)
 void run_clone_tests();
 void run_sync_concurrent_tests();
 void run_canvas_tests();
@@ -500,9 +501,8 @@ static void musl_hello_smoke_entry() {
     // -O2 constructors) from the header/compile question (B4-C2).  Gate on
     // exit==0 like the as smoke; stdout is not console-wired so do not gate on
     // the version text.
-    static constexpr const char* kCc1Path =
-        "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/cc1";
-    bool cc1_ok = false;
+    static constexpr const char* kCc1Path = "/usr/lib/gcc/x86_64-pc-linux-gnu/16.1.1/cc1";
+    bool                         cc1_ok   = false;
     {
         int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);
         if (child_pid == 0) {
@@ -1135,6 +1135,13 @@ extern "C" void kernel_main() {
         exit_code = 1;
     }
 #endif
+
+    // VirtIO transport tests (F5-M2 batch 1).  Run LAST: virtio-blk/net bring-up
+    // asserts legacy INTx (the test kernel polls, never init_msi_x), and on QEMU
+    // 8.x that pending INTx stalls other devices' BHs (e1000 TX completion).  All
+    // IRQ/timing-sensitive suites (e1000/net/socket/...) have already run, so a
+    // pending INTx here cannot break anything.
+    run_virtio_tests();
 
     // Exit via QEMU isa-debug-exit device (port 0xf4)
     __asm__ volatile("outl %0, $0xf4" : : "a"(exit_code));
