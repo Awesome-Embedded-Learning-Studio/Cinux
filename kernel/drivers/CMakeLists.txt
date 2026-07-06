@@ -113,5 +113,6 @@ if(CINUX_VIRTIO)
     target_sources(big_kernel_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtqueue.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/virtio/virtio_blk.cpp
     )
 endif()
