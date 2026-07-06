@@ -6,6 +6,7 @@
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/ahci/ahci_block_device.hpp"
+#include "kernel/drivers/nvme/nvme_block_device.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
@@ -50,18 +51,35 @@ void kernel_init_thread() {
                         self ? self->pid : 0);
 
     cinux::lib::kprintf("[INIT] ===== Milestone 028: ext2 Filesystem =====\n");
-    static auto blk_dev =
-        cinux::drivers::ahci::AHCIBlockDevice::create(cinux::drivers::ahci::AHCI::instance(), 1);
-    static cinux::fs::Ext2 ext2(blk_dev.ok() ? &blk_dev.value() : nullptr);
-    auto                   mount_result = ext2.mount();
-    if (!mount_result.ok()) {
-        cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n",
-                            cinux::lib::error_string(mount_result.error()));
+    // Boot disk: prefer NVMe (perf path) if its namespace carries a valid ext2
+    // fs; else fall back to AHCI.  Same kernel image runs either rootfs (qemu
+    // -device nvme with rootfs on NVMe -> NVMe boot; AHCI rootfs -> AHCI boot)
+    // -- runtime select, no #ifdef (§14 file-gate spirit).  Ext2(nullptr) would
+    // crash in mount(), so the NVMe Ext2 is constructed only when a device exists.
+    cinux::fs::Ext2* rootfs  = nullptr;
+    auto*            nvme_bd = cinux::drivers::nvme::nvme_block_device();
+    if (nvme_bd != nullptr) {
+        static cinux::fs::Ext2 nvme_ext2(nvme_bd);
+        if (nvme_ext2.mount().ok()) {
+            rootfs = &nvme_ext2;
+            cinux::lib::kprintf("[INIT] rootfs on NVMe (perf path)\n");
+        }
+    }
+    if (rootfs == nullptr) {
+        static auto ahci_blk = cinux::drivers::ahci::AHCIBlockDevice::create(
+            cinux::drivers::ahci::AHCI::instance(), 1);
+        static cinux::fs::Ext2 ahci_ext2(ahci_blk.ok() ? &ahci_blk.value() : nullptr);
+        auto                   m = ahci_ext2.mount();
+        if (!m.ok()) {
+            cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n", cinux::lib::error_string(m.error()));
+        }
+        rootfs = &ahci_ext2;
+        cinux::lib::kprintf("[INIT] rootfs on AHCI\n");
     }
 
     cinux::lib::kprintf("[INIT] ===== Milestone 027: VFS =====\n");
     cinux::fs::vfs_mount_init();
-    cinux::fs::vfs_mount_add("/", &ext2);
+    cinux::fs::vfs_mount_add("/", rootfs);
     cinux::lib::kprintf("[VFS] ext2 mounted at /\n");
 
     // DevFS: /dev/null, /dev/zero, /dev/console (F6-M3).

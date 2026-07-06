@@ -84,6 +84,18 @@ constexpr bool is_e1000_device(uint16_t vendor, uint16_t device) {
     }
 }
 
+/**
+ * @brief True iff the class/subclass identify an NVMe controller
+ *
+ * NVMe = class 0x01 (mass storage) / subclass 0x08 (NVM controller).
+ * prog_if 0x02 (NVMe over PCIe) is NOT required: subclass 0x08 already
+ * uniquely identifies NVM controllers, and older NVMe chips may leave prog_if
+ * unset.  Pure (host-testable).
+ */
+constexpr bool is_nvme_device(uint8_t cls, uint8_t sub) {
+    return cls == PciClass::MASS_STORAGE && sub == PciClass::NVME_SUBCLASS;
+}
+
 // ============================================================
 // PCI Class
 // ============================================================
@@ -165,6 +177,18 @@ public:
      * @return     true if an e1000 NIC was found, false otherwise
      */
     bool find_e1000(PCIDevice& out) const;
+
+    /**
+     * @brief Enumerate PCI buses and locate an NVMe controller
+     *
+     * Scans for a device matching is_nvme_device() (class 0x01 / subclass 0x08).
+     * The first match is written to @p out with BARs decoded; BAR0 holds the
+     * controller register window.
+     *
+     * @param out  Reference to a PCIDevice to fill with the match
+     * @return     true if an NVMe controller was found, false otherwise
+     */
+    bool find_nvme(PCIDevice& out) const;
 
     /**
      * @brief Read all six BAR values from a PCI device

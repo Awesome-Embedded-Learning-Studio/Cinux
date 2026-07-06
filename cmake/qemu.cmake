@@ -5,14 +5,14 @@ if(NOT QEMU_EXECUTABLE)
     message(WARNING "qemu-system-x86_64 not found in PATH, using default name")
 endif()
 
-# Detect KVM — skip -accel kvm when /dev/kvm is absent (e.g. CI runners)
-# or when CINUX_NO_KVM is set (force TCG / 2MB-path for diagnosis).
-if(EXISTS "/dev/kvm" AND NOT DEFINED ENV{CINUX_NO_KVM})
+# KVM vs TCG.  Default TCG: the host's /dev/kvm GID drifted to `kmem` (the user
+# is in `kvm` only) → permission denied, so KVM is currently unusable
+# (2026-07-06).  Enable explicitly with -DCINUX_USE_KVM=ON once /dev/kvm is
+# accessible again.  -cpu max so SMAP/SMEP are emulated (qemu64 advertises
+# neither → F9 stac/clac #UD without CPUID support); applies to both backends.
+if(CINUX_USE_KVM AND EXISTS "/dev/kvm")
     set(QEMU_ACCEL -accel kvm -cpu max)
 else()
-    # No KVM (CI runners, or CINUX_NO_KVM force-TCG). Use -cpu max so SMAP/SMEP
-    # are emulated; the default qemu64 advertises neither, so F9 batch 4's
-    # stac/clac instructions #UD (CR4.SMAP can't be set without CPUID support).
     set(QEMU_ACCEL -cpu max)
 endif()
 
@@ -45,6 +45,18 @@ add_custom_command(
     OUTPUT ${AHCI_TEST_IMAGE}
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh ${AHCI_TEST_IMAGE}
     COMMENT "Creating AHCI test disk image"
+    VERBATIM
+)
+
+# F5-M3 NVMe: test disk (1 MB raw).  The batch-1 mechanism test reads CAP/VS via
+# MMIO, so disk content is irrelevant -- the file just backs -device nvme so the
+# controller enumerates and its BAR0 maps.
+set(NVME_TEST_IMAGE "${CMAKE_BINARY_DIR}/nvme_test.img")
+add_custom_command(
+    OUTPUT ${NVME_TEST_IMAGE}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh ${NVME_TEST_IMAGE}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh
+    COMMENT "Creating NVMe test disk image"
     VERBATIM
 )
 
@@ -148,6 +160,11 @@ set(QEMU_TEST_EXTRA_FLAGS
     -device ide-hd,drive=ext2-disk,bus=ahci.1
     -drive file=${EXT4_IMAGE},format=raw,if=none,id=ext4-disk
     -device ide-hd,drive=ext4-disk,bus=ahci.2
+    # F5-M3 NVMe: controller + 1 MB backing disk.  serial= is mandatory for
+    # -device nvme; the kernel enumerates via PCI class 0x01/0x08.
+    -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
+    -device nvme,id=nvme0,serial=nvme0
+    -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
 )
 
 # ============================================================
@@ -237,7 +254,7 @@ function(cinux_qemu_test_target name)
                 ${_devs}
                 -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
         DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE}
-                regenerate-ext2-image ${EXT4_IMAGE}
+                regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
         USES_TERMINAL
         COMMENT "${ARG_COMMENT}"
         VERBATIM)
@@ -265,13 +282,17 @@ function(cinux_qemu_run_target name)
                           -device usb-tablet,bus=xhci.0)
     endif()
     if(NOT ARG_DEBUG)
-        # Interactive run targets attach the AHCI + rootfs disk group; run-debug
-        # is a bare image + gdb boot (no extra disks, no extra deps).
+        # Boot disk = NVMe (rootfs on NVMe for perf; F5-M3 batch 5). AHCI port 0
+        # keeps the test disk (boot-signature mechanism + legacy fallback path).
+        # init.cpp mounts NVMe because its namespace carries the ROOTFS_IMG ext2
+        # fs; if NVMe is absent it falls back to AHCI (port 1 rootfs would need
+        # re-adding, but NVMe is the expected default path now).
         list(APPEND _devs -device ahci,id=ahci
                 -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
                 -device ide-hd,drive=ahci-disk,bus=ahci.0
-                -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
-                -device ide-hd,drive=ext2-disk,bus=ahci.1)
+                -drive file=${ROOTFS_IMG},format=raw,if=none,id=nvme-disk
+                -device nvme,id=nvme0,serial=nvme0
+                -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0)
         list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS})
     endif()
     add_custom_target(${name}
@@ -466,7 +487,7 @@ add_custom_target(run-kernel-test-all
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE}
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
     VERBATIM
@@ -492,6 +513,30 @@ add_custom_target(run-buildroot-usability
     DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
     USES_TERMINAL
     COMMENT "F-USABILITY: Buildroot rootfs usability gate (init -> test script -> cinux-exit)"
+    VERBATIM
+)
+
+# F5-M3 batch 5 (NVMe perf): same usability gate as run-buildroot-usability but
+# the rootfs (rootfs-gcc.ext2) is attached to the NVMe namespace instead of AHCI
+# port 1.  init.cpp mounts NVMe (its namespace carries a valid ext2 fs) and the
+# gcc/g++ compile runs off NvmeBlockDevice -> Ext2 -- the AHCI vs NVMe I/O
+# comparison.  AHCI keeps port 0 (MBR boot); port 1 is unused (NVMe is the boot
+# disk).  Same kernel image + rootfs as run-buildroot-usability; only the
+# underlying block device driver differs.
+add_custom_target(run-nvme-buildroot-usability
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
+        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS}
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04
+        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        -device ahci,id=ahci
+        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
+        -device ide-hd,drive=ahci-disk,bus=ahci.0
+        -drive file=${ROOTFS_IMG},format=raw,if=none,id=nvme-disk
+        -device nvme,id=nvme0,serial=nvme0
+        -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
+    DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
+    USES_TERMINAL
+    COMMENT "F5-M3 NVMe perf: rootfs on NVMe (gcc/g++ compile I/O vs AHCI baseline)"
     VERBATIM
 )
 
