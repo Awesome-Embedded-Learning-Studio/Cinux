@@ -73,4 +73,18 @@ private:
     cinux::drivers::dma::DmaBuffer dma_buf_;
 };
 
+/**
+ * @name Production boot-disk accessor
+ *
+ * main.cpp Step 21a creates the NvmeBlockDevice once NVMe bring-up succeeds and
+ * registers it via set_nvme_block_device().  init.cpp reads it through
+ * nvme_block_device() to choose the boot disk at runtime (NVMe if its namespace
+ * carries a valid ext2 fs, else AHCI) -- no #ifdef (§14).  Returns nullptr when
+ * the NVMe controller is absent (no -device nvme) or bring-up failed.
+ */
+///@{
+NvmeBlockDevice* nvme_block_device();
+void             set_nvme_block_device(NvmeBlockDevice* bd);
+///@}
+
 }  // namespace cinux::drivers::nvme

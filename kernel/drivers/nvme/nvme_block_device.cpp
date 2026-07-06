@@ -80,4 +80,12 @@ cinux::lib::ErrorOr<void> NvmeBlockDevice::write_blocks(uint64_t block, uint64_t
     return {};
 }
 
+namespace {
+/// Production boot-disk singleton (set by main.cpp Step 21a, read by init.cpp).
+NvmeBlockDevice* g_nvme_blk = nullptr;
+}  // namespace
+
+NvmeBlockDevice* nvme_block_device() { return g_nvme_blk; }
+void             set_nvme_block_device(NvmeBlockDevice* bd) { g_nvme_blk = bd; }
+
 }  // namespace cinux::drivers::nvme

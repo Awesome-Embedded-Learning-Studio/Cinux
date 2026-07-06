@@ -124,11 +124,13 @@ void test_find_and_map() {
         TEST_ASSERT_TRUE(bd_r.ok());
         auto bd = std::move(bd_r.value());
 
-        uint8_t wpat[512];
+        // static: keep these off the stack (test_find_and_map already pushes
+        // several DmaBuffers; two 512-B locals blew -Wframe-larger-than=1024).
+        static uint8_t wpat[512];
         for (uint32_t i = 0; i < sizeof(wpat); ++i) {
             wpat[i] = static_cast<uint8_t>(0x3C ^ (i & 0x1F));
         }
-        uint8_t rpat[512] = {0};
+        static uint8_t rpat[512] = {0};
         TEST_ASSERT_TRUE(bd.write_blocks(2, 1, wpat).ok());
         TEST_ASSERT_TRUE(bd.read_blocks(2, 1, rpat).ok());
 

@@ -282,19 +282,18 @@ function(cinux_qemu_run_target name)
                           -device usb-tablet,bus=xhci.0)
     endif()
     if(NOT ARG_DEBUG)
-        # Interactive run targets attach the AHCI + rootfs disk group; run-debug
-        # is a bare image + gdb boot (no extra disks, no extra deps).
+        # Boot disk = NVMe (rootfs on NVMe for perf; F5-M3 batch 5). AHCI port 0
+        # keeps the test disk (boot-signature mechanism + legacy fallback path).
+        # init.cpp mounts NVMe because its namespace carries the ROOTFS_IMG ext2
+        # fs; if NVMe is absent it falls back to AHCI (port 1 rootfs would need
+        # re-adding, but NVMe is the expected default path now).
         list(APPEND _devs -device ahci,id=ahci
                 -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
                 -device ide-hd,drive=ahci-disk,bus=ahci.0
-                -drive file=${ROOTFS_IMG},format=raw,if=none,id=ext2-disk
-                -device ide-hd,drive=ext2-disk,bus=ahci.1
-                # F5-M3 NVMe: independent second disk (并存; production rootfs stays
-                # on AHCI, NVMe is the perf-comparison / future-NVMe-Ext2 target).
-                -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
+                -drive file=${ROOTFS_IMG},format=raw,if=none,id=nvme-disk
                 -device nvme,id=nvme0,serial=nvme0
                 -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0)
-        list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS} ${NVME_TEST_IMAGE})
+        list(APPEND _deps ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS})
     endif()
     add_custom_target(${name}
         COMMAND ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} ${_smp} ${QEMU_DEVELOP_FLAG} ${_dbg}
@@ -514,6 +513,30 @@ add_custom_target(run-buildroot-usability
     DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
     USES_TERMINAL
     COMMENT "F-USABILITY: Buildroot rootfs usability gate (init -> test script -> cinux-exit)"
+    VERBATIM
+)
+
+# F5-M3 batch 5 (NVMe perf): same usability gate as run-buildroot-usability but
+# the rootfs (rootfs-gcc.ext2) is attached to the NVMe namespace instead of AHCI
+# port 1.  init.cpp mounts NVMe (its namespace carries a valid ext2 fs) and the
+# gcc/g++ compile runs off NvmeBlockDevice -> Ext2 -- the AHCI vs NVMe I/O
+# comparison.  AHCI keeps port 0 (MBR boot); port 1 is unused (NVMe is the boot
+# disk).  Same kernel image + rootfs as run-buildroot-usability; only the
+# underlying block device driver differs.
+add_custom_target(run-nvme-buildroot-usability
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
+        ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS}
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04
+        -drive file=${CINUX_IMAGE_PATH},format=raw,index=0,media=disk
+        -device ahci,id=ahci
+        -drive file=${AHCI_TEST_IMAGE},format=raw,if=none,id=ahci-disk
+        -device ide-hd,drive=ahci-disk,bus=ahci.0
+        -drive file=${ROOTFS_IMG},format=raw,if=none,id=nvme-disk
+        -device nvme,id=nvme0,serial=nvme0
+        -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
+    DEPENDS image ${AHCI_TEST_IMAGE} ${ROOTFS_DEPS}
+    USES_TERMINAL
+    COMMENT "F5-M3 NVMe perf: rootfs on NVMe (gcc/g++ compile I/O vs AHCI baseline)"
     VERBATIM
 )
 

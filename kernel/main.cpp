@@ -288,7 +288,7 @@ extern "C" void kernel_main() {
                 // Leak into a static so the device outlives this scope; batch 5
                 // exposes an accessor for the perf comparison.
                 static cinux::drivers::nvme::NvmeBlockDevice nvme_blk = std::move(bd.value());
-                (void)nvme_blk;
+                cinux::drivers::nvme::set_nvme_block_device(&nvme_blk);
                 cinux::lib::kprintf("[NVMe] NvmeBlockDevice ready (nsze=%llu lba_size=%llu)\n",
                                     static_cast<unsigned long long>(ns.nsze),
                                     static_cast<unsigned long long>(ns.lba_size));
