@@ -1,11 +1,12 @@
 /**
  * @file kernel/gui/gui_init.hpp
- * @brief GUI subsystem initialisation interface
+ * @brief GUI subsystem initialisation interface (F13-B)
  *
- * Provides a clean entry point for the GUI stack: mouse driver,
- * window manager, and PIT tick callback registration.  All GUI
- * setup is encapsulated here so that kernel_main stays free of
- * GUI details.
+ * F13-B (2026-07-05): the old gui_init(Canvas&, PSFFont&) + create_shell_terminal()
+ * helpers are gone. The widget tree + GuiCore are constructed by the host
+ * adapter (cinux_host_init, called from handoff_framebuffer_to_gui); shell
+ * spawn arrives in B2 via the HostDesktop::spawn callback. gui_start() remains
+ * to register the PS/2 mouse + keyboard listener.
  *
  * This header is only compiled when CINUX_GUI is defined.
  *
@@ -14,41 +15,17 @@
 
 #pragma once
 
-namespace cinux::drivers {
-class Canvas;
-class PSFFont;
-}  // namespace cinux::drivers
-
 namespace cinux::gui {
 
 /**
- * @brief Perform one-time GUI initialisation (call once from kernel_main)
+ * @brief Register the PS/2 mouse driver + keyboard listener (call from
+ *        kernel_init_thread via launch_userspace)
  *
- * Sets up the mouse driver, window manager, and renders the demo
- * screen.  Must be called after the Canvas and PSFFont are ready
- * and after PIC IRQ0/IRQ1 are unmasked and interrupts enabled.
- *
- * @param screen  Reference to the initialised screen canvas
- * @param font    Reference to the initialised PSF2 font
- */
-void gui_init(cinux::drivers::Canvas& screen, cinux::drivers::PSFFont& font);
-
-/**
- * @brief Register the GUI tick callback on the PIT (call from kernel_init_thread)
- *
- * After calling this, every PIT tick will drain the event queue,
- * dispatch input to the window manager, and composite the frame.
- * Registers desktop icons (Shell, Calculator) on the desktop.
+ * After this, every decoded key event is mirrored into the unified Mouse event
+ * queue so host_cinux poll_event drains both pointer + keyboard. Widget tree
+ * + GuiCore + mouse screen bounds are set by cinux_host_init() (called earlier
+ * from handoff_framebuffer_to_gui at kernel_main time).
  */
 void gui_start();
-
-/**
- * @brief Spawn a shell terminal window (Desktop icon action)
- *
- * Creates a centred Terminal window, wires per-terminal stdin/stdout pipes,
- * forks a shell child task running /bin/sh, and adds the window to the WM.
- * Used by the cinux::gui host desktop->spawn callback (cinux::gui §3b adapter).
- */
-void create_shell_terminal();
 
 }  // namespace cinux::gui

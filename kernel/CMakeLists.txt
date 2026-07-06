@@ -246,20 +246,12 @@ add_executable(big_kernel_test
     test/test_cwd_stat.cpp
     test/test_canvas.cpp
     test/test_mouse_event.cpp
-    test/test_window.cpp
-    test/test_window_manager.cpp
-    test/test_gui_integration.cpp
-    test/test_bitmap_icon.cpp
-    test/test_desktop.cpp
-    test/test_terminal.cpp
     test/test_pipe.cpp
     test/test_sys_pipe.cpp
     test/test_fifo.cpp
     test/test_shm.cpp
     test/test_poll.cpp
-    test/test_terminal_shell.cpp
     test/test_fork_exec.cpp
-    test/test_multi_terminal.cpp
     test/test_kprintf_format.cpp
     test/test_concurrent_ring_buffer.cpp
     test/test_user_ptr.cpp
@@ -287,9 +279,6 @@ add_executable(big_kernel_test
     test/test_kallsyms.cpp
     test/test_backtrace.cpp
     test/test_memory_stats.cpp
-    test/test_gui_swraster.cpp
-    test/test_gui_region.cpp
-    test/test_gui_dirty.cpp
     test/test_aslr.cpp
     test/test_creds.cpp
     test/test_devfs.cpp
