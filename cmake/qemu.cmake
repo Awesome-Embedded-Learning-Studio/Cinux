@@ -5,14 +5,14 @@ if(NOT QEMU_EXECUTABLE)
     message(WARNING "qemu-system-x86_64 not found in PATH, using default name")
 endif()
 
-# Detect KVM — skip -accel kvm when /dev/kvm is absent (e.g. CI runners)
-# or when CINUX_NO_KVM is set (force TCG / 2MB-path for diagnosis).
-if(EXISTS "/dev/kvm" AND NOT DEFINED ENV{CINUX_NO_KVM})
+# KVM vs TCG.  Default TCG: the host's /dev/kvm GID drifted to `kmem` (the user
+# is in `kvm` only) → permission denied, so KVM is currently unusable
+# (2026-07-06).  Enable explicitly with -DCINUX_USE_KVM=ON once /dev/kvm is
+# accessible again.  -cpu max so SMAP/SMEP are emulated (qemu64 advertises
+# neither → F9 stac/clac #UD without CPUID support); applies to both backends.
+if(CINUX_USE_KVM AND EXISTS "/dev/kvm")
     set(QEMU_ACCEL -accel kvm -cpu max)
 else()
-    # No KVM (CI runners, or CINUX_NO_KVM force-TCG). Use -cpu max so SMAP/SMEP
-    # are emulated; the default qemu64 advertises neither, so F9 batch 4's
-    # stac/clac instructions #UD (CR4.SMAP can't be set without CPUID support).
     set(QEMU_ACCEL -cpu max)
 endif()
 
