@@ -149,3 +149,21 @@ VirtIOBlock* virtio_block_device() { return g_virtio_blk; }
 void         set_virtio_block_device(VirtIOBlock* bd) { g_virtio_blk = bd; }
 
 }  // namespace cinux::drivers::virtio
+
+// ============================================================
+// MSI-X interrupt handler (F5-M2 batch 3, vector 0x42 kVirtioBlkIrqVector)
+// ============================================================
+// Fires when the device posts a used-ring entry (request completion).  Counts
+// only; the polling path in wait_completion independently observes used->idx,
+// so this handler does NOT need to wake a wait-queue (production can swap the
+// spin for prepare_to_wait/schedule_blocked here -- the ISR is the wake seam).
+// NO schedule() in ISR -- sti-in-syscall #DF (see sys-ping-df).  EOI by the
+// ISR_IRQ asm stub.
+namespace cinux::arch {
+struct InterruptFrame;  // fwd decl for the C handler signature
+}
+
+volatile uint64_t g_virtio_blk_irq_count = 0;
+extern "C" void virtio_blk_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
+    g_virtio_blk_irq_count = g_virtio_blk_irq_count + 1;
+}

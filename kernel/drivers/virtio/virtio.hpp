@@ -32,9 +32,15 @@
 
 #include <cinux/expected.hpp>
 
+#include "kernel/drivers/pci/msix.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 
 namespace cinux::drivers::virtio {
+
+/// Fixed IDT vector for the VirtIO-blk MSI-X interrupt (entry 0). Clear of
+/// NVMe (0x41) / xHCI (0x40) / LAPIC timer (0x30). Registered in irq_init;
+/// fires once init_msi_x enables + unmasks MSI-X.
+constexpr uint8_t kVirtioBlkIrqVector = 0x42;
 
 // ============================================================
 // VirtIO device_status bits (common_cfg + 0x14)
@@ -117,6 +123,14 @@ public:
     /// ACKNOWLEDGE | DRIVER.  Does NOT negotiate features or set DRIVER_OK --
     /// call negotiate_features() + finish_init().
     cinux::lib::ErrorOr<void> init(const pci::PCIDevice& dev);
+
+    /// Configure MSI-X (batch 3): map Table/PBA at +0x84000/+0x85000, program
+    /// entry 0 -> @p vector, enable, and LEAVE entry 0 unmasked (real async
+    /// interrupt -- unlike NVMe's mask_all polling).  The caller MUST have
+    /// installed the IDT handler first (irq_init registers kVirtioBlkIrqVector).
+    /// Production path; the test kernel leaves MSI-X off (no switch_to_apic ->
+    /// an unmasked MSI would strand in the LAPIC ISR, re-NVMe-batch-3 root cause).
+    cinux::lib::ErrorOr<void> init_msi_x(uint8_t vector);
 
     /// Reset the device (device_status <- 0) and wait for it to settle.
     /// Required before a fresh feature negotiation.
@@ -203,6 +217,11 @@ private:
     /// a split layout still resolves.  Mapped at KMEM_MMIO + 0x80000 + bar*0x1000.
     static constexpr uint8_t kMaxBars = 6;
     uint64_t bar_virt_[kMaxBars] = {};
+
+    // MSI-X (batch 3).  Third MsixController instance (xHCI @+0x40000, NVMe
+    // @+0x74000); VirtIO-blk Table @+0x84000, PBA @+0x85000.
+    pci::msix::MsixCap        msix_cap_{};
+    pci::msix::MsixController msix_;
 
     volatile uint8_t* common_cfg_  = nullptr;  ///< common_cfg base (virt)
     volatile uint8_t* notify_base_ = nullptr;  ///< notify region base (virt)

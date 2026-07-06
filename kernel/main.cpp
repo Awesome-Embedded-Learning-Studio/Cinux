@@ -308,6 +308,14 @@ extern "C" void kernel_main() {
             auto fr = virtio_blk_dev.negotiate_features(
                 cinux::drivers::virtio::Feature::VERSION_1);
             if (fr.ok()) {
+                // Enable MSI-X real interrupt (batch 3): entry 0 -> 0x42, unmasked.
+                // Production only -- the test kernel has no switch_to_apic, so an
+                // unmasked MSI would strand in the LAPIC ISR (NVMe batch-3 root
+                // cause); test_virtio therefore never calls init_msi_x.
+                auto mr = virtio_blk_dev.init_msi_x(cinux::drivers::virtio::kVirtioBlkIrqVector);
+                if (!mr.ok()) {
+                    cinux::lib::kprintf("[VirtIO-blk] MSI-X init failed -- polling mode\n");
+                }
                 const uint64_t capacity = virtio_blk_dev.device_cfg_read64(0);
                 auto bd = cinux::drivers::virtio::VirtIOBlock::create(virtio_blk_dev, capacity);
                 if (bd.ok()) {

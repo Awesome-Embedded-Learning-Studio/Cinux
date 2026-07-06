@@ -25,7 +25,8 @@
 #include "kernel/drivers/apic/local_apic.hpp"
 #include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/usb/xhci_irq.hpp"
-#include "kernel/drivers/nvme/nvme.hpp"  // F5-M3 batch 4: kNvmeIrqVector
+#include "kernel/drivers/nvme/nvme.hpp"             // F5-M3 batch 4: kNvmeIrqVector
+#include "kernel/drivers/virtio/virtio.hpp"         // F5-M2 batch 3: kVirtioBlkIrqVector
 #include "kernel/lib/kprintf.hpp"
 #include "pic.hpp"
 #include "smp.hpp"
@@ -65,6 +66,7 @@ void irq15_stub();
 void reschedule_ipi_stub();  // F4-M4 M4-2: reschedule IPI (vector 0xE0)
 void xhci_irq_stub();        // F5-M5 Batch 0C: xHCI event-ring MSI-X (vector 0x40)
 void nvme_irq_stub();        // F5-M3 batch 4: NVMe MSI-X (vector 0x41)
+void virtio_blk_irq_stub();  // F5-M2 batch 3: VirtIO-blk MSI-X (vector 0x42)
 void lapic_timer_stub();     // F5-M5 -smp: per-CPU LAPIC timer (vector 0x30)
 void net_timer_stub();       // F5-M6: e1000 RX-poll wakeup timer (vector 0x30, test kernel)
 }  // extern "C"
@@ -177,6 +179,13 @@ extern "C" void irq_init() {
     // enabled until init_msi_x, so it never fires prematurely.
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::nvme::kNvmeIrqVector),
                       nvme_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
+
+    // VirtIO-blk MSI-X interrupt (F5-M2 batch 3, vector kVirtioBlkIrqVector=0x42).
+    // Registered at boot so the shared IDT has the entry before APs start; MSI-X
+    // is not enabled until init_msi_x (production only), so it never fires
+    // prematurely, and the test kernel never enables MSI-X.
+    g_idt.set_handler(static_cast<ExceptionVector>(cinux::drivers::virtio::kVirtioBlkIrqVector),
+                      virtio_blk_irq_stub, GDT_KERNEL_CODE, kIRQAttr, 0);
 
     // LAPIC timer (F5-M5 -smp, vector kLapicTimerVector).  Registered into the
     // shared IDT so APs can take it; the BSP is preempted by the PIT and never

@@ -42,6 +42,7 @@ constexpr uint32_t NUM_QUEUES            = 0x12;  ///< R  total queues supported
 constexpr uint32_t DEVICE_STATUS         = 0x14;  ///< RW status bits
 constexpr uint32_t QUEUE_SELECT          = 0x16;  ///< RW selects queue for the below
 constexpr uint32_t QUEUE_SIZE            = 0x18;  ///< RW queue size (power of two)
+constexpr uint32_t QUEUE_MSIX_VECTOR     = 0x1a;  ///< RW MSI-X entry (0xFFFF=none)
 constexpr uint32_t QUEUE_ENABLE          = 0x1c;  ///< RW 1 = enable selected queue
 constexpr uint32_t QUEUE_NOTIFY_OFF      = 0x1e;  ///< R  notify-offset for this queue
 constexpr uint32_t QUEUE_DESC_LO         = 0x20;  ///< RW desc-table phys (split lo/hi)
@@ -257,6 +258,35 @@ cinux::lib::ErrorOr<void> VirtIODevice::init(const pci::PCIDevice& dev) {
     return {};
 }
 
+cinux::lib::ErrorOr<void> VirtIODevice::init_msi_x(uint8_t vector) {
+    msix_cap_ = pci::msix::find_capability(dev_.bus, dev_.slot, dev_.func, &pci::PCI::pci_read);
+    if (!msix_cap_.found) {
+        cinux::lib::kprintf("[VirtIO] no MSI-X capability\n");
+        return cinux::lib::Error::InvalidArgument;
+    }
+    // Third MsixController instance: Table/PBA @+0x84000/+0x85000 (xHCI owns
+    // +0x40000, NVMe +0x74000).  Entry 0 -> @p vector; program_vector unmasks.
+    // LEAVE entry 0 unmasked -- real async IRQ (the batch-3 delta over NVMe's
+    // mask_all polling, which stranded real IRQ as a follow-up).  Production
+    // only: the test kernel has no switch_to_apic, so an unmasked MSI would
+    // strand in the LAPIC ISR (NVMe batch-3 root cause).
+    constexpr uint64_t kTableVirt = cinux::arch::KMEM_MMIO_BASE + 0x84000;
+    constexpr uint64_t kPbaVirt   = cinux::arch::KMEM_MMIO_BASE + 0x85000;
+    auto               r          = msix_.init(msix_cap_, dev_, kTableVirt, kPbaVirt);
+    if (!r.ok()) {
+        return cinux::lib::Error::OutOfMemory;
+    }
+    msix_.mask_all();
+    msix_.program_vector(0, vector, 0);
+    msix_.enable();
+    // NOT mask_all() here -- entry 0 stays unmasked so the device's completion
+    // MSI fires for real.  Production arms the IDT handler (irq_init) + has
+    // switch_to_apic (Step 17), so the MSI delivers instead of stranding.
+    cinux::lib::kprintf("[VirtIO] MSI-X enabled (entry 0 -> vector 0x%x, %u entries, unmasked)\n",
+                        vector, msix_cap_.table_size);
+    return {};
+}
+
 cinux::lib::ErrorOr<void> VirtIODevice::reset() {
     common_write8(CfgOff::DEVICE_STATUS, 0);
     for (uint32_t i = 0; i < kResetIters; ++i) {
@@ -319,6 +349,9 @@ cinux::lib::ErrorOr<uint16_t> VirtIODevice::setup_queue(uint16_t queue_index, ui
                                                        uint64_t used_phys) {
     common_write16(CfgOff::QUEUE_SELECT, queue_index);
     common_write16(CfgOff::QUEUE_SIZE, size);
+    // Bind this queue to MSI-X entry 0 so completions raise vector 0x42 once
+    // init_msi_x enables MSI-X.  No effect when MSI-X is off (test kernel).
+    common_write16(CfgOff::QUEUE_MSIX_VECTOR, 0);
     // 64-bit ring phys written as two 32-bit halves (avoids 64-bit MMIO
     // alignment concerns; VirtIO common_cfg queue_{desc,avail,used} are le64).
     common_write32(CfgOff::QUEUE_DESC_LO, static_cast<uint32_t>(desc_phys));
