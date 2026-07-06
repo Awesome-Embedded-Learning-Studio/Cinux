@@ -85,6 +85,10 @@ option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for
 # it makes it visible in ccmake/cmake-gui without changing the default.
 option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF)
 
+# F5-M3 后(2026-07-06):host /dev/kvm GID 漂到 kmem(用户只在 kvm 组)→ permission
+# denied,KVM 不可用。默认 TCG 模拟;KVM 恢复后 -DCINUX_USE_KVM=ON 显式开。
+option(CINUX_USE_KVM "Use KVM acceleration (default OFF; TCG until host /dev/kvm GID is fixed)" OFF)
+
 # =============================================================================
 # Rootfs profile (F-USABILITY stage 2)
 # =============================================================================

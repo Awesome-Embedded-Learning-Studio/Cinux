@@ -154,6 +154,9 @@ bool match_xhci(const PCIDevice& dev) {
 bool match_e1000(const PCIDevice& dev) {
     return is_e1000_device(dev.vendor_id, dev.device_id);
 }
+bool match_nvme(const PCIDevice& dev) {
+    return is_nvme_device(dev.class_code, dev.subclass);
+}
 
 }  // namespace
 
@@ -194,6 +197,10 @@ bool PCI::find_xhci(PCIDevice& out) const {
 
 bool PCI::find_e1000(PCIDevice& out) const {
     return find_device("e1000", 0, match_e1000, out);
+}
+
+bool PCI::find_nvme(PCIDevice& out) const {
+    return find_device("NVMe", 0, match_nvme, out);
 }
 
 }  // namespace cinux::drivers::pci

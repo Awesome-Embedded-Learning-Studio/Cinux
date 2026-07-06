@@ -3,6 +3,30 @@
 > 现代 SSD 协议。PCIe 设备，Admin Queue + I/O Queue。
 > 高性能存储接口，实现 IBlockDevice。
 
+## 立项（2026-07-05，分支 `feat/f5-nvme-virtio`，从干净 main `bef86b0`）
+
+**接入策略 = 并存验证**：NVMe 作独立第二盘，生产 rootfs 仍走 AHCI；perf 批把 gcc rootfs 放 NVMe 盘对比 I/O。**接入缝（零改 ext2）**：`Ext2` 持裸 `IBlockDevice*`（`explicit Ext2(IBlockDevice* dev)`），NVMe 造 `NvmeBlockDevice` 传给 Ext2，ext2/PageCache 零改。**MMIO 槽位（KMEM_MMIO 2MB 窗）**：NVMe BAR0 @+0x70000、MSI-X Table @+0x74000 / PBA @+0x75000（避碰 xHCI +0x40000）。
+
+### 批表（详见 [PLAN](../../ai/PLAN.md)「🔄 F5-M3 NVMe」段）
+| 批 | 范围 |
+|----|------|
+| 0 | 立项 docs（PLAN + ROADMAP ⏳→🔄 + 本文件范围栅栏） |
+| 1 | PCI 枚举 NVMe（`find_nvme`）+ BAR0 映射 @+0x70000 + QEMU 加 `-device nvme` 独立盘 + 机制测读 CAP/VS 证映射真生效 |
+| 2 | Controller init（CC.EN↔CSTS.RDY 握手）+ Admin SQ/CQ + doorbell + Identify Controller（轮询 CQ，无中断） |
+| 3 | MSI-X 多实例（`MsixController::init` 加 base 参数）+ NVMe MSI-X + IO CQ 中断绑 IDT |
+| 4 | `NvmeBlockDevice`（IBlockDevice，抄 AHCIBlockDevice）+ Read/Write（PRP SGL）+ main.cpp Step 21c 注册（并存） |
+| 5 | perf NVMe vs AHCI gcc/g++ I/O 对比（基线 ~6.2s/~7.4s）+ 收官 note + ROADMAP ✅ |
+
+### GOTCHA
+- **sti-in-syscall #DF（致命）**：中断 ISR 绝不 inline schedule（同 sys-ping-df / PIT 重入 #DF，已修过两类）。中断只记账+唤醒，EOI 后再调度。
+- **MsixController 硬编码 +0x40000**：xHCI 专用，批3 加 base 参数支持第二实例（改公共接口，push 前全量编）。
+- **PRP SGL**：4KB 对齐物理连续，>2 页用 PRP list 链，复用 DmaPool（参考 AHCIBlockDevice 持单 DmaBuffer）。
+- **QEMU nvme 仿真 overhead**：理论 per-page ~50μs ≈ 40× AHCI 打折扣，真机才接近，perf 诚实标注。
+- **smoke 默认 ON 挂死**：本地 `-DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`。
+- **范围栅栏**：批1-4 不动 AHCI 链；NVMe 不进 production Ext2 装配（生产切换留 follow-up）；VirtIO（M2）下一弧。
+
+> 下方 T1-T4 为早期设计骨架，寄存器 / SQ / CQ 结构可参考；**接口以 `IBlockDevice`（`ErrorOr<void>`，见 [block_device.hpp](../../../kernel/drivers/block_device.hpp)）为准，下方 `bool read_blocks` 签名已过时**。
+
 ## 依赖
 
 - F1 IBlockDevice 接口

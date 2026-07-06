@@ -51,6 +51,36 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 - **批4a follow-up（登记，留后续）**：①ext4 rootfs（ext2 驱动只读 ext4 extent depth-0 leaf，**extent 写是 F6-M5 follow-up**；可写 rootfs 必须留 ext2 `mkfs.ext2 -O none`，批4a 暂扩 IMAGE_SIZE 192MB）；②do_open_kernel follow（sys_open 旧路径 ring0 测试专用，不 follow symlink；生产 sys_open/sys_openat → do_openat 已 follow，一致性非 gate 阻塞）；③sys_readlink 对 regular 文件应返 EINVAL（现读 i_block 当 long symlink，次要）；④PIE（**批1 kernel ✅ 2026-07-05**：execve 检测 ET_DYN 选 `USER_EXEC_BASE(0x20000000)+aslr_exec_base_offset`，`entry_va`/`AT_ENTRY` 加 base 偏移；`build-hello-dyn.sh` 去 `-no-pie` 产真 PIE。⭐踩坑：brk heap 的 `USER_BRK_MAX(240MB)` 是绝对上限(为 ldso 让路)，PIE main 在 512MB 撞穿→heap VMA 倒置→execve -12；修 `brk_max` 跟随 image(ET_EXEC→`USER_BRK_MAX` / PIE→`USER_MMAP_BASE`)。两 leg `/hello`(ET_EXEC)20/20 + `/hello-dyn`(PIE)5/5 PASS + ASLR base 10 次全不同。**批2 toolchain ✅**：extract.sh/usability 去 `-fno-pie`，gcc/g++ 默认 PIE，run-buildroot-usability PASS（gcc a.out base=0x2024D000 / g++ cpp.out base=0x209E4000，ASLR 生效）。⭐踩坑：GUI=ON 让 usability gate 卡(kernel_init 走 GUI desktop 不跑 busybox init PID1)，gate 须 GUI=OFF。详见 [note](../notes/2026-07-05-pie-b1.md)/[b2](../notes/2026-07-05-pie-b2.md)）；⑤ACT nektos/act issue 107（container cwd `/tmp/...` no such file + composite action path 空，act 0.2.89 + Docker Desktop；升 act 或换 `--bind` 配置，**非脚本**——`act_ci_job.sh` 固化 docker/image/workdir/git-init/prepare 检查全过）；⑥批4b pthread（gettid/set_robust_list/sched_getaffinity stub + clone CLONE_THREAD 真跑，机制有未压测）。详见 [note](../notes/2026-07-04-f-usability-b4a-gpp-cpp.md)。
 - **手搓并存纪律**：`tools/musl/` + `create_ext2_disk.sh` 保留作快反馈/调试载体；两条 rootfs 走不同 CMake option/profile，Buildroot 出问题时能定位是内核还是 rootfs 的锅。
 
+## 🔄 F5-M3 NVMe（PCIe SSD）— 立项 2026-07-05（分支 `feat/f5-nvme-virtio`，从干净 main `bef86b0`）
+
+> Feature 域 F5 第三里程碑。NVMe PCIe SSD 驱动，实现 IBlockDevice，目标给 gcc 编译 I/O 提速（实测 KVM gcc 编译 I/O bound 87%，per-page AHCI ~2.4ms vs NVMe ~50μs 理论 ~40×；QEMU 仿真打折扣，真机才接近）。接 F5-M1 AHCI DMA ✅（IBlockDevice + DmaPool 参考）、F5-M5 xHCI ✅（MSI-X 参考）、F5 PCI 框架 ✅。**用户决策（2026-07-05）**：① 接入策略 = **并存验证**（NVMe 独立第二盘，生产 rootfs 仍走 AHCI，perf 批把 gcc rootfs 放 NVMe 盘对比）；② 范围 = 完整 5 批（批0→5）。VirtIO（M2）是下一弧，本弧不碰。
+
+> **接入缝（零改 ext2）**：`Ext2` 持裸 `IBlockDevice*`（[ext2.hpp:55](../../kernel/fs/ext2/ext2.hpp#L55) `explicit Ext2(IBlockDevice* dev)`），NVMe 再造一个 `NvmeBlockDevice` 传给 Ext2 构造，ext2/PageCache 零改。**MMIO 槽位（KMEM_MMIO 2MB 窗）**：现有 AHCI@+0 / LAPIC@+0x10000 / IOAPIC@+0x11000 / xHCI@+0x20000 / MSI-X@+0x40000 / e1000@+0x50000 / HPET@+0x60000 → NVMe BAR0 @+0x70000、NVMe MSI-X Table @+0x74000 / PBA @+0x75000。
+
+### 批表
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 0 | 立项 docs（本段）+ ROADMAP F5-M3 ⏳→🔄 + todo `02-nvme.md` 范围栅栏 | 🔄 | docs-only |
+| 1 | PCI 枚举 NVMe（`find_nvme` class=0x01/subclass=0x08）+ BAR0 映射 @+0x70000 + QEMU 加 `-device nvme` 独立盘 + 机制测读 CAP/VS 证映射真生效 | ✅ `1b7fc5a`+nvme | 两 leg 886/0 + 机制测 MQES=2047 VS=1.4 |
+| 2a | Controller enable（CC.EN↔CSTS.RDY 握手）+ Admin SQ/CQ 配置（AQA/ASQ/ACQ + 4KB DmaBuffer） | ✅ | 两 leg 886/0 + CSTS.RDY=1 |
+| 2b | doorbell + Identify Controller（Admin SQ 提交 + 轮询 CQ）+ CAP.DSTRD 解码确认 | ✅ `a471f22`+2b | 两 leg 886/0 + Identify VID=0x1b36 SSVID=0x1af4 MN=QEMU NVMe Ctrl |
+| 3 | MSI-X 多实例：`MsixController::init` 加 table_virt/pba_virt 默认参数（xHCI 用默认 +0x40000 不变；NVMe 传 +0x74000/+0x75000）+ NVMe `init_msi_x`（entry 0 -> vector 0x41）| ✅ | 全量编绿（xHCI 不破）+ 两 leg 886/0 + init_msi_x 真验（msix_table[0] 编程）；⭐dev_.bar[0] stale 治（read_bars 在 self-assign 前→MSI-X Table phys 算低内存→写低 RAM 破坏 0x1234 区→clone acquire #PF；修 init 更新 dev_.bar[0]）|
+| 4a | Identify Namespace（CNS=0x00）+ admin_submit helper + Create IO Cq/SQ + ISR（IDT[0x41]）+ enable MSI-X | ✅ | 两 leg 1844/0 + Create IO Cq/SQ status=0；⭐根因 CC 字段位错（IOSQES=[19:16]/IOCQES=[23:20]，非 [29:24]/[21:16]；0x8205=MAX_QSIZE_EXCEEDED SC=2 非 IV SC=8，IV 是误诊）+ NVMe MSI 污染 LAPIC（test kernel 没 switch_to_apic→0x41 占 ISR 阻塞 e1000 timer；修 init_msi_x mask_all）。note `2026-07-06-f5-m3-b4a-create-io-queue.md` |
+| 4b | NVM Read/Write（单页 PRP1，opcode 0x02/0x01）+ io_submit + round-trip 机制测 | ✅ | 两 leg 1844/0 + Read/Write round-trip 512 bytes OK；note `2026-07-06-f5-m3-b4b-nvm-read-write.md`。PRP list（>1 页）留批4c |
+| 4c | NvmeBlockDevice（IBlockDevice 适配，抄 AHCIBlockDevice）+ main.cpp Step 21a 注册（并存）+ test round-trip | ✅ | 两 leg 1844/0 + NvmeBlockDevice round-trip OK；production boot 待用户 GUI 验。note `2026-07-06-f5-m3-b4c-nvme-block-device.md`。ISR install（批4a）+ mask_all polling；unmask 真异步 IRQ 留 follow-up |
+| 5 | perf 量收益：NVMe 盘跑 gcc/g++ 编译对比 AHCI 基线 [MEM] I/O + NVMe 默认 boot disk + 收官 | ✅ | NVMe 9365ms vs AHCI 10763ms（−13% I/O，QEMU 仿真折扣理论 40×）；NVMe 默认 rootfs（`run` target）+ AHCI legacy fallback（init.cpp runtime 选盘）；两 gate PASS + TCG 回归 922/0。note `2026-07-06-f5-m3-b5-perf-nvme-vs-ahci.md` |
+
+### 风险 / 陷阱
+- **⭐ SeaBIOS 不配 QEMU nvme BAR0（批1 踩坑，假绿）**：`dev.bar[0]=0x0`（SeaBIOS 配 AHCI/e1000 但跳过 QEMU nvme），读 CAP/VS 映射到 phys 0x0（低 RAM）返垃圾值恰好满足 "> 0" 断言 = **假绿**（MQES=65363/VS=0xf000e2c3）。修：NVMe init 加 BAR self-assign（probe size=16384 + 固定槽 `0xfeb40000`）+ **64-bit BAR 必须清 BAR1**（rb1=0 才使地址=0xfeb40000 < 4GB），读到真 MQES=2047/VS=1.4（NVMe 1.4）。教训：机制测断言要能区分真值 vs 垃圾（MQES 合理范围 + MJR>=1，不只 >0）。通用 PCI BAR 分配器留 PCI 框架 follow-up（批1 NVMe 内 self-assign）。
+- **⭐ CAP.DSTRD 解码（批2b 修正）**：NVMe 1.4 CAP.DSTRD = bits[31:28]（4 位），doorbell stride = 4 << DSTRD。批1/2a 误用 `(cap_lo>>24)&0xF`（bits[27:24] = TO 高半字节）显示 DSTRD=15（误导，真值 0）；批2b 改 `(cap_lo>>28)&0xF` → DSTRD=0/stride=4，Admin SQ tail @ BAR0+0x1000、CQ head @ BAR0+0x1004。
+- **sti-in-syscall #DF（致命 GOTCHA）**：NVMe 中断 ISR 绝不 inline schedule（同 sys-ping-df-sti-in-syscall / PIT IRQ 重入 #DF，批3 PIT/LAPIC timer inline schedule 重入窗口已修过）。中断只记账+唤醒，EOI 后再调度。
+- **MsixController 硬编码 +0x40000**（[msix_controller.cpp:30](../../kernel/drivers/pci/msix_controller.cpp#L30) `kMsixTableVirt`）：xHCI 专用，NVMe 要第二实例须给 `MsixController::init` 加 `table_virt/pba_virt` 参数（或构造注入）。**改公共接口，push 前全量编**（CI 盲区：run-kernel-test 不编 test/unit host 单测）。
+- **PRP SGL**：NVMe 用 PRP（Physical Region Page，4KB 对齐物理连续），第一 PRP + PRP list 链（>2 页传输）。复用 DmaPool（参考 [AHCIBlockDevice](../../kernel/drivers/ahci/ahci_block_device.hpp) 持单 DmaBuffer 模式）。
+- **QEMU nvme 仿真 overhead**：理论 per-page ~50μs ≈ 40× AHCI，但 QEMU 仿真打折扣；真机才接近。批5 诚实标注，不包装成真硬件收益。
+- **smoke 默认 ON 挂死**：本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`（同 F10/F5-M4 惯例）。
+- **VNC 避让**：多 AI 会话共 `-vnc :0` 互杀 QEMU，验证临时 sed `-vnc :5`，跑完 `git checkout`（同 verify-vnc-port-collision-multi-session）。
+- **范围栅栏（不投机）**：批1-4 不动 AHCI 链（并存）；NVMe 不进 production Ext2 装配（批4 只注册独立盘 + 机制测，生产切换留 follow-up）；VirtIO（M2）下一弧，不碰。
+
 ## ✅ GCC 自举主线 — 阶段收尾 2026-07-05（批1 tmpfs ＋ shm ＋ 批2 mount/tmp ＋ 批3a sys_access ＋ 批3b busybox init PID1 → 批4-a as+ld 自举 ＋ 批4-C2 cc1→as→ld→./hello 全闭环，合 main PR#61/PR#62/PR#66）
 
 > **2026-07-05 GCC 线阶段收尾**：CinuxOS 上 gcc/g++ 编译 + 跑用户程序全链路绿。达成：① F12-M2 批4-C2 cc1→as→ld→./hello 自举闭环；② F-USABILITY 批3 gcc driver 单命令 ✅ + 批4a g++ STL+异常 ✅（PR#63/64/65）；③ busybox init PID1（批3b）；④ C 重构治 lto_plugin corrupt（PR#65，refcount/pte_count 分离）；⑤ perf 弧 ext2 agg 降 gcc 编译 I/O 25%（PR#66）；⑥ 默认 PIE gcc/g++ + main-base ASLR（PR#66 PIE B1+B2）；⑦ syscall 补全 gcc/g++ unhandled 90→0（PR#66）。CI 全绿。详见收官 [note](../notes/2026-07-05-gcc-line-finale.md)。
