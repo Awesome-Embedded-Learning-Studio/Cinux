@@ -51,6 +51,8 @@ constexpr uint32_t kAssignedBar0 = 0xfeb40000;
 
 // Admin queue geometry + enable constants (batch 2a).
 constexpr uint16_t kAdminQSize = 64;       // Admin SQ/CQ entries (well under MQES+1=2048)
+// IO queue geometry (batch 4a/4b).  qid=1, 64 entries (well under MQES+1=2048).
+constexpr uint16_t kIoQSize = 64;
 constexpr uint32_t kReadyIters = 1000000;  // CSTS.RDY spin budget (no IRQ until batch 3)
 constexpr uint32_t kCstsRdy    = 0x1;      // CSTS.RDY bit
 // CC (NVMe 1.4): IOCQES[23:20]=4 (16 B CQ entry), IOSQES[19:16]=6 (64 B SQ
@@ -341,7 +343,6 @@ cinux::lib::ErrorOr<void> NvmeController::identify_namespace(uint32_t nsid, Name
 }
 
 cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
-    constexpr uint16_t kIoQSize       = 64;
     constexpr uint16_t kIoQid         = 1;
 
     auto sq_r = cinux::drivers::dma::g_dma_pool.alloc(static_cast<uint64_t>(kIoQSize) * 64);
@@ -390,6 +391,68 @@ cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
     io_cq_phase_         = 1;
     cinux::lib::kprintf("[NVMe] IO queues created (qid=1 size=%u)\n", kIoQSize);
     return {};
+}
+
+cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
+    // Enqueue on the IO SQ (qid=1) at [tail] and ring the doorbell.
+    auto*   sq                = static_cast<NvmeCmd*>(io_sq_buf_.virt());
+    sq[io_sq_tail_]           = cmd;
+    io_sq_tail_               = (io_sq_tail_ + 1) % kIoQSize;
+    *io_sq_tdbell_            = io_sq_tail_;
+
+    // Poll the IO CQ for this command's completion (phase tag flips).
+    auto* cq = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
+    for (uint32_t i = 0; i < kReadyIters; ++i) {
+        volatile NvmeCqe& cqe          = cq[io_cq_head_];
+        const uint16_t    status_field = cqe.status;
+        if ((status_field & 0x1) == io_cq_phase_) {
+            const uint16_t status = static_cast<uint16_t>(status_field >> 1);
+            io_cq_head_           = (io_cq_head_ + 1) % kIoQSize;
+            if (io_cq_head_ == 0) {
+                io_cq_phase_ ^= 1;
+            }
+            *io_cq_hdbell_ = io_cq_head_;
+            return status;
+        }
+    }
+    return cinux::lib::Error::TimedOut;
+}
+
+cinux::lib::ErrorOr<void> NvmeController::nvm_io(uint8_t opcode, uint32_t nsid, uint64_t slba,
+                                                 uint16_t                              nlb,
+                                                 cinux::drivers::dma::DmaBuffer& buf) {
+    // NVM Read (0x02) / Write (0x01) -- NvmeRwCmd layout (QEMU hw/nvme/nvme.h):
+    //   cdw10/11 = SLBA (64-bit), cdw12[15:0] = NLB-1 (0-based), dptr = PRP1/PRP2.
+    // Single-page transfer: PRP1 = buf.phys() (page-aligned), PRP2 = 0.
+    NvmeCmd cmd{};
+    cmd.opcode = opcode;
+    cmd.nsid   = nsid;
+    cmd.prp1   = buf.phys();
+    cmd.prp2   = 0;
+    cmd.cdw10  = static_cast<uint32_t>(slba);
+    cmd.cdw11  = static_cast<uint32_t>(slba >> 32);
+    cmd.cdw12  = static_cast<uint32_t>(nlb - 1);
+    auto sr    = io_submit(cmd);
+    if (!sr.ok()) {
+        return sr.error();
+    }
+    if (sr.value() != 0) {
+        cinux::lib::kprintf(
+            "[NVMe] NVM I/O opcode=0x%x nsid=%u slba=%llu nlb=%u failed status=0x%x\n", opcode,
+            nsid, static_cast<unsigned long long>(slba), nlb, sr.value());
+        return cinux::lib::Error::IOError;
+    }
+    return {};
+}
+
+cinux::lib::ErrorOr<void> NvmeController::read_blocks(uint32_t nsid, uint64_t slba, uint16_t nlb,
+                                                      cinux::drivers::dma::DmaBuffer& buf) {
+    return nvm_io(0x02, nsid, slba, nlb, buf);
+}
+
+cinux::lib::ErrorOr<void> NvmeController::write_blocks(uint32_t nsid, uint64_t slba, uint16_t nlb,
+                                                       cinux::drivers::dma::DmaBuffer& buf) {
+    return nvm_io(0x01, nsid, slba, nlb, buf);
 }
 
 }  // namespace cinux::drivers::nvme

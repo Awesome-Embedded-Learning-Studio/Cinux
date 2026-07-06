@@ -132,6 +132,18 @@ public:
     /// batch 4b NVM Read/Write.
     cinux::lib::ErrorOr<void> create_io_queues();
 
+    /// Read @p nlb LBAs starting at @p slba from namespace @p nsid into @p buf
+    /// (batch 4b).  @p buf is a DMA buffer, page-aligned, holding at least
+    /// nlb*lba_size bytes; only single-page transfers are supported (PRP1 only,
+    /// PRP2 = 0 -- a PRP list for >1 page is a follow-up).
+    cinux::lib::ErrorOr<void> read_blocks(uint32_t nsid, uint64_t slba, uint16_t nlb,
+                                          cinux::drivers::dma::DmaBuffer& buf);
+
+    /// Write @p nlb LBAs from @p buf to namespace @p nsid at @p slba (batch 4b).
+    /// Same buffer constraints as read_blocks.
+    cinux::lib::ErrorOr<void> write_blocks(uint32_t nsid, uint64_t slba, uint16_t nlb,
+                                           cinux::drivers::dma::DmaBuffer& buf);
+
     bool present() const { return regs_ != nullptr; }
 
     /// CAP.MQES (0-based; the maximum queue size is MQES + 1).
@@ -150,6 +162,17 @@ private:
     /// (phase flip).  Returns the status field (SC/SCT, 0 = success) or
     /// Error::TimedOut.  Shared by Identify/Create commands (batch 4a helper).
     cinux::lib::ErrorOr<uint16_t> admin_submit(const NvmeCmd& cmd);
+
+    /// Submit @p cmd on the IO SQ (qid=1) and poll the IO CQ for completion
+    /// (batch 4b).  Mirrors admin_submit but for the IO queue pair created by
+    /// create_io_queues().
+    cinux::lib::ErrorOr<uint16_t> io_submit(const NvmeCmd& cmd);
+
+    /// Build + submit an NVM Read (opcode 0x02) or Write (0x01) command
+    /// (batch 4b).  cdw10/11 = SLBA, cdw12[15:0] = nlb-1, PRP1 = buf.phys(),
+    /// PRP2 = 0 (single-page transfers only).
+    cinux::lib::ErrorOr<void> nvm_io(uint8_t opcode, uint32_t nsid, uint64_t slba,
+                                     uint16_t nlb, cinux::drivers::dma::DmaBuffer& buf);
 
     volatile NvmeRegs* regs_ = nullptr;
     pci::PCIDevice     dev_{};  // saved for MSI-X config (bus/slot/func + BARs)

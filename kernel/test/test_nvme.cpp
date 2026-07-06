@@ -13,8 +13,10 @@
  */
 
 #include <stdint.h>
+#include <utility>
 
 #include "big_kernel_test.h"
+#include "kernel/drivers/dma/dma_pool.hpp"
 #include "kernel/drivers/nvme/nvme.hpp"
 #include "kernel/drivers/pci/pci.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -77,6 +79,42 @@ void test_find_and_map() {
 
     cinux::lib::ErrorOr<void> cr = ctrl.create_io_queues();
     TEST_ASSERT_TRUE(cr.ok());
+
+    // batch 4b: NVM Read/Write round-trip (1 LBA = ns.lba_size bytes,
+    // single-page PRP1).  Write a distinct pattern to slba=0, read it back,
+    // byte-compare.  The test disk is regenerated fresh per build, so writing
+    // slba=0 is safe and each leg gets the same initial image.
+    {
+        auto wbuf_r = dma::g_dma_pool.alloc(4096);
+        auto rbuf_r = dma::g_dma_pool.alloc(4096);
+        TEST_ASSERT_TRUE(wbuf_r.ok() && rbuf_r.ok());
+        auto wbuf = std::move(wbuf_r.value());
+        auto rbuf = std::move(rbuf_r.value());
+
+        auto* wp = static_cast<uint8_t*>(wbuf.virt());
+        for (uint32_t i = 0; i < ns.lba_size; ++i) {
+            wp[i] = static_cast<uint8_t>(0xA5 ^ (i & 0x1F));  // distinct, non-trivial
+        }
+        auto* rp = static_cast<uint8_t*>(rbuf.virt());
+        for (uint32_t i = 0; i < ns.lba_size; ++i) {
+            rp[i] = 0;
+        }
+
+        TEST_ASSERT_TRUE(ctrl.write_blocks(1, 0, 1, wbuf).ok());
+        TEST_ASSERT_TRUE(ctrl.read_blocks(1, 0, 1, rbuf).ok());
+
+        bool match = true;
+        for (uint32_t i = 0; i < ns.lba_size; ++i) {
+            if (rp[i] != wp[i]) {
+                cinux::lib::kprintf("[NVMe] RW mismatch @%u: w=0x%x r=0x%x\n", i, wp[i], rp[i]);
+                match = false;
+                break;
+            }
+        }
+        TEST_ASSERT_TRUE(match);
+        cinux::lib::kprintf("[NVMe] Read/Write round-trip: %u bytes OK\n",
+                            static_cast<unsigned>(ns.lba_size));
+    }
 
     // CAP.MQES (0-based) > 0: real controllers allow >= 2 entries; a zero or
     // unmapped read returns 0, so MQES > 0 proves the window is live and the
