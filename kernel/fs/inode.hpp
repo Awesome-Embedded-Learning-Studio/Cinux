@@ -90,7 +90,7 @@ public:
     /// on-disk + VFS size; freeing the now-orphaned data blocks is a follow-up
     /// (a hobby-os leak, not a correctness issue -- reads stop at i_size).  The
     /// default returns NotImplemented; only ext2 overrides for now.
-    virtual cinux::lib::ErrorOr<void>    truncate(Inode* inode, uint64_t new_size);
+    virtual cinux::lib::ErrorOr<void> truncate(Inode* inode, uint64_t new_size);
 
     /// Device-specific ioctl (terminal ioctls on a PTY/console inode, ...).
     /// @p request is the Linux ioctl request word (TCGETS, TIOCSCTTY, ...);
@@ -99,6 +99,17 @@ public:
     /// this simply answers "not a tty ioctl".  Overrides cross the user/kernel
     /// boundary themselves (copy_to/from_user).
     virtual cinux::lib::ErrorOr<int64_t> ioctl(const Inode* inode, uint32_t request, uint64_t arg);
+
+    /// F-GUI-USERSPACE batch 1: device mmap.  sys_mmap consults this hook when a
+    /// non-anonymous mapping targets a character device; an override returns the
+    /// physical base the VMA must bind to (e.g. the framebuffer's VBE phys
+    /// address).  The default returns NotImplemented, so regular files and
+    /// non-mmap-able devices fall through to the normal file-backed path or
+    /// reject the mmap.  @p offset is the mmap offset (already validated by the
+    /// caller); @p length the requested mapping size, which the override may
+    /// bound (e.g. clamp to the screen size).
+    virtual cinux::lib::ErrorOr<uint64_t> mmap(const Inode* inode, uint64_t offset,
+                                               uint64_t length);
 
     /// Called by sys_open after lookup resolves this inode.  The default returns
     /// the same inode (bind the fd to what lookup found).  A cloning device --

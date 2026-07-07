@@ -1,85 +1,72 @@
 /**
  * @file kernel/gui/desktop_launch.cpp
- * @brief GUI userspace launch (cinux::proc::launch_userspace, CINUX_GUI build)
+ * @brief GUI userspace launch -- fork+execve the userspace GUI host (F-GUI-USERSPACE b3b)
  *
- * CODING-TASTE §14: this is the GUI-side implementation of the single
- * launch_userspace() interface declared in kernel/proc/userspace.hpp. It starts
- * the desktop (mouse + keyboard listener via gui_start) and spawns the
- * gui_worker thread that drives the core-owned GuiCore session + services the
- * xHCI event ring each frame. The non-GUI counterpart lives in
- * kernel/proc/shell_launch.cpp; CMake links exactly one (the gui/ subdirectory
- * is added only under if(CINUX_GUI)).
+ * b3b replaces the in-kernel gui_worker thread with a USERSPACE GUI process.
+ * launch_userspace() fork+execve's /cinux_gui_host (the static musl ELF from
+ * tools/musl/build-cinux-gui-host.sh), which opens /dev/fb0 + /dev/event0,
+ * builds the widget tree, and pumps GuiCore entirely in user mode. gui_start()
+ * still runs first to arm the PS/2 mouse + keyboard listener (dual-write into
+ * /dev/event0, batch 2) so the host's poll_event drains pointer + keyboard.
  *
- * F13-B (2026-07-05): gui_worker now drives GuiCore::pump() (core owns the
- * staging session) instead of the old free-function cinux::gui::pump().
- * handoff_framebuffer_to_gui calls cinux_host_init() to build the widget tree
- * + GuiCore; the old Canvas + gui_init(canvas, font) steps are gone (the new
- * core owns its staging buffer and carries its own PSF2 font data).
+ * handoff_framebuffer_to_gui no longer builds the kernel host_cinux widget tree
+ * (the userspace host owns it now); it only detaches the text console so routine
+ * logs stop overlaying the framebuffer. host_cinux.cpp is dead code as of this
+ * batch -- batch 4 deletes it.
+ *
+ * CODING-TASTE §14: this is the GUI-side launch_userspace() impl; the non-GUI
+ * counterpart (execve /sbin/init) is kernel/proc/shell_launch.cpp. CMake links
+ * exactly one (kernel/gui/ is added only under if(CINUX_GUI)).
  */
 
 #include <stdint.h>
 
-#include "kernel/drivers/usb/usb_init.hpp"
-#include "kernel/drivers/video/console.hpp"
-#include "kernel/gui/gui_init.hpp"
-#include "kernel/gui/host_cinux.hpp"
+#include "kernel/drivers/video/console.hpp"  // Console::console_sink_adapter
+#include "kernel/gui/gui_init.hpp"           // gui_start (mouse + kbd listener)
 #include "kernel/lib/kprintf.hpp"
-#include "kernel/proc/scheduler.hpp"
-#include "kernel/proc/task_builder.hpp"
-#include "kernel/proc/userspace.hpp"
-#include "third_party/Cinux-GUI/core/gui_core.hpp"  // GuiCore (complete type for pump())
-
-namespace {
-
-/// GUI render/input pump loop. Drives the core-owned GuiCore session through
-/// the Host ABI table, then services the xHCI event ring. Runs for the system
-/// lifetime on its own thread.
-void gui_worker_thread() {
-    cinux::lib::kprintf("[GUI] Worker thread started\n");
-    while (true) {
-        cinux::gui::cinux_core().pump();
-        // Service the xHCI event ring each frame (usb::poll_input is a no-op if
-        // no controller was enumerated, or if USB is compiled out -- §14 links
-        // usb_stub.cpp). Under nested-KVM the MSI-X transfer-complete interrupt
-        // is not reliably delivered, so polling the ring here is the production
-        // event-service path; cheap when the mouse is idle.
-        cinux::drivers::usb::poll_input();
-        cinux::proc::Scheduler::yield();
-    }
-}
-
-}  // namespace
+#include "kernel/mm/address_space.hpp"  // AddressSpace (child user AS)
+#include "kernel/proc/pid.hpp"          // g_pid_alloc
+#include "kernel/proc/process.hpp"      // fork
+#include "kernel/proc/scheduler.hpp"    // current / exit_current
+#include "kernel/proc/user_launch.hpp"  // launch_user_program
+#include "kernel/proc/userspace.hpp"    // launch_userspace / handoff_framebuffer_to_gui
 
 namespace cinux::proc {
 
 void launch_userspace() {
-    cinux::lib::kprintf("[INIT] ===== Milestone 035: GUI Desktop (F13-B) =====\n");
+    cinux::lib::kprintf("[INIT] ===== Milestone 035: GUI Desktop (b3b userspace) =====\n");
 
-    // Start the GUI: PS/2 mouse + keyboard listener (mirrors key events into
-    // the unified Mouse event queue so host_cinux poll_event drains both).
-    // Widget tree + GuiCore + mouse bounds are constructed by cinux_host_init
-    // (called from handoff_framebuffer_to_gui at kernel_main time).
+    // Arm PS/2 mouse + keyboard listener. The listener mirrors each KeyEvent
+    // into /dev/event0 (batch 2 dual-write), so the userspace host's
+    // poll_event drains pointer + keyboard through the one device.
     cinux::gui::gui_start();
 
-    // Launch the GUI worker thread to drive the render/input pump + deferred
-    // work (B2: PTY shell spawn) outside of PIT interrupt context.
-    auto* gui_task = TaskBuilder().set_entry(gui_worker_thread).set_name("gui_worker").build();
-    if (gui_task != nullptr) {
-        Scheduler::add_task(gui_task);
-        cinux::lib::kprintf("[INIT] GUI worker thread launched\n");
+    // Fork+execve the userspace GUI host. It opens /dev/fb0 + /dev/event0,
+    // builds the widget tree, and pumps GuiCore forever (argv "0"). Replaces
+    // the old in-kernel gui_worker thread. Mirrors the test-kernel smoke's
+    // fork+execve+AddressSpace shape (kernel/test/main_test.cpp).
+    int child_pid = fork(g_pid_alloc);
+    if (child_pid == 0) {
+        auto* child        = Scheduler::current();
+        child->addr_space  = new cinux::mm::AddressSpace();
+        const char* argv[] = {"/cinux_gui_host", "0", nullptr};
+        const char* envp[] = {nullptr};
+        launch_user_program("/cinux_gui_host", argv, envp);
+        Scheduler::exit_current();  // unreachable
     }
+    cinux::lib::kprintf("[INIT] userspace GUI host launched (pid=%d)\n", child_pid);
 }
 
 void handoff_framebuffer_to_gui(cinux::drivers::Framebuffer& fb, cinux::drivers::PSFFont& font,
                                 cinux::drivers::Console& console) {
-    // The new core owns its staging buffer + carries its own PSF2 font data, so
-    // the CinuxOS PSFFont is no longer consumed by the GUI path (it stays for
-    // the text Console). cinux_host_init builds the HostState widget tree +
-    // GuiCore over the framebuffer geometry + fills the host table. Detach the
-    // text console so routine logs stop overlaying the desktop (still serial +
-    // klog; kpanic re-enables).
+    // b3b: the userspace host owns the widget tree + GuiCore now (it builds
+    // them in main() over /dev/fb0 + mmap). The kernel no longer constructs
+    // host_cinux -- only detach the text console so routine logs stop
+    // overlaying the framebuffer (kpanic re-enables it). fb init +
+    // set_system_framebuffer already ran in kernel_main, so /dev/fb0 mmap
+    // resolves the VBE framebuffer phys; fb/font are kept on the §14 interface.
+    (void)fb;
     (void)font;
-    cinux::gui::cinux_host_init(&fb);
     cinux::lib::kprintf_set_sink_enabled(cinux::drivers::Console::console_sink_adapter, &console,
                                          false);
 }

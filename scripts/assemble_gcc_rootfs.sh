@@ -50,6 +50,18 @@ cp -a "$GCC_ROOT/." "$WORK/target/"
 cp "$REPO_ROOT/rootfs/overlay/etc/inittab" "$WORK/target/etc/inittab"
 cp "$REPO_ROOT/rootfs/overlay/etc/cinux-usability-test.sh" "$WORK/target/etc/cinux-usability-test.sh"
 
+# F-GUI-USERSPACE b3b: stage the userspace GUI host ELF (static musl, built by
+# tools/musl/build-cinux-gui-host.sh). Self-contained -- no libstdc++/glibc deps
+# -- so it sits beside the gcc closure with no extra staging. launch_userspace
+# fork+execve's /cinux_gui_host at boot; absent -> ENOENT -> no desktop.
+GUI_HOST="${CINUX_GUI_HOST_ELF:-$REPO_ROOT/build/musl/cinux_gui_host}"
+if [ -f "$GUI_HOST" ]; then
+    cp -p "$GUI_HOST" "$WORK/target/cinux_gui_host"
+    echo "[assemble] + /cinux_gui_host (userspace GUI host, b3b)"
+else
+    echo "[assemble] WARNING: $GUI_HOST missing -- run tools/musl/build-cinux-gui-host.sh first" >&2
+fi
+
 # Defense (2026-07-04 regression): force the link-time crt objects to the gcc
 # toolchain's authoritative relocatable versions.  An executable crt1.o left in
 # the merged tree makes ld reject the link ("cannot use executable file 'crt1.o'

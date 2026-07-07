@@ -253,6 +253,34 @@ void handle_pf(InterruptFrame* frame) {
                     "demand-paged user addr %p has no VMA (kernel-mode/no-task "
                     "context; mapping zero page)",
                     reinterpret_cast<void*>(fault_addr));
+            } else if (vma != nullptr &&
+                       cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::IoPhys)) {
+                // F-GUI-USERSPACE batch 1: device mmap (e.g. /dev/fb0).  Map the
+                // pre-bound physical page verbatim with FLAG_PCD (uncached, like
+                // every other MMIO region) -- NO PMM allocation, NO page cache,
+                // NO pte_count_inc: device memory is not PMM-managed, so both
+                // teardown (munmap) and fork skip it.  W^X: non-exec VMAs get
+                // FLAG_NX, writable VMAs get FLAG_WRITABLE.
+                const uint64_t io_phys = vma->phys_base + (virt_page - vma->start);
+                uint64_t       ioflags =
+                    cinux::arch::FLAG_PRESENT | cinux::arch::FLAG_USER | cinux::arch::FLAG_PCD;
+                if (cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Write)) {
+                    ioflags |= cinux::arch::FLAG_WRITABLE;
+                }
+                if (!cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Exec)) {
+                    ioflags |= cinux::arch::FLAG_NX;
+                }
+                uint64_t cur_cr3 = cinux::arch::read_cr3();
+                if (g_vmm.map_nolock(virt_page, io_phys, ioflags, &cur_cr3)) {
+                    return;
+                }
+                // map_nolock failure = an intermediate page-table page could not
+                // be allocated (OOM).  Do NOT fall through to the anonymous
+                // service: that would back this device VMA with a fresh RAM page
+                // instead of device memory, corrupting the mapping.  Leave the
+                // fault unserved; the retry re-enters this branch (OOM resolves
+                // or the system panics, same outcome as anonymous OOM).
+                return;
             } else if (vma != nullptr && vma->backing != nullptr &&
                        !cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Anonymous)) {
                 // File-backed VMA (F2-M4): demand-read the file page through the
@@ -289,7 +317,7 @@ void handle_pf(InterruptFrame* frame) {
                         !cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Shared);
                     uint64_t map_phys = gp.value()->phys;
                     if (private_writable) {
-                        const uint64_t cow_phys = cinux::mm::g_pmm.alloc_page_locked();
+                        const uint64_t cow_phys = cinux::mm::g_pmm.alloc_page();
                         if (cow_phys != 0) {
                             memcpy(reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE + cow_phys),
                                    reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE +
@@ -338,7 +366,7 @@ void handle_pf(InterruptFrame* frame) {
                 // Fall through to the anonymous zero page below (best effort).
             }
         }
-        uint64_t phys = cinux::mm::g_pmm.alloc_page_locked();
+        uint64_t phys = cinux::mm::g_pmm.alloc_page();
         if (phys != 0) {
             // Anonymous demand pages (brk heap, MAP_ANON, stack growth) must
             // enter user space as zero-filled pages.  PMM pages are recycled
@@ -351,7 +379,8 @@ void handle_pf(InterruptFrame* frame) {
                 cinux::mm::g_pmm.pte_count_inc(phys);  // batch 3: account for the new PTE
                 return;
             }
-            cinux::mm::g_pmm.refcount_dec_and_test(phys);  // batch 4: roll back alloc via ownership ref
+            cinux::mm::g_pmm.refcount_dec_and_test(
+                phys);  // batch 4: roll back alloc via ownership ref
         }
     }
 

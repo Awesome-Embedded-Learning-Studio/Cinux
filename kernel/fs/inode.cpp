@@ -50,6 +50,14 @@ cinux::lib::ErrorOr<int64_t> InodeOps::ioctl(const Inode*, uint32_t, uint64_t) {
     return cinux::lib::Error::NotImplemented;
 }
 
+// F-GUI-USERSPACE batch 1: "this inode cannot be mmap'd as device memory."
+// sys_mmap treats NotImplemented as "fall through to the normal file-backed /
+// anonymous path", so the default leaves every existing InodeOps subclass
+// unchanged.
+cinux::lib::ErrorOr<uint64_t> InodeOps::mmap(const Inode*, uint64_t, uint64_t) {
+    return cinux::lib::Error::NotImplemented;
+}
+
 cinux::lib::ErrorOr<Inode*> InodeOps::open(Inode* inode, uint64_t /*flags*/) {
     // Bind the fd to the inode lookup resolved -- no per-open clone.  A cloning
     // device (/dev/ptmx, a FIFO) overrides this to hand back a fresh resource,

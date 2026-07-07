@@ -187,6 +187,7 @@ extern "C" void kernel_main() {
     // Step 13: Initialise framebuffer from BootInfo
     Framebuffer fb;
     fb.init(*boot_info);
+    cinux::drivers::set_system_framebuffer(&fb);  // F-GUI-USERSPACE b1: /dev/fb0 mmap
     cinux::lib::kprintf("[BIG] Framebuffer initialised: %ux%u %ubpp\n", fb.width(), fb.height(),
                         boot_info->fb_bpp);
 
