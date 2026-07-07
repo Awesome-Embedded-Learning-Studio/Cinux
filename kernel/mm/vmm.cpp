@@ -49,7 +49,7 @@ PageEntry* walk_level(PageEntry* table, uint64_t index, bool should_alloc, uint6
             uint64_t big_phys  = entry.phys_addr();
             uint64_t big_flags = entry.raw & ~ADDR_MASK;
 
-            uint64_t new_page = cinux::mm::g_pmm.alloc_page_locked();
+            uint64_t new_page = cinux::mm::g_pmm.alloc_page();
             if (new_page == 0) {
                 return nullptr;
             }
@@ -69,7 +69,7 @@ PageEntry* walk_level(PageEntry* table, uint64_t index, bool should_alloc, uint6
         return nullptr;
     }
 
-    uint64_t new_page = cinux::mm::g_pmm.alloc_page_locked();
+    uint64_t new_page = cinux::mm::g_pmm.alloc_page();
     if (new_page == 0) {
         return nullptr;
     }

@@ -317,7 +317,7 @@ void handle_pf(InterruptFrame* frame) {
                         !cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Shared);
                     uint64_t map_phys = gp.value()->phys;
                     if (private_writable) {
-                        const uint64_t cow_phys = cinux::mm::g_pmm.alloc_page_locked();
+                        const uint64_t cow_phys = cinux::mm::g_pmm.alloc_page();
                         if (cow_phys != 0) {
                             memcpy(reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE + cow_phys),
                                    reinterpret_cast<void*>(cinux::arch::DIRECT_MAP_BASE +
@@ -366,7 +366,7 @@ void handle_pf(InterruptFrame* frame) {
                 // Fall through to the anonymous zero page below (best effort).
             }
         }
-        uint64_t phys = cinux::mm::g_pmm.alloc_page_locked();
+        uint64_t phys = cinux::mm::g_pmm.alloc_page();
         if (phys != 0) {
             // Anonymous demand pages (brk heap, MAP_ANON, stack growth) must
             // enter user space as zero-filled pages.  PMM pages are recycled

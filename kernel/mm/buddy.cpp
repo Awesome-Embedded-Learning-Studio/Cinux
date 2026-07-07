@@ -7,6 +7,8 @@
 
 #include "kernel/mm/buddy.hpp"
 
+#include "kernel/lib/kprintf.hpp"
+
 namespace cinux::mm {
 
 // ============================================================
@@ -72,10 +74,26 @@ void BuddyAllocator::mark_free_region(uint64_t base_page, uint64_t count) {
 // ============================================================
 
 void BuddyAllocator::set_bit(int o, uint64_t block) {
+    // [BUDDY-DIAG] catch the nested-fork/PageCache buddy-corruption at the
+    // exact wild-deref site (production #GP had RDX non-canonical here). Panic
+    // with the bad indices + backtrace BEFORE the deref so the smash source is
+    // obvious. Kept narrow (no free_page pte_count assert) to avoid the
+    // console-gate false-positive that bit the earlier DIAG rollup.
+    if (o < 0 || o > kMaxOrder || block >= blocks_per_order(o)) {
+        cinux::lib::kpanic("[BUDDY-DIAG] set_bit OOB o=%d block=%lu bpo=%lu\n", o,
+                           static_cast<unsigned long>(block),
+                           static_cast<unsigned long>(blocks_per_order(o)));
+    }
     free_bitmap_[o][block / 64] |= (1ULL << (block % 64));
 }
 
 void BuddyAllocator::clear_bit(int o, uint64_t block) {
+    // [BUDDY-DIAG] see set_bit -- this is the exact production #GP site.
+    if (o < 0 || o > kMaxOrder || block >= blocks_per_order(o)) {
+        cinux::lib::kpanic("[BUDDY-DIAG] clear_bit OOB o=%d block=%lu bpo=%lu\n", o,
+                           static_cast<unsigned long>(block),
+                           static_cast<unsigned long>(blocks_per_order(o)));
+    }
     free_bitmap_[o][block / 64] &= ~(1ULL << (block % 64));
 }
 
