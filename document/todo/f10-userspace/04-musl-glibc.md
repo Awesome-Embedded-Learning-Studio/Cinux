@@ -1,12 +1,11 @@
-# M5: musl libc 接入 + glibc 兼容验证
+# M5: musl libc 接入 + glibc 兼容验证 — ⚠️ 已被吸收（归档）
 
-> 三阶段 libc 路线：自建(当前) → musl(本 milestone) → glibc 兼容(目标验证)。
-> musl 作为过渡，验证内核 POSIX 兼容性。
-
-## 目标
-
-1. musl libc 交叉编译到 Cinux 并验证基本程序运行
-2. glibc 静态二进制兼容性验证（目标明确化）
+> **本里程碑的实质内容已全部落地，分散到三条弧**（2026-07-08 核对）：
+> - **musl 静态移植 + sysroot** → F10-M1 ✅（PR#42；砍掉「自建 libc」路线，直接移植 musl 作唯一 libc）
+> - **musl 动态链接 ldso** → F10-M2 ✅（PR#49）
+> - **gcc/g++ 自举 + 双 libc 共存（musl 静态 busybox + glibc 动态 cc1）** → F12-M2 ✅ + F-USABILITY ✅（PR#61/62/66/63/64/65）
+>
+> 下方旧「自建 → musl → glibc 三阶段」任务表是历史规划，**已作废**——真实进度见上述三条弧的 PLAN 段 + notes。本文件保留仅作决策溯源（记录为何砍自建 libc）。
 
 ## 任务清单
 

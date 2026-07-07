@@ -7,10 +7,11 @@
  * PTY drain + keyboard→master). User clicks Shell → terminal window → gcc
  * compiles in the GUI.
  *
- * Mirrors kernel/gui/host_cinux.cpp widget tree (DesktopIcons line 342-361) +
- * host/linux_fbdev_main.cpp pump + host/posix_spawn.cpp PTY (but CinuxOS manual
- * path: no libc forkpty -- open /dev/ptmx + ioctl TIOCGPTN + fork + child opens
- * /dev/pts/N).
+ * Widget tree mirrors Cinux-GUI host/linux_fbdev_main.cpp pump +
+ * host/posix_spawn.cpp PTY (CinuxOS manual path: no libc forkpty -- open
+ * /dev/ptmx + ioctl TIOCGPTN + fork + child opens /dev/pts/N). The kernel
+ * host_cinux.cpp adapter was deleted in F-GUI-USERSPACE: this userspace host is
+ * the sole GUI host now.
  */
 
 #include <errno.h>
@@ -123,7 +124,7 @@ struct HostState {
 
 // File-scope HostState (BSS) -- NOT a function-local static, to avoid emitting
 // __cxa_guard (no libstdc++ in this freestanding link). Widget/PsfFont default
-// ctors are side-effect-free (host_cinux.cpp makes the same assumption).
+// ctors are side-effect-free (the deleted kernel host adapter relied on the same).
 HostState st;
 
 void host_log(void* /*ctx*/, const char* fmt, ...) {
@@ -479,7 +480,7 @@ int main(int argc, char** argv) {
     st.win.layout();
     st.wm.add_window(&st.win);
 
-    // b4: DesktopIcons Shell/Calculator (mirror host_cinux.cpp:342-361).
+    // b4: DesktopIcons Shell/Calculator.
     constexpr int32_t kIconW = 32;
     constexpr int32_t kIconH = 32 + 18;
     st.shell_icon.set_bitmap(icons::data::k_shell_icon.data(), icons::data::k_shell_mask.data(),

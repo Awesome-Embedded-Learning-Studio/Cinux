@@ -5,22 +5,22 @@
 
 ## 实现决策
 
-全部四项：
-1. 调试工具（GDB stub + KALLSYMS + panic 增强）
-2. Lua 5.4 脚本
-3. TinyCC 编译器
-4. 文本编辑器 + 包管理器
+**用户决策（2026-07-02）：砍 Lua/TinyCC 自建，走 GCC 自举**——不造轮子，直接让现成 GCC/binutils 在 CinuxOS 跑通并自举编译。真实状态：
 
-## Milestone 依赖
+- **M1 调试工具**：KALLSYMS ✅（合 F-INFRA/FO，panic backtrace 已用）；GDB stub 内核侧 ⏳ 未做
+- **M2 GCC 自举** ✅（2026-07-05 阶段收尾，PR#61/62/66）：cc1→as→ld→./hello 全闭环 + 默认 PIE gcc/g++ + syscall 补全 + perf 降编译 I/O 25%
+- ~~M2 Lua 5.4~~ / ~~M3 TinyCC~~：**砍**（01-lua.md / 02-tinycc.md 为砍前历史规划，保留作决策溯源）
+- **M3 self-hosting** ⏳ 远期（在 CinuxOS 编 CinuxOS 自己）
+- **M4 编辑器 + 包管理器** ⏳ 未立项
+
+## Milestone 依赖（修订后）
 
 ```
-M1 调试工具（独立，内核侧）
-M2 Lua 5.4（用户态，需 libc）
-M3 TinyCC（用户态，需 libc + 文件系统）
-M4 编辑器 + 包管理器（用户态，需前面全部）
+M1 调试工具（KALLSYMS ✅；GDB stub 待）
+M2 GCC 自举 ✅（as+ld+cc1 闭包拷贝，非 Buildroot 编）
+M3 self-hosting（远期，依赖更多 syscall + 工具链稳定）
+M4 编辑器 + 包管理器（未立项）
 ```
-
-按顺序推进。
 
 ## 文件清单
 

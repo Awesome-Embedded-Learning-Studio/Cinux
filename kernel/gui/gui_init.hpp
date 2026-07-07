@@ -2,11 +2,10 @@
  * @file kernel/gui/gui_init.hpp
  * @brief GUI subsystem initialisation interface (F13-B)
  *
- * F13-B (2026-07-05): the old gui_init(Canvas&, PSFFont&) + create_shell_terminal()
- * helpers are gone. The widget tree + GuiCore are constructed by the host
- * adapter (cinux_host_init, called from handoff_framebuffer_to_gui); shell
- * spawn arrives in B2 via the HostDesktop::spawn callback. gui_start() remains
- * to register the PS/2 mouse + keyboard listener.
+ * F-GUI-USERSPACE (2026-07-08): the widget tree + GuiCore are built in the
+ * USERSPACE GUI host (user/cinux_gui_host), not in any kernel host adapter.
+ * gui_start() remains to register the PS/2 mouse + keyboard listener that
+ * dual-writes input to /dev/event0 for the host to read.
  *
  * This header is only compiled when CINUX_GUI is defined.
  *
@@ -21,10 +20,9 @@ namespace cinux::gui {
  * @brief Register the PS/2 mouse driver + keyboard listener (call from
  *        kernel_init_thread via launch_userspace)
  *
- * After this, every decoded key event is mirrored into the unified Mouse event
- * queue so host_cinux poll_event drains both pointer + keyboard. Widget tree
- * + GuiCore + mouse screen bounds are set by cinux_host_init() (called earlier
- * from handoff_framebuffer_to_gui at kernel_main time).
+ * After this, every decoded key event is dual-written to /dev/event0 so the
+ * userspace GUI host's poll_event drains both pointer + keyboard. The widget
+ * tree + GuiCore are built by the host itself over /dev/fb0 + /dev/event0.
  */
 void gui_start();
 

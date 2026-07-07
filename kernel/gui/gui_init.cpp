@@ -2,13 +2,11 @@
  * @file kernel/gui/gui_init.cpp
  * @brief GUI subsystem initialisation implementation (F13-B)
  *
- * F13-B (2026-07-05): the old WindowManager singleton init + desktop-icon
- * registration + create_shell_terminal() (PTY + TaskBuilder + launch_user_program)
- * are gone -- the widget tree now lives in the host adapter (HostState, built by
- * cinux_host_init), and shell spawn is deferred to B2's HostDesktop::spawn.
- * What remains here is the input-side wiring: PS/2 mouse + a keyboard listener
- * that mirrors each KeyEvent into the unified Mouse event queue so host_cinux
- * poll_event drains both pointer + keyboard through one queue.
+ * F-GUI-USERSPACE (2026-07-08): the widget tree + GuiCore live in the USERSPACE
+ * GUI host now (user/cinux_gui_host), not in any kernel host adapter. What
+ * remains here is the input-side wiring: PS/2 mouse + a keyboard listener that
+ * dual-writes each KeyEvent into /dev/event0 so the userspace host's poll_event
+ * drains both pointer + keyboard through the one device.
  */
 
 #include "gui_init.hpp"
@@ -23,11 +21,11 @@ namespace cinux::gui {
 
 namespace {
 
-// Key listener registered with the keyboard driver: mirror each decoded
-// KeyEvent into the GUI EventQueue so host_cinux poll_event sees keyboard input
-// through the unified Mouse queue. Lives here (not in keyboard.cpp) so the
-// keyboard driver has no GUI/EventQueue dependency -- it just calls a
-// registered listener (CODING-TASTE §14).
+// Key listener registered with the keyboard driver: dual-write each decoded
+// KeyEvent to /dev/event0 so the userspace GUI host reads keyboard input
+// alongside pointer events. Lives here (not in keyboard.cpp) so the keyboard
+// driver has no GUI dependency -- it just calls a registered listener
+// (CODING-TASTE §14).
 void on_key_event(const cinux::drivers::KeyEvent& ev) {
     cinux::gui::Event gui_ev{};
     gui_ev.type_     = ev.pressed ? cinux::gui::EventType::KeyDown : cinux::gui::EventType::KeyUp;
@@ -57,8 +55,8 @@ void gui_start() {
     cinux::drivers::Keyboard::register_key_listener(on_key_event);
 
     cinux::lib::kprintf(
-        "[GUI] Mouse + keyboard listener initialised; desktop driven by "
-        "gui_worker pump loop.\n");
+        "[GUI] Mouse + keyboard listener initialised; desktop driven by the "
+        "userspace GUI host (/cinux_gui_host).\n");
 }
 
 }  // namespace cinux::gui

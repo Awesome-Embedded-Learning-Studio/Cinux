@@ -125,8 +125,8 @@ void kernel_init_thread() {
     // launch_userspace -- the non-GUI launch_userspace execves /sbin/init and
     // never returns, so anything placed after it never runs.  Interrupt-driven
     // once armed; graceful no-op if no xHCI controller is present or USB is
-    // compiled out (usb_stub.cpp is linked).  (The GUI build's desktop_launch
-    // spawns a separate gui_worker, so USB ordering there is unchanged.)
+    // compiled out (usb_stub.cpp is linked).  (The GUI build's desktop_launch fork+execve's the
+    // userspace GUI host, so USB ordering there is unchanged.)
     cinux::drivers::usb::init();
 
     // B1 gcc-stutter profiling: spawn the periodic memory-stats kthread.  No-op
@@ -134,7 +134,7 @@ void kernel_init_thread() {
     // curve to the serial log when ON, for narrowing gcc/g++ compile-stutter.
     cinux::mm::start_stats_thread();
 
-    // Bring up userspace.  GUI build: desktop + gui_worker thread
+    // Bring up userspace.  GUI build: fork+execve the userspace GUI host
     // (kernel/gui/desktop_launch.cpp).  Non-GUI build: execve /sbin/init as
     // PID1 (kernel/proc/shell_launch.cpp) -- busybox init, which forks /
     // respawns /bin/sh per /etc/inittab.  §14: one interface, two impl files,
