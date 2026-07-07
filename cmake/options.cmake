@@ -101,7 +101,7 @@ option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for
 # (.github/workflows/ci.yml), VSCode (.vscode/tasks.json), and scripts; never
 # declared, so a bare `cmake -B build -S .` silently skipped test/. Declaring
 # it makes it visible in ccmake/cmake-gui without changing the default.
-option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF)
+option(CINUX_BUILD_TESTS "Build host unit tests (top-level test/ dir -> test_host target). Test kernels (big_kernel_test + mini_kernel_test) build unconditionally." OFF)
 
 # F5-M3 后(2026-07-06):host /dev/kvm GID 漂到 kmem(用户只在 kvm 组)→ permission
 # denied,KVM 不可用。默认 TCG 模拟;KVM 恢复后 -DCINUX_USE_KVM=ON 显式开。
