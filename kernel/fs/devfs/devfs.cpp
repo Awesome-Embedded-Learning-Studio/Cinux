@@ -242,6 +242,18 @@ cinux::lib::ErrorOr<void> DevFs::mount() {
     root_inode_.mode       = kSIfDir | 0755;
     root_inode_.nlink      = 2;
 
+    // Virtual /dev/pts directory so the vfs component walk can descend into it
+    // before resolving "<N>".  ino 0xFFFF stays clear of the static node table
+    // (1-based) and the PTY slave inodes (kPtyInoBase = 0x1000).  readdir on
+    // /dev/pts is not wired -- slaves exist on demand; opening /dev/pts/<N> is
+    // the path that matters here.
+    pts_dir_inode_.ino        = 0xFFFF;
+    pts_dir_inode_.type       = InodeType::Directory;
+    pts_dir_inode_.ops        = dir_ops_;
+    pts_dir_inode_.fs_private = this;
+    pts_dir_inode_.mode       = kSIfDir | 0755;
+    pts_dir_inode_.nlink      = 2;
+
     return {};
 }
 
@@ -323,7 +335,38 @@ cinux::lib::ErrorOr<Inode*> DevFs::lookup_child(const Inode* parent, const char*
     if (parent == nullptr || name == nullptr || namelen == 0) {
         return cinux::lib::Error::InvalidArgument;
     }
-    // DevFs is flat: only the root directory contains entries.
+
+    // /dev/pts virtual subdirectory: root -> "pts" -> pts_dir_inode_, then
+    // pts_dir_inode_ -> "<N>" -> the PTY slave inode.  DevFs is flat, so without
+    // this two-level hop the vfs component walk dies at the "pts" component
+    // (dynamic_lookup_ expects the whole "pts/N" spelling) and open("/dev/pts/N")
+    // fails -- the shell then inherits /dev/console and IO bypasses the PTY.
+    if (parent == &root_inode_ && namelen == 3 && name[0] == 'p' && name[1] == 't' &&
+        name[2] == 's') {
+        inode_ref(&pts_dir_inode_);
+        return &pts_dir_inode_;
+    }
+    if (parent == &pts_dir_inode_) {
+        // Reassemble "pts/<N>" -- the spelling dynamic_lookup_ expects.
+        char buf[64];
+        if (namelen >= sizeof(buf) - 4) {
+            return cinux::lib::Error::NotFound;
+        }
+        buf[0] = 'p';
+        buf[1] = 't';
+        buf[2] = 's';
+        buf[3] = '/';
+        for (uint32_t i = 0; i < namelen; ++i) {
+            buf[4 + i] = name[i];
+        }
+        buf[4 + namelen] = '\0';
+        if (dynamic_lookup_ != nullptr) {
+            return dynamic_lookup_(buf);
+        }
+        return cinux::lib::Error::NotFound;
+    }
+
+    // DevFs is otherwise flat: only the root directory contains entries.
     if (parent != &root_inode_) {
         return cinux::lib::Error::NotFound;
     }

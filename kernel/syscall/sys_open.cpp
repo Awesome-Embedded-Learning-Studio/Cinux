@@ -185,6 +185,23 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
         }
     }
 
+    // Cloning device: let the inode's open() substitute a per-open inode (e.g.
+    // /dev/ptmx returns the new PTY master). Mirrors do_open_kernel; without
+    // this, musl open() (which goes through sys_openat -> do_openat_kernel, not
+    // sys_open) got the ptmx inode itself, so PTY ioctls (TIOCGPTN) hit the
+    // ptmx InodeOps (NotImplemented) instead of the master's -> ENOTTY.
+    if (inode->ops != nullptr) {
+        auto opened = inode->ops->open(inode, flags);
+        if (!opened.ok()) {
+            cinux::fs::inode_unref(inode);
+            return -to_errno(opened.error());
+        }
+        if (opened.value() != inode) {
+            cinux::fs::inode_unref(inode);  // drop the lookup ref on the original
+            inode = opened.value();
+        }
+    }
+
     // O_TRUNC: truncate the file to 0 before handing out the fd.  Without this
     // a shorter rewrite leaves the old tail (B4-C2: cc1 overwrote the host-
     // precompiled /hello.s but the residual "...progbits\n" tail -> as saw

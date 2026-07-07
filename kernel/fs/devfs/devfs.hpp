@@ -168,6 +168,14 @@ private:
     /// Root directory inode (readdir walks nodes_ via fs_private == this).
     Inode root_inode_{};
 
+    /// Virtual /dev/pts directory inode.  DevFs is otherwise flat, but the vfs
+    /// resolver walks paths component-by-component, so "pts" must resolve to a
+    /// directory it can descend into before looking up "<N>".  Without it
+    /// open("/dev/pts/N") dies at the "pts" component (dynamic_lookup_ expects
+    /// the whole "pts/N" spelling) and the slave fd is never returned -- the
+    /// shell then inherits /dev/console and all IO bypasses the PTY.
+    Inode pts_dir_inode_{};
+
     /// Sink wired into the console device; null => console writes discard.
     CharSink*     console_sink_;
     /// Read+ioctl backend for /dev/console (B3b); null => read/ioctl return
