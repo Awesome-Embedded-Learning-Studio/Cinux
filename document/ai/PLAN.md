@@ -109,6 +109,33 @@ extract.sh 产出(GCC 工具链闭包, 批3+)  ──┘
 - **VNC 避让**：多 AI 会话共 `-vnc :0` 互杀 QEMU，验证临时 sed `-vnc :5`，跑完 `git checkout`（同 verify-vnc-port-collision-multi-session）。
 - **范围栅栏（不投机）**：批1-4 不动 AHCI 链（并存）；NVMe 不进 production Ext2 装配（批4 只注册独立盘 + 机制测，生产切换留 follow-up）；VirtIO（M2）下一弧，不碰。
 
+## 🔄 F5-M2/M7 VirtIO 块设备 + 网卡 — 立项 2026-07-06(分支 `feat/f5-virtio-blk-net`,从干净 main `17798fa`)
+
+> F5 第三大存储弧 + 网卡收尾(NVMe 弧之后的下一弧,如上 NVMe 范围栅栏所述)。VirtIO 传输层(PCI modern capability + split virtqueue)新写,块设备 + 网卡两设备共享;复用 NVMe 弧趟过的 PCI/MSI-X 多实例/DmaPool/IBlockDevice + e1000 的 NetDevice/协议栈范式。**用户决策 + 约束(2026-07-06)**:① virtqueue 用 polling 跑稳机制测后,**紧接着直接上真异步 MSI-X 中断**提升性能——不要像 NVMe 弧停在「ISR install + mask_all polling」把真中断留 follow-up;② 严防 -smp 竞态(NVMe `749e7db` NvmeBlockDevice 单 DmaBuffer 无锁在 -smp 2 崩的教训——共享状态从一开始就 Spinlock)。
+
+> **接入缝(零改 Ext2/PageCache/协议栈)**:同 NVMe,`Ext2` 持裸 `IBlockDevice*`,`VirtIOBlock` 再造一个 IBlockDevice 传给 Ext2 构造;virtio-net 走 `NetDevice` 接口抄 e1000,挂 net_init 注册,L3/L4 协议层零改动。
+
+### 批表
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 0 | 立项 docs(ROADMAP/PLAN/todo 01+06)+ `CINUX_VIRTIO` option + QEMU 加 virtio-blk-pci + PCI `find_virtio_block`/`find_virtio_net` | 🔄 | docs-only + 全量编 + 两 leg 零回归 |
+| 1 | VirtIO 传输层(`virtio.hpp` PCI cap 遍历 + feature 协商 + status 机)+ `virtqueue.hpp/cpp`(split queue desc/avail/used + submit/wait/notify)+ polling 机制测(queue round-trip) | ⏳ | 两 leg + cap offset 回读 + queue 提交回收 |
+| 2 | virtio-blk 驱动(read/write/flush + `VirtIOBlock : IBlockDevice` 抄 NvmeBlockDevice + main.cpp Step 注册)polling | ⏳ | 两 leg + read/write round-trip byte-compare + Ext2 mount |
+| 3 | ⭐**virtio-blk 真中断 + SMP**:MSI-X unmask(vector 0x42)+ ISR flag/wake(**不 inline schedule**,避 #DF)+ Spinlock 从第一天护 DmaBuffer/virtqueue + -smp 2 压测 | ⏳ | 两 leg(单核 + **-smp 2**)+ 并发 read_blocks 不出 garbage |
+| 4 | virtio-net 驱动(RX/TX virtqueue + `VirtIONetDevice : NetDevice` 抄 e1000 + net_init 注册)polling + SLIRP ping smoke。先 fixed header,mergeable buffer 留续 | ⏳ | 两 leg + ping 10.0.2.2 + loopback echo |
+| 5 | ⭐**virtio-net 真中断(3 向量 0x43-0x45)+ SMP + perf + 收官**:MSI-X RX/TX/config + ISR + Spinlock RX/TX buffer + -smp 2 验 + perf virtio-blk vs NVMe vs AHCI + note + ROADMAP F5-M2/M7 ✅ | ⏳ | 两 leg(单核 + **-smp 2**)+ ping + perf 数据 |
+
+### 风险 / 陷阱
+- **⭐ polling→真中断(用户约束,核心)**:virtqueue polling 机制测稳后**紧接着**上真异步 MSI-X(NVMe 弧停在 ISR install + mask_all polling 留 follow-up,本弧不留)。ISR 只 flag + wake wait_queue,**绝不 inline schedule**(避 sti-in-syscall #DF,同 sys-ping-df / PIT IRQ 重入 #DF);EOI 后再调度。
+- **⭐ -smp 章态(NVMe `749e7db` 教训)**:单 DmaBuffer + virtqueue 环 + per-device RX/TX buffer 从第一行就 Spinlock,别等 -smp 2 崩了补(-smp 2 多核并发 read_blocks 覆盖单 DmaBuffer → garbage → ext2 坏)。`run-kernel-test-all` 两 leg 本含 -smp 2(F-VERIFY 基建)。
+- **VirtIO modern cap 遍历**:4 组寄存器(common_cfg(cap_id=0x09 子类型 1)/ notify(子类型 2)/ isr(子类型 3)/ device_cfg(子类型 4))offset 要对,漏一个协商不过。批1 机制测先证 cap offset 回读正确(对标 NVMe 批1 假绿——MQES 要能区分真值 vs 垃圾)。
+- **MSI 向量避撞**:0x42(blk)、0x43-0x45(net RX/TX/config),严防 0x41(NVMe,曾污染 LAPIC 占 ISR 阻塞 e1000 timer)+ 0x40(xHCI)+ 0x30(LAPIC timer)。
+- **transitional vs modern device ID**:QEMU `-device virtio-blk-pci` 默认 transitional(PCI device_id 读 0x1001)但走 modern capability transport。`find_virtio_block` 匹配 vendor 0x1AF4 + device ∈ {0x1001 legacy, 0x1042 modern};transport 一律 modern(legacy transport 不做)。
+- **MsixController 第 3/4 实例**:NVMe 弧已加 `table_virt/pba_virt` 参数,xHCI @+0x40000 / NVMe @+0x74000;virtio-blk MSI-X Table @+0x84000、virtio-net @+0x86000(避撞)。
+- **smoke 默认 ON 挂死**:本地 `cmake -B build -DCINUX_MUSL_HELLO_SMOKE=OFF -DCINUX_MUSL_DYN_SMOKE=OFF`(同 F10/NVMe 惯例)。
+- **VNC 避让**:多 AI 会话共 -vnc :0 互杀 QEMU,验证临时 sed -vnc :5,跑完 git checkout(同 verify-vnc-port-collision)。
+- **范围栅栏(不投机)**:批1-3 只 virtio-blk(不碰 AHCI/NVMe 链,并存独立盘);批4-5 virtio-net(不拆 e1000,独立 SLIRP netdev);packed virtqueue / scatter-gather 多链 / mergeable buffer 留续。
+
 ## ✅ GCC 自举主线 — 阶段收尾 2026-07-05（批1 tmpfs ＋ shm ＋ 批2 mount/tmp ＋ 批3a sys_access ＋ 批3b busybox init PID1 → 批4-a as+ld 自举 ＋ 批4-C2 cc1→as→ld→./hello 全闭环，合 main PR#61/PR#62/PR#66）
 
 > **2026-07-05 GCC 线阶段收尾**：CinuxOS 上 gcc/g++ 编译 + 跑用户程序全链路绿。达成：① F12-M2 批4-C2 cc1→as→ld→./hello 自举闭环；② F-USABILITY 批3 gcc driver 单命令 ✅ + 批4a g++ STL+异常 ✅（PR#63/64/65）；③ busybox init PID1（批3b）；④ C 重构治 lto_plugin corrupt（PR#65，refcount/pte_count 分离）；⑤ perf 弧 ext2 agg 降 gcc 编译 I/O 25%（PR#66）；⑥ 默认 PIE gcc/g++ + main-base ASLR（PR#66 PIE B1+B2）；⑦ syscall 补全 gcc/g++ unhandled 90→0（PR#66）。CI 全绿。详见收官 [note](../notes/2026-07-05-gcc-line-finale.md)。

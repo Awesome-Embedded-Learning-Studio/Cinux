@@ -157,6 +157,12 @@ bool match_e1000(const PCIDevice& dev) {
 bool match_nvme(const PCIDevice& dev) {
     return is_nvme_device(dev.class_code, dev.subclass);
 }
+bool match_virtio_block(const PCIDevice& dev) {
+    return is_virtio_block_device(dev.vendor_id, dev.device_id);
+}
+bool match_virtio_net(const PCIDevice& dev) {
+    return is_virtio_net_device(dev.vendor_id, dev.device_id);
+}
 
 }  // namespace
 
@@ -201,6 +207,14 @@ bool PCI::find_e1000(PCIDevice& out) const {
 
 bool PCI::find_nvme(PCIDevice& out) const {
     return find_device("NVMe", 0, match_nvme, out);
+}
+
+bool PCI::find_virtio_block(PCIDevice& out) const {
+    return find_device("VirtIO-blk", 0, match_virtio_block, out);
+}
+
+bool PCI::find_virtio_net(PCIDevice& out) const {
+    return find_device("VirtIO-net", 0, match_virtio_net, out);
 }
 
 }  // namespace cinux::drivers::pci

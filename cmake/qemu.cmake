@@ -60,6 +60,19 @@ add_custom_command(
     VERBATIM
 )
 
+# F5-M2 VirtIO-blk: test disk (1 MB raw).  The batch-1 mechanism test reads the
+# PCI capability list + does a virtqueue round-trip, so disk content is
+# irrelevant -- the file just backs -device virtio-blk-pci so the controller
+# enumerates and its BAR/cap-list map.
+set(VIRTIO_BLK_TEST_IMAGE "${CMAKE_BINARY_DIR}/virtio_blk_test.img")
+add_custom_command(
+    OUTPUT ${VIRTIO_BLK_TEST_IMAGE}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh ${VIRTIO_BLK_TEST_IMAGE}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ahci_test_disk.sh
+    COMMENT "Creating VirtIO-blk test disk image"
+    VERBATIM
+)
+
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 
@@ -179,6 +192,14 @@ set(QEMU_TEST_EXTRA_FLAGS
     -drive file=${NVME_TEST_IMAGE},format=raw,if=none,id=nvme-disk
     -device nvme,id=nvme0,serial=nvme0
     -device nvme-ns,drive=nvme-disk,nsid=1,bus=nvme0
+    # F5-M2 VirtIO-blk: controller + 1 MB backing disk.  Enumerated via PCI
+    # vendor 0x1AF4 + device 0x1001/0x1042; modern capability transport.
+    -drive file=${VIRTIO_BLK_TEST_IMAGE},format=raw,if=none,id=virtio-blk-disk
+    -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0
+    # F5-M2 batch 4: virtio-net NIC (PCI device only -- no SLIRP netdev here;
+    # the mechanism test validates bring-up + MAC + RX/TX queue config, not
+    # traffic. SLIRP ping is a production/follow-up gate).
+    -device virtio-net-pci,id=virtio-net0
 )
 
 # ============================================================
@@ -269,13 +290,14 @@ function(cinux_qemu_test_target name)
                 -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
         DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE}
                 regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
+                ${VIRTIO_BLK_TEST_IMAGE}
         USES_TERMINAL
         COMMENT "${ARG_COMMENT}"
         VERBATIM)
 endfunction()
 
 function(cinux_qemu_run_target name)
-    set(opts SMP DEV_NET DEV_XHCI DEBUG)
+    set(opts SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEV_VIRTIO_NET DEBUG)
     cmake_parse_arguments(ARG "${opts}" "COMMENT" "" ${ARGN})
     set(_smp)
     if(ARG_SMP)
@@ -294,6 +316,24 @@ function(cinux_qemu_run_target name)
         list(APPEND _devs -device qemu-xhci,id=xhci
                           -device usb-kbd,bus=xhci.0
                           -device usb-tablet,bus=xhci.0)
+    endif()
+    if(ARG_DEV_VIRTIO_BLK)
+        # F5-M2 production: virtio-blk-pci as an independent third disk (not the
+        # boot disk -- NVMe owns rootfs).  Backed by the 1 MB test image; content
+        # is irrelevant, the file just backs -device so the controller enumerates
+        # and Step 21a2 (PCI find + transport + init_msi_x unmask + IBlockDevice
+        # create + DRIVER_OK) actually runs in production.  First time the
+        # batch-3 real-interrupt path (vector 0x42) is exercised in GUI.
+        list(APPEND _devs -drive file=${VIRTIO_BLK_TEST_IMAGE},format=raw,if=none,id=virtio-blk-disk
+                          -device virtio-blk-pci,drive=virtio-blk-disk,id=virtio-blk0)
+        list(APPEND _deps ${VIRTIO_BLK_TEST_IMAGE})
+    endif()
+    if(ARG_DEV_VIRTIO_NET)
+        # F5-M2 task 2: virtio-net-pci on its own SLIRP netdev (net1).  e1000
+        # (net0) stays for coexistence; net::init() attaches both, dev_for()
+        # prefers virtio-net so `ping 10.0.2.2` exercises virtio RX/TX.
+        list(APPEND _devs -device virtio-net-pci,netdev=net1,id=virtio-net0
+                          -netdev user,id=net1)
     endif()
     if(NOT ARG_DEBUG)
         # Boot disk = NVMe (rootfs on NVMe for perf; F5-M3 batch 5). AHCI port 0
@@ -319,7 +359,7 @@ function(cinux_qemu_run_target name)
         VERBATIM)
 endfunction()
 
-cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI COMMENT "Starting QEMU (serial: stdio)")
+cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEV_VIRTIO_NET COMMENT "Starting QEMU (serial: stdio)")
 
 # Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
 # fork #DF saga is -smp-2-only; single-CPU is stable, so this is the path to
@@ -502,7 +542,7 @@ add_custom_target(run-kernel-test-all
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS} -smp 2 ${QEMU_TEST_EXTRA_FLAGS}
         -drive file=${CINUX_TEST_IMAGE_PATH},format=raw,index=0,media=disk
-    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE}
+    DEPENDS check_uaccess_boundaries test-image ${AHCI_TEST_IMAGE} regenerate-ext2-image ${EXT4_IMAGE} ${NVME_TEST_IMAGE} ${VIRTIO_BLK_TEST_IMAGE}
     USES_TERMINAL
     COMMENT "F-VERIFY: kernel tests under single-CPU THEN -smp 2 (unified AI/CI entry; individuals kept for debug)"
     VERBATIM

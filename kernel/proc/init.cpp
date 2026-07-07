@@ -7,6 +7,7 @@
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/ahci/ahci_block_device.hpp"
 #include "kernel/drivers/nvme/nvme_block_device.hpp"
+#include "kernel/drivers/virtio/virtio_blk.hpp"  // F5-M2 task 3: virtio_block_device()
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
@@ -26,9 +27,35 @@
 // usb_init.hpp is unconditional: when CINUX_USB is off, usb_stub.cpp supplies
 // empty usb::init()/poll_input() (§14 file gate), so this TU needs no #ifdef.
 #include "kernel/drivers/usb/usb_init.hpp"
+#include "kernel/net/net_init.hpp"    // F5-M2 task 2: ping() virtio-net SLIRP gate
 #include "kernel/proc/userspace.hpp"  // launch_userspace: GUI/non-GUI impl chosen by CMake (§14)
 
 namespace cinux::proc {
+
+namespace {
+// F5-M2 task 3: virtio-blk vs NVMe vs AHCI read-perf comparison.  Reads
+// block (i % 64) for kIters iterations (avoiding the fixed-block cache effect)
+// and reports rdtsc ticks -- READ-ONLY so it's safe on the NVMe boot disk too.
+// QEMU emulates all three via the same block backend, so absolute numbers are
+// QEMU-flavoured; the RELATIVE comparison is the point.
+inline uint64_t rdtsc_now() {
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return (static_cast<uint64_t>(hi) << 32) | lo;
+}
+
+void perf_read(const char* name, cinux::drivers::IBlockDevice& dev, void* buf) {
+    constexpr uint32_t kIters = 256;
+    const auto         t0     = rdtsc_now();
+    for (uint32_t i = 0; i < kIters; ++i) {
+        static_cast<void>(dev.read_blocks(i % 64, 1, buf));
+    }
+    const auto t1 = rdtsc_now();
+    cinux::lib::kprintf("[perf] %-10s: %u reads = %llu ticks (%llu ticks/read)\n", name, kIters,
+                        static_cast<unsigned long long>(t1 - t0),
+                        static_cast<unsigned long long>((t1 - t0) / kIters));
+}
+}  // namespace
 
 void kernel_init_thread() {
     auto* self = Scheduler::current();
@@ -71,7 +98,8 @@ void kernel_init_thread() {
         static cinux::fs::Ext2 ahci_ext2(ahci_blk.ok() ? &ahci_blk.value() : nullptr);
         auto                   m = ahci_ext2.mount();
         if (!m.ok()) {
-            cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n", cinux::lib::error_string(m.error()));
+            cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n",
+                                cinux::lib::error_string(m.error()));
         }
         rootfs = &ahci_ext2;
         cinux::lib::kprintf("[INIT] rootfs on AHCI\n");
@@ -111,6 +139,50 @@ void kernel_init_thread() {
     // PID1 (kernel/proc/shell_launch.cpp) -- busybox init, which forks /
     // respawns /bin/sh per /etc/inittab.  §14: one interface, two impl files,
     // CMake selects which to link -- no #ifdef here.
+
+    // F5-M2 task 2: boot-time virtio-net SLIRP ping gate (before launch_userspace
+    // execves busybox init -- this stops being a kernel thread).  dev_for()
+    // routes this via virtio-net.
+    {
+        // Uses the legacy sti/hlt pump (explicit poll): pump_yield assumes a
+        // user-process syscall
+        // context where yield() lets the net_poll kthread drain RX, but kernel_init
+        // is a kernel thread whose yield() does not reliably hand off to net_poll
+        // before the reply arrives -> ping stalls.  sti/hlt is safe HERE because
+        // kernel_init has no syscall trap frame (the sys_ping #DF hazard is
+        // syscall-only).  dev_for() routes this via virtio-net.
+        constexpr uint16_t kPingId = 0xC1C0;
+        auto r = cinux::net::ping({{10, 0, 2, 2}}, kPingId, 1, cinux::net::rx_pump_sti_hlt);
+        if (r.ok() && r.value().got_reply) {
+            cinux::lib::kprintf(
+                "[net] PING 10.0.2.2: reply (id=0x%x seq=%u) -- "
+                "virtio-net SLIRP path OK\n",
+                r.value().id, r.value().seq);
+        } else {
+            cinux::lib::kprintf("[net] PING 10.0.2.2: no reply -- virtio-net SLIRP path FAILED\n");
+        }
+    }
+
+    // F5-M2 task 3: virtio-blk vs NVMe vs AHCI read-perf comparison (boot-time
+    // micro-benchmark, read-only).  virtio-blk/NVMe are the production-registered
+    // devices; AHCI port 0 is the test disk (port 1 is the AHCI rootfs fallback).
+    {
+        static uint8_t perf_buf[4096];  // 1 block buffer
+        auto*          vbd = cinux::drivers::virtio::virtio_block_device();
+        if (vbd != nullptr) {
+            perf_read("virtio-blk", *vbd, perf_buf);
+        }
+        auto* nbd = cinux::drivers::nvme::nvme_block_device();
+        if (nbd != nullptr) {
+            perf_read("NVMe", *nbd, perf_buf);
+        }
+        auto ahci_blk = cinux::drivers::ahci::AHCIBlockDevice::create(
+            cinux::drivers::ahci::AHCI::instance(), 0);
+        if (ahci_blk.ok()) {
+            perf_read("AHCI", ahci_blk.value(), perf_buf);
+        }
+    }
+
     launch_userspace();
 
     // Unreachable in the non-GUI build: launch_userspace jumps to user mode
