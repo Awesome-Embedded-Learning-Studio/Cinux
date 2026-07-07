@@ -297,8 +297,6 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         KeycodePayload k;
         memcpy(&k, payload, sizeof(k));
-        host_log(st, "[gui] key ascii=%d scan=0x%x flags=0x%x", k.ascii, k.scancode,
-                 ev->flags);
         // b4: route key to the shell PTY (printable + Enter + Backspace).
         if (st->sh_master_fd >= 0 && (ev->flags & kEventFlagPressed)) {
             if (k.ascii == '\r' || k.ascii == '\n') {
