@@ -120,8 +120,46 @@ set(FB_MMAP_TEST_ELF "${CMAKE_BINARY_DIR}/musl/fb_mmap_test")
 # (CINUX_GCC_TOOLCHAIN off) does not collapse this arg into $9.
 set(INPUT_EVENT_TEST_ELF "${CMAKE_BINARY_DIR}/musl/input_event_test")
 # F-GUI-USERSPACE batch 3a: userspace GUI host (Cinux-GUI core + host adapter),
-# static musl ELF. Built by tools/musl/build-cinux-gui-host.sh (not a CMake target).
+# static musl ELF. Wrapped as a CMake custom command around build-cinux-gui-host.sh
+# so `cmake --build` rebuilds it when any core/host source changes -- previously
+# the script ran out-of-band and a stale host (+ stale rootfs) shipped silently.
 set(CINUX_GUI_HOST_ELF "${CMAKE_BINARY_DIR}/musl/cinux_gui_host")
+set(CINUX_GUI_HOST_SCRIPT "${CMAKE_SOURCE_DIR}/tools/musl/build-cinux-gui-host.sh")
+# Mirrors CORE_SRCS in build-cinux-gui-host.sh + the host adapter. Editing any of
+# these (or the script) triggers a host rebuild -> ext2/rootfs refresh downstream.
+set(CINUX_GUI_HOST_SRCS
+    ${CINUX_GUI_HOST_SCRIPT}
+    ${CMAKE_SOURCE_DIR}/user/cinux_gui_host/main.cpp
+    ${CMAKE_SOURCE_DIR}/user/cinux_gui_host/crt_stub.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/compositor.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/font.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/gui_core.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/paint_list.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/region.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/swraster.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/theme.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/button.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/container.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/label.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/slider.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/window.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/window_manager.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/desktop_icon.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/terminal.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/textbox.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/checkbox.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/radio.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/widget/dropdown.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/Cinux-GUI/core/abi_check.cpp)
+add_custom_command(
+    OUTPUT ${CINUX_GUI_HOST_ELF}
+    COMMAND ${CINUX_GUI_HOST_SCRIPT} ${CINUX_GUI_HOST_ELF}
+    DEPENDS ${CINUX_GUI_HOST_SRCS}
+    COMMENT "Building userspace GUI host (static musl ELF)"
+    VERBATIM
+)
+add_custom_target(cinux_gui_host DEPENDS ${CINUX_GUI_HOST_ELF})
 # F-ECO batch 0: minimal static busybox at /bin/busybox when present (built by
 # clang --target=x86_64-linux-musl, not a CMake target). The ring-3 smoke
 # fork+execves it to run echo/cat/ls applets -- the first ecosystem touchstone.
@@ -159,7 +197,7 @@ add_custom_command(
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
             ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${INPUT_EVENT_TEST_ELF} ${CINUX_GUI_HOST_ELF}
             ${GCC_ROOT}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP} ${CINUX_GUI_HOST_ELF}
     COMMENT "Creating ext2 image with /bin/sh (+ GCC toolchain if CINUX_GCC_TOOLCHAIN)"
     VERBATIM
 )
@@ -361,6 +399,20 @@ endfunction()
 
 cinux_qemu_run_target(run SMP DEV_NET DEV_XHCI DEV_VIRTIO_BLK DEV_VIRTIO_NET COMMENT "Starting QEMU (serial: stdio)")
 
+# Refresh /cinux_gui_host inside the production buildroot rootfs in-place via
+# debugfs -- skips a full assemble_gcc_rootfs.sh run (that restages the GCC
+# closure). Attached to `run` so a stale host never ships to the GUI again.
+if(CINUX_GUI AND ROOTFS_IMG)
+    add_custom_target(update-rootfs-host
+        COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/update_rootfs_host.sh
+                ${ROOTFS_IMG} ${CINUX_GUI_HOST_ELF}
+        DEPENDS ${CINUX_GUI_HOST_ELF}
+        COMMENT "Refreshing /cinux_gui_host in production rootfs (debugfs, no full assemble)"
+        VERBATIM
+    )
+    add_dependencies(run update-rootfs-host)
+endif()
+
 # Single-CPU run: same devices as `run` but WITHOUT -smp 2. The shell-launch
 # fork #DF saga is -smp-2-only; single-CPU is stable, so this is the path to
 # launch external programs from the shell without hitting the saga.
@@ -499,7 +551,7 @@ add_custom_target(regenerate-ext2-image
             ${MUSL_HELLO_ELF} ${MUSL_FORKTEST_ELF} ${MUSL_HELLO_DYN_ELF} ${MUSL_LDSO_ELF}
             ${BUSYBOX_ELF} ${FB_MMAP_TEST_ELF} ${INPUT_EVENT_TEST_ELF} ${CINUX_GUI_HOST_ELF}
             ${GCC_ROOT}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh user_shell ${GCC_ROOT_DEP} ${CINUX_GUI_HOST_ELF}
     COMMENT "Regenerating ext2 disk image for clean test state"
     VERBATIM
 )

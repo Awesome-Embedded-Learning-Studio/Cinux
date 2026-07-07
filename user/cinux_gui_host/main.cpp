@@ -13,6 +13,7 @@
  * /dev/pts/N).
  */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdarg.h>
@@ -131,6 +132,7 @@ void host_log(void* /*ctx*/, const char* fmt, ...) {
     vprintf(fmt, ap);
     va_end(ap);
     putchar('\n');
+    fflush(stdout);  // b4: force flush (stdout may be fully-buffered if not a tty)
 }
 
 // L1 Display: flush one dirty rect from staging to the mmap'd framebuffer.
@@ -189,14 +191,20 @@ void host_render_frame(void* ctx, Frame* frame) {
             st->term.write(buf, static_cast<uint32_t>(n));
         }
     }
+    // [DIAG] (removed) scroll/drain instrumentation -- kept the host_render_frame
+    // drain path clean for the commit.
     Surface s{frame->pixels, frame->width, frame->height, frame->stride, frame->format};
     Region  dirty;
     st->desktop.render(s, st->font, &dirty);
-    const uint32_t n = dirty.count();
-    for (uint32_t i = 0; i < n && i < frame->max_rects; ++i) {
-        frame->rects[i] = dirty.rects()[i];
+    // b4 fix: force full-screen dirty. Core's WindowManager::remove_window
+    // doesn't invalidate the closed window's rect (core bug), so a closed
+    // window leaves fb residue until the cursor moves over it. Full flush each
+    // frame is cheap on QEMU; the proper fix (core invalidate) is a follow-up.
+    if (frame->max_rects >= 1u) {
+        frame->rects[0] = Rect{0, 0, static_cast<int32_t>(frame->width),
+                               static_cast<int32_t>(frame->height)};
+        frame->count    = 1u;
     }
-    frame->count = n;
 }
 
 // L2 Input: drain one event from /dev/event0 (poll(0) non-blocking).
@@ -277,6 +285,11 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         PointerPayload p;
         memcpy(&p, payload, sizeof(p));
+        if (p.kind != kPointerKindMove) {
+            host_log(st, "[gui] ptr %s x=%d y=%d",
+                     p.kind == kPointerKindDown ? "down" : "up",
+                     static_cast<int>(p.x), static_cast<int>(p.y));
+        }
         st->wm.process_pointer(p);  // cursor + drag + icon click (on_activate)
     } else if (ev->type == EventCode::kKeycode) {
         if (ev->payload_len < sizeof(KeycodePayload)) {
@@ -284,6 +297,8 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         KeycodePayload k;
         memcpy(&k, payload, sizeof(k));
+        host_log(st, "[gui] key ascii=%d scan=0x%x flags=0x%x", k.ascii, k.scancode,
+                 ev->flags);
         // b4: route key to the shell PTY (printable + Enter + Backspace).
         if (st->sh_master_fd >= 0 && (ev->flags & kEventFlagPressed)) {
             if (k.ascii == '\r' || k.ascii == '\n') {
@@ -310,9 +325,22 @@ void host_free(void* /*ctx*/, void* p) {
     free(p);
 }
 
+// b4 fix: the WM fires this after remove_window(term_win), so the host closes
+// the PTY master and resets sh_master_fd. Without it shell_activate sees the
+// shell as "still open" (sh_master_fd >= 0) and silently refuses to reopen --
+// the reopen bug.
+void on_win_removed(void* ctx, Window* w) {
+    auto* st = static_cast<HostState*>(ctx);
+    if (w == &st->term_win && st->sh_master_fd >= 0) {
+        close(st->sh_master_fd);
+        st->sh_master_fd = -1;  // allow the next Shell click to respawn
+    }
+}
+
 // b4: Shell icon click → spawn /bin/sh on a CinuxOS PTY + open a terminal window.
 void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     auto* st = static_cast<HostState*>(ctx);
+    host_log(st, "[gui] shell_activate (sh_master_fd=%d)", st->sh_master_fd);
     if (st->sh_master_fd >= 0) {
         return;  // already open
     }
@@ -322,18 +350,28 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
         return;
     }
     unsigned int pty_num = 0;
+    host_log(st, "[gui] shell: ioctl req=0x%lx master=%d", static_cast<unsigned long>(TIOCGPTN),
+             master);
     if (ioctl(master, TIOCGPTN, &pty_num) < 0) {
+        int saved_errno = errno;
+        host_log(st, "[gui] shell: TIOCGPTN failed errno=%d master=%d", saved_errno, master);
         close(master);
-        host_log(st, "[gui] shell: TIOCGPTN failed");
         return;
     }
     char slave[32];
     snprintf(slave, sizeof(slave), "/dev/pts/%u", pty_num);
     pid_t pid = fork();
     if (pid == 0) {
-        // child: slave becomes stdio, then exec /bin/sh
+        // child: slave becomes stdio, then exec /bin/sh.  Trace each step to
+        // serial (fd 1 still = /dev/console here, inherited from parent) so we
+        // can see where the child stalls -- pre-dup2 logs reach the serial log;
+        // post-dup2 logs (fd 1 -> slave PTY) land in the terminal window.
+        host_log(st, "[gui] child: entered slave=%s pid=%d", slave,
+                 static_cast<int>(getpid()));
         close(master);
+        host_log(st, "[gui] child: closed master");
         int sfd = open(slave, O_RDWR);
+        host_log(st, "[gui] child: open slave sfd=%d errno=%d", sfd, errno);
         if (sfd >= 0) {
             dup2(sfd, 0);
             dup2(sfd, 1);
@@ -345,6 +383,9 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
         char* argv[] = {const_cast<char*>("sh"), nullptr};
         char* envp[] = {const_cast<char*>("TERM=xterm-256color"), nullptr};
         execve("/bin/sh", argv, envp);
+        // Reached only on execve failure (fd 1 may be the slave PTY here, so
+        // this lands in the terminal window, not serial).
+        host_log(st, "[gui] child: execve FAILED errno=%d", errno);
         _exit(127);
     }
     if (pid < 0) {
@@ -360,7 +401,7 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     st->term_win.set_title("Shell");
     st->term_win.set_theme(&st->theme);
     st->term_win.set_rect(80, 60, kTermCols * TerminalWidget::kGlyphW,
-                          kTermRows * TerminalWidget::kGlyphH);
+                          kTermRows * TerminalWidget::kGlyphH + Window::kTitleBarHeight);
     st->term_win.set_content(&st->term);
     st->term_win.layout();
     st->wm.add_window(&st->term_win);
@@ -374,6 +415,18 @@ void calc_activate(void* /*ctx*/, DesktopIcon* /*self*/) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // b4: redirect stdout/stderr to /dev/console so host_log (printf) reaches
+    // the serial log. The fork+execve'd host inherits kernel_init's fd table,
+    // which may not wire stdout to the console; open it explicitly + fflush.
+    int cfd = open("/dev/console", O_WRONLY);
+    if (cfd >= 0) {
+        dup2(cfd, 1);
+        dup2(cfd, 2);
+        if (cfd > 2) {
+            close(cfd);
+        }
+    }
+
     int fb_fd = open("/dev/fb0", O_RDWR);
     if (fb_fd < 0) {
         return 1;
@@ -411,6 +464,7 @@ int main(int argc, char** argv) {
     st.theme = material_dark();
     st.wm.set_rect(0, 0, info.width, info.height);
     st.wm.set_theme(&st.theme);
+    st.wm.set_on_remove(on_win_removed, &st);
 
     // "Hello" window (centered).
     const int32_t wx0 = static_cast<int32_t>(info.width) / 2 - static_cast<int32_t>(kWinW) / 2;
