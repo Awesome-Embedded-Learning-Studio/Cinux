@@ -380,8 +380,11 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
                 close(sfd);
             }
         }
+        // envp PATH so gcc's driver finds /usr/bin (cc1); argv[0]="sh" non-login.
         char* argv[] = {const_cast<char*>("sh"), nullptr};
-        char* envp[] = {const_cast<char*>("TERM=xterm-256color"), nullptr};
+        char* envp[] = {const_cast<char*>("TERM=xterm-256color"),
+                        const_cast<char*>("PATH=/bin:/sbin:/usr/bin:/usr/sbin"),
+                        nullptr};
         execve("/bin/sh", argv, envp);
         // Reached only on execve failure (fd 1 may be the slave PTY here, so
         // this lands in the terminal window, not serial).

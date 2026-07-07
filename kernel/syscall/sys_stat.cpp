@@ -68,8 +68,6 @@ int64_t do_stat_kernel(const char* resolved_path, cinux::fs::stat* kst, bool fol
                : static_cast<uint32_t>(cinux::fs::LookupFlag::NoFollow);
     auto lr = cinux::fs::vfs_lookup(resolved_path, flags, "/");
     if (!lr.ok()) {
-        kprintf("[SYS_STAT] lookup failed: '%s' err=%d\n", resolved_path,
-                static_cast<int>(lr.error()));
         return -to_errno(lr.error());
     }
     cinux::fs::Inode* inode = lr.value().target;  // ref'd by vfs_lookup
