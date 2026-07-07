@@ -21,6 +21,8 @@
 | 3b | production 启动：launch_userspace fork+execve /cinux_gui_host（替 gui_worker）+ host poll_event 接 event0（poll(0) 非阻塞）+ assemble host 进 buildroot gcc rootfs | ✅ `62ae31d` | console 1906/0 + gui_host 5/5；**桌面验证用户启 GUI run**（buildroot gcc rootfs 含 host）|
 | 4 | kernel `gui_worker` 退役：host_cinux 删，kernel 只剩 fb + 输入 + 调度 | ⏳ | 桌面正常 + 无 gui_worker task + GUI bug 只崩进程 |
 
+> **批4 进度（2026-07-07，worktree `worktree-gui-userspace` 本地未 push）**：keyboard MSI-X EHB 修（`bd90833`）+ GUI 收尾弧（`b45aed8`，配色/cursor/clear/reopen/scroll/title/backspace/cmake host·rootfs 闭环）+ **mm SMP buddy race 修（`96bd1ae`，`alloc_page_locked` 移 private 治 page-fault 绕锁与 `handle_cow_fault` 持锁并发 corrupt buddy）+ shell spawn PTY 修（`e0040a4`，devfs `/dev/pts` 虚拟目录 + `do_openat_kernel` cloning 治 TIOCGPTN ENOTTY）**。两 leg run-kernel-test-all 917/0 + 917/0。详见 [note](../notes/2026-07-07-f-gui-b4-mm-shell-spawn.md)。**残留主线：mm PageCache corrupt**（nested-fork + dynamic ELF，RDX 非 canonical #GP @ alloc_order；buddy OOB DIAG 留被动监控，5 轨迹法追，memory `f-gui-b4-shell-spawn-handoff`）。
+
 ### 风险 / 陷阱
 - **VMA 布局断言**：加 `phys_base` 字段同步 `static_assert(sizeof(VMA))` 56→64（F-INFRA R11 锁布局，漏改编译断）。
 - **IoPhys munmap 误 free**：设备内存非 PMM 页，`sys_munmap` 现对每页 `pte_count_dec_and_test`——必须按 VMA 类型分流，否则 PMM 把 fb 物理帧当普通页 free → 灾难。
