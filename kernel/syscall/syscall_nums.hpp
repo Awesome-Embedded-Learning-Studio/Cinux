@@ -130,6 +130,7 @@ enum class SyscallNr : uint64_t {
     SYS_gettimeofday    = 96,   ///< wall-clock time (CLOCK_REALTIME; same source as clock_gettime)
     SYS_set_robust_list = 273,  ///< robust-futex probe (stub 0; no real robust cleanup yet)
     SYS_prlimit64       = 302,  ///< resource-limit probe (stub; reports RLIM_INFINITY)
+    SYS_getcpu          = 309,  ///< getcpu (stub -ENOSYS; glibc falls back from per-CPU hint)
     SYS_getrandom       = 318,  ///< random bytes (KRandom PRNG)
     SYS_rseq            = 334,  ///< restartable-sequence probe (stub -ENOSYS)
     SYS_clone3          = 435,  ///< clone3 probe (stub -ENOSYS; libc falls back to clone)
