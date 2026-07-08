@@ -95,8 +95,6 @@ option(CINUX_HOST_ASAN "Host unit tests: AddressSanitizer + UBSan + gcov coverag
 # -pthread tests (pmm concurrent, sync_concurrent).
 option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for -pthread tests)" OFF)
 
-# mm free-site auditor: panic at a free that's still-mapped / still-cached / OOB, with the culprit stack.
-option(CINUX_MM_REFCOUNT_AUDIT "mm: panic at bad phys-page frees with the culprit stack" OFF)
 
 # ---- 5. Build switches ------------------------------------------------------
 # Controls whether test/ (host unit tests + test kernel image) is added. OFF by

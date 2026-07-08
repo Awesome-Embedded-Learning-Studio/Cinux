@@ -8,9 +8,7 @@
 #include <stddef.h>
 
 #include "kernel/lib/kprintf.hpp"
-#ifdef CINUX_MM_REFCOUNT_AUDIT
-#include "kernel/mm/page_cache.hpp"  // g_page_cache.contains_phys
-#endif
+#include "kernel/mm/page_cache.hpp"  // free-vs-cache audit (always-on)
 
 namespace cinux::mm {
 
@@ -299,7 +297,6 @@ bool PMM::refcount_dec_and_test(uint64_t phys) {
     if (__atomic_sub_fetch(&refcount_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL) != 0) {
         return false;
     }
-#ifdef CINUX_MM_REFCOUNT_AUDIT
     int16_t live_pc = __atomic_load_n(&pte_count_storage_[phys / PAGE_SIZE], __ATOMIC_RELAXED);
     if (live_pc != 0) {
         cinux::lib::kpanic("[AUDIT] free phys=0x%lx pte_count=%d (still mapped)",
@@ -309,7 +306,6 @@ bool PMM::refcount_dec_and_test(uint64_t phys) {
         cinux::lib::kpanic("[AUDIT] free phys=0x%lx still in PageCache",
                            static_cast<unsigned long>(phys));
     }
-#endif
     __atomic_store_n(&pte_count_storage_[phys / PAGE_SIZE], 0, __ATOMIC_RELAXED);
     auto g = lock_.guard();  // buddy_ not thread-safe; serialize vs alloc (96bd1ae did alloc side)
     buddy_.free(phys / PAGE_SIZE);

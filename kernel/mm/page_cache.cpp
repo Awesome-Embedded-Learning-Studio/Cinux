@@ -55,7 +55,7 @@ CachedPage* PageCache::lookup(cinux::fs::Inode* inode, uint64_t offset) {
 bool PageCache::contains_phys(uint64_t phys) const {
     // Lock-free: cached pages are never freed (no eviction yet), so bucket
     // chains only grow at the head -- a scan sees a stable snapshot. Used by
-    // CINUX_MM_REFCOUNT_AUDIT to flag a free of a still-cached page.
+    // the always-on free check (pmm.cpp) to flag a free of a still-cached page.
     for (size_t b = 0; b < kHashBuckets; b++) {
         for (CachedPage* p = buckets_[b]; p != nullptr; p = p->hash_next) {
             if (p->phys == phys) {

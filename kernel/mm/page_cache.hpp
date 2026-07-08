@@ -95,7 +95,7 @@ public:
     CachedPage* lookup(cinux::fs::Inode* inode, uint64_t offset);
 
     /// True if @p phys is currently cached. Lock-free (cached pages are never
-    /// freed -- no eviction). Used by CINUX_MM_REFCOUNT_AUDIT's free check.
+    /// freed -- no eviction). Used by the always-on free-vs-cache check in pmm.cpp.
     bool contains_phys(uint64_t phys) const;
 
     /// Obtain a page: a hit bumps the ref count and returns; a miss allocates a
