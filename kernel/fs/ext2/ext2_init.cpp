@@ -213,9 +213,15 @@ bool Ext2::write_superblock() {
     constexpr uint64_t SB_LBA     = EXT2_SUPERBLOCK_OFFSET / EXT2_SECTOR_SIZE;
     constexpr uint16_t SB_SECTORS = EXT2_SUPERBLOCK_SIZE / EXT2_SECTOR_SIZE;
 
-    memcpy(block_buf_, &sb_, sizeof(Ext2Superblock));
+    // SMP-safe: per-call KmBuf (block_buf_ is shared/not thread-safe; multiple
+    // callers -- alloc_block, alloc_inode, ext2_directory -- invoke this).
+    KmBuf buf(4096);
+    if (!buf) {
+        return false;
+    }
+    memcpy(buf.data(), &sb_, sizeof(Ext2Superblock));
 
-    if (!dev_->write_blocks(SB_LBA, SB_SECTORS, block_buf_).ok()) {
+    if (!dev_->write_blocks(SB_LBA, SB_SECTORS, buf.data()).ok()) {
         cinux::lib::kprintf("[EXT2] write_superblock: I/O failed\n");
         return false;
     }
@@ -234,16 +240,18 @@ bool Ext2::write_bgdt(uint32_t group) {
     uint32_t entry_in_block    = group % entries_per_block;
     uint32_t disk_block        = bgdt_start_block + bgdt_block_index;
 
-    if (!read_block(disk_block)) {
+    // SMP-safe: per-call KmBuf (block_buf_ is shared; multiple callers).
+    KmBuf buf(4096);
+    if (!buf || !read_block(disk_block, buf.get())) {
         cinux::lib::kprintf("[EXT2] write_bgdt: failed to read block %u\n", disk_block);
         return false;
     }
 
-    auto* block_data = block_buf_;
+    auto* block_data = buf.data();
     memcpy(block_data + entry_in_block * sizeof(Ext2BlockGroupDescriptor), &bgdt_[group],
            sizeof(Ext2BlockGroupDescriptor));
 
-    if (!write_block(disk_block)) {
+    if (!write_block(disk_block, buf.get())) {
         cinux::lib::kprintf("[EXT2] write_bgdt: failed to write block %u\n", disk_block);
         return false;
     }

@@ -176,6 +176,9 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
 // ============================================================
 
 uint32_t Ext2::alloc_inode() {
+    // SMP: serialize inode bitmap alloc vs block alloc / other inode allocs
+    // (shared block_buf_ in write_superblock/write_bgdt + bitmap RMW race).
+    auto g = block_alloc_lock_.guard();
     if (!mounted_) {
         return 0;
     }
@@ -247,6 +250,8 @@ uint32_t Ext2::alloc_inode() {
 }
 
 bool Ext2::free_inode(uint32_t ino) {
+    // SMP: serialize inode bitmap free (see alloc_inode above).
+    auto g = block_alloc_lock_.guard();
     if (ino == 0 || !mounted_) {
         return false;
     }

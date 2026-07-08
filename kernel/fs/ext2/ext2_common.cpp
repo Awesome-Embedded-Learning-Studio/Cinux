@@ -14,6 +14,7 @@
 #include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
+#include "kernel/arch/x86_64/backtrace.hpp"  // F-DYN-COV: wild-block trace
 #include "kernel/mm/page_cache.hpp"
 
 namespace cinux::fs {
@@ -165,23 +166,46 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
 // blocks. Clobbers block_buf_ (indirect-table reads); data I/O uses read_disk_range.
 // Note: extent depth>0 (Unsupported) collapses to 0 here (zero-fill) -- read() used
 // to break on it; ext4 depth>0 stays a follow-up and cc1's depth-0 extents are fine.
+// F-DYN-COV trace (temporary, wild-block root-cause hunt): a blk >= s_blocks_count
+// means disk.i_block[] or an indirect-block pointer is garbage.  Print which
+// pointer + the disk_inode address + caller stack so the race source shows.
+static void ext2_trace_wild_blk(uint32_t blk, uint64_t file_block, const Ext2Inode& disk,
+                                uint32_t blocks_count) {
+    if (blk == 0 || blk < blocks_count) {
+        return;
+    }
+    cinux::lib::kprintf(
+        "[EXT2-TRACE] resolve wild blk=%u file_block=%lu i_block[12]=%u [13]=%u [14]=%u disk=%p\n",
+        blk, static_cast<unsigned long>(file_block), disk.i_block[EXT2_INDIRECT_BLOCK],
+        disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK], disk.i_block[14],
+        static_cast<const void*>(&disk));
+    cinux::arch::backtrace();
+}
+
 uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
                                           uint64_t block_ptrs_per_block, uint8_t* scratch) {
+    const uint32_t blocks_count = ext2_.blocks_count();
     if (inode_has_extent_tree(disk)) {
         uint32_t           extent_block = 0;
         ExtentLookupResult r =
             extent_lookup_block(disk, static_cast<uint32_t>(file_block), extent_block);
-        return (r == ExtentLookupResult::Mapped) ? extent_block : 0;
+        uint32_t blk = (r == ExtentLookupResult::Mapped) ? extent_block : 0;
+        ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
+        return blk;
     }
     if (file_block < EXT2_DIRECT_BLOCKS) {
-        return disk.i_block[file_block];
+        uint32_t blk = disk.i_block[file_block];
+        ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
+        return blk;
     }
     if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
         const uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
         if (indirect_block == 0) return 0;
         if (!ext2_.read_block(indirect_block, scratch)) return 0;
         const auto* indirect = reinterpret_cast<const uint32_t*>(scratch);
-        return indirect[file_block - EXT2_DIRECT_BLOCKS];
+        uint32_t    blk      = indirect[file_block - EXT2_DIRECT_BLOCKS];
+        ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
+        return blk;
     }
     if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block +
                          block_ptrs_per_block * block_ptrs_per_block) {
@@ -197,7 +221,9 @@ uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_b
         if (indirect_block == 0) return 0;
         if (!ext2_.read_block(indirect_block, scratch)) return 0;
         const auto* child_ptrs = reinterpret_cast<const uint32_t*>(scratch);
-        return child_ptrs[idx2];
+        uint32_t    blk        = child_ptrs[idx2];
+        ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
+        return blk;
     }
     return 0;  // triple-indirect unsupported
 }

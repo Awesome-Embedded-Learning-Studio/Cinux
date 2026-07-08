@@ -114,6 +114,9 @@ public:
      */
     uint8_t* block_buf();
 
+    /// Total on-disk blocks (s_blocks_count) -- bounds check for block pointers.
+    uint32_t blocks_count() const { return sb_.s_blocks_count; }
+
     /// Read into block_buf_ (NOT SMP-safe; see dst overload).  @return true on success.
     bool read_block(uint32_t block_num);
     /// SMP-safe: read straight into @p dst (caller-provided).
@@ -483,17 +486,14 @@ private:
     /// Block group descriptor table (cached after mount)
     Ext2BlockGroupDescriptor bgdt_[EXT2_MAX_GROUPS]{};
 
-    /// Inode cache: separate-chaining hash table (bucket = ino % SIZE chain
-    /// head) of heap-owned Ext2CachedInode.  An object is freed only when its
-    /// refcount has dropped to 0 AND the cache needs room (soft cap
-    /// EXT2_INODE_CACHE_MAX) or it is invalidated; a live (refcount > 0) object
-    /// is never moved or repopulated, so an Inode* from get_cached_inode() is
-    /// stable for the holder's lifetime.  See Ext2CachedInode for the full model.
+    /// Inode cache: separate-chaining hash (bucket = ino % SIZE) of heap-owned
+    /// Ext2CachedInode.  Live (refcount > 0) objects are never moved/repopulated.
     Ext2CachedInode* inode_cache_[EXT2_INODE_CACHE_SIZE]{};
 
     /// Live object count; capped at EXT2_INODE_CACHE_MAX (evict refcount==0).
     uint32_t inode_cache_count_{0};
     mutable cinux::proc::Spinlock inode_cache_lock_;  ///< SMP: serialize cache walks/evicts
+    mutable cinux::proc::Spinlock block_alloc_lock_;  ///< SMP: serialize block+inode bitmap alloc/free
 };
 
 }  // namespace cinux::fs
