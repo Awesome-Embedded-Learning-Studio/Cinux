@@ -84,6 +84,7 @@ void run_pty_device_tests();
 void run_procfs_tests();
 void run_tmpfs_tests();
 void run_mount_tests();
+void run_flock_tests();  // F6-M1 B2: flock(2)
 void run_access_tests();
 void run_ahci_write_tests();
 void run_ahci_block_device_tests();
@@ -1314,6 +1315,7 @@ extern "C" void kernel_main() {
     // mount/umount2 tests (F6-M1): tmpfs-via-sys_mount, resolve, umount detach,
     // unknown fstype, remount-after-umount (owned backend freed).
     run_mount_tests();
+    run_flock_tests();  // F6-M1 B2: flock(2)
 
     // access tests (F6 batch 3a): root bypass R/W, X denied on non-exec file,
     // missing -> ENOENT, bad mode -> EINVAL.
