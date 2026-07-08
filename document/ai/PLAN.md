@@ -2,7 +2,7 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
-## 🔄 F6-M1 VFS 增强全收 — 立项 2026-07-08（分支 `feat/f6-m1-vfs-finale`，从干净 main `61a583e`）
+## ✅ F6-M1 VFS 增强全收 — 收官 2026-07-08（分支 `feat/f6-m1-vfs-finale`，从干净 main `61a583e`，6 commit `fb8aa48`→`3ce5e10`，两 leg 937/937）
 
 > Feature 域 F6 VFS 第一里程碑收尾弧。**todo 滞后真相（2026-07-08 核对代码）**：T2 symlink / T3 硬链接在 **F-ECO 批2 已做透**——`InodeOps` 有 `readlink`/`symlink`/`link` 虚方法（[inode.hpp:151/155/160](../../kernel/fs/inode.hpp#L151)）、`vfs_lookup.cpp` 完整 follow + `kMaxSymlinks=40` 循环检测 + restart-after-follow、`ext2_links.cpp` 真 `Ext2::symlink`/`link`（fast/long symlink 都支持）、`sys_symlink`/`sys_readlink`/`sys_link`/`sys_lstat` 全注册。todo `00-vfs-enhance.md` 仍标"未启动"，不准，本弧校准。
 
@@ -13,11 +13,12 @@
 ### 批表
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
-| 0 | 立项 docs（本段 + 校准 todo `00-vfs-enhance.md` T2/T3 标 ✅ + ROADMAP F6-M1 细化） | 🔄 | docs-only |
-| 1 | 块设备注册表（`BlockRegistry` name→`IBlockDevice*`）+ DevFS 块设备节点（`add_block_node` + `InodeOps::block_device()` 虚方法默认 nullptr）+ boot 注册 `/dev/sda /dev/sdb /dev/sdc` + `ProcFs/DevFs::instance()` 访问器 + `do_mount_kernel` factory 扩 proc/devfs（静态单例 owned=false）/ext2/ext4（source→vfs_lookup→`block_device()`→`new Ext2`，owned=true）+ QEMU 加第二 ext2 盘 + 机制测 | ⏳ | 两 leg + mount -t proc/devfs/ext2 机制测 + boot 冒烟 `/dev/sda` 装配 |
-| 2 | flock POSIX 文件锁：`FileLockManager`（key=`Inode*`/owner=`Task*`，SH/EX/UN，阻塞+非阻塞 EWOULDBLOCK）+ `sys_flock=73`（照 sys_symlink 注册）+ close 释放钩 `FDTable::close` + 机制测 | ⏳ | 两 leg + flock SH 共享/EX 互斥/UN/close 释放机制测 |
-| 3 | Dentry Cache：`Dentry`+`DentryCache`（全局，Spinlock，正缓存 `inode_ref` pin 防 UAF，LRU 软上限）+ `vfs_lookup` 集成（命中返 inode_ref'd）+ 失效挂 syscall 层（sys_unlink/rmdir/rename/umount2，不让 FS 知 dentry）+ 机制测 + -smp 压 | ⏳ | 两 leg + dentry 命中/失效/跨 mount 机制测 + -smp inode_cache race 防回归 |
-| 4 | 收官：todo 校准（T1/T4/T5 ✅）+ ROADMAP F6-M1 ✅ + note + 全量验证 | ⏳ | 两 leg run-kernel-test-all + host ctest + 全量 cmake --build（改 InodeOps 公共接口） |
+| 0 | 立项 docs（本段 + 校准 todo `00-vfs-enhance.md` T2/T3 标 ✅ + ROADMAP F6-M1 细化） | ✅ `fb8aa48` | docs-only |
+| 1a | factory 扩 proc/devfs（静态单例 owned=false）+ `ProcFs/DevFs::instance()` 访问器（`is_mounted()` 判防暴露未 init 单例）+ 机制测 | ✅ `3f3c108` | 两 leg 926/926 + proc/devfs 共享单例机制测 |
+| 1b | `BlockRegistry` + DevFS 块节点（`add_block_node`+`BlockDevOps`+`InodeOps::block_device()` 默认 nullptr）+ boot 注册（init.cpp rootfs backing + main_test AHCI port1）+ factory 扩 ext2/ext4（source→vfs_lookup→`block_device()`→`new Ext2`）+ errno `kEnxio`(6) + 机制测 | ✅ `1c2d337` | 两 leg 927/927 + mount -t ext2 /dev/sda→Ext2→root 机制测 |
+| 2 | flock POSIX 文件锁：`FileLockManager`（key=`Inode*`/owner=`Task*`，SH/EX/UN/NB，阻塞+非阻塞 EAGAIN）+ `sys_flock=73` + sys_close 释放钩 + 机制测 | ✅ `fa1c31b` | 两 leg 932/932 + flock 5 测（EX 互斥/SH 共享/SH vs EX/同 task upgrade/close 释放）|
+| 3 | Dentry Cache：`DentryCache`（全局 hash，正缓存 `inode_ref` pin 防 UAF，无 LRU 留续）+ `vfs_lookup` 集成（命中跳 lookup_child）+ 失效挂 syscall 层（sys_unlink/rmdir/rename，FS 不知 dentry）+ 机制测 + -smp 压 | ✅ `3ce5e10` | 两 leg 937/937 + dentry 5 测 + -smp dentry×inode_cache race 无回归 |
+| 4 | 收官：todo/ROADMAP/PLAN ✅ + note + 全量验证 | ✅ 本次 | 两 leg 937/937 + 全量 cmake --build + test_host（InodeOps 公共接口改 B1b）|
 
 ### 风险 / 陷阱
 - **B1 boot 注册时机**：NVMe/AHCI/VirtIO init vs DevFS init 顺序——块设备注册须在 DevFS 装配前；mount source 解析走 vfs_lookup 需 `/dev` 已挂（确认 init.cpp 调用链）。

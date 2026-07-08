@@ -2,14 +2,14 @@
 
 > 三项 VFS 层增强：目录项缓存加速路径解析、符号/硬链接支持、文件锁。
 
-> **进度（2026-07-08 核对代码 + F6-M1 全收立项）**：
-> - **T2 symlink / T3 硬链接：✅ F-ECO 批2 已做透**（原 todo 滞后标"未启动"，不准）。证据：`InodeOps` 有 `readlink`/`symlink`/`link` 虚方法（[inode.hpp:151/155/160](../../../kernel/fs/inode.hpp#L151)）；`vfs_lookup.cpp` 完整 symlink follow + `kMaxSymlinks=40` 循环检测 + restart-after-follow；[ext2_links.cpp](../../../kernel/fs/ext2/ext2_links.cpp) 真 `Ext2::symlink`（fast/long 都支持）+ `Ext2::link` + nlink 从 `i_links_count`；`sys_symlink`/`sys_readlink`/`sys_link`/`sys_lstat` 全注册。
-> - **T5 mount：sys_mount/umount2 ✅**（`b078fef`，boot 挂 /tmp）；fstype 工厂只认 tmpfs，其余 ENODEV；**mount factory 全做（含 `/dev/sda1` 块设备节点+注册表）→ F6-M1 B1**。
-> - **T1 Dentry Cache：⏳ 未启动**（无 `dentry.hpp`）→ **F6-M1 B3**。
-> - **T4 flock：⏳ 未启动**（无 `SYS_flock`/`file_lock.hpp`）→ **F6-M1 B2**。
-> - **T6 单测**：symlink/link 已有（F-ECO 批2 roundtrip）；dentry/flock 单测随 B2/B3 落。
+> **进度（2026-07-08 ✅ 收官 `feat/f6-m1-vfs-finale`，两 leg 937/937）**：
+> - **T1 Dentry Cache：✅ B3**（`3ce5e10`）——DentryCache 全局 hash (parent,name)→child + vfs_lookup 集成 + syscall 层失效（sys_unlink/rmdir/rename）。
+> - **T2 symlink / T3 硬链接：✅ F-ECO 批2**（原 todo 滞后已校准）。证据：`InodeOps` `readlink`/`symlink`/`link`（[inode.hpp:151/155/160](../../../kernel/fs/inode.hpp#L151)）；`vfs_lookup.cpp` 完整 follow + 40 层循环检测；[ext2_links.cpp](../../../kernel/fs/ext2/ext2_links.cpp) 真 `Ext2::symlink`/`link`；`sys_symlink`/`readlink`/`link`/`lstat` 全注册。
+> - **T4 flock：✅ B2**（`fa1c31b`）——`sys_flock(73)` + FileLockManager（SH/EX/UN/NB，key=Inode*/owner=Task*，阻塞+非阻塞 EAGAIN）+ sys_close 释放钩。
+> - **T5 mount factory：✅ B1a+B1b**（`3f3c108`/`1c2d337`）——proc/devfs 静态单例 + ext2/ext4 块设备链（/dev/sda→IBlockDevice→new Ext2，BlockRegistry+DevFS 块节点+InodeOps::block_device）。
+> - **T6 单测：✅** test_flock 5 + test_dentry 5 + test_mount 扩（proc/devfs/ext2 factory）。
 >
-> **M1 仍 🔄；本弧 = `feat/f6-m1-vfs-finale`（5 批：B0 docs / B1 mount factory / B2 flock / B3 Dentry Cache / B4 收官）。** 详见 PLAN「🔄 F6-M1 VFS 增强全收」段。
+> **M1 ✅ 收官。** 详见 PLAN「✅ F6-M1 VFS 增强全收」段 + [note](../../notes/2026-07-08-f6-m1-vfs-finale.md)。留续（非 M1 阻塞）：flock per-file-description owner 语义 / dentry LRU 收缩 + 负缓存 / ext2 独立库（M6）/ ext4 写（M5 续）。
 
 ## 目标
 
