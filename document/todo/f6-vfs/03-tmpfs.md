@@ -3,6 +3,8 @@
 > 内存文件系统。tmpfs 用于共享内存和临时文件，
 > ramfs 是更简单的纯内存 FS。
 
+> **进度（2026-07-08 核对）**：**M4 ✅ 收官**（合 main PR#60）。实际走 TmpFs 单类直做（非本 todo 旧 ramfs 派生设计）：`kernel/fs/tmpfs/{tmpfs.hpp,tmpfs.cpp,tmpfs_init.cpp}` + create/mkdir/unlink + 9 机制测(`6656096`)+ sys_mount/umount2 + boot 挂 /tmp(`b078fef`)+ mount 机制测 5 项。两 leg 绿 + boot 冒烟 `[TMPFS] mounted at /tmp`。本 todo 的 ramfs 基类/容量限制/swap/df 统计/`/dev/shm` 属远期扩展,非 GCC 自举验收门槛。
+
 ## 目标
 
 实现内存驻留文件系统，为 POSIX shm 和临时文件提供基础。

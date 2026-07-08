@@ -2,6 +2,8 @@
 
 > 三项 VFS 层增强：目录项缓存加速路径解析、符号/硬链接支持、文件锁。
 
+> **进度（2026-07-08 核对）**：T5 mount 部分落地——`sys_mount`/`sys_umount2`(165/166)+ boot 挂 /tmp 已合 main(`b078fef`,PR#60);fstype 工厂(仅 tmpfs 无源,ext2/ext4/proc/devfs/ramfs/fat 返 ENODEV)+ mount flags(MS_RDONLY/MS_NOSUID 忽略)留续。**T1 Dentry Cache / T2 symlink 完整+lstat / T3 硬链接 nlink 维护 / T4 flock / T6 单测 均未启动**(无 `kernel/fs/dentry.hpp`/`file_lock.hpp`,`lstat` 是 stub=stat)。M1 仍 🔄。
+
 ## 目标
 
 提升 VFS 性能和 POSIX 兼容性。

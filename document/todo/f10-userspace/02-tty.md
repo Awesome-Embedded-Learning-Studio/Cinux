@@ -4,7 +4,7 @@
 > Shell 管道、Job Control、交互式终端的基础。
 
 > **Phase 1（2026-06-27 立项，不需 DevFS）**：TTY 行规范（echo / 退格 / Ctrl+C / Ctrl+D / 行积累）+ stdin 阻塞读（替 spin）+ ioctl 实命令（TCGETS / TCSETS / TIOCGWINSZ / TIOCGPGRP / TIOCSPGRP）+ 前台进程组信号。用 console TTY 单例 + `Task::controlling_tty` 字段绕开 DevFS。
-> **Phase 2（🔄 进行中 2026-06-30，feat/f10-m3-pty；DevFS 已合 main PR#48，解锁）**：PTY master/slave、`/dev/ptmx`、`/dev/pts/N`、`/dev/tty`、`/dev/console`、TIOCSCTTY——需设备 inode（现就位）。按需不投机建。详见 PLAN「🔄 F10-M3 TTY Phase 2」段。
+> **Phase 2（✅ 收官 2026-06-30，已合 main PR#50 c0188cd；DevFS PR#48 解锁）**：PTY master/slave、`/dev/ptmx`、`/dev/pts/N`、`/dev/tty`、`/dev/console`、TIOCSCTTY 全落地。Phase 2 follow-up(sys_dup2/pty_release/blocking slave read/TIOCSCTTY 闭环)归 F10-M4,M4 已 ✅(PR#72)。详见 PLAN「✅ F10-M3 TTY Phase 2」段。
 
 ## 目标
 
