@@ -9,10 +9,10 @@
  * still runs first to arm the PS/2 mouse + keyboard listener (dual-write into
  * /dev/event0, batch 2) so the host's poll_event drains pointer + keyboard.
  *
- * handoff_framebuffer_to_gui no longer builds the kernel host_cinux widget tree
- * (the userspace host owns it now); it only detaches the text console so routine
- * logs stop overlaying the framebuffer. host_cinux.cpp is dead code as of this
- * batch -- batch 4 deletes it.
+ * handoff_framebuffer_to_gui no longer builds any kernel widget tree (the
+ * userspace host owns it); it only detaches the text console so routine logs
+ * stop overlaying the framebuffer. The old kernel host_cinux.cpp was deleted in
+ * chore/post-gui-cleanup -- the Host ABI table is filled in userspace now.
  *
  * CODING-TASTE §14: this is the GUI-side launch_userspace() impl; the non-GUI
  * counterpart (execve /sbin/init) is kernel/proc/shell_launch.cpp. CMake links

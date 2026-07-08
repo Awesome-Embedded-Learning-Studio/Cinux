@@ -12,6 +12,7 @@
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging.hpp"
+#include "kernel/arch/x86_64/tlb.hpp"  // B3 defect C: enqueue_pending_shootdown
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/phys_virt.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -115,7 +116,15 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
     // NOTE (SMP): correct single-core and when threads do not migrate across
     // cores mid-CoW. Cross-core TLB shootdown before freeing is a deeper
     // follow-up; CinuxOS APs are mostly idle today.
-    cinux::mm::g_pmm.pte_count_dec_and_test(old_phys);
+    // B3 defect C: defer the free.  pte_count_dec_and_test_no_free returns
+    // true when the page would be freed (pte_count+refcount hit 0, audit
+    // passed) but does NOT free -- another core's TLB may still cache a
+    // mapping to old_phys.  enqueue_pending_shootdown either pushes (phys,
+    // vaddr) for the drain kthread to shootdown+free (production), or falls
+    // back to an inline free_page (suite-only / pre-init, single-core-safe).
+    if (cinux::mm::g_pmm.pte_count_dec_and_test_no_free(old_phys)) {
+        cinux::arch::enqueue_pending_shootdown(old_phys, fault_vaddr);
+    }
 
     return true;
 }

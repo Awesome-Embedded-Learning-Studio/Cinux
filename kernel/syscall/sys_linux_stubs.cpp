@@ -18,6 +18,12 @@
 
 namespace cinux::syscall {
 
+// getcpu(309): glibc probes it for per-CPU affinity hints via vDSO; the syscall
+// fallback returning -ENOSYS makes glibc give up the hint gracefully.
+int64_t sys_getcpu(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
+    return -cinux::kEnosys;
+}
+
 int64_t sys_rseq(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
     return -cinux::kEnosys;
 }

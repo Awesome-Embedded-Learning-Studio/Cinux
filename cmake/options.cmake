@@ -43,6 +43,25 @@ option(CINUX_UBSAN "Enable -fsanitize=undefined with freestanding UBSan stubs" O
 # stats_kthread.cpp, OFF links stats_kthread_stub.cpp (empty); no source #ifdef.
 option(CINUX_STATS_KTHREAD "Spawn periodic 1 Hz memory-stats kthread for ad-hoc profiling" OFF)
 
+# B3 defect C: spawn the TLB drain kthread (deferred CoW shootdown+free).
+# ON (default) links tlb_drain.cpp -- handle_cow_fault defers the free to a
+# kthread that shootdowns all cores first.  OFF links tlb_drain_stub.cpp
+# (empty start_tlb_drain_thread); g_drain_active stays false so
+# enqueue_pending_shootdown inline-frees with no shootdown (defect C stale
+# tolerated).  §14 file gate: no source #ifdef.
+option(CINUX_TLB_DRAIN "Spawn the TLB shootdown drain kthread (deferred CoW free)" ON)
+
+# F-DYN-COV: SMP data-race watchpoint detector.  RACE_TOUCH(w) marks a shared
+# variable that ought to be lock-protected and kpanics if two different CPUs
+# touch it with no lock in between -- the signature of a lockless shared-state
+# race (e.g. ext2 inode_cache_ before it got a lock).  lockdep_assert_held
+# (always available under CINUX_LOCKDEP) catches "designed a lock but forgot
+# to take it on some path".  Default OFF: the watchpoint adds an atomic
+# exchange per touch and perturbs timing (heisenbug risk); enable for race
+# hunting: cmake -DCINUX_RACE_DETECT=ON -DCINUX_LOCKDEP=ON ...
+# §14 file gate: ON links race_detect.cpp, OFF links race_detect_stub.cpp.
+option(CINUX_RACE_DETECT "Enable SMP data-race watchpoint detector (debug)" OFF)
+
 # ---- 3. Ring-3 smoke tests (run-kernel-test harness; need artifacts) --------
 # F10-M1 batch 6 / P3: musl /hello ring-3 smoke -- the ONLY test that exercises
 # real user-space syscall paths under SMAP (run-kernel-test uses kernel
@@ -95,13 +114,14 @@ option(CINUX_HOST_ASAN "Host unit tests: AddressSanitizer + UBSan + gcov coverag
 # -pthread tests (pmm concurrent, sync_concurrent).
 option(CINUX_HOST_TSAN "Host unit tests: ThreadSanitizer (data-race detector for -pthread tests)" OFF)
 
+
 # ---- 5. Build switches ------------------------------------------------------
 # Controls whether test/ (host unit tests + test kernel image) is added. OFF by
 # default for zero behaviour change: historically injected via -D from CI
 # (.github/workflows/ci.yml), VSCode (.vscode/tasks.json), and scripts; never
 # declared, so a bare `cmake -B build -S .` silently skipped test/. Declaring
 # it makes it visible in ccmake/cmake-gui without changing the default.
-option(CINUX_BUILD_TESTS "Build host unit tests (test/) + test kernel image" OFF)
+option(CINUX_BUILD_TESTS "Build host unit tests (top-level test/ dir -> test_host target). Test kernels (big_kernel_test + mini_kernel_test) build unconditionally." OFF)
 
 # F5-M3 后(2026-07-06):host /dev/kvm GID 漂到 kmem(用户只在 kvm 组)→ permission
 # denied,KVM 不可用。默认 TCG 模拟;KVM 恢复后 -DCINUX_USE_KVM=ON 显式开。
@@ -134,7 +154,7 @@ set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
 # if() per flag. CINUX_UBSAN is intentionally absent (see comment above).
 # =============================================================================
 set(CINUX_COMPILE_DEF_OPTS
-    GUI USB NET VIRTIO LOCKDEP
+    GUI USB NET VIRTIO LOCKDEP RACE_DETECT
     MUSL_HELLO_SMOKE MUSL_DYN_SMOKE BUSYBOX_SMOKE GCC_TOOLCHAIN FB_MMAP_SMOKE
     INPUT_SMOKE
     GUI_HOST_SMOKE)

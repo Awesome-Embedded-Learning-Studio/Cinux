@@ -40,14 +40,28 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
     cinux::fs::FDTable& tbl  = cinux::fs::current_fd_table();
     cinux::fs::File*    file = tbl.get(fd);
     if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
-        auto g = file->offset_lock_.guard();
-        // Disk-backed files (ext2) are served through the PageCache so that
-        // read() and demand paging share one cached copy; pipes and other
-        // transient ops keep their direct read() path.
-        auto read_result =
-            file->inode->ops->is_page_cacheable()
-                ? cinux::mm::g_page_cache.read_bytes(file->inode, file->offset, kbuf, count)
-                : file->inode->ops->read(file->inode, file->offset, kbuf, count);
+        // offset_lock_ guards file->offset (seek position).  Only disk-backed
+        // (page_cacheable) files use offset; their read path (PageCache +
+        // demand page + NVMe poll) does not block on schedule.  Pipes/pty are
+        // streams -- their read() calls schedule_blocked, so holding
+        // offset_lock_ across it would deadlock (LOCKDEP: schedule-while-held).
+        if (file->inode->ops->is_page_cacheable()) {
+            auto g           = file->offset_lock_.guard();
+            auto read_result = cinux::mm::g_page_cache.read_bytes(file->inode, file->offset,
+                                                                  kbuf, count);
+            if (!read_result.ok()) {
+                return -to_errno(read_result.error());
+            }
+            if (read_result.value() > 0) {
+                file->offset += static_cast<uint64_t>(read_result.value());
+            }
+            return read_result.value();
+        }
+        // Non-page-cacheable (pipe/pty/ramdisk): direct read, may block --
+        // no offset_lock_ (would deadlock schedule_blocked).  Update offset
+        // unlocked (single-fd read is the common case; dup-shared racing
+        // reads are rare in this hobby kernel).
+        auto read_result = file->inode->ops->read(file->inode, file->offset, kbuf, count);
         if (!read_result.ok()) {
             return -to_errno(read_result.error());
         }

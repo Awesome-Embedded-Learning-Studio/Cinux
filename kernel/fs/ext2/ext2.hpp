@@ -23,6 +23,7 @@
 #include "fs/ext2/ext2_types.hpp"
 #include "fs/vfs_filesystem.hpp"
 #include "kernel/drivers/block_device.hpp"
+#include "kernel/proc/sync.hpp"  // Spinlock (inode_cache_lock_)
 
 namespace cinux::fs {
 
@@ -113,9 +114,13 @@ public:
      */
     uint8_t* block_buf();
 
-    /// Read an ext2 block from disk into block_buf_ (public; InodeOps callbacks use it).
-    /// @return true on success, false on I/O error.
+    /// Total on-disk blocks (s_blocks_count) -- bounds check for block pointers.
+    uint32_t blocks_count() const { return sb_.s_blocks_count; }
+
+    /// Read into block_buf_ (NOT SMP-safe; see dst overload).  @return true on success.
     bool read_block(uint32_t block_num);
+    /// SMP-safe: read straight into @p dst (caller-provided).
+    bool read_block(uint32_t block_num, void* dst);
     /// B3a: read @p block_count contiguous on-disk blocks straight into @p buf (one DMA,
     /// skipping block_buf_). Callers guarantee contiguity + block_count ≤ dma_buf (4 blk).
     cinux::lib::ErrorOr<void> read_disk_range(uint32_t start_disk_block, uint64_t block_count,
@@ -126,18 +131,17 @@ public:
      *
      * The caller should first populate the block buffer (via block_buf())
      * with the modified block data, then call write_block() to flush it.
-     * This is the counterpart to read_block().
-     *
-     * @param block_num  ext2 block number (0-based)
-     * @return true on success, false on I/O error
+     * This is the counterpart to read_block().  NOT SMP-safe (block_buf_); SMP
+     * paths use write_block(b, src).
      */
     bool write_block(uint32_t block_num);
+    /// SMP-safe: write @p src straight to disk (caller-provided).
+    bool write_block(uint32_t block_num, void* src);
 
-    /// Zero block_buf_ (block_size_ bytes) then write it to @p blk.  Used at
-    /// every freshly-allocated metadata block (inode/get_or_alloc_block paths)
-    /// so the new block hits disk zeroed.  @return write_block()'s result;
-    /// on false the caller frees @p blk and bails.
+    /// Zero block_buf_ then write to @p blk.  NOT SMP-safe; SMP uses the src overload.
     bool zero_and_write_block(uint32_t blk);
+    /// SMP-safe: zero @p src then write it.
+    bool zero_and_write_block(uint32_t blk, void* src);
 
     /// Fill @p st from @p inode's cached on-disk fields.  Shared by Ext2FileOps
     /// and Ext2DirOps stat(): validates inputs, zeroes the struct (so the unset
@@ -482,16 +486,14 @@ private:
     /// Block group descriptor table (cached after mount)
     Ext2BlockGroupDescriptor bgdt_[EXT2_MAX_GROUPS]{};
 
-    /// Inode cache: separate-chaining hash table (bucket = ino % SIZE chain
-    /// head) of heap-owned Ext2CachedInode.  An object is freed only when its
-    /// refcount has dropped to 0 AND the cache needs room (soft cap
-    /// EXT2_INODE_CACHE_MAX) or it is invalidated; a live (refcount > 0) object
-    /// is never moved or repopulated, so an Inode* from get_cached_inode() is
-    /// stable for the holder's lifetime.  See Ext2CachedInode for the full model.
+    /// Inode cache: separate-chaining hash (bucket = ino % SIZE) of heap-owned
+    /// Ext2CachedInode.  Live (refcount > 0) objects are never moved/repopulated.
     Ext2CachedInode* inode_cache_[EXT2_INODE_CACHE_SIZE]{};
 
     /// Live object count; capped at EXT2_INODE_CACHE_MAX (evict refcount==0).
     uint32_t inode_cache_count_{0};
+    mutable cinux::proc::Spinlock inode_cache_lock_;  ///< SMP: serialize cache walks/evicts
+    mutable cinux::proc::Spinlock block_alloc_lock_;  ///< SMP: serialize block+inode bitmap alloc/free
 };
 
 }  // namespace cinux::fs

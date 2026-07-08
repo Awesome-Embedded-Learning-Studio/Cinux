@@ -3,21 +3,21 @@
 #
 # @brief GUI subsystem CMake configuration (F13-B)
 #
-# F13-B (2026-07-05): the old in-tree desktop layer (window / window_manager /
-# terminal / desktop_icon / icon -- ~1500 lines) is removed -- the new Cinux-GUI
-# core absorbed all of it into host-neutral widget/ (WindowManager + Window +
-# Label + ... + Compositor + Desktop). kernel/gui/ now keeps ONLY:
-#   - event.cpp        : unified mouse+keyboard EventQueue (host_cinux poll_event
-#                        drains it; test_mouse_event exercises it)
-#   - host_cinux.cpp   : the Cinux host adapter -- the single host-specific TU
-#                        that fills the Host ABI table against the kernel's
-#                        drivers (the ONLY hard seam, per DIRECTIVES D)
-#   - gui_init.cpp     : PS/2 mouse + keyboard listener registration
-#   - desktop_launch.cpp: GUI-side launch_userspace + handoff_framebuffer_to_gui
-#                        (§14 single interface, non-GUI counterpart in proc/)
+# F-GUI-USERSPACE (2026-07-08): the in-kernel host adapter (host_cinux.cpp) is
+# deleted -- the widget tree + Host ABI table + GuiCore pump now live entirely in
+# the USERSPACE GUI host (user/cinux_gui_host, fork+execve'd by desktop_launch).
+# kernel/gui/ keeps only the kernel-side plumbing the userspace host can't do:
+#   - event.cpp        : unified mouse+keyboard EventQueue (test_mouse_event
+#                        exercises it; production input reaches the host via
+#                        /dev/event0, not this queue)
+#   - gui_init.cpp     : PS/2 mouse + keyboard listener -- dual-writes each
+#                        decoded key into /dev/event0 for the userspace host
+#   - desktop_launch.cpp: GUI-side launch_userspace (fork+execve /cinux_gui_host)
+#                        + handoff_framebuffer_to_gui (§14 interface, non-GUI
+#                        counterpart in proc/)
 # The host-neutral core (widget tree + Compositor + GuiCore + swraster + region)
 # lives at third_party/Cinux-GUI/ and is built as the cinux-gui STATIC lib
-# (linked from kernel/CMakeLists.txt).
+# (linked into the userspace host ELF; kernel no longer needs it).
 #
 
 # Unified event queue (ring buffer for mouse+keyboard events)
@@ -25,9 +25,8 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/event.cpp
 )
 
-# F13-B Cinux host adapter + input init + desktop launch
+# Input init + userspace GUI host launch (host_cinux.cpp deleted in F-GUI-USERSPACE)
 target_sources(big_kernel_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/host_cinux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gui_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/desktop_launch.cpp
 )

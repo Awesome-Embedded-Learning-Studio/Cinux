@@ -241,8 +241,8 @@
 - **F9 批4 更新（SMAP 启用）**: 合法访用户经 syscall/ISR entry STAC 显式放行,意外（漏 STAC）访用户 → SMAP #PF（双层保护,不再仅 PF 兜底）。validate 行为不变;完整 copy_from_user 修复仍留 F10。
 - **关联 GOTCHA**: #11(PF 硬门控 user-mode 判定)
 
-### DEBT-020 execve ELF 字段算术无溢出检查（恶意/损坏 ELF → VMA 映射错乱）
-- **维度**: 整数溢出/边界(D14)　**优先级**: P3　**状态**: 🆕 登记待办（F-QA Q3-4 审计）　**核验**: ✅ 读码坐实
+### DEBT-020 execve ELF 字段算术无溢出检查（恶意/损坏 ELF → VMA 映射错乱）✅ 已修
+- **维度**: 整数溢出/边界(D14)　**优先级**: P3　**状态**: ✅ 已修（feat/boost_cinux B1, 2026-07-08）　**核验**: ✅ 已修坐实
 - **位置**: `kernel/proc/execve.cpp:218`(seg_end = p_vaddr + p_memsz + PAGE_SIZE-1) / `:256`(p_offset + seg_offset) / `:189`(phnum * sizeof,DEBT-012)
 - **现象**: ELF phdr 字段(p_vaddr/p_memsz/p_offset/p_filesz)参与算术无溢出检查。`validate_elf_header`(L181)只校验 ehdr,不校验 phdr 算术。p_vaddr + p_memsz 若 wrap(UINT64_MAX 附近)→ seg_end 错乱 → VMA/页表映射错乱(L267 map)。
 - **根因**: ELF 字段用户可控(损坏/恶意 ELF)。当前 init/shell 是仓库编译 ELF(字段合法,不触发);未来 execve 用户自定义 ELF + 恶意构造触发。read 兜底部分(ReadFailed)但 seg_end 用于 VMA 映射(L267 map)。
@@ -257,8 +257,8 @@
 - **修复建议**: 改 slab 级 per-slot 状态位（SlabHeader bitmap 标 inuse/free），或 free 时查 slot 是否已在 freelist。当前启发式标注「非权威检测」可接受。Linux SLUB 用 redzone + freelist 指针校验。
 - **关联 GOTCHA**: 无
 
-### DEBT-012 execve phnum 无上限校验 → 损坏 ELF 触发 3.6MB 分配
-- **维度**: 内存安全　**优先级**: P3　**状态**: 🆕 登记待办　**核验**: ⚠️ 待核验
+### DEBT-012 execve phnum 无上限校验 → 损坏 ELF 触发 3.6MB 分配 ✅ 已修
+- **维度**: 内存安全　**优先级**: P3　**状态**: ✅ 已修（feat/boost_cinux B1, 2026-07-08,上限 256）　**核验**: ✅ 已修坐实
 - **位置**: `kernel/proc/elf_types.cpp:60` / `kernel/proc/execve.cpp:189-194`
 - **现象**: `validate_elf_header` 只查 `e_phnum==0`，无上限。`new Elf64_Phdr[phnum]` 最大 65535×56≈3.6MB。
 - **修复建议**: 加 `if(ehdr->e_phnum > 256) return BadElfHeaders;`（典型 <20）。

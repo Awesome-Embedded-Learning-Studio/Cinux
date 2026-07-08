@@ -15,6 +15,7 @@
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/address_space.hpp"
+#include "kernel/arch/x86_64/tlb.hpp"  // B3 defect C: start_tlb_drain_thread
 #include "kernel/mm/diagnostics.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/proc/percpu.hpp"
@@ -125,8 +126,8 @@ void kernel_init_thread() {
     // launch_userspace -- the non-GUI launch_userspace execves /sbin/init and
     // never returns, so anything placed after it never runs.  Interrupt-driven
     // once armed; graceful no-op if no xHCI controller is present or USB is
-    // compiled out (usb_stub.cpp is linked).  (The GUI build's desktop_launch
-    // spawns a separate gui_worker, so USB ordering there is unchanged.)
+    // compiled out (usb_stub.cpp is linked).  (The GUI build's desktop_launch fork+execve's the
+    // userspace GUI host, so USB ordering there is unchanged.)
     cinux::drivers::usb::init();
 
     // B1 gcc-stutter profiling: spawn the periodic memory-stats kthread.  No-op
@@ -134,7 +135,14 @@ void kernel_init_thread() {
     // curve to the serial log when ON, for narrowing gcc/g++ compile-stutter.
     cinux::mm::start_stats_thread();
 
-    // Bring up userspace.  GUI build: desktop + gui_worker thread
+    // B3 defect C: spawn the TLB drain kthread.  Sets g_drain_active so CoW
+    // frees defer to it (shootdown + free at IF=1, avoiding the sync-shootdown
+    // deadlock two CoW-faulting CPUs would hit).  Empty stub when
+    // CINUX_TLB_DRAIN=OFF (then enqueue inline-frees).  Needs the scheduler
+    // (Semaphore::wait), so this production-only call sits after Scheduler::init.
+    cinux::arch::start_tlb_drain_thread();
+
+    // Bring up userspace.  GUI build: fork+execve the userspace GUI host
     // (kernel/gui/desktop_launch.cpp).  Non-GUI build: execve /sbin/init as
     // PID1 (kernel/proc/shell_launch.cpp) -- busybox init, which forks /
     // respawns /bin/sh per /etc/inittab.  §14: one interface, two impl files,

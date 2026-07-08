@@ -45,7 +45,24 @@ int64_t do_write_kernel(int fd, const void* kbuf, uint64_t count) {
     cinux::fs::FDTable& tbl  = cinux::fs::current_fd_table();
     cinux::fs::File*    file = tbl.get(fd);
     if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
-        auto g = file->offset_lock_.guard();
+        // offset_lock_ guards file->offset.  Only disk-backed (page_cacheable)
+        // files use offset; their write path does not block on schedule.
+        // Pipes/pty are streams whose write() may block (pipe full ->
+        // schedule_blocked, or EPIPE -> SIGPIPE), so holding offset_lock_ across
+        // it would deadlock (LOCKDEP: schedule-while-held).
+        if (file->inode->ops->is_page_cacheable()) {
+            auto g            = file->offset_lock_.guard();
+            auto write_result = file->inode->ops->write(file->inode, file->offset, kbuf, count);
+            if (!write_result.ok()) {
+                return -to_errno(write_result.error());
+            }
+            if (write_result.value() > 0) {
+                file->offset += static_cast<uint64_t>(write_result.value());
+            }
+            return write_result.value();
+        }
+        // Non-page-cacheable (pipe/pty/ramdisk): direct write, may block --
+        // no offset_lock_.  Update offset unlocked (see read side above).
         auto write_result = file->inode->ops->write(file->inode, file->offset, kbuf, count);
         if (!write_result.ok()) {
             int err = to_errno(write_result.error());

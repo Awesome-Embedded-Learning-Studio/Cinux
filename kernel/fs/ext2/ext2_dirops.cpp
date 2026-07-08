@@ -70,11 +70,15 @@ cinux::lib::ErrorOr<int64_t> Ext2DirOps::readdir(const Inode* inode, uint64_t in
             continue;
         }
 
-        if (!ext2_.read_block(blk)) {
+        KmBuf buf(4096);
+        if (!buf) {
+            return cinux::lib::Error::IOError;
+        }
+        if (!ext2_.read_block(blk, buf.get())) {
             return cinux::lib::Error::IOError;
         }
 
-        auto*    block_data = reinterpret_cast<const uint8_t*>(ext2_.block_buf());
+        auto*    block_data = buf.data();
         uint32_t pos        = 0;
 
         while (pos < bs) {
