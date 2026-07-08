@@ -178,5 +178,9 @@ Inode* console_inode() {
     return r.ok() ? r.value() : nullptr;
 }
 
+DevFs* instance() {
+    return g_devfs.is_mounted() ? &g_devfs : nullptr;
+}
+
 }  // namespace devfs
 }  // namespace cinux::fs

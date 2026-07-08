@@ -124,6 +124,10 @@ public:
     /// Number of registered device nodes (excludes the root directory).
     uint32_t node_count() const { return node_count_; }
 
+    /// Whether mount() has registered nodes (F6-M1: devfs::instance() exposes
+    /// the singleton only once mounted).
+    bool is_mounted() const { return node_count_ > 0; }
+
     /// Name of the i-th device node, or nullptr if @p i is out of range.
     /// Used by the directory readdir implementation.
     const char* node_name(uint32_t i) const;
@@ -191,8 +195,10 @@ private:
  * @return true on success, false if mount() or vfs_mount_add(/dev) fails.
  */
 namespace devfs {
-bool   init();
-Inode* console_inode();
+bool    init();
+Inode*  console_inode();
+DevFs*  instance();  ///< Boot-owned DevFs singleton (F6-M1: sys_mount -t devfs).
+                     ///< nullptr before devfs::init().
 }  // namespace devfs
 
 }  // namespace cinux::fs

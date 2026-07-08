@@ -10,13 +10,17 @@
  * so leaving a mount behind would poison later sections.
  *
  * Coverage: mount + resolve, mount -> create/write/read through the mounted FS,
- * umount detaches, unknown fstype -> -ENODEV, umount missing -> -ENOENT, and
- * mount/umount/remount (slot reused + owned backend freed).
+ * umount detaches, unknown fstype -> -ENODEV, umount missing -> -ENOENT,
+ * mount/umount/remount (slot reuse + owned backend freed), and proc/devfs
+ * singleton sharing (F6-M1 B1a: a second mount point shares the boot FS;
+ * proc/devfs::instance() exposes the singleton only once mounted).
  */
 
 #include <stdint.h>
 
 #include "kernel/errno.hpp"
+#include "kernel/fs/devfs/devfs.hpp"    // devfs::instance / devfs::init
+#include "kernel/fs/procfs/procfs.hpp"  // procfs::instance / procfs::init
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/string.hpp"  // memcmp / strlen
 #include "kernel/syscall/sys_mount.hpp"
@@ -82,6 +86,8 @@ void test_mount_then_create_write_read() {
 }
 
 void test_mount_unknown_fstype_is_enodev() {
+    // ext2/ext4 land in B1b (source -> IBlockDevice); until then they are still
+    // -ENODEV, exactly like a nonsense fstype.
     TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "ext2", 0), -cinux::kEnodev);
     TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "nonsense", 0), -cinux::kEnodev);
     TEST_ASSERT_NULL(fs_at(kPathA));  // nothing mounted on failure
@@ -119,6 +125,43 @@ void test_remount_after_umount_is_fresh() {
     TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);
 }
 
+/// proc factory: the boot singleton is mounted at /proc; sys_mount -t proc at a
+/// second path shares it (owned=false).  run-kernel-test's slim boot may skip
+/// procfs::init(); mount() is idempotent (it guards on mounted_), so mount the
+/// singleton here first when the boot path left it uninitialised.
+void test_mount_proc_shares_singleton() {
+    if (cinux::fs::procfs::instance() == nullptr) {
+        cinux::fs::procfs::init();  // idempotent
+    }
+    TEST_ASSERT_NOT_NULL(cinux::fs::procfs::instance());
+
+    TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "proc", 0), 0);
+    TEST_ASSERT_NOT_NULL(fs_at(kPathA));
+    TEST_ASSERT_NOT_NULL(fs_at("/proc"));  // boot mount (from init) still resolves
+    TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);
+    TEST_ASSERT_NULL(fs_at(kPathA));
+    TEST_ASSERT_NOT_NULL(fs_at("/proc"));  // singleton survived the umount of kPathA
+}
+
+/// devfs factory: same singleton-sharing semantics as proc.  devfs::init() is
+/// NOT idempotent (it re-registers nodes), so the factory refuses -ENODEV when
+/// the boot singleton is uninitialised rather than expose it; when devfs IS
+/// mounted (production boot) it shares the singleton like proc.
+void test_mount_devfs_factory() {
+    if (cinux::fs::devfs::instance() != nullptr) {
+        TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "devfs", 0), 0);
+        TEST_ASSERT_NOT_NULL(fs_at(kPathA));
+        TEST_ASSERT_NOT_NULL(fs_at("/dev"));  // original /dev still resolves
+        TEST_ASSERT_EQ(do_umount2_kernel(kPathA, 0), 0);
+        TEST_ASSERT_NULL(fs_at(kPathA));
+        TEST_ASSERT_NOT_NULL(fs_at("/dev"));  // singleton survived the umount
+    } else {
+        // Slim test boot without devfs::init(): factory must refuse rather than
+        // mount an uninitialised singleton.
+        TEST_ASSERT_EQ(do_mount_kernel(nullptr, kPathA, "devfs", 0), -cinux::kEnodev);
+    }
+}
+
 }  // namespace test_mount
 
 extern "C" void run_mount_tests() {
@@ -128,5 +171,7 @@ extern "C" void run_mount_tests() {
     RUN_TEST(test_mount::test_mount_unknown_fstype_is_enodev);
     RUN_TEST(test_mount::test_umount_missing_is_enoent);
     RUN_TEST(test_mount::test_remount_after_umount_is_fresh);
+    RUN_TEST(test_mount::test_mount_proc_shares_singleton);
+    RUN_TEST(test_mount::test_mount_devfs_factory);
     TEST_SUMMARY();
 }
