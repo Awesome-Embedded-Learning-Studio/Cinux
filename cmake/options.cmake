@@ -154,7 +154,7 @@ set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
 # if() per flag. CINUX_UBSAN is intentionally absent (see comment above).
 # =============================================================================
 set(CINUX_COMPILE_DEF_OPTS
-    GUI USB NET VIRTIO LOCKDEP
+    GUI USB NET VIRTIO LOCKDEP RACE_DETECT
     MUSL_HELLO_SMOKE MUSL_DYN_SMOKE BUSYBOX_SMOKE GCC_TOOLCHAIN FB_MMAP_SMOKE
     INPUT_SMOKE
     GUI_HOST_SMOKE)
