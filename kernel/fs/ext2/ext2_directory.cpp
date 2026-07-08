@@ -78,11 +78,7 @@ bool Ext2::add_dir_entry(uint32_t dir_ino, Ext2Inode& dir_disk, uint32_t entry_i
                     new_entry->name[i] = name[i];
                 }
 
-                if (!write_block(blk, dir_buf.get())) {
-                    return false;
-                }
-
-                return true;
+                return write_block(blk, dir_buf.get());
             }
 
             pos += entry->rec_len;
@@ -185,11 +181,7 @@ bool Ext2::remove_dir_entry(uint32_t /*dir_ino*/, const Ext2Inode& dir_disk, con
                         prev->rec_len += entry->rec_len;
                     }
 
-                    if (!write_block(blk, buf.get())) {
-                        return false;
-                    }
-
-                    return true;
+                    return write_block(blk, buf.get());
                 }
             }
 
