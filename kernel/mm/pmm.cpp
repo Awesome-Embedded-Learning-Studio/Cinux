@@ -276,6 +276,18 @@ bool PMM::pte_count_dec_and_test(uint64_t phys) {
     return refcount_dec_and_test(phys);  // last PTE gone -> drop ownership ref (maybe free)
 }
 
+bool PMM::pte_count_dec_and_test_no_free(uint64_t phys) {
+    // Same as pte_count_dec_and_test but does NOT free -- the caller (drain
+    // kthread path) frees via free_page() after a cross-core TLB shootdown.
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
+        return false;
+    }
+    if (__atomic_sub_fetch(&pte_count_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL) != 0) {
+        return false;
+    }
+    return refcount_dec_and_test_no_free(phys);
+}
+
 int16_t PMM::pte_count_load(uint64_t phys) const {
     if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
         return 0;
@@ -309,6 +321,30 @@ bool PMM::refcount_dec_and_test(uint64_t phys) {
     __atomic_store_n(&pte_count_storage_[phys / PAGE_SIZE], 0, __ATOMIC_RELAXED);
     auto g = lock_.guard();  // buddy_ not thread-safe; serialize vs alloc (96bd1ae did alloc side)
     buddy_.free(phys / PAGE_SIZE);
+    return true;
+}
+
+bool PMM::refcount_dec_and_test_no_free(uint64_t phys) {
+    // Same as refcount_dec_and_test but does NOT buddy_.free -- audit still
+    // runs (bad free caught at dec time), only the free is deferred.  Caller
+    // (drain kthread) frees via free_page() after the shootdown.
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
+        return false;
+    }
+    if (__atomic_sub_fetch(&refcount_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL) != 0) {
+        return false;
+    }
+    int16_t live_pc = __atomic_load_n(&pte_count_storage_[phys / PAGE_SIZE], __ATOMIC_RELAXED);
+    if (live_pc != 0) {
+        cinux::lib::kpanic("[AUDIT] free phys=0x%lx pte_count=%d (still mapped)",
+                           static_cast<unsigned long>(phys), static_cast<int>(live_pc));
+    }
+    if (cinux::mm::g_page_cache.contains_phys(phys)) {
+        cinux::lib::kpanic("[AUDIT] free phys=0x%lx still in PageCache",
+                           static_cast<unsigned long>(phys));
+    }
+    // NOTE: do NOT store pte_count=0 / buddy_.free here -- caller frees after
+    // shootdown.  pte_count is already 0 (audit above).
     return true;
 }
 

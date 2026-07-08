@@ -43,6 +43,14 @@ option(CINUX_UBSAN "Enable -fsanitize=undefined with freestanding UBSan stubs" O
 # stats_kthread.cpp, OFF links stats_kthread_stub.cpp (empty); no source #ifdef.
 option(CINUX_STATS_KTHREAD "Spawn periodic 1 Hz memory-stats kthread for ad-hoc profiling" OFF)
 
+# B3 defect C: spawn the TLB drain kthread (deferred CoW shootdown+free).
+# ON (default) links tlb_drain.cpp -- handle_cow_fault defers the free to a
+# kthread that shootdowns all cores first.  OFF links tlb_drain_stub.cpp
+# (empty start_tlb_drain_thread); g_drain_active stays false so
+# enqueue_pending_shootdown inline-frees with no shootdown (defect C stale
+# tolerated).  §14 file gate: no source #ifdef.
+option(CINUX_TLB_DRAIN "Spawn the TLB shootdown drain kthread (deferred CoW free)" ON)
+
 # ---- 3. Ring-3 smoke tests (run-kernel-test harness; need artifacts) --------
 # F10-M1 batch 6 / P3: musl /hello ring-3 smoke -- the ONLY test that exercises
 # real user-space syscall paths under SMAP (run-kernel-test uses kernel
