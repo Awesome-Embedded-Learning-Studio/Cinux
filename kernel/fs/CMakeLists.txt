@@ -11,6 +11,7 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs_mount.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/path.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs_lookup.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dentry.cpp  # F6-M1 B3: directory-entry cache
     # --- ramdisk ---
     ${CMAKE_CURRENT_SOURCE_DIR}/ramdisk/ramdisk.cpp
     # --- ext2 ---

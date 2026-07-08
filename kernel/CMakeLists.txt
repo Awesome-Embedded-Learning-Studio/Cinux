@@ -287,6 +287,7 @@ add_executable(big_kernel_test
     test/test_tmpfs.cpp
     test/test_mount.cpp
     test/test_flock.cpp  # F6-M1 B2: flock(2)
+    test/test_dentry.cpp  # F6-M1 B3: DentryCache
     test/test_access.cpp
 )
 

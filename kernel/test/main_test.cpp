@@ -85,6 +85,7 @@ void run_procfs_tests();
 void run_tmpfs_tests();
 void run_mount_tests();
 void run_flock_tests();  // F6-M1 B2: flock(2)
+void run_dentry_tests();  // F6-M1 B3: DentryCache
 void run_access_tests();
 void run_ahci_write_tests();
 void run_ahci_block_device_tests();
@@ -1316,6 +1317,7 @@ extern "C" void kernel_main() {
     // unknown fstype, remount-after-umount (owned backend freed).
     run_mount_tests();
     run_flock_tests();  // F6-M1 B2: flock(2)
+    run_dentry_tests();  // F6-M1 B3: DentryCache
 
     // access tests (F6 batch 3a): root bypass R/W, X denied on non-exec file,
     // missing -> ENOENT, bad mode -> EINVAL.
