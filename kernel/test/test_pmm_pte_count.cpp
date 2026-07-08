@@ -137,6 +137,38 @@ void test_real_copy_page_table_level_cow() {
     g_pmm.free_page(child_pml4);
 }
 
+// B3 defect B: device phys skips the PMM counters (bounds check, no OOB write).
+void test_pmm_primitives_skip_device_phys() {
+    uint64_t kDev = (g_pmm.total_page_count() + 0x10000) * 4096ULL;  // above managed
+    g_pmm.pte_count_inc(kDev);
+    g_pmm.pte_count_dec(kDev);
+    TEST_ASSERT_FALSE(g_pmm.pte_count_dec_and_test(kDev));
+    g_pmm.refcount_inc(kDev);
+    TEST_ASSERT_FALSE(g_pmm.refcount_dec_and_test(kDev));
+    TEST_ASSERT_EQ(g_pmm.pte_count_load(kDev), 0);
+    TEST_ASSERT_EQ(g_pmm.refcount_load(kDev), 0);
+}
+
+// B3 defect B: a FLAG_PCD PTE must be skipped by free_subtree (the click-shell
+// path: fb mmap -> fork+execve /bin/sh -> child teardown hits the device PTE).
+void test_iophys_pte_skipped_on_teardown() {
+    using namespace cinux::arch;
+    uint64_t dev = (g_pmm.total_page_count() + 0x10000) * 4096ULL;
+    cinux::mm::AddressSpace as;
+    TEST_ASSERT_TRUE(as.map(0x40000000ULL, dev, FLAG_PRESENT | FLAG_USER | FLAG_PCD));
+    // ~AddressSpace -> free_subtree skips the device leaf (pre-fix: OOB smash).
+}
+
+// B3 click-shell proxy: stress the IoPhys teardown + free-side lock together.
+void test_iophys_teardown_stress() {
+    using namespace cinux::arch;
+    uint64_t dev = (g_pmm.total_page_count() + 0x10000) * 4096ULL;
+    for (int i = 0; i < 64; i++) {
+        cinux::mm::AddressSpace as;
+        TEST_ASSERT_TRUE(as.map(0x40000000ULL, dev, FLAG_PRESENT | FLAG_USER | FLAG_PCD));
+    }
+}
+
 }  // namespace test_pmm_pte_count
 
 extern "C" void run_pmm_pte_count_tests() {
@@ -148,5 +180,8 @@ extern "C" void run_pmm_pte_count_tests() {
     RUN_TEST(test_pmm_pte_count::test_cache_page_survives_teardown);
     RUN_TEST(test_pmm_pte_count::test_simulated_fork_cow_lifecycle);
     RUN_TEST(test_pmm_pte_count::test_real_copy_page_table_level_cow);  // F-VERIFY M5-1
+    RUN_TEST(test_pmm_pte_count::test_pmm_primitives_skip_device_phys);  // B3 defect B
+    RUN_TEST(test_pmm_pte_count::test_iophys_pte_skipped_on_teardown);   // B3 defect B
+    RUN_TEST(test_pmm_pte_count::test_iophys_teardown_stress);           // B3 click-shell proxy
     TEST_SUMMARY();
 }

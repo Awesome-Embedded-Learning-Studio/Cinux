@@ -279,7 +279,7 @@ bool PMM::pte_count_dec_and_test(uint64_t phys) {
 }
 
 int16_t PMM::pte_count_load(uint64_t phys) const {
-    if (phys == 0) {
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
         return 0;
     }
     return __atomic_load_n(&pte_count_storage_[phys / PAGE_SIZE], __ATOMIC_RELAXED);
@@ -317,7 +317,7 @@ bool PMM::refcount_dec_and_test(uint64_t phys) {
 }
 
 int16_t PMM::refcount_load(uint64_t phys) const {
-    if (phys == 0) {
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
         return 0;
     }
     return __atomic_load_n(&refcount_storage_[phys / PAGE_SIZE], __ATOMIC_RELAXED);
