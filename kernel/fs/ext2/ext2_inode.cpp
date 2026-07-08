@@ -14,7 +14,7 @@
 #include "kernel/fs/file.hpp"  // inode_ref / inode_unref (cache returns ref'd inodes)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
-#include "kernel/proc/race_detect.hpp"  // F-DYN-COV: RACE_TOUCH on inode_cache_ (validation target)
+#include "kernel/proc/race_detect.hpp"  // F-DYN-COV: lockdep_assert_held (inode_cache_lock_ guard)
 
 namespace cinux::fs {
 
@@ -86,24 +86,18 @@ bool Ext2::write_disk_inode(uint32_t ino, const Ext2Inode& inode) {
     return true;
 }
 
-// F-DYN-COV: watchpoint over the inode cache.  get_cached_inode walks +
-// mutates inode_cache_ with no lock (B3 audit: a suspected SMP race target).
-// RACE_TOUCH kpanics if two CPUs touch the cache with no lock in between --
-// the validation probe for the race-detect infrastructure.  Removed once
-// inode_cache_lock_ is added (batch 3); kept here only to prove the tool fires.
-#ifdef CINUX_RACE_DETECT
-namespace {
-cinux::proc::RaceWatchpoint g_inode_cache_wp =
-    RACE_WATCHPOINT_INIT("ext2.inode_cache");
-}  // namespace
-#endif
-
 // ============================================================
 // Inode cache management
 // ============================================================
 
 Inode* Ext2::get_cached_inode(uint32_t ino) {
-    RACE_TOUCH(g_inode_cache_wp);  // F-DYN-COV: detect cross-CPU lockless access
+    // B3 inode cache race: inode_cache_ is shared across CPUs.  Serialize the
+    // walk/evict/insert under inode_cache_lock_.  Held across read_disk_inode
+    // (disk I/O) -- cache miss is rare and slow anyway; dropping the lock for
+    // I/O would need a TOCTOU recheck.  lockdep_assert_held is the regression
+    // guard if a future refactor drops the guard.
+    auto g = inode_cache_lock_.guard();
+    lockdep_assert_held(&inode_cache_lock_);
     if (ino == 0) {
         return nullptr;
     }
