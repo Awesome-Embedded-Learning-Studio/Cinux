@@ -46,6 +46,7 @@
 #include "kernel/mm/slab.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/proc/percpu.hpp"          // F-VERIFY M3-2: kMaxCpus (AP result slots)
+#include "kernel/proc/race_detect.hpp"     // F-DYN-COV: RACE_TOUCH / race_check_access_probe
 #include "kernel/proc/pid.hpp"             // F10-M1 batch 6: g_pid_alloc
 #include "kernel/proc/process.hpp"         // F10-M1 batch 6: fork()
 #include "kernel/proc/scheduler.hpp"       // F10-M1 batch 6: run_first/add_task
@@ -898,6 +899,16 @@ static void musl_hello_smoke_entry() {
 // ============================================================
 // F-VERIFY M3-2: AP wake + AP-side mechanism readback
 // ============================================================
+// F-DYN-COV: shared watchpoint for the race-detect mechanism test.  The AP
+// touches it in ap_test_selfcheck (below) before writing magic; the BSP
+// touches it after polling magic -- the BSP's probe must see last_cpu == AP
+// and report a cross-CPU interleaving.  Guarded so an OFF build (no
+// race_detect.cpp) does not reference the symbol.
+#ifdef CINUX_RACE_DETECT
+static cinux::proc::RaceWatchpoint g_race_test_wp =
+    RACE_WATCHPOINT_INIT("test.race_detect");
+#endif
+
 // Runs ON THE AP (called from ap_main's test-mode branch, after the AP signals
 // online).  Reads this AP's CR4/EFER/LSTAR/STAR/SFMASK into its result slot so
 // the BSP can assert AP-side CPU-config parity.  Writes magic LAST (x86 TSO) so
@@ -915,6 +926,11 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
     r.lstar  = cinux::arch::read_msr(0xC0000082);
     r.star   = cinux::arch::read_msr(0xC0000081);
     r.sfmask = cinux::arch::read_msr(0xC0000084);
+    // F-DYN-COV: AP marks this watchpoint before magic (x86 TSO: BSP polling
+    // magic will then see last_cpu == AP, so its own probe reports cross-CPU).
+#ifdef CINUX_RACE_DETECT
+    cinux::proc::race_check_access_probe(g_race_test_wp);
+#endif
     r.magic  = cinux::arch::kApSelfcheckMagic;
 #if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
     defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) ||                                \
@@ -1020,6 +1036,23 @@ static bool run_smp_ap_wake_test() {
         cinux::arch::tlb_shootdown_page(0xDEADB000);
         cinux::lib::kprintf("[F-VERIFY] shootdown IPI test: PASS (all APs acked)\n");
     }
+
+    // F-DYN-COV: race-detect watchpoint mechanism test.  Each AP touched
+    // g_race_test_wp in ap_test_selfcheck (above) before writing magic, so
+    // last_cpu is an AP.  The BSP touching it now must be reported as a
+    // cross-CPU access -- proving the watchpoint detects lockless interleaving
+    // without panicking (uses probe, not RACE_TOUCH).  Guarded: an OFF build
+    // links race_detect_stub (probe returns false) -- skip so it does not fail.
+#ifdef CINUX_RACE_DETECT
+    if (ok && ap_count > 0) {
+        const bool race = cinux::proc::race_check_access_probe(g_race_test_wp);
+        cinux::lib::kprintf("[F-DYN-COV] race-detect test: %s\n",
+                            race ? "PASS (detected cross-CPU)" : "FAIL (no cross-CPU seen)");
+        if (!race) {
+            ok = false;
+        }
+    }
+#endif  // CINUX_RACE_DETECT
 #endif
     cinux::arch::g_ap_test_selfcheck_fn = nullptr;  // disarm (APs already halted)
     return ok;

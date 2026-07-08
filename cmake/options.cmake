@@ -51,6 +51,17 @@ option(CINUX_STATS_KTHREAD "Spawn periodic 1 Hz memory-stats kthread for ad-hoc 
 # tolerated).  §14 file gate: no source #ifdef.
 option(CINUX_TLB_DRAIN "Spawn the TLB shootdown drain kthread (deferred CoW free)" ON)
 
+# F-DYN-COV: SMP data-race watchpoint detector.  RACE_TOUCH(w) marks a shared
+# variable that ought to be lock-protected and kpanics if two different CPUs
+# touch it with no lock in between -- the signature of a lockless shared-state
+# race (e.g. ext2 inode_cache_ before it got a lock).  lockdep_assert_held
+# (always available under CINUX_LOCKDEP) catches "designed a lock but forgot
+# to take it on some path".  Default OFF: the watchpoint adds an atomic
+# exchange per touch and perturbs timing (heisenbug risk); enable for race
+# hunting: cmake -DCINUX_RACE_DETECT=ON -DCINUX_LOCKDEP=ON ...
+# §14 file gate: ON links race_detect.cpp, OFF links race_detect_stub.cpp.
+option(CINUX_RACE_DETECT "Enable SMP data-race watchpoint detector (debug)" OFF)
+
 # ---- 3. Ring-3 smoke tests (run-kernel-test harness; need artifacts) --------
 # F10-M1 batch 6 / P3: musl /hello ring-3 smoke -- the ONLY test that exercises
 # real user-space syscall paths under SMAP (run-kernel-test uses kernel
