@@ -81,6 +81,14 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
     uint32_t bs                   = ext2_.block_size();
     uint64_t block_ptrs_per_block = bs / sizeof(uint32_t);
 
+    // SMP-safe per-call scratch (block_buf_ is shared/non-thread-safe; two CPUs
+    // demand-page-reading would clobber each other -> wild block numbers). Heap
+    // not stack: #PF runs on IST2 which is only 4 KB (IRQ_STACK_PAGES=1).
+    KmBuf scratch(4096);
+    if (!scratch) {
+        return cinux::lib::Error::IOError;  // slab OOM
+    }
+
     auto*    dst        = static_cast<uint8_t*>(buf);
     uint64_t total_read = 0;
 
@@ -92,7 +100,7 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             chunk = to_read - total_read;
         }
 
-        uint32_t disk_block = resolve_disk_block_(disk, file_block, block_ptrs_per_block);
+        uint32_t disk_block = resolve_disk_block_(disk, file_block, block_ptrs_per_block, scratch.data());
         if (disk_block == 0) {  // hole / unmapped / extent-unsupported -> zero fill
             for (uint64_t i = 0; i < chunk; ++i) {
                 dst[total_read + i] = 0;
@@ -114,7 +122,7 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
         uint64_t agg = 1;
         if (block_offset == 0) {  // B3a: agg re-enabled (audit+repair below)
             while (agg < 4 && total_read + agg * bs <= to_read) {
-                uint32_t next = resolve_disk_block_(disk, file_block + agg, block_ptrs_per_block);
+                uint32_t next = resolve_disk_block_(disk, file_block + agg, block_ptrs_per_block, scratch.data());
                 if (next != disk_block + agg) break;
                 agg++;
             }
@@ -133,16 +141,16 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             // (offset 0x84c..0xfff) with file bytes. _rtld_global+0xb50 then
             // read a non-zero file byte as rax -> non-canonical -> #GP. Land the
             // DMA in block_buf_ first, then a bounded memcpy.
-            if (!ext2_.read_disk_range(disk_block, agg, ext2_.block_buf()).ok()) break;
+            if (!ext2_.read_disk_range(disk_block, agg, scratch.get()).ok()) break;
             uint64_t take = agg * bs;
             if (take > to_read - total_read) {
                 take = to_read - total_read;
             }
-            memcpy(dst + total_read, ext2_.block_buf(), take);
+            memcpy(dst + total_read, scratch.data(), take);
             total_read += take;
         } else {
-            if (!ext2_.read_block(disk_block)) break;
-            const auto* src = reinterpret_cast<const uint8_t*>(ext2_.block_buf()) + block_offset;
+            if (!ext2_.read_block(disk_block, scratch.get())) break;
+            const auto* src = scratch.data() + block_offset;
             memcpy(dst + total_read, src, chunk);
             total_read += chunk;
         }
@@ -158,7 +166,7 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
 // Note: extent depth>0 (Unsupported) collapses to 0 here (zero-fill) -- read() used
 // to break on it; ext4 depth>0 stays a follow-up and cc1's depth-0 extents are fine.
 uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
-                                          uint64_t block_ptrs_per_block) {
+                                          uint64_t block_ptrs_per_block, uint8_t* scratch) {
     if (inode_has_extent_tree(disk)) {
         uint32_t           extent_block = 0;
         ExtentLookupResult r =
@@ -171,24 +179,24 @@ uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_b
     if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
         const uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
         if (indirect_block == 0) return 0;
-        if (!ext2_.read_block(indirect_block)) return 0;
-        const auto* indirect = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        if (!ext2_.read_block(indirect_block, scratch)) return 0;
+        const auto* indirect = reinterpret_cast<const uint32_t*>(scratch);
         return indirect[file_block - EXT2_DIRECT_BLOCKS];
     }
     if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block +
                          block_ptrs_per_block * block_ptrs_per_block) {
         const uint32_t double_block = disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK];
         if (double_block == 0) return 0;
-        if (!ext2_.read_block(double_block)) return 0;
+        if (!ext2_.read_block(double_block, scratch)) return 0;
         const uint32_t di_offset =
             static_cast<uint32_t>(file_block - EXT2_DIRECT_BLOCKS - block_ptrs_per_block);
         const uint32_t idx1           = di_offset / block_ptrs_per_block;
         const uint32_t idx2           = di_offset % block_ptrs_per_block;
-        const auto*    double_ptrs    = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        const auto*    double_ptrs    = reinterpret_cast<const uint32_t*>(scratch);
         const uint32_t indirect_block = double_ptrs[idx1];
         if (indirect_block == 0) return 0;
-        if (!ext2_.read_block(indirect_block)) return 0;
-        const auto* child_ptrs = reinterpret_cast<const uint32_t*>(ext2_.block_buf());
+        if (!ext2_.read_block(indirect_block, scratch)) return 0;
+        const auto* child_ptrs = reinterpret_cast<const uint32_t*>(scratch);
         return child_ptrs[idx2];
     }
     return 0;  // triple-indirect unsupported
@@ -215,6 +223,13 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, c
     uint64_t ptrs_per_block = bs / sizeof(uint32_t);
     uint64_t max_file_block = EXT2_DIRECT_BLOCKS + ptrs_per_block + ptrs_per_block * ptrs_per_block;
 
+    // SMP-safe per-call scratch (block_buf_ is shared/non-thread-safe). Heap
+    // not stack: file_write can run deep in the demand-page path (IST2=4KB).
+    KmBuf scratch(4096);
+    if (!scratch) {
+        return cinux::lib::Error::IOError;
+    }
+
     auto*    src           = static_cast<const uint8_t*>(buf);
     uint64_t total_written = 0;
 
@@ -238,22 +253,22 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, c
         }
 
         if (block_offset != 0 || chunk != bs) {
-            if (!ext2_.read_block(disk_block)) {
+            if (!ext2_.read_block(disk_block, scratch.get())) {
                 break;
             }
         } else {
-            auto* dma = reinterpret_cast<uint8_t*>(ext2_.block_buf());
+            auto* dma = scratch.data();
             for (uint32_t i = 0; i < bs; ++i) {
                 dma[i] = 0;
             }
         }
 
-        auto* dst = reinterpret_cast<uint8_t*>(ext2_.block_buf()) + block_offset;
+        auto* dst = scratch.data() + block_offset;
         for (uint64_t i = 0; i < chunk; ++i) {
             dst[i] = src[total_written + i];
         }
 
-        if (!ext2_.write_block(disk_block)) {
+        if (!ext2_.write_block(disk_block, scratch.get())) {
             break;
         }
 

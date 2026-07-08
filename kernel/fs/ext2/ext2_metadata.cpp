@@ -110,10 +110,14 @@ int64_t Ext2::readlink(uint32_t ino, char* buf, uint64_t buf_size) {
         }
         return static_cast<int64_t>(n);
     }
-    if (d.i_block[0] == 0 || !read_block(d.i_block[0])) {
+    if (d.i_block[0] == 0) {
         return -1;
     }
-    const uint8_t* src = block_buf();
+    KmBuf blk_buf(4096);
+    if (!blk_buf || !read_block(d.i_block[0], blk_buf.get())) {
+        return -1;
+    }
+    const uint8_t* src = blk_buf.data();
     for (uint64_t i = 0; i < n; ++i) {
         buf[i] = static_cast<char>(src[i]);
     }

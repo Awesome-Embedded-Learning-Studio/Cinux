@@ -113,9 +113,10 @@ public:
      */
     uint8_t* block_buf();
 
-    /// Read an ext2 block from disk into block_buf_ (public; InodeOps callbacks use it).
-    /// @return true on success, false on I/O error.
+    /// Read into block_buf_ (NOT SMP-safe; see dst overload).  @return true on success.
     bool read_block(uint32_t block_num);
+    /// SMP-safe: read straight into @p dst (caller-provided).
+    bool read_block(uint32_t block_num, void* dst);
     /// B3a: read @p block_count contiguous on-disk blocks straight into @p buf (one DMA,
     /// skipping block_buf_). Callers guarantee contiguity + block_count ≤ dma_buf (4 blk).
     cinux::lib::ErrorOr<void> read_disk_range(uint32_t start_disk_block, uint64_t block_count,
@@ -126,18 +127,17 @@ public:
      *
      * The caller should first populate the block buffer (via block_buf())
      * with the modified block data, then call write_block() to flush it.
-     * This is the counterpart to read_block().
-     *
-     * @param block_num  ext2 block number (0-based)
-     * @return true on success, false on I/O error
+     * This is the counterpart to read_block().  NOT SMP-safe (block_buf_); SMP
+     * paths use write_block(b, src).
      */
     bool write_block(uint32_t block_num);
+    /// SMP-safe: write @p src straight to disk (caller-provided).
+    bool write_block(uint32_t block_num, void* src);
 
-    /// Zero block_buf_ (block_size_ bytes) then write it to @p blk.  Used at
-    /// every freshly-allocated metadata block (inode/get_or_alloc_block paths)
-    /// so the new block hits disk zeroed.  @return write_block()'s result;
-    /// on false the caller frees @p blk and bails.
+    /// Zero block_buf_ then write to @p blk.  NOT SMP-safe; SMP uses the src overload.
     bool zero_and_write_block(uint32_t blk);
+    /// SMP-safe: zero @p src then write it.
+    bool zero_and_write_block(uint32_t blk, void* src);
 
     /// Fill @p st from @p inode's cached on-disk fields.  Shared by Ext2FileOps
     /// and Ext2DirOps stat(): validates inputs, zeroes the struct (so the unset

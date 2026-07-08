@@ -15,10 +15,30 @@
 
 #include "fs/ext2/ext2_types.hpp"
 #include "fs/inode.hpp"
+#include "kernel/mm/slab.hpp"  // kmalloc/kfree (KmBuf)
 
 namespace cinux::fs {
 
 class Ext2;
+
+/// RAII kmalloc'd scratch buffer for ext2 SMP read/write paths (block_buf_ is
+/// shared/non-thread-safe). Heap not stack: demand-page #PF runs on IST2 which
+/// is only 4 KB (IRQ_STACK_PAGES=1). ~KmBuf kfrees; operator bool checks OOM.
+class KmBuf {
+    void* p_;
+public:
+    explicit KmBuf(uint64_t n) : p_(cinux::mm::kmalloc(n, 16)) {}
+    ~KmBuf() {
+        if (p_ != nullptr) {
+            cinux::mm::kfree(p_);
+        }
+    }
+    KmBuf(const KmBuf&)            = delete;
+    KmBuf& operator=(const KmBuf&) = delete;
+    explicit operator bool() const { return p_ != nullptr; }
+    void*    get() const { return p_; }
+    uint8_t* data() const { return static_cast<uint8_t*>(p_); }
+};
 
 /// ext2-private typed accessor: Inode::fs_private holds the Ext2CachedInode.
 /// Centralises the downcast so a typo'd mask or const-wrong variant can't
@@ -82,9 +102,10 @@ private:
 
     /// B3a: resolve @p file_block → on-disk block (0 = hole / unmapped / I/O error /
     /// extent-unsupported). Extracted from read() so coalescing can probe N contiguous
-    /// blocks. Clobbers block_buf_ (indirect-table reads); data I/O uses read_disk_range.
+    /// blocks. Uses @p scratch (caller-provided, SMP-safe) for indirect-table reads
+    /// instead of the shared block_buf_; data I/O uses read_disk_range.
     uint32_t resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
-                                 uint64_t block_ptrs_per_block);
+                                 uint64_t block_ptrs_per_block, uint8_t* scratch);
 };
 
 /**
