@@ -25,6 +25,10 @@ namespace cinux::proc {
 struct Task;  // forward -- poll_events() parks a poller on a fd's wait queue
 }
 
+namespace cinux::drivers {
+class IBlockDevice;  // forward -- block_device() exposes a backing block device
+}
+
 namespace cinux::fs {
 
 // ============================================================
@@ -222,6 +226,14 @@ public:
     /// non-null; the inode itself is owned by its filesystem and is NOT freed
     /// here (release only signals "an open description went away").
     virtual void release(Inode* inode);
+
+    /// F6-M1 B1b: backing block device for a block-device inode (e.g. /dev/sda
+    /// in DevFs).  sys_mount resolves its source path to an Inode, then calls
+    /// this to obtain the IBlockDevice to mount.  Default nullptr -- regular
+    /// files, char devices and pseudo-fs nodes have no block-device backing.
+    virtual cinux::drivers::IBlockDevice* block_device(const Inode* /*inode*/) {
+        return nullptr;
+    }
 };
 
 // ============================================================
