@@ -64,6 +64,7 @@ void irq13_stub();
 void irq14_stub();
 void irq15_stub();
 void reschedule_ipi_stub();  // F4-M4 M4-2: reschedule IPI (vector 0xE0)
+void shootdown_ipi_stub();   // B3 defect C: TLB shootdown IPI (vector 0xE1)
 void xhci_irq_stub();        // F5-M5 Batch 0C: xHCI event-ring MSI-X (vector 0x40)
 void nvme_irq_stub();        // F5-M3 batch 4: NVMe MSI-X (vector 0x41)
 void virtio_blk_irq_stub();  // F5-M2 batch 3: VirtIO-blk MSI-X (vector 0x42)
@@ -167,6 +168,13 @@ extern "C" void irq_init() {
     // system (wake_idle_ap never sends it).
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::arch::kRescheduleIpiVector),
                       reschedule_ipi_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
+
+    // TLB shootdown IPI (B3 defect C, vector 0xE1).  Registered into the shared
+    // IDT so any CPU can take it; the handler (tlb.cpp) invlpg's + decrements
+    // acks_remaining, and the ISR_IRQ stub EOIs.  Dormant until stage 2 wires
+    // handle_cow_fault -> tlb_shootdown_page (the mechanism test fires it first).
+    g_idt.set_handler(static_cast<ExceptionVector>(cinux::arch::kShootdownIpiVector),
+                      shootdown_ipi_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
 
     // xHCI event-ring MSI-X interrupt (F5-M5 Batch 0C, vector kXhciIrqVector).
     // Registered at boot so the shared IDT has the entry before APs start.  The

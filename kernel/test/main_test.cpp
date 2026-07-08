@@ -21,6 +21,7 @@
 #include "kernel/arch/x86_64/msr.hpp"     // F-VERIFY M3-2: read_msr (AP-side mechanism readback)
 #include "kernel/arch/x86_64/paging.hpp"  // F9: enable_smep_smap
 #include "kernel/arch/x86_64/smp.hpp"     // F5-M6: kLapicTimerVector
+#include "kernel/arch/x86_64/tlb.hpp"     // B3 defect C: tlb_shootdown_page (mechanism test)
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/drivers/acpi/acpi.hpp"  // F-VERIFY M3-1: real acpi::init (firmware SMP topology)
@@ -922,6 +923,20 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
     return true;
 #else
     // Suite-only build: no scheduler, halt to avoid an is_initialized spin hang.
+    // Before halting, participate in the B3 defect C shootdown IPI mechanism
+    // test: mask this AP's LAPIC timer (ap_main armed it ~300 Hz; sti without
+    // masking would fire lapic_timer_handler -> Scheduler::tick, which has no
+    // scheduler here -> fault), then sti+hlt so the BSP's tlb_shootdown_page
+    // IPI (vector 0xE1) can land.  shootdown_ipi_handler invlpg's + decrements
+    // acks_remaining; the BSP spins on acks==0.  LINT0 stays masked (LAPIC
+    // default -- the test kernel never configures it), so no PIC IRQ lands on
+    // this AP while sti.  After the IPI, fall through to halt forever.
+    cinux::drivers::apic::g_lapic.write(
+        cinux::drivers::apic::kRegLvtTimer,
+        cinux::drivers::apic::g_lapic.read(cinux::drivers::apic::kRegLvtTimer) | (1u << 16));
+    __asm__ volatile("sti");
+    __asm__ volatile("hlt");
+    __asm__ volatile("cli");
     return false;
 #endif
 }
@@ -988,6 +1003,24 @@ static bool run_smp_ap_wake_test() {
         }
     }
     cinux::lib::kprintf("[F-VERIFY M3-2] AP wake + readback: %s\n", ok ? "PASS" : "FAIL");
+
+    // B3 defect C: TLB shootdown IPI mechanism test (suite-only).  Each AP is
+    // sti;hlt waiting (ap_test_selfcheck masked its LAPIC timer then sti before
+    // halting).  Send a shootdown to all-excl-self; each AP's
+    // shootdown_ipi_handler invlpg's + decrements acks_remaining, and
+    // tlb_shootdown_page spins until acks==0 -- proves the 0xE1 IPI path
+    // end-to-end.  Smoke builds skip this: APs return true from selfcheck and
+    // enter the scheduler spin (IF=0), so they cannot safely ack here; the
+    // production shootdown in handle_cow_fault is its own proof under smoke.
+#if !defined(CINUX_MUSL_HELLO_SMOKE) && !defined(CINUX_MUSL_DYN_SMOKE) &&                         \
+    !defined(CINUX_BUSYBOX_SMOKE) && !defined(CINUX_GCC_TOOLCHAIN) &&                               \
+    !defined(CINUX_FB_MMAP_SMOKE) && !defined(CINUX_INPUT_SMOKE) && !defined(CINUX_GUI_HOST_SMOKE)
+    if (ok && ap_count > 0) {
+        cinux::lib::kprintf("[F-VERIFY] shootdown IPI test: sending to %u AP(s)\n", ap_count);
+        cinux::arch::tlb_shootdown_page(0xDEADB000);
+        cinux::lib::kprintf("[F-VERIFY] shootdown IPI test: PASS (all APs acked)\n");
+    }
+#endif
     cinux::arch::g_ap_test_selfcheck_fn = nullptr;  // disarm (APs already halted)
     return ok;
 }
