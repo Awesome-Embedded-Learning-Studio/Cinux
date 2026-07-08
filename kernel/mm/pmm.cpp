@@ -8,6 +8,9 @@
 #include <stddef.h>
 
 #include "kernel/lib/kprintf.hpp"
+#ifdef CINUX_MM_REFCOUNT_AUDIT
+#include "kernel/mm/page_cache.hpp"  // g_page_cache.contains_phys
+#endif
 
 namespace cinux::mm {
 
@@ -242,8 +245,8 @@ void PMM::free_pages(uint64_t phys, [[maybe_unused]] uint64_t count) {
 // ============================================================
 
 void PMM::pte_count_inc(uint64_t phys) {
-    if (phys == 0) {
-        return;
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
+        return;  // unmanaged (device/IoPhys)
     }
     // ACQ_REL: fork (parent CPU), clear_user_mappings (child CPU), and CoW
     // fault (faulting CPU) all read/write the same pte_count cross-CPU.
@@ -251,7 +254,7 @@ void PMM::pte_count_inc(uint64_t phys) {
 }
 
 void PMM::pte_count_dec(uint64_t phys) {
-    if (phys == 0) {
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
         return;
     }
     // Pure PTE -1; never frees.  Free is driven by refcount_dec_and_test.
@@ -266,8 +269,8 @@ bool PMM::pte_count_dec_and_test(uint64_t phys) {
     // > 0 after the drop and survives teardown -- the type-level guarantee
     // f06ea6b's phantom pte_count+1 used to paper over.  Callers must NOT
     // free_page() on a true return: the page is already freed here.
-    if (phys == 0) {
-        return false;
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
+        return false;  // unmanaged (device/IoPhys)
     }
     if (__atomic_sub_fetch(&pte_count_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL) != 0) {
         return false;  // other PTEs still map it
@@ -283,23 +286,32 @@ int16_t PMM::pte_count_load(uint64_t phys) const {
 }
 
 void PMM::refcount_inc(uint64_t phys) {
-    if (phys == 0) {
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
         return;
     }
     __atomic_add_fetch(&refcount_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL);
 }
 
 bool PMM::refcount_dec_and_test(uint64_t phys) {
-    if (phys == 0) {
-        return false;
+    if (phys == 0 || phys / PAGE_SIZE >= total_pages_) {
+        return false;  // unmanaged (device/IoPhys)
     }
     if (__atomic_sub_fetch(&refcount_storage_[phys / PAGE_SIZE], 1, __ATOMIC_ACQ_REL) != 0) {
         return false;
     }
-    // Last ownership ref gone -> return the page to the buddy.  Reset pte_count
-    // so the next allocation (alloc_page sets refcount=1, pte_count=0) starts
-    // clean; a stale non-zero pte_count would desync fault diagnostics.
+#ifdef CINUX_MM_REFCOUNT_AUDIT
+    int16_t live_pc = __atomic_load_n(&pte_count_storage_[phys / PAGE_SIZE], __ATOMIC_RELAXED);
+    if (live_pc != 0) {
+        cinux::lib::kpanic("[AUDIT] free phys=0x%lx pte_count=%d (still mapped)",
+                           static_cast<unsigned long>(phys), static_cast<int>(live_pc));
+    }
+    if (cinux::mm::g_page_cache.contains_phys(phys)) {
+        cinux::lib::kpanic("[AUDIT] free phys=0x%lx still in PageCache",
+                           static_cast<unsigned long>(phys));
+    }
+#endif
     __atomic_store_n(&pte_count_storage_[phys / PAGE_SIZE], 0, __ATOMIC_RELAXED);
+    auto g = lock_.guard();  // buddy_ not thread-safe; serialize vs alloc (96bd1ae did alloc side)
     buddy_.free(phys / PAGE_SIZE);
     return true;
 }

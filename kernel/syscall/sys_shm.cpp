@@ -99,8 +99,8 @@ int64_t sys_shmget(uint64_t key, uint64_t size, uint64_t shmflg, uint64_t, uint6
         }
     }
 
-    // Allocate the backing frames.  alloc_pages rounds up to a buddy order and
-    // sets pte_count=1 on every page in the block (the segment's own reference).
+    // Allocate the backing frames.  alloc_pages rounds up to a buddy order;
+    // each page starts refcount=1 (ownership), pte_count=0.
     uint64_t phys_base = cinux::mm::g_pmm.alloc_pages(page_count);
     if (phys_base == 0) {
         return -kEnomem;

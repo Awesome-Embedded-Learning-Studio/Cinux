@@ -92,10 +92,10 @@ public:
     // f06ea6b prevented at the type layer instead of by a phantom pte_count+1).
     bool pte_count_dec_and_test(uint64_t phys);
 
-    // Per-page refcount = ownership refs (alloc baseline + cache/shm owners).
-    // alloc_page sets 1; CachePhysRef::alloc / shm add an extra inc; the last
-    // ref (refcount_dec_and_test -> 0) frees the page back to the buddy.  This
-    // is the dimension that decides free; pte_count above only tracks mappings.
+    // Per-page refcount = ownership refs. alloc_page sets 1 (the lone-owner
+    // baseline, which doubles as page-cache ownership via CachePhysRef); shm
+    // attach adds an inc. Last ref frees via buddy. pte_count only tracks
+    // PTE mappings and never frees on its own.
     void    refcount_inc(uint64_t phys);
     bool    refcount_dec_and_test(uint64_t phys);  ///< true => reached 0, page freed
     int16_t refcount_load(uint64_t phys) const;
