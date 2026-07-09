@@ -23,6 +23,7 @@ constexpr int kEperm           = 1;    ///< Operation not permitted
 constexpr int kEnoent          = 2;    ///< No such file or directory
 constexpr int kEsrch           = 3;    ///< No such process
 constexpr int kEio             = 5;    ///< I/O error
+constexpr int kEnxio           = 6;    ///< No such device or address
 constexpr int kEbadf           = 9;    ///< Bad file descriptor
 constexpr int kEagain          = 11;   ///< Resource temporarily unavailable
 constexpr int kEnomem          = 12;   ///< Cannot allocate memory

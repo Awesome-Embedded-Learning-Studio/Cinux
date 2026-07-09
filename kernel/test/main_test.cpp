@@ -27,6 +27,7 @@
 #include "kernel/drivers/acpi/acpi.hpp"  // F-VERIFY M3-1: real acpi::init (firmware SMP topology)
 #include "kernel/drivers/ahci/ahci.hpp"  // F10-M1 batch 6: ext2 mount
 #include "kernel/drivers/ahci/ahci_block_device.hpp"    // F10-M1 batch 6: ext2 mount
+#include "kernel/drivers/block_registry.hpp"            // F6-M1 B1b: register test disk
 #include "kernel/drivers/apic/local_apic.hpp"           // F5-M6: g_lapic (e1000 poll timer)
 #include "kernel/drivers/input/input_event_device.hpp"  // F-GUI b2: InputEventDevice (mock push)
 #include "kernel/drivers/pci/pci.hpp"                   // F10-M1 batch 6: PCI->AHCI for ext2
@@ -83,6 +84,8 @@ void run_pty_device_tests();
 void run_procfs_tests();
 void run_tmpfs_tests();
 void run_mount_tests();
+void run_flock_tests();  // F6-M1 B2: flock(2)
+void run_dentry_tests();  // F6-M1 B3: DentryCache
 void run_access_tests();
 void run_ahci_write_tests();
 void run_ahci_block_device_tests();
@@ -224,6 +227,11 @@ static void musl_hello_smoke_entry() {
     cinux::fs::vfs_mount_add("/", ext2);
     cinux::lib::kprintf("[F10-M1] ext2 mounted at / for smoke (mounted=%d, blk=%d)\n",
                         ext2->is_mounted() ? 1 : 0, blk_dev != nullptr ? 1 : 0);
+    // F6-M1 B1b: register the test ext2 disk so sys_mount -t ext2 /dev/sda works
+    // (devfs::init below iterates the registry to populate /dev/<name> nodes).
+    if (blk_dev != nullptr) {
+        cinux::drivers::BlockRegistry::register_device("sda", blk_dev);
+    }
     // F-ECO busybox acceptance: mount /proc so procps applets (ps/free) work.
     // ProcFS is on this branch (F6-M2); without /proc, busybox ps/free exit 1.
     cinux::fs::devfs::init();  // F-GUI-USERSPACE b1b: re-mount /dev (vfs_mount_init cleared it) so
@@ -1308,6 +1316,8 @@ extern "C" void kernel_main() {
     // mount/umount2 tests (F6-M1): tmpfs-via-sys_mount, resolve, umount detach,
     // unknown fstype, remount-after-umount (owned backend freed).
     run_mount_tests();
+    run_flock_tests();  // F6-M1 B2: flock(2)
+    run_dentry_tests();  // F6-M1 B3: DentryCache
 
     // access tests (F6 batch 3a): root bypass R/W, X denied on non-exec file,
     // missing -> ENOENT, bad mode -> EINVAL.

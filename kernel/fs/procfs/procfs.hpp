@@ -84,6 +84,10 @@ public:
     cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
                                              uint32_t namelen) override;
 
+    /// Whether mount() has run (F6-M1: procfs::instance() exposes the singleton
+    /// only once mounted, so sys_mount -t proc refuses an uninitialised FS).
+    bool is_mounted() const { return mounted_; }
+
 private:
     // One InodeOps instance per inode kind, owned.  Allocated in mount(), freed
     // in ~ProcFs.  All inodes of a kind share the single ops instance, exactly
@@ -126,7 +130,9 @@ private:
  * @return true on success, false if mount() or vfs_mount_add(/proc) fails.
  */
 namespace procfs {
-bool init();
+bool    init();
+ProcFs* instance();  ///< Boot-owned ProcFs singleton (F6-M1: sys_mount -t proc).
+                     ///< nullptr before procfs::init().
 }  // namespace procfs
 
 }  // namespace cinux::fs

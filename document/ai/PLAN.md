@@ -2,6 +2,33 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F6-M1 VFS 增强全收 — 收官 2026-07-08（分支 `feat/f6-m1-vfs-finale`，从干净 main `61a583e`，6 commit `fb8aa48`→`3ce5e10`，两 leg 937/937）
+
+> Feature 域 F6 VFS 第一里程碑收尾弧。**todo 滞后真相（2026-07-08 核对代码）**：T2 symlink / T3 硬链接在 **F-ECO 批2 已做透**——`InodeOps` 有 `readlink`/`symlink`/`link` 虚方法（[inode.hpp:151/155/160](../../kernel/fs/inode.hpp#L151)）、`vfs_lookup.cpp` 完整 follow + `kMaxSymlinks=40` 循环检测 + restart-after-follow、`ext2_links.cpp` 真 `Ext2::symlink`/`link`（fast/long symlink 都支持）、`sys_symlink`/`sys_readlink`/`sys_link`/`sys_lstat` 全注册。todo `00-vfs-enhance.md` 仍标"未启动"，不准，本弧校准。
+
+> **真留续三项**：T1 Dentry Cache（无 `dentry.hpp`，路径解析每次遍历磁盘目录）/ T4 flock（无 `SYS_flock`，无 POSIX 文件锁）/ T5 mount factory（[sys_mount.cpp:45](../../kernel/syscall/sys_mount.cpp#L45) 只认 `tmpfs`，其余 ENODEV；ext2/ext4 挂第二块盘 + proc/devfs 运行时挂全缺）。
+
+> **用户决策（2026-07-08）**：① M1 全收（含 Dentry Cache）；② mount factory **全做含 `/dev/sda1`**——块设备节点 + 注册表 + sys_mount source 路径解析成 `IBlockDevice*`。目标：M1 真 ✅，VFS 层齐（路径缓存 + POSIX 文件锁 + 运行时多 FS 挂载），对齐 Linux VFS 范式。跨 VFS 核心 / syscall / 各 FS 适配 / 块设备子系统的大弧，**分 5 批一个 PR**。F6-M5 ext4 写 / M6 ext2 独立库是另两弧，本弧不碰。
+
+### 批表
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 0 | 立项 docs（本段 + 校准 todo `00-vfs-enhance.md` T2/T3 标 ✅ + ROADMAP F6-M1 细化） | ✅ `fb8aa48` | docs-only |
+| 1a | factory 扩 proc/devfs（静态单例 owned=false）+ `ProcFs/DevFs::instance()` 访问器（`is_mounted()` 判防暴露未 init 单例）+ 机制测 | ✅ `3f3c108` | 两 leg 926/926 + proc/devfs 共享单例机制测 |
+| 1b | `BlockRegistry` + DevFS 块节点（`add_block_node`+`BlockDevOps`+`InodeOps::block_device()` 默认 nullptr）+ boot 注册（init.cpp rootfs backing + main_test AHCI port1）+ factory 扩 ext2/ext4（source→vfs_lookup→`block_device()`→`new Ext2`）+ errno `kEnxio`(6) + 机制测 | ✅ `1c2d337` | 两 leg 927/927 + mount -t ext2 /dev/sda→Ext2→root 机制测 |
+| 2 | flock POSIX 文件锁：`FileLockManager`（key=`Inode*`/owner=`Task*`，SH/EX/UN/NB，阻塞+非阻塞 EAGAIN）+ `sys_flock=73` + sys_close 释放钩 + 机制测 | ✅ `fa1c31b` | 两 leg 932/932 + flock 5 测（EX 互斥/SH 共享/SH vs EX/同 task upgrade/close 释放）|
+| 3 | Dentry Cache：`DentryCache`（全局 hash，正缓存 `inode_ref` pin 防 UAF，无 LRU 留续）+ `vfs_lookup` 集成（命中跳 lookup_child）+ 失效挂 syscall 层（sys_unlink/rmdir/rename，FS 不知 dentry）+ 机制测 + -smp 压 | ✅ `3ce5e10` | 两 leg 937/937 + dentry 5 测 + -smp dentry×inode_cache race 无回归 |
+| 4 | 收官：todo/ROADMAP/PLAN ✅ + note + 全量验证 | ✅ 本次 | 两 leg 937/937 + 全量 cmake --build + test_host（InodeOps 公共接口改 B1b）|
+
+### 风险 / 陷阱
+- **B1 boot 注册时机**：NVMe/AHCI/VirtIO init vs DevFS init 顺序——块设备注册须在 DevFS 装配前；mount source 解析走 vfs_lookup 需 `/dev` 已挂（确认 init.cpp 调用链）。
+- **B1 source→IBlockDevice 链路**：`vfs_lookup("/dev/sda")`→`Inode*`→`ops->block_device()`→`IBlockDevice*`→`new Ext2(dev)`；非块设备节点 `block_device()` 返 nullptr→ENXIO。`InodeOps::block_device()` 默认 nullptr，所有现有 FS ops vtable 多一项不动。
+- **B3 dentry × inode_cache race（⭐头号）**：F-DYN-COV 批3 刚治 `inode_cache_` SMP race（`inode_cache_lock_`+assert_held）。dentry 持 `inode_ref`、`get_cached_inode` 内部也 `inode_ref`，**两层 ref 独立**；invalidate 必须 `inode_unref` 走正常 release 路径，不 double-free；-smp 2 必验（DentryCache Spinlock + inode_ref 原子性）。
+- **B3 失效挂 syscall 层**：FS 层（Ext2DirOps::unlink 等）不知 dentry，失效在 sys_unlink/rmdir/rename/umount2 handler 调；不做负缓存（lookup NotFound 不缓存，defer）。
+- **改 InodeOps 公共接口**（B1 `block_device()` 虚方法）：push 前 `cmake --build build -j$(nproc)` 全量（run-kernel-test 不编 test/unit，CI 盲区）+ host ASAN。
+- **flock owner=Task* 简化**：Linux 是 per-open-file-description（dup 共享语义），本弧 owner=Task* + close 释放该 task 在该 inode 的锁，dup 精确语义 defer。
+- **GUI 验证用户自启**：console gate（run-kernel-test-all）Claude 跑；GUI boot 冒烟（`make run` 看 `/dev/sda` 装配）用户启。
+
 ## ✅ F-GUI-USERSPACE（GUI 用户态化）— 收官 2026-07-08（全弧已合 main PR#72；批4 host_cinux.cpp 死代码本批 chore/post-gui-cleanup 删）
 
 > 横切弧（同 F-USABILITY / F-VERIFY 档）。**目标**：把 GUI 从**内核线程**（`gui_worker` ring0，visor 时代遗留）迁**用户态进程**。理由（2026-07-06 拍板）：spawn 自然（PTY 批2 `fork+execve /bin/sh` 是一行正常代码，内核线程 fork 用户态 shell 边界拧）+ 安全隔离（SMAP/SMEP/F9 整套做隔离，GUI 代码量最大留内核 = 白隔离；用户态崩进程，内核稳）+ Linux 范式（X/Wayland 全用户态）+ 基建齐（F10 ring3 + F2 mmap + F8 IPC + F9 安全全 ✅）。详见 todo `f-gui-userspace/README.md`。

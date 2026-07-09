@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "kernel/drivers/block_registry.hpp"  // BlockRegistry (F6-M1 B1b: /dev/<name> nodes)
 #include "kernel/drivers/input/input_event_device.hpp"  // /dev/event0 (F-GUI-USERSPACE b2)
 #include "kernel/drivers/serial/serial.hpp"
 #include "kernel/drivers/tty/console_tty.hpp"  // console_tty + console_tty_ioctl (B3b)
@@ -164,6 +165,11 @@ bool init() {
     // F-GUI-USERSPACE batch 2: /dev/event0 -- userspace input device.  Mouse +
     // keyboard ISRs (via gui_init's listener) push Events; userspace reads them.
     g_devfs.add_node("event0", &cinux::input::input_event_device_ops());
+    // F6-M1 B1b: register /dev/<name> for every block device in the registry.
+    for (uint32_t i = 0; i < cinux::drivers::BlockRegistry::count(); ++i) {
+        g_devfs.add_block_node(cinux::drivers::BlockRegistry::name_at(i),
+                               cinux::drivers::BlockRegistry::device_at(i));
+    }
     g_devfs.set_dynamic_lookup(&devfs_dynamic_lookup);
     if (!vfs_mount_add("/dev", &g_devfs)) {
         cinux::lib::kprintf("[DEVFS] vfs_mount_add /dev failed (table full?)\n");
@@ -176,6 +182,10 @@ bool init() {
 Inode* console_inode() {
     auto r = g_devfs.lookup("console");
     return r.ok() ? r.value() : nullptr;
+}
+
+DevFs* instance() {
+    return g_devfs.is_mounted() ? &g_devfs : nullptr;
 }
 
 }  // namespace devfs
