@@ -275,6 +275,30 @@ add_cinux_integration_test(ext2_inode_ops
     ${CMAKE_SOURCE_DIR}/kernel/fs/inode.cpp
 )
 
+# F6-M6 B1a: ext2 host PAL smoke. Links the REAL ext2 driver (libs/ext2/*.cpp,
+# compiled host-side, the net_tcp pattern -- no STATIC lib: the kernel build
+# needs -mcmodel=kernel codegen and the host build must not, so one target
+# cannot serve both) against a host PAL: kprintf/kmalloc via ext2_host_pal.cpp,
+# Spinlock via host_spinlock.cpp, inode_ref/unref via file.cpp. This gates that
+# the host PAL coverage is complete (the M6 make-or-break link); real fs
+# semantics (mount a real image, lookup/read/write) follow in B1b.
+add_cinux_integration_test(ext2_host_link
+    unit/test_ext2_host_link.cpp
+    unit/ext2_host_pal.cpp
+    unit/host_spinlock.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/file.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/inode.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_common.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_dirops.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_init.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_inode.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_block.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_directory.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_links.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_metadata.cpp
+    ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_extent.cpp
+)
+
 add_cinux_integration_test(pipe
     unit/test_pipe.cpp
     unit/host_spinlock.cpp
