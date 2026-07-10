@@ -35,7 +35,12 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: sudo apt-get install -y ccache ${{ inputs.apt-packages }}
+      # apt-get update first: the runner image's apt index is a few days stale,
+      # so a since-rotated package version (e.g. ovmf 2024.02-2ubuntu0.8) 404s
+      # on install. Refresh the index so install picks the current version.
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache ${{ inputs.apt-packages }}
 
     - name: ccache cache
       # Shared across ALL jobs/cells: ccache keys its store on the full compile
