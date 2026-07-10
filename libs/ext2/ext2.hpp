@@ -19,8 +19,8 @@
 
 #include <stdint.h>
 
-#include "fs/ext2/ext2_common.hpp"
-#include "fs/ext2/ext2_types.hpp"
+#include "ext2_common.hpp"
+#include "ext2_types.hpp"
 #include "fs/vfs_filesystem.hpp"
 #include "kernel/drivers/block_device.hpp"
 #include "kernel/proc/sync.hpp"  // Spinlock (inode_cache_lock_)

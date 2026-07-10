@@ -30,6 +30,8 @@ Makefile
 *.elf
 *.bin
 *.img
+# F6-M6: ext2 host-test fixture -- a committed test image, not a build artifact.
+!test/data/ext2_test.img
 
 # ============================================================
 # 磁盘镜像

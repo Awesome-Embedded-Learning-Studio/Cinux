@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 
-#include "fs/ext2/ext2_types.hpp"
+#include "ext2_types.hpp"
 
 namespace cinux::fs {
 

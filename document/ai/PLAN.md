@@ -2,6 +2,27 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ F6-M6 ext2 独立库 — 收官 2026-07-10（分支 `feat/f6-m6-ext2-lib`，从 main `482f126`[含 M1]，4 commit `ec320f2`→`c486595`，两 leg 937/937 + test_host 66/66）
+
+> 用户决策（2026-07-10）：**路 A libs/ext2/ 物理 lib**（不走原地 host-link 路 B）。需求：host 端跑 ext2 真逻辑 ASAN 测 + TSAN 并发测（F-DYN-COV QEMU forensics 抓的 race host TSAN 秒级抓；给 M5 ext4 写铺路）。
+
+> **执行调整**：B0b 提取 ext2_lib STATIC 撞 codegen 矛盾（kernel build 要 `-mcmodel=kernel`，host build 不能；build/build-host 同一份 CMakeLists 无法条件区分）→ 用户确认**跳过 STATIC，双端直接编**（net_tcp 范式）：kernel `target_sources` 引 `libs/ext2/*.cpp` 继承 kernel codegen，host test `add_cinux_integration_test` 直接编 host codegen。物理 lib（libs/ext2/）达成。
+
+### 批表
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| B0a | `git mv kernel/fs/ext2 → libs/ext2/`（13 文件）+ 内部 include 归一化 + 外部 18 处改 libs/ext2/ + CMakeLists 路径 | ✅ `ec320f2` | run-kernel-test-all 两 leg 937/937 + test_host 63/63 |
+| B0b | ~~提取 ext2_lib STATIC~~ → 跳过（codegen 矛盾，用户确认双端直接编） | ✅ 决策 | 并入 B1a |
+| B1a | ext2_common.cpp `#ifndef CINUX_HOST_TEST` 守（hpet/backtrace/page_cache）+ ext2_host_pal.cpp（kprintf/kmalloc shim）+ ext2_host_link 冒烟 + EXT2_HOST_LIB_SOURCES 共享变量 | ✅ `d3fbb9e` | host 编链通（M6 关键关卡）+ ASAN 绿 + test_host 64/64 |
+| B1b | test/data/ext2_test.img（64KB mke2fs -d）+ ext2_host 真逻辑 ASAN（mount/readdir/lookup/read/create/write/readback/unlink）+ .gitignore 例外 | ✅ `196a42c` | ASAN ext2_host 绿 + test_host 65/65 + kernel 937/937 |
+| B2 | ext2_concurrent TSAN 并发 alloc/free（验 block_alloc_lock_）+ ⭐ host TSAN 首抓 block_buf_ SMP race（留续） | ✅ `c486595` | TSAN alloc/free 0 warning + test_host 66/66 + kernel 937/937 |
+
+> **⭐ M6 核心价值兑现**：host TSAN 秒级抓到 **F-DYN-COV QEMU forensics 漏掉的真 SMP bug**——`lookup_in_dir` 调 `read_block(block)`（无 dst 版）写共享 `Ext2::block_buf_` scratch（[ext2.hpp:120](../../libs/ext2/ext2.hpp#L120) 自标 "NOT SMP-safe"），多 CPU 并发 lookup 互踩。F-DYN-COV 批3/批4 只修 inode_cache_/block_alloc_ 数据结构 race，没修 block_buf_ scratch 共享（lockdep 只看锁序，scratch-clobber 不触发 wild block）。
+
+> **留续（非 M6 阻塞）**：① ext2 `block_buf_` SMP race 修复（`lookup_in_dir` → `read_block(block,dst)` + per-call KmBuf scratch，`Ext2FileOps::read/write` 已用范式；并发 lookup TSAN 测试已写好等修复后加回归）；② ext2 lib STATIC 化（待 codegen 矛盾解）；③ F6-M5 ext4 写（另一弧）。
+
+> 详见 [todo 05-ext2-lib](../todo/f6-vfs/05-ext2-lib.md) + [note](../notes/2026-07-10-f6-m6-ext2-lib.md)。
+
 ## ✅ F6-M1 VFS 增强全收 — 收官 2026-07-08（分支 `feat/f6-m1-vfs-finale`，从干净 main `61a583e`，6 commit `fb8aa48`→`3ce5e10`，两 leg 937/937）
 
 > Feature 域 F6 VFS 第一里程碑收尾弧。**todo 滞后真相（2026-07-08 核对代码）**：T2 symlink / T3 硬链接在 **F-ECO 批2 已做透**——`InodeOps` 有 `readlink`/`symlink`/`link` 虚方法（[inode.hpp:151/155/160](../../kernel/fs/inode.hpp#L151)）、`vfs_lookup.cpp` 完整 follow + `kMaxSymlinks=40` 循环检测 + restart-after-follow、`ext2_links.cpp` 真 `Ext2::symlink`/`link`（fast/long symlink 都支持）、`sys_symlink`/`sys_readlink`/`sys_link`/`sys_lstat` 全注册。todo `00-vfs-enhance.md` 仍标"未启动"，不准，本弧校准。

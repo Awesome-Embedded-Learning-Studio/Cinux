@@ -11,11 +11,13 @@
 
 #include "ext2.hpp"
 #include "ext2_extent.hpp"
-#include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
-#include "kernel/arch/x86_64/backtrace.hpp"  // F-DYN-COV: wild-block trace
-#include "kernel/mm/page_cache.hpp"
+#ifndef CINUX_HOST_TEST
+#    include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
+#    include "kernel/arch/x86_64/backtrace.hpp"  // F-DYN-COV: wild-block trace
+#    include "kernel/mm/page_cache.hpp"
+#endif
 
 namespace cinux::fs {
 
@@ -32,12 +34,19 @@ uint64_t g_ext2_read_ns    = 0;
 /// RAII: time Ext2FileOps::read() from entry to exit (counts every return path).
 class Ext2ReadTimer {
   public:
+#ifndef CINUX_HOST_TEST
     Ext2ReadTimer() : t0_(cinux::drivers::g_hpet.monotonic_ns()) {}
     ~Ext2ReadTimer() {
         __atomic_fetch_add(&g_ext2_read_ns, cinux::drivers::g_hpet.monotonic_ns() - t0_,
                            __ATOMIC_RELAXED);
         __atomic_fetch_add(&g_ext2_read_count, 1, __ATOMIC_RELAXED);
     }
+#else
+    // Host build: no HPET device. Keep the read counter (host tests may inspect it)
+    // but skip ns timing -- the host PAL does not provide g_hpet.
+    Ext2ReadTimer() : t0_(0) {}
+    ~Ext2ReadTimer() { __atomic_fetch_add(&g_ext2_read_count, 1, __ATOMIC_RELAXED); }
+#endif
 
   private:
     uint64_t t0_;
@@ -179,7 +188,9 @@ static void ext2_trace_wild_blk(uint32_t blk, uint64_t file_block, const Ext2Ino
         blk, static_cast<unsigned long>(file_block), disk.i_block[EXT2_INDIRECT_BLOCK],
         disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK], disk.i_block[14],
         static_cast<const void*>(&disk));
+#ifndef CINUX_HOST_TEST
     cinux::arch::backtrace();
+#endif
 }
 
 uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_block,
@@ -321,7 +332,9 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, c
     // the zero-filled first page -> "file not recognized").  Refresh cached
     // pages overlapping this write in place so the next reader sees fresh bytes.
     if (total_written > 0) {
+#ifndef CINUX_HOST_TEST
         cinux::mm::g_page_cache.invalidate_range(inode, offset, total_written);
+#endif
     }
 
     return static_cast<int64_t>(total_written);
