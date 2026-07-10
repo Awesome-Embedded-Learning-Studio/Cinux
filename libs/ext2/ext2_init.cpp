@@ -124,6 +124,7 @@ uint8_t* Ext2::block_buf() {
 cinux::lib::ErrorOr<void> Ext2::mount() {
     cinux::lib::kprintf("[EXT2] Mounting ext2 filesystem\n");
 
+    // Mount-only, single-threaded use of the shared scratch buffer.
     // Read the superblock (byte offset 1024 = LBA 2, 2 sectors)
     constexpr uint64_t SB_LBA     = EXT2_SUPERBLOCK_OFFSET / EXT2_SECTOR_SIZE;
     constexpr uint16_t SB_SECTORS = EXT2_SUPERBLOCK_SIZE / EXT2_SECTOR_SIZE;
@@ -161,7 +162,8 @@ cinux::lib::ErrorOr<void> Ext2::mount() {
     cinux::lib::kprintf("[EXT2]   blocks_per_group=%u  inodes_per_group=%u\n", blocks_per_group_,
                         inodes_per_group_);
 
-    // Read the block group descriptor table
+    // Read the block group descriptor table. mount() is single-threaded, so
+    // the shared block_buf_ and no-dst read_block() overload are safe here.
     uint32_t bgdt_block = (block_size_ == 1024) ? 2 : 1;
 
     uint32_t bgdt_entries       = group_count_;
@@ -277,6 +279,11 @@ uint32_t Ext2::lookup_in_dir(uint32_t dir_ino, const char* name, uint32_t name_l
         total_blocks = EXT2_DIRECT_BLOCKS;
     }
 
+    KmBuf scratch(4096);
+    if (!scratch) {
+        return 0;
+    }
+
     for (uint32_t b = 0; b < total_blocks; ++b) {
         // Resolve the directory data block via the extent tree (ext4 dirs are
         // extent-mapped too) or the classic direct pointer.
@@ -285,11 +292,11 @@ uint32_t Ext2::lookup_in_dir(uint32_t dir_ino, const char* name, uint32_t name_l
             continue;
         }
 
-        if (!read_block(blk)) {
+        if (!read_block(blk, scratch.get())) {
             return 0;
         }
 
-        auto*    block_data = block_buf_;
+        auto*    block_data = scratch.data();
         uint32_t pos        = 0;
 
         while (pos < bs) {
@@ -382,8 +389,7 @@ cinux::lib::ErrorOr<Inode*> Ext2::lookup(const char* path) {
 // paths one component at a time and follows symlinks at the vfs level. Each
 // step delegates to lookup_in_dir (the same primitive lookup() uses) and hands
 // back the cached Inode.
-cinux::lib::ErrorOr<Inode*> Ext2::lookup_child(const Inode* parent,
-                                               const char* name,
+cinux::lib::ErrorOr<Inode*> Ext2::lookup_child(const Inode* parent, const char* name,
                                                uint32_t namelen) {
     if (parent == nullptr || name == nullptr || namelen == 0) {
         return cinux::lib::Error::InvalidArgument;
