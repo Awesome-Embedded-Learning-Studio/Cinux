@@ -224,7 +224,7 @@ cinux::lib::ErrorOr<void> NvmeController::identify_controller(IdentifyController
         volatile NvmeCqe& cqe          = cq[admin_cq_head_];
         const uint16_t    status_field = cqe.status;
         if ((status_field & 0x1) == cq_phase_) {
-            const uint16_t status = static_cast<uint16_t>(status_field >> 1);  // SC/SCT
+            const uint16_t status = static_cast<uint16_t>(status_field >> 1);  // phase removed
             admin_cq_head_        = (admin_cq_head_ + 1) % kAdminQSize;
             if (admin_cq_head_ == 0) {
                 cq_phase_ ^= 1;  // phase wraps at CQ ring rollover
@@ -389,30 +389,58 @@ cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
     io_sq_tail_          = 0;
     io_cq_head_          = 0;
     io_cq_phase_         = 1;
+    io_next_cid_         = 0;
     cinux::lib::kprintf("[NVMe] IO queues created (qid=1 size=%u)\n", kIoQSize);
     return {};
 }
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
     // SMP: serialize SQ enqueue + CQ poll -- io_sq_tail_/io_cq_head_/io_cq_phase_
-    // are shared; two CPUs submitting at once clobber each other's sq slot and
-    // mis-read completions (status=0x4080 on a legal LBA). Held across the poll
-    // (busy-wait, IF=0-safe; caller is #PF demand page or syscall context).
+    // are shared; two CPUs submitting at once clobber each other's SQ slot and
+    // desynchronize completion handling.  Held across the poll (busy-wait,
+    // IF=0-safe; caller is #PF demand page or syscall context).
     auto g = io_lock_.guard();
+    // Rotate CID to distinguish the only outstanding command from a stale same-phase CQE.
+    NvmeCmd submitted = cmd;
+    submitted.cid     = io_next_cid_++;
     // Enqueue on the IO SQ (qid=1) at [tail] and ring the doorbell.
-    auto*   sq                = static_cast<NvmeCmd*>(io_sq_buf_.virt());
-    sq[io_sq_tail_]           = cmd;
-    io_sq_tail_               = (io_sq_tail_ + 1) % kIoQSize;
-    *io_sq_tdbell_            = io_sq_tail_;
+    auto* sq          = static_cast<NvmeCmd*>(io_sq_buf_.virt());
+    sq[io_sq_tail_]   = submitted;
+    io_sq_tail_       = (io_sq_tail_ + 1) % kIoQSize;
+    *io_sq_tdbell_    = io_sq_tail_;
 
     // Poll the IO CQ for this command's completion (phase tag flips).
-    auto* cq = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
+    auto* cq                    = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
+    bool  cid_mismatch_reported = false;
     for (uint32_t i = 0; i < kReadyIters; ++i) {
         volatile NvmeCqe& cqe          = cq[io_cq_head_];
         const uint16_t    status_field = cqe.status;
         if ((status_field & 0x1) == io_cq_phase_) {
+            const uint16_t completion_cid = cqe.cid;
+            if (completion_cid != submitted.cid) {
+                if (!cid_mismatch_reported) {
+                    cinux::lib::kprintf(
+                        "[NVMe] CQ CID mismatch raw=0x%x got=%u expected=%u sq_head=%u "
+                        "sq_id=%u driver_head=%u phase=%u\n",
+                        status_field, completion_cid, submitted.cid, cqe.sq_head, cqe.sq_id,
+                        io_cq_head_, io_cq_phase_);
+                    cid_mismatch_reported = true;
+                }
+                continue;
+            }
             const uint16_t status = static_cast<uint16_t>(status_field >> 1);
-            io_cq_head_           = (io_cq_head_ + 1) % kIoQSize;
+            if (status != 0) {
+                const uint64_t slba = static_cast<uint64_t>(submitted.cdw10) |
+                                      (static_cast<uint64_t>(submitted.cdw11) << 32);
+                const uint16_t nlb  = static_cast<uint16_t>(submitted.cdw12) + 1;
+                cinux::lib::kprintf(
+                    "[NVMe] CQ error raw=0x%x status=0x%x cid=%u sq_head=%u sq_id=%u "
+                    "driver_head=%u phase=%u cmd(op=0x%x nsid=%u slba=%llu nlb=%u)\n",
+                    status_field, status, completion_cid, cqe.sq_head, cqe.sq_id, io_cq_head_,
+                    io_cq_phase_, submitted.opcode, submitted.nsid,
+                    static_cast<unsigned long long>(slba), nlb);
+            }
+            io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
             if (io_cq_head_ == 0) {
                 io_cq_phase_ ^= 1;
             }

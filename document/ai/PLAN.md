@@ -2,6 +2,16 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
+
+> FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。
+
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| 协议取证 | 删除 `clflush`/CMake workaround；IO SQE 使用递增 CID，CQ phase 命中后先校验 echo CID；错误时打印 raw status/CID/SQ head/SQ id/driver head/phase/提交命令；QEMU 常开 `pci_nvme_err_invalid_lba_range` error-only trace，记录设备实际解出的 start/len/limit | 🟡 GUI 多轮未复现，保留取证观察 | 两 leg 937/937，0 failed；SMP shootdown PASS；GUI gcc + 光标活动多轮无 `0x4080`/CID mismatch/QEMU range trace |
+
+> 判读：QEMU trace 的 start 若越界而 driver `cmd(... slba=920 nlb=2)` 合法，说明 SQE 在 doorbell 前后被改坏；若先报 `CQ CID mismatch`，说明 driver 看到了不属于当前命令的旧/错 completion；若两边 LBA 都合法却 QEMU 仍报 range，才查 QEMU/device-model。范围栅栏：证据出来前不做 uncached DMA 映射或 cache flush。详见 [note](../notes/2026-07-10-nvme-status-4080-investigation.md)。
+
 ## ✅ F6-M6 ext2 独立库 — 收官 2026-07-10（分支 `feat/f6-m6-ext2-lib`，从 main `482f126`[含 M1]，4 commit `ec320f2`→`c486595`，两 leg 937/937 + test_host 66/66）
 
 > 用户决策（2026-07-10）：**路 A libs/ext2/ 物理 lib**（不走原地 host-link 路 B）。需求：host 端跑 ext2 真逻辑 ASAN 测 + TSAN 并发测（F-DYN-COV QEMU forensics 抓的 race host TSAN 秒级抓；给 M5 ext4 写铺路）。
