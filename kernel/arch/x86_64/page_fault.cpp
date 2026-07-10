@@ -360,10 +360,31 @@ void handle_pf(InterruptFrame* frame) {
                         cinux::mm::g_pmm.refcount_dec_and_test(map_phys);
                     }
                 } else {
-                    klog_warn("page cache read failed for file VMA @ %p",
-                              reinterpret_cast<void*>(fault_addr));
+                    // File-backed page read failed (I/O error or driver
+                    // mis-read).  A user-mode access gets SIGBUS (Linux
+                    // semantics) so the offender dies with the real cause --
+                    // NOT a silently-mapped zero page, which serves the fault
+                    // with wrong data and, if the page is later executed,
+                    // runs user code on stale/garbage bytes (the FC29000
+                    // #UD-on-garbage path).  Kernel mode (e.g. an extable
+                    // accessor) still falls through to the zero page as a
+                    // best-effort last resort.
+                    klog_error("file page read failed @ %p backing=%p off=0x%lx -- %s",
+                               reinterpret_cast<void*>(fault_addr),
+                               reinterpret_cast<void*>(vma->backing),
+                               static_cast<unsigned long>(file_off),
+                               (err & 0x04) ? "user mode, sending SIGBUS"
+                                            : "kernel mode, mapping zero page");
+                    if ((err & 0x04) != 0) {
+                        auto* offender = cinux::proc::Scheduler::current();
+                        if (offender != nullptr) {
+                            cinux::proc::signal_force_send(offender, cinux::proc::Signal::kSigbus);
+                            return;
+                        }
+                    }
+                    // Kernel mode or no task: fall through to anonymous zero
+                    // page below (best effort).
                 }
-                // Fall through to the anonymous zero page below (best effort).
             }
         }
         uint64_t phys = cinux::mm::g_pmm.alloc_page();
