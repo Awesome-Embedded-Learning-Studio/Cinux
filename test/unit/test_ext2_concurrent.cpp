@@ -24,13 +24,14 @@
 
 #ifdef CINUX_HOST_TEST
 
+#    include <atomic>
+#    include <cinux/expected.hpp>
 #    include <cstdint>
 #    include <fstream>
 #    include <iterator>
 #    include <thread>
 #    include <vector>
 
-#    include <cinux/expected.hpp>
 #    include "kernel/drivers/ram_block_device.hpp"
 #    include "kernel/fs/file.hpp"  // inode_unref
 #    include "libs/ext2/ext2.hpp"
@@ -81,19 +82,47 @@ TEST("ext2_concurrent: parallel alloc_block / free_block (TSAN)") {
     }
 }
 
-// NOTE: a parallel-lookup stress was run here and TSan surfaced a real ext2 SMP
-// bug -- the first time this race has been caught (F-DYN-COV's QEMU forensics
-// missed it: lockdep only does lock-order, and the scratch-clobber pattern does
-// not show as a wild block until timing-dependent corruption). lookup_in_dir()
-// calls read_block(block) -- the no-dst overload -- which writes the SHARED
-// Ext2::block_buf_ scratch (ext2.hpp:120 flags it "NOT SMP-safe"). Two threads
-// resolving paths concurrently clobber each other's block_buf_. Fix route:
-// switch lookup_in_dir() to the read_block(block, dst) SMP-safe overload with a
-// per-call KmBuf scratch (the same fix Ext2FileOps::read/write already use).
-// That is an ext2 SMP-correctness repair, out of scope for M6 (lib extraction);
-// tracked as a follow-up. A concurrent-lookup test would report the race today,
-// so it is omitted until the repair lands (then it should be re-added to guard
-// the regression -- this is exactly the host-TSAN value M6 unlocked).
+// Regression for the shared block_buf_ race found by the original M6 TSan run:
+// lookup_in_dir() now owns one KmBuf per call and reuses it across directory
+// blocks, so concurrent path resolution never shares scratch storage.
+TEST("ext2_concurrent: parallel lookup (TSAN)") {
+    std::ifstream img(EXT2_TEST_IMG_PATH, std::ios::binary);
+    ASSERT_TRUE(img.good());
+    std::vector<char> bytes((std::istreambuf_iterator<char>(img)),
+                            std::istreambuf_iterator<char>());
+    ASSERT_TRUE(bytes.size() > 0 && bytes.size() % 512 == 0);
+    const uint64_t nblocks = bytes.size() / 512;
+
+    auto dev_r = RAMBlockDevice::create(nblocks);
+    ASSERT_OK(dev_r);
+    RAMBlockDevice dev = std::move(*dev_r);
+    ASSERT_OK(dev.write_blocks(0, nblocks, bytes.data()));
+
+    Ext2 ext2(&dev);
+    ASSERT_OK(ext2.mount());
+
+    constexpr int    kThreads = 4;
+    constexpr int    kIters   = 200;
+    std::atomic<int> failures{0};
+    std::thread      threads[kThreads];
+    for (int t = 0; t < kThreads; ++t) {
+        threads[t] = std::thread([&ext2, &failures]() {
+            for (int i = 0; i < kIters; ++i) {
+                auto result = ext2.lookup("/etc/motd");
+                if (!result.ok() || result.value() == nullptr) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                inode_unref(result.value());
+            }
+        });
+    }
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    ASSERT_EQ(failures.load(std::memory_order_relaxed), 0);
+}
 
 int main() {
     RUN_ALL_TESTS();

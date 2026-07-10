@@ -16,10 +16,13 @@
 | B1a | ext2_common.cpp `#ifndef CINUX_HOST_TEST` 守（hpet/backtrace/page_cache）+ ext2_host_pal.cpp（kprintf/kmalloc shim）+ ext2_host_link 冒烟 + EXT2_HOST_LIB_SOURCES 共享变量 | ✅ `d3fbb9e` | host 编链通（M6 关键关卡）+ ASAN 绿 + test_host 64/64 |
 | B1b | test/data/ext2_test.img（64KB mke2fs -d）+ ext2_host 真逻辑 ASAN（mount/readdir/lookup/read/create/write/readback/unlink）+ .gitignore 例外 | ✅ `196a42c` | ASAN ext2_host 绿 + test_host 65/65 + kernel 937/937 |
 | B2 | ext2_concurrent TSAN 并发 alloc/free（验 block_alloc_lock_）+ ⭐ host TSAN 首抓 block_buf_ SMP race（留续） | ✅ `c486595` | TSAN alloc/free 0 warning + test_host 66/66 + kernel 937/937 |
+| follow-up | `lookup_in_dir`/`symlink` 改 per-call `KmBuf` + dst I/O，mount-only 共享 buffer 加单线程说明；加回 4×200 concurrent lookup TSAN 回归 | ✅ 本次 | TSAN 2/2 零 warning + 两 leg 937/937 + test_host 66/66 + ASAN 1/1 + full build |
 
 > **⭐ M6 核心价值兑现**：host TSAN 秒级抓到 **F-DYN-COV QEMU forensics 漏掉的真 SMP bug**——`lookup_in_dir` 调 `read_block(block)`（无 dst 版）写共享 `Ext2::block_buf_` scratch（[ext2.hpp:120](../../libs/ext2/ext2.hpp#L120) 自标 "NOT SMP-safe"），多 CPU 并发 lookup 互踩。F-DYN-COV 批3/批4 只修 inode_cache_/block_alloc_ 数据结构 race，没修 block_buf_ scratch 共享（lockdep 只看锁序，scratch-clobber 不触发 wild block）。
 
-> **留续（非 M6 阻塞）**：① ext2 `block_buf_` SMP race 修复（`lookup_in_dir` → `read_block(block,dst)` + per-call KmBuf scratch，`Ext2FileOps::read/write` 已用范式；并发 lookup TSAN 测试已写好等修复后加回归）；② ext2 lib STATIC 化（待 codegen 矛盾解）；③ F6-M5 ext4 写（另一弧）。
+> **✅ block_buf_ 留续修复（2026-07-10，本次）**：`lookup_in_dir` 在循环外分配 per-call `KmBuf`，循环内复用并走 `read_block(block,dst)`；`symlink` 同样用调用私有 scratch + `write_block(block,src)`，不再触碰共享 `block_buf_`。mount 期保留无 dst API并标明 single-threaded。加回 4 线程 × 200 次 `/etc/motd` lookup TSAN 回归，每个成功结果配对 `inode_unref`；TSAN 2/2 零 warning。详见 [block_buf_ race note](../notes/2026-07-10-f6-m6-blockbuf-race.md)。
+
+> **剩余留续（非 M6 阻塞）**：① ext2 lib STATIC 化（待 codegen 矛盾解）；② F6-M5 ext4 写（另一弧）。
 
 > 详见 [todo 05-ext2-lib](../todo/f6-vfs/05-ext2-lib.md) + [note](../notes/2026-07-10-f6-m6-ext2-lib.md)。
 
