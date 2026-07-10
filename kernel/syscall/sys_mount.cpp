@@ -24,7 +24,7 @@
 #include "kernel/drivers/block_device.hpp"  // IBlockDevice
 #include "kernel/errno.hpp"
 #include "kernel/fs/devfs/devfs.hpp"        // devfs::instance() (sys_mount -t devfs)
-#include "kernel/fs/ext2/ext2.hpp"          // Ext2 (sys_mount -t ext2/ext4)
+#include "libs/ext2/ext2.hpp"          // Ext2 (sys_mount -t ext2/ext4)
 #include "kernel/fs/file.hpp"               // inode_unref
 #include "kernel/fs/path.hpp"               // PathBuf
 #include "kernel/fs/procfs/procfs.hpp"      // procfs::instance() (sys_mount -t proc)

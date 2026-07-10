@@ -33,7 +33,7 @@
 #include "kernel/drivers/pci/pci.hpp"                   // F10-M1 batch 6: PCI->AHCI for ext2
 #include "kernel/drivers/video/framebuffer.hpp"         // F-GUI b1b: Framebuffer for /dev/fb0
 #include "kernel/fs/devfs/devfs.hpp"                    // F-GUI b1b: devfs::init (/dev for fb0)
-#include "kernel/fs/ext2/ext2.hpp"                      // F10-M1 batch 6: ext2 mount
+#include "libs/ext2/ext2.hpp"                      // F10-M1 batch 6: ext2 mount
 #include "kernel/fs/file.hpp"                           // FDTable::close to clear polluted fd 0/1/2
 #include "kernel/fs/procfs/procfs.hpp"                  // F-ECO busybox: procfs::init (/proc)
 #include "kernel/fs/vfs_mount.hpp"                      // F10-M1 batch 6: VFS mount

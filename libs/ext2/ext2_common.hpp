@@ -13,7 +13,7 @@
 
 #include <stdint.h>
 
-#include "fs/ext2/ext2_types.hpp"
+#include "ext2_types.hpp"
 #include "fs/inode.hpp"
 #include "kernel/mm/slab.hpp"  // kmalloc/kfree (KmBuf)
 

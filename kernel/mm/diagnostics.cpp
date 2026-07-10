@@ -13,7 +13,7 @@
 
 #include "kernel/arch/x86_64/fault_diag.hpp"  // pf_count (B1 gcc-stutter profiling)
 #include "kernel/drivers/hpet/hpet.hpp"       // g_hpet.monotonic_ns for dump timestamp
-#include "kernel/fs/ext2/ext2.hpp"            // ext2_read_* (B2.5 I/O accounting)
+#include "libs/ext2/ext2.hpp"            // ext2_read_* (B2.5 I/O accounting)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/page_cache.hpp"
 #include "kernel/mm/pmm.hpp"
