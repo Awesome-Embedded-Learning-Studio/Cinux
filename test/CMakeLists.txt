@@ -275,15 +275,12 @@ add_cinux_integration_test(ext2_inode_ops
     ${CMAKE_SOURCE_DIR}/kernel/fs/inode.cpp
 )
 
-# F6-M6 B1a: ext2 host PAL smoke. Links the REAL ext2 driver (libs/ext2/*.cpp,
-# compiled host-side, the net_tcp pattern -- no STATIC lib: the kernel build
-# needs -mcmodel=kernel codegen and the host build must not, so one target
-# cannot serve both) against a host PAL: kprintf/kmalloc via ext2_host_pal.cpp,
-# Spinlock via host_spinlock.cpp, inode_ref/unref via file.cpp. This gates that
-# the host PAL coverage is complete (the M6 make-or-break link); real fs
-# semantics (mount a real image, lookup/read/write) follow in B1b.
-add_cinux_integration_test(ext2_host_link
-    unit/test_ext2_host_link.cpp
+# F6-M6: ext2 host-side build. The driver is compiled directly into each host
+# integration test (net_tcp pattern -- no STATIC lib: the kernel build needs
+# -mcmodel=kernel codegen, the host build must not, so one target cannot serve
+# both). EXT2_HOST_LIB_SOURCES is the shared link list: the real ext2 sources
+# + the host PAL (kprintf/kmalloc) + Spinlock + inode_ref/unref.
+set(EXT2_HOST_LIB_SOURCES
     unit/ext2_host_pal.cpp
     unit/host_spinlock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file.cpp
@@ -298,6 +295,24 @@ add_cinux_integration_test(ext2_host_link
     ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_metadata.cpp
     ${CMAKE_SOURCE_DIR}/libs/ext2/ext2_extent.cpp
 )
+
+# B1a: PAL link smoke. ctor + mount (zeroed image -> magic fail) + dtor. Gates
+# that the host PAL coverage is complete (the M6 make-or-break link).
+add_cinux_integration_test(ext2_host_link
+    unit/test_ext2_host_link.cpp
+    ${EXT2_HOST_LIB_SOURCES}
+)
+
+# B1b: real-logic ASAN test. Mounts the prebuilt 64 KiB image and exercises
+# readdir / multi-level lookup / read / create / write / read-back / unlink
+# through the real VFS path (the host counterpart of the F-DYN-COV QEMU
+# forensics -- races / UAF surface in milliseconds under ASAN/TSAN).
+add_cinux_integration_test(ext2_host
+    unit/test_ext2_host.cpp
+    ${EXT2_HOST_LIB_SOURCES}
+)
+target_compile_definitions(test_ext2_host PRIVATE
+    EXT2_TEST_IMG_PATH="${CMAKE_SOURCE_DIR}/test/data/ext2_test.img")
 
 add_cinux_integration_test(pipe
     unit/test_pipe.cpp
