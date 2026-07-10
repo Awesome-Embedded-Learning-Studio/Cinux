@@ -314,6 +314,18 @@ add_cinux_integration_test(ext2_host
 target_compile_definitions(test_ext2_host PRIVATE
     EXT2_TEST_IMG_PATH="${CMAKE_SOURCE_DIR}/test/data/ext2_test.img")
 
+# B2: host TSAN concurrency test. N threads over one Ext2 stress the
+# block_alloc_lock_ (alloc/free) and inode_cache_lock_ (lookup); TSan sees
+# races lockdep cannot -- the host counterpart of the F-DYN-COV QEMU forensics.
+# Build with -DCINUX_HOST_TSAN=ON (mutually exclusive with ASAN).
+add_cinux_integration_test(ext2_concurrent
+    unit/test_ext2_concurrent.cpp
+    ${EXT2_HOST_LIB_SOURCES}
+)
+target_compile_definitions(test_ext2_concurrent PRIVATE
+    EXT2_TEST_IMG_PATH="${CMAKE_SOURCE_DIR}/test/data/ext2_test.img")
+target_link_libraries(test_ext2_concurrent PRIVATE -pthread)
+
 add_cinux_integration_test(pipe
     unit/test_pipe.cpp
     unit/host_spinlock.cpp
