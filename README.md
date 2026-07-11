@@ -4,7 +4,7 @@
 
 ### x86_64 操作系统 · 现代 C++ 实现 · SMP 多核 · TCP/IP · GUI 桌面 · GCC 自举
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](document/changelogs/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)]()
 [![GCC](https://img.shields.io/badge/GCC-11%2B-blue)]()
@@ -268,7 +268,7 @@ gdb build/kernel.elf
 - **机制回读**:启用硬件后写读寄存器验证真生效(SMEP/SMAP/CR4/EFER/LSTAR),不靠"没崩就算对"。
 - **host ASAN 门禁**:CI 硬门禁,本地 `ctest` 默认不开,push 前自验。
 
-详见 [CHANGELOG](CHANGELOG.md) 的测试段。
+详见 [CHANGELOG](document/changelogs/CHANGELOG.md) 的测试段。
 
 ---
 
@@ -309,7 +309,7 @@ TEST("测试名称") {
 <summary><b>📖 文档与里程碑</b></summary>
 
 - [ROADMAP](document/ai/ROADMAP.md) — 13 Feature / ~50 Milestone 长弧全树
-- [CHANGELOG](CHANGELOG.md) — v1.0.0 发版特性清单
+- [CHANGELOG](document/changelogs/CHANGELOG.md) — v1.0.0 发版特性清单
 - [document/notes/](document/notes/) — 每批工作记录(正式发布文档)
 - [document/ci/](document/ci/) — 分支/提交/PR/发版工作流
 
