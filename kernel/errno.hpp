@@ -22,6 +22,7 @@ namespace cinux {
 constexpr int kEperm           = 1;    ///< Operation not permitted
 constexpr int kEnoent          = 2;    ///< No such file or directory
 constexpr int kEsrch           = 3;    ///< No such process
+constexpr int kEintr           = 4;    ///< Interrupted system call (signal)
 constexpr int kEio             = 5;    ///< I/O error
 constexpr int kEnxio           = 6;    ///< No such device or address
 constexpr int kEbadf           = 9;    ///< Bad file descriptor

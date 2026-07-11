@@ -26,12 +26,12 @@
 #include "kernel/net/raw_socket.hpp"
 #include "kernel/net/icmp.hpp"         // IcmpModule (register/unregister)
 #include "kernel/net/ipv4.hpp"         // Ipv4Module, kIpProtoIcmp
-#include "kernel/net/wait_queue.hpp"   // wake_one / wake_all / wait_enqueue
+#include "kernel/net/wait_queue.hpp"   // wake_one / wake_all / wait_enqueue / wait_remove
 
 #include <cstdint>
 
 #ifndef CINUX_HOST_TEST
-#    include "kernel/proc/process.hpp"    // Task::wait_next
+#    include "kernel/proc/process.hpp"  // Task + signal_deliverable_pending
 #    include "kernel/proc/scheduler.hpp"  // prepare_to_wait/schedule_blocked
 #endif
 
@@ -124,6 +124,16 @@ cinux::lib::ErrorOr<int64_t> RawSocket::recv(uint8_t* buf, uint32_t len, Ipv4Add
 #ifndef CINUX_HOST_TEST
         if (need_block) {
             Scheduler::schedule_blocked();  // LOCK-FREE: lock_ scope exited above
+        }
+        // EINTR: a signal landed while parked.  Return the sentinel -1 (a value
+        // a real byte-count can never take) so the syscall layer maps it to
+        // -EINTR.  Unlink ourselves under lock_ first so a producer does not
+        // wake a stale link.
+        if (Scheduler::current() != nullptr &&
+            signal_deliverable_pending(Scheduler::current())) {
+            auto g = lock_.irq_guard();
+            wait_remove(recv_waiters_, Scheduler::current());
+            return static_cast<int64_t>(-1);  // sentinel: sys_recvfrom -> -EINTR
         }
         // Woken by on_icmp_reply() enqueuing a reply; loop and dequeue.
 #endif

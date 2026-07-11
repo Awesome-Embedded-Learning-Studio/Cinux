@@ -294,7 +294,24 @@ struct Task {
 
     /** Parent blocked by CLONE_VFORK until this task execs or exits. */
     Task* vfork_parent{nullptr};
+
+    // ---- EINTR / interruptible sleep (signal breaks blocking IO) ----
+    // A task parked in a blocking syscall (pipe R/W, socket recv/accept, poll)
+    // records its wait-queue HEAD address here so signal_send() can wake it for
+    // EINTR delivery.  Mutex/Semaphore (kernel-internal) and futex/waitpid
+    // sleeps leave this nullptr -- they are NOT interruptible by signals
+    // (matches Linux: kernel mutexes / TASK_UNINTERRUPTIBLE never take signals).
+    //   wait_enqueue(head,self) -> self->wait_queue_head = &head
+    //   signal_send(self,sig)   -> if non-null + deliverable, unblock(self); the
+    //                              woken loop checks signal_deliverable_pending()
+    //                              and returns -EINTR after unlinking itself
+    //                              (under its own lock -- no cross-CPU remove).
+    Task** wait_queue_head{nullptr};
 };
+
+/// True if @p task has a deliverable pending signal (unblocked or forced) --
+/// the EINTR check a blocking syscall loop makes after waking.  signal.cpp.
+bool signal_deliverable_pending(const Task* task);
 
 // F4-followup (SMP migration race): context_switch.S writes from->on_cpu = -1
 // via a hardcoded offset, relying on rdi (=&from->ctx) being &from because ctx

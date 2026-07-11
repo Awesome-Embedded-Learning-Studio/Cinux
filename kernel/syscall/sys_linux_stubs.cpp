@@ -17,6 +17,7 @@
 #include "kernel/arch/x86_64/user_access.hpp"  // copy_to_user (sched_getaffinity mask)
 #include "kernel/drivers/acpi/acpi.hpp"        // g_acpi_info (cpu_count)
 #include "kernel/errno.hpp"
+#include "kernel/proc/signal.hpp"  // signal_find_task_by_pid / signal_send (tkill)
 
 namespace cinux::syscall {
 
@@ -40,6 +41,18 @@ int64_t sys_set_robust_list(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, ui
 
 int64_t sys_sendfile(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
     return -cinux::kEnosys;
+}
+
+// tkill(200): send a signal to a task by tid.  busybox sh's job control uses
+// this to forward SIGINT (Ctrl+C from the PTY) to the foreground child (e.g.
+// ping).  Cinux tasks are single-threaded (tid == pid), so reuse the same
+// pid->Task lookup + signal_send path as sys_kill(62).
+int64_t sys_tkill(uint64_t tid, uint64_t sig, uint64_t, uint64_t, uint64_t, uint64_t) {
+    auto* t = cinux::proc::signal_find_task_by_pid(static_cast<int>(tid));
+    if (t == nullptr) {
+        return -cinux::kEsrch;
+    }
+    return cinux::proc::signal_send(t, static_cast<cinux::proc::Signal>(sig));
 }
 
 // setitimer(38): busybox ping uses ITIMER_REAL to fire SIGALRM every second

@@ -182,6 +182,12 @@ int64_t do_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t fla
     if (!r.ok()) {
         return -cinux::to_errno(r.error());
     }
+    // EINTR sentinel: a blocking accept() woken by a signal returns -1 cast to
+    // Socket* (it cannot extend lib::Error without touching the Cinux-Base
+    // submodule).  Map it to -EINTR here.
+    if (*r == reinterpret_cast<Socket*>(static_cast<uintptr_t>(-1))) {
+        return -cinux::kEintr;
+    }
     int64_t new_fd = install_socket_fd(*r);
     if (new_fd < 0) {
         (*r)->close();  // free the accepted socket the fd table could not hold
@@ -323,6 +329,12 @@ int64_t sys_recvfrom(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/
     auto     r     = s->recv(kbuf.get(), n, &src, &sport);
     if (!r.ok()) {
         return -cinux::to_errno(r.error());  // kbuf auto-freed
+    }
+    // EINTR sentinel: a blocking recv() woken by a signal returns -1 as a
+    // success-typed value (it cannot extend lib::Error without touching the
+    // Cinux-Base submodule).  Map it to -EINTR here, before any byte-count use.
+    if (*r == static_cast<int64_t>(-1)) {
+        return -cinux::kEintr;
     }
     uint32_t got = static_cast<uint32_t>(*r);
     if (got != 0 && !copy_to_user(reinterpret_cast<void*>(buf), kbuf.get(), got)) {

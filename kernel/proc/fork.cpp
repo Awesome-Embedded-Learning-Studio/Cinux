@@ -283,6 +283,11 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     child->vfork_parent    = nullptr;
     child->children        = nullptr;
     child->exit_status     = 0;
+    // The child is a brand-new task -- never on a wait queue.  The memcpy may
+    // have inherited the parent's wait_queue_head (non-null if the parent was
+    // itself mid-block, which it is not here, but defensively clear it so a
+    // later signal_send never wakes a phantom queue).  (EINTR support.)
+    child->wait_queue_head = nullptr;
 
     // F3-M3 batch 1: derive process-group / session membership.  memcpy
     // already copied the parent's pgid/sid/session_leader, but we re-derive

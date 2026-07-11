@@ -13,8 +13,18 @@
 #include "kernel/ipc/pipe_ops.hpp"
 
 #include "kernel/ipc/pipe.hpp"
+#include "kernel/errno.hpp"  // kEintr
 
 namespace cinux::ipc {
+
+namespace {
+// Sentinel success value meaning "interrupted by signal" -- a real byte count
+// is always >= 0, so -1 is unused.  do_read_kernel / sys_write detect it and
+// return -EINTR.  (We cannot add a variant to lib::Error without touching the
+// Cinux-Base submodule, so the same convention the socket recv path uses
+// applies here too.)
+constexpr int64_t kEintrSentinel = -1;
+}  // namespace
 
 // ============================================================
 // PipeReadOps
@@ -34,6 +44,11 @@ cinux::lib::ErrorOr<int64_t> PipeReadOps::read(const cinux::fs::Inode*, uint64_t
     int64_t n = pipe_->read(static_cast<char*>(buf), count, nonblock_);
     if (n == PIPE_WOULDBLOCK) {
         return cinux::lib::Error::WouldBlock;
+    }
+    // EINTR from a signal-interrupted blocking read: forward as the sentinel
+    // success value so do_read_kernel can map it to -EINTR.
+    if (n == -cinux::kEintr) {
+        return kEintrSentinel;
     }
     if (n >= 0) {
         return n;  // byte count, or 0 for EOF
@@ -79,6 +94,10 @@ cinux::lib::ErrorOr<int64_t> PipeWriteOps::write(cinux::fs::Inode*, uint64_t, co
     int64_t n = pipe_->write(static_cast<const char*>(buf), count, nonblock_);
     if (n == PIPE_WOULDBLOCK) {
         return cinux::lib::Error::WouldBlock;
+    }
+    // EINTR from a signal-interrupted blocking write: forward as the sentinel.
+    if (n == -cinux::kEintr) {
+        return kEintrSentinel;
     }
     if (n >= 0) {
         return n;

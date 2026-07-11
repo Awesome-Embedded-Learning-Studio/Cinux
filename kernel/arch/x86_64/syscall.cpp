@@ -202,6 +202,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_accept4, sys_accept4);          // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_setsockopt, sys_setsockopt);    // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_setitimer, sys_setitimer);
+    syscall_register(SyscallNr::SYS_tkill, sys_tkill);
     syscall_register(SyscallNr::SYS_getsockopt, sys_getsockopt);    // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_shutdown, sys_shutdown);        // F-ECO batch 7b
     syscall_register(SyscallNr::SYS_getsockname, sys_getsockname);  // F-ECO batch 7b
