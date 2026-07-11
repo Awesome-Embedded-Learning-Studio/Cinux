@@ -459,9 +459,6 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
 
     Scheduler::add_task(child);
 
-    cinux::lib::kprintf("[PROC] fork: created child pid=%d tid=%lu parent_pid=%d\n", child->pid,
-                        child->tid, parent->pid);
-
     return child_pid;
 }
 

@@ -31,6 +31,8 @@ set(QEMU_COMMON_FLAGS
     -no-reboot
     -debugcon file:debug.log
     -global isa-debugcon.iobase=0xe9
+    # FC29000 forensic: emits only when QEMU decodes an out-of-range NVMe SQE.
+    -trace enable=pci_nvme_err_invalid_lba_range
     ${QEMU_ACCEL}
     ${QEMU_DISPLAY}
     -usb

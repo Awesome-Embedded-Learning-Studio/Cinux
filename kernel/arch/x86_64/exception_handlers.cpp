@@ -84,6 +84,31 @@ void dump_registers(const InterruptFrame* frame, const char* name, uint8_t vecto
     }
 }
 
+// Synchronous user-mode CPU exception (#DE/#UD/#OF/#BR): the offending USER
+// task must die, not the kernel -- same policy as handle_gp / handle_pf (Linux
+// force_sig_info for synchronous faults).  Force-delivers @p sig past sig_blocked
+// so a task that masked it (gcc's abort path blocks SIGILL via rt_sigprocmask)
+// terminates instead of livelocking at the faulting rip (see handle_gp for the
+// full rationale).  Returns true when the caller may return -- the ISR stub's
+// signal_check_deliver_isr delivers the signal on IRETQ; false when the caller
+// must panic (kernel-mode fault, or no current task).
+bool user_fault_to_signal(const InterruptFrame* frame, const char* name,
+                          cinux::proc::Signal sig) {
+    if ((frame->cs & 0x03) == 0) {
+        return false;  // kernel mode: a kernel fault stays fatal.
+    }
+    auto* task = cinux::proc::Scheduler::current();
+    if (task == nullptr) {
+        return false;
+    }
+    klog_error("%s user mode: tid=%u '%s' rip=%p cs=%p rsp=%p -- sending signal %d",
+               name, static_cast<unsigned>(task->tid), task->name ? task->name : "(null)",
+               reinterpret_cast<const void*>(frame->rip), reinterpret_cast<const void*>(frame->cs),
+               reinterpret_cast<const void*>(frame->rsp), static_cast<int>(sig));
+    cinux::proc::signal_force_send(task, sig);
+    return true;
+}
+
 }  // anonymous namespace
 
 // Central kernel-panic path (FO batch 3): uniform diagnostics for every fatal
@@ -143,6 +168,10 @@ void handle_bp(InterruptFrame* frame) {
 }
 
 void handle_de(InterruptFrame* frame) {
+    // User-mode divide-by-zero -> SIGFPE (task dies, kernel lives).
+    if (user_fault_to_signal(frame, "#DE", cinux::proc::Signal::kSigfpe)) {
+        return;
+    }
     panic(frame, "#DE", 0, "Divide Error");
 }
 
@@ -151,14 +180,28 @@ void handle_nmi(InterruptFrame* frame) {
 }
 
 void handle_of(InterruptFrame* frame) {
+    // User-mode INTO overflow -> SIGFPE.
+    if (user_fault_to_signal(frame, "#OF", cinux::proc::Signal::kSigfpe)) {
+        return;
+    }
     panic(frame, "#OF", 4, "Overflow");
 }
 
 void handle_br(InterruptFrame* frame) {
+    // User-mode BOUND range exceeded -> SIGSEGV.
+    if (user_fault_to_signal(frame, "#BR", cinux::proc::Signal::kSigsegv)) {
+        return;
+    }
     panic(frame, "#BR", 5, "BOUND Range Exceeded");
 }
 
 void handle_ud(InterruptFrame* frame) {
+    // User-mode illegal opcode -> SIGILL.  FC29000: a stale page mapped after an
+    // NVMe/ext2 read failure let user code execute garbage; #UD must kill the
+    // task, not the whole kernel.
+    if (user_fault_to_signal(frame, "#UD", cinux::proc::Signal::kSigill)) {
+        return;
+    }
     panic(frame, "#UD", 6, "Invalid Opcode");
 }
 

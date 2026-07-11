@@ -357,9 +357,6 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
 
     Scheduler::add_task(child);
 
-    cinux::lib::kprintf("[PROC] clone: created child pid=%d tid=%lu tgid=%d flags=0x%lx\n",
-                        child->pid, child->tid, child->tgid, flags);
-
     if (flags & kCloneVfork) {
         Scheduler::schedule_blocked();
     }

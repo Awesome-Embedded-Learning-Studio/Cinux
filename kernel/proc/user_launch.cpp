@@ -137,10 +137,6 @@ void enter_loaded_program(const char* path, const char* const argv[], const char
     }
     uint64_t user_rsp = stack_top - size;
 
-    cinux::lib::kprintf("[PROC] jumping to user mode: entry=%p rsp=%p stack_top=%p\n",
-                        reinterpret_cast<void*>(entry), reinterpret_cast<void*>(user_rsp),
-                        reinterpret_cast<void*>(stack_top));
-
     task->addr_space->activate();
     update_syscall_stack(task->kernel_stack_top);
     jump_to_usermode(entry, user_rsp, 0);

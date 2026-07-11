@@ -281,8 +281,6 @@ ExecveResult load_interpreter(cinux::mm::AddressSpace& space, const char* path, 
 
     out_base  = cinux::arch::USER_INTERP_BASE;
     out_entry = cinux::arch::USER_INTERP_BASE + ehdr->e_entry;  // ET_DYN: entry is base-relative
-    cinux::lib::kprintf("[EXECVE] loaded interp %s base=%p entry=%p\n", path,
-                        reinterpret_cast<void*>(out_base), reinterpret_cast<void*>(out_entry));
     return ExecveResult::Ok;
 }
 
