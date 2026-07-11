@@ -226,7 +226,11 @@ bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
     pfd.fd      = st->ev_fd;
     pfd.events  = POLLIN;
     pfd.revents = 0;
-    if (poll(&pfd, 1, 0) <= 0) {
+    // 10ms wait (was timeout=0 busy-poll): release the CPU to other tasks
+    // (a gcc/cc1 compile, another shell) when no input event is pending,
+    // instead of spinning pump() at full throttle.  Input still wakes us
+    // immediately -- the wait is only entered when /dev/event0 is empty.
+    if (poll(&pfd, 1, 10) <= 0) {
         return false;
     }
     kernel_event kev;
