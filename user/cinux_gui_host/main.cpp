@@ -416,6 +416,12 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     if (pid == 0) {
         // child: slave becomes stdio, then exec /bin/sh.
         close(master);
+        // Start a fresh session so the shell leads its own process group with no
+        // controlling tty.  Without this the shell would inherit the GUI host's
+        // pgrp, and a ^C in the terminal would signal the whole desktop.  The
+        // slave is then acquired as the controlling terminal so busybox sh can
+        // drive job control (TIOCSPGRP) and ^C reaches the foreground job.
+        setsid();
         int sfd = open(slave, O_RDWR);
         if (sfd >= 0) {
             dup2(sfd, 0);
@@ -424,6 +430,7 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
             if (sfd > 2) {
                 close(sfd);
             }
+            ioctl(0, TIOCSCTTY, 0);  // 0 is now the slave; acquire it as ctty
         }
         char* argv[] = {const_cast<char*>("sh"), nullptr};
         char* envp[] = {const_cast<char*>("TERM=xterm-256color"),
