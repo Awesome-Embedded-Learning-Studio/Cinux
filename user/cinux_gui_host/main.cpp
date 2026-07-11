@@ -226,11 +226,13 @@ bool host_poll_event(void* ctx, EventHeader* out, uint16_t cap) {
     pfd.fd      = st->ev_fd;
     pfd.events  = POLLIN;
     pfd.revents = 0;
-    // 10ms wait (was timeout=0 busy-poll): release the CPU to other tasks
-    // (a gcc/cc1 compile, another shell) when no input event is pending,
-    // instead of spinning pump() at full throttle.  Input still wakes us
-    // immediately -- the wait is only entered when /dev/event0 is empty.
-    if (poll(&pfd, 1, 10) <= 0) {
+    // Nonblocking (timeout=0): pump stays fully responsive -- mouse/keyboard
+    // events are read with no latency.  A 10ms blocking wait was tried (to
+    // release CPU during gcc compiles) but reverted: it didn't fix the real
+    // stall (NVMe sync poll under NvmeBlockDevice::lock_, can't yield) and
+    // only added input lag.  The compile-time stall is a known v1.0.0 issue;
+    // the cure is async IO (v1.1+).
+    if (poll(&pfd, 1, 0) <= 0) {
         return false;
     }
     kernel_event kev;
