@@ -7,7 +7,6 @@
 
 #include "kernel/drivers/hpet/hpet.hpp"
 #include "kernel/lib/kprintf.hpp"
-#include "kernel/proc/scheduler.hpp"  // Scheduler::yield (don't starve during poll)
 #include "nvme.hpp"
 
 namespace cinux::drivers::nvme {
@@ -40,8 +39,6 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
     const uint64_t deadline =
         has_deadline ? cinux::drivers::g_hpet.monotonic_ns() + kIoTimeoutNs : 0;
     uint32_t fallback_iters = 0;
-    uint32_t since_yield    = 0;
-    constexpr uint32_t kYieldEveryIters = 4096;  // ~poll cadence between yields
 
     auto advance_cq = [this]() {
         io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
@@ -92,12 +89,6 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
             return status;
         }
         __asm__ volatile("pause");
-        if (++since_yield >= kYieldEveryIters) {
-            since_yield = 0;
-            io_lock_.release();
-            cinux::proc::Scheduler::yield();  // let other tasks run while we wait
-            io_lock_.acquire();
-        }
     }
 
     volatile NvmeCqe& timed_out_cqe = cq[io_cq_head_];
