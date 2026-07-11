@@ -295,6 +295,18 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         PointerPayload p;
         memcpy(&p, payload, sizeof(p));
         st->wm.process_pointer(p);  // cursor + drag + icon click (on_activate)
+        // v1.0.0 click-to-focus: a press inside a terminal window's content
+        // makes that shell receive keyboard.  Walk newest-first so the
+        // top-most overlapping terminal wins (spawn order == z-order here).
+        if (p.kind == kPointerKindDown) {
+            for (int32_t si = static_cast<int32_t>(HostState::kMaxShells) - 1; si >= 0; --si) {
+                if (st->shells_[si].master_fd >= 0 &&
+                    st->shells_[si].win.content_rect().contains(p.x, p.y)) {
+                    st->focus_slot = si;
+                    break;
+                }
+            }
+        }
     } else if (ev->type == EventCode::kKeycode) {
         if (ev->payload_len < sizeof(KeycodePayload)) {
             return;
