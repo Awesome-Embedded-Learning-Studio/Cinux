@@ -2,6 +2,21 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ v1.0.0 发版门面 — 2026-07-11（分支 `release/v1.0.0`，从 origin/main `f1075f4`）
+
+> 13 Feature 主体完成（8 全 ✅ / F6·F8·F12 部分 / F11 推 v1.1），两 leg run-kernel-test-all 1946/0 绿，FC29000 panic 三层防御（2/3）已 merge。本批发版门面，6 commit：
+
+| commit | 范围 | 状态 |
+|----|------|------|
+| 1 | 命名统一 CinuxOS→Cinux + VERSION 1.0.0（sys_uname/CMakeLists/全仓注释/hello.c/ci-04） | ✅ `e9fb931`（两 leg 1946/0）|
+| 2 | ROADMAP/todo 统计刷新 + 清过期立项段（F-VERIFY/F8/F-QA/F4-followup 待 PR 全清）+ PLAN 焦点 | 🔄 本次 |
+| 3 | 新建 CHANGELOG.md（13 Feature 用户可读特性 + Known Issues） | ⏳ |
+| 4 | README 重写（大改结构保留语气 + 真实数字 + 下载镜像段） | ⏳ |
+| 5 | CI release.yml（tag v* 触发，两 variant 镜像 console/desktop + run.sh） | ⏳ |
+| 6 | gif 录制清单 RECORDING.md（用户录：boot/gui/gcc/smp/net/fs） | ⏳ |
+
+> 不在本批：git tag v1.0.0 + gh release（用户外发）。NVMe status=0x4080 根因未定位，后果已兜底（SIGBUS/SIGILL 杀进程不杀内核），列 CHANGELOG Known Issues。
+
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 
 > FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。
