@@ -48,6 +48,7 @@ using cinux::net::create_socket;
 using cinux::net::kAfInet;
 using cinux::net::kAfUnix;
 using cinux::net::kSockDgram;
+using cinux::net::kSockRaw;
 using cinux::net::kSockStream;
 using cinux::net::socket_ops;
 using cinux::user::copy_from_user;
@@ -204,7 +205,8 @@ int64_t do_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t fla
 
 int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t /*protocol*/, uint64_t, uint64_t,
                    uint64_t) {
-    if (type != static_cast<uint64_t>(kSockStream) && type != static_cast<uint64_t>(kSockDgram)) {
+    if (type != static_cast<uint64_t>(kSockStream) && type != static_cast<uint64_t>(kSockDgram) &&
+        type != static_cast<uint64_t>(kSockRaw)) {
         return -cinux::kEprotonosupport;
     }
     // AF_UNIX is self-contained (no NIC / L4 module), so build it here directly

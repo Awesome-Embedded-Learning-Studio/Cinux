@@ -39,6 +39,7 @@ constexpr int kAfUnix     = 1;  ///< AF_UNIX (local IPC) -- F8-M3
 constexpr int kAfInet     = 2;  ///< AF_INET (IPv4)
 constexpr int kSockStream = 1;  ///< TCP
 constexpr int kSockDgram  = 2;  ///< UDP
+constexpr int kSockRaw    = 3;  ///< RAW (IPPROTO_ICMP ping, like Linux SOCK_RAW)
 
 /// IPv4 socket address -- kernel mirror of libc sockaddr_in (16 bytes).
 /// @note port is NETWORK order on the wire (musl lays it out big-endian); the

@@ -52,10 +52,16 @@ inline void build_icmp_header(const IcmpHeader& in, uint8_t* p) {
     p[7] = static_cast<uint8_t>(in.seq & 0xFF);
 }
 
+/// Forward -- the raw-socket adapter registers itself so echo replies are
+/// delivered to its RX ring (see on_icmp_reply).  Kept opaque here: the header
+/// only needs the pointer type for the registration list.
+class RawSocket;
+
 class IcmpModule : public L4Handler {
 public:
     /// @brief Handle an inbound ICMP message (L4Handler, dispatched for proto==1).
-    ///        Echo request -> echo reply (via ipv4.send); echo reply -> record.
+    ///        Echo request -> echo reply (via ipv4.send); echo reply -> record +
+    ///        deliver a COPY to every registered RawSocket (SOCK_RAW ping path).
     void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
                 NetStack& stack) override;
 
@@ -74,10 +80,23 @@ public:
         last_seq_    = 0;
     }
 
+    /// @name SOCK_RAW delivery (busybox ping reads echo replies via recvfrom()).
+    /// A RawSocket registers itself on construct; on every inbound echo reply
+    /// IcmpModule::handle copies the whole ICMP message into each registered
+    /// socket's ring.  unregisters on close() / destruct.  Best-effort list: a
+    /// duplicate register is a no-op; unregister of an absent entry is a no-op.
+    ///@{
+    void register_raw_socket(RawSocket* s);
+    void unregister_raw_socket(RawSocket* s);
+    ///@}
+
 private:
     uint32_t reply_count_ = 0;  ///< echo replies observed
     uint16_t last_id_     = 0;
     uint16_t last_seq_    = 0;
+
+    static constexpr uint32_t kMaxRawSockets = 8;  ///< concurrent SOCK_RAW ping users
+    RawSocket*                raw_sockets_[kMaxRawSockets]{};
 };
 
 }  // namespace cinux::net
