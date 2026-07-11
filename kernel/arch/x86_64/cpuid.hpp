@@ -5,7 +5,7 @@
  * Used so far by AT_HWCAP emission (user_launch.cpp) so glibc's IFUNC resolvers
  * can pick SIMD-optimized memcpy/strlen/... paths instead of falling back to the
  * generic C loops. Linux puts CPUID.01H:EDX (FPU/SSE/SSE2/...) into AT_HWCAP;
- * the extended ECX bits and CPUID.07H leaves go to AT_HWCAP2, which CinuxOS does
+ * the extended ECX bits and CPUID.07H leaves go to AT_HWCAP2, which Cinux does
  * not yet emit (follow-up if a toolchain binary needs AVX-class dispatch).
  *
  * Freestanding-friendly: no <bitset>, just inline asm + uint32_t outs.

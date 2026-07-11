@@ -115,7 +115,7 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
     // last ownership ref (batch 3: was a two-step dec_and_test + free_page).
     // NOTE (SMP): correct single-core and when threads do not migrate across
     // cores mid-CoW. Cross-core TLB shootdown before freeing is a deeper
-    // follow-up; CinuxOS APs are mostly idle today.
+    // follow-up; Cinux APs are mostly idle today.
     // B3 defect C: defer the free.  pte_count_dec_and_test_no_free returns
     // true when the page would be freed (pte_count+refcount hit 0, audit
     // passed) but does NOT free -- another core's TLB may still cache a

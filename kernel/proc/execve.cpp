@@ -302,7 +302,7 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
     // F4-B0: scan PT_GNU_STACK to decide whether the user stack may be executable.
     // glibc-built ELFs carry PT_GNU_STACK=RW (NX stack, the glibc default); only
     // legacy RWX marks request an executable stack. Absence -> NX (modern default;
-    // Linux defaults to X only for ABI-legacy binaries CinuxOS does not host).
+    // Linux defaults to X only for ABI-legacy binaries Cinux does not host).
     constexpr uint32_t kPtGnuStack      = 0x6474e551;
     bool               stack_executable = false;
     for (uint16_t i = 0; i < phnum; i++) {

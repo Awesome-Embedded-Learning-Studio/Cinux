@@ -14,7 +14,7 @@
 
 ## 现状资产(关键)
 
-- **Cinux-GUI core host-neutral**:子模块 `third_party/Cinux-GUI` pin `0b0c135`(F13-B 收官:DesktopIcon + cursor + clear_dirty)。core **一行不用改**就能在用户态跑——`host/linux_fbdev_main.cpp`(用户态 Linux fbdev host)+ evdev + posix_spawn 已在子模块 `host/`,是 CinuxOS host 的参考样板。
+- **Cinux-GUI core host-neutral**:子模块 `third_party/Cinux-GUI` pin `0b0c135`(F13-B 收官:DesktopIcon + cursor + clear_dirty)。core **一行不用改**就能在用户态跑——`host/linux_fbdev_main.cpp`(用户态 Linux fbdev host)+ evdev + posix_spawn 已在子模块 `host/`,是 Cinux host 的参考样板。
 - `kernel/gui/host_cinux.cpp` = 内核态 host adapter(批4 退役)。
 - `Framebuffer`(`kernel/drivers/video/framebuffer.cpp`):已映射 fb 到 `KMEM_FB_BASE`(2MB huge page,cached),但 `fb_phys` 是 `init()` 局部变量(批1 要导出),无 `/dev/fb0` 设备节点。
 - 鼠标/键盘事件:`Mouse::g_event_queue_`(SPSC 128)+ `Keyboard` 队列,消费者 `gui_worker_thread`(`desktop_launch.cpp:37`→`pump`→`cinux_poll_event`)。
@@ -23,7 +23,7 @@
 
 1. **fb mmap**(批1):`/dev/fb0` mmap 到用户态。VBE fb 现是内核 MMIO 直写;fb 驱动加 mmap vm_ops(物理帧映射到用户地址空间)。
 2. **输入到用户态**(批2):kernel mouse/kbd 事件 → 用户态(evdev-like `/dev/input/event*` 或 Unix socket / SPSC 共享队列)。ISR push + 用户 pop 竞态要防。
-3. **用户态 GUI 进程**(批3):Cinux-GUI core + CinuxOS host adapter(抄 `linux_fbdev_main.cpp`,换 CinuxOS syscall)。
+3. **用户态 GUI 进程**(批3):Cinux-GUI core + Cinux host adapter(抄 `linux_fbdev_main.cpp`,换 Cinux syscall)。
 4. **kernel `gui_worker` 退役**(批4):kernel 只剩 fb 驱动 + 输入驱动 + 进程调度。
 
 ## 批表
@@ -56,10 +56,10 @@
 
 ## 范围栅栏(不投机)
 
-- **core host-neutral 不动**:Cinux-GUI 子模块 core 一行不改(Host ABI 是唯一硬缝)。批3 只写 CinuxOS host adapter(抄 `linux_fbdev_main.cpp`)。
+- **core host-neutral 不动**:Cinux-GUI 子模块 core 一行不改(Host ABI 是唯一硬缝)。批3 只写 Cinux host adapter(抄 `linux_fbdev_main.cpp`)。
 - **批1 只做 fb mmap 机制** + 机制测,不动 gui_worker / 不迁桌面(批3-4)。批1 完成后 kernel GUI 照常跑(gui_worker 不变)。
 - **PTY 批2**(`fork+execve /bin/sh`)不在本弧,是 F10/F-USABILITY 线;但本弧批3 用户态 host 的 `on_activate` stub 为它铺路(用户态 fork+execve 自然落地)。
-- **X11/Wayland 远期**(不是本弧等号):X11 需 syscall 扩到 server 级 + 交叉编译 Xorg;Wayland 需 DRM/KMS 驱动(CinuxOS 无 drm)。本弧止于"自研用户态 GUI 进程"。
+- **X11/Wayland 远期**(不是本弧等号):X11 需 syscall 扩到 server 级 + 交叉编译 Xorg;Wayland 需 DRM/KMS 驱动(Cinux 无 drm)。本弧止于"自研用户态 GUI 进程"。
 - **WC/PAT、SMP 别名、fb 多进程、DRM/KMS** 全留 follow-up。
 
 ## 不变量

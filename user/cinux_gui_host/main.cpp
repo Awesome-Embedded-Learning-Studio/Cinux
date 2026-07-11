@@ -1,14 +1,14 @@
 /**
  * @file user/cinux_gui_host/main.cpp
- * @brief CinuxOS userspace GUI host (F-GUI-USERSPACE b3a/b3b/b4)
+ * @brief Cinux userspace GUI host (F-GUI-USERSPACE b3a/b3b/b4)
  *
  * b4: full desktop (DesktopIcon Shell/Calculator + cursor) + Shell icon spawn
- * /bin/sh on a CinuxOS PTY (open /dev/ptmx + fork + execve + TerminalWidget +
+ * /bin/sh on a Cinux PTY (open /dev/ptmx + fork + execve + TerminalWidget +
  * PTY drain + keyboard→master). User clicks Shell → terminal window → gcc
  * compiles in the GUI.
  *
  * Widget tree mirrors Cinux-GUI host/linux_fbdev_main.cpp pump +
- * host/posix_spawn.cpp PTY (CinuxOS manual path: no libc forkpty -- open
+ * host/posix_spawn.cpp PTY (Cinux manual path: no libc forkpty -- open
  * /dev/ptmx + ioctl TIOCGPTN + fork + child opens /dev/pts/N). The kernel
  * host_cinux.cpp adapter was deleted in F-GUI-USERSPACE: this userspace host is
  * the sole GUI host now.
@@ -54,7 +54,7 @@ struct fb_screen_info {
     uint32_t bpp;
 };
 
-// CinuxOS PTY ioctl (Linux TIOCGPTN); musl <sys/ioctl.h> may not expose it.
+// Cinux PTY ioctl (Linux TIOCGPTN); musl <sys/ioctl.h> may not expose it.
 #ifndef TIOCGPTN
 #    define TIOCGPTN 0x80045430
 #endif
@@ -339,7 +339,7 @@ void on_win_removed(void* ctx, Window* w) {
     }
 }
 
-// b4: Shell icon click → spawn /bin/sh on a CinuxOS PTY + open a terminal window.
+// b4: Shell icon click → spawn /bin/sh on a Cinux PTY + open a terminal window.
 void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     auto* st = static_cast<HostState*>(ctx);
     host_log(st, "[gui] shell_activate (sh_master_fd=%d)", st->sh_master_fd);

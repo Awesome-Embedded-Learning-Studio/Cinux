@@ -8,11 +8,11 @@
  * MouseMove then KeyDown before fork+execve'ing this program (the test kernel
  * has no real mouse/keyboard in QEMU automation), so the reads return at once.
  *
- * The struct layouts mirror kernel/gui/event.hpp (cinux::gui::Event).  CinuxOS
+ * The struct layouts mirror kernel/gui/event.hpp (cinux::gui::Event).  Cinux
  * and this program are both built with gcc under the SysV x86_64 ABI, so the C
  * mirror shares the kernel C++ POD layout exactly.
  *
- * Built static against the CinuxOS musl sysroot (see build-input-event-test.sh).
+ * Built static against the Cinux musl sysroot (see build-input-event-test.sh).
  */
 #include <fcntl.h>
 #include <stdbool.h>

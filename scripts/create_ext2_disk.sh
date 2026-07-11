@@ -75,7 +75,7 @@ GROUP_EOF
 # B3b busybox init: /etc/inittab consumed by the init applet (PID1). Minimal --
 # a sysinit banner then respawn /bin/sh on the console.
 cat > "$ROOT/etc/inittab" << 'INITTAB_EOF'
-::sysinit:/bin/echo CinuxOS init: filesystems mounted
+::sysinit:/bin/echo Cinux init: filesystems mounted
 ::respawn:/bin/sh
 INITTAB_EOF
 

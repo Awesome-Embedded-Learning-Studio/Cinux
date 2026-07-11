@@ -5,7 +5,7 @@
  * Thin wrapper over the ownership-aware vfs_mount_remove: detach the mount at
  * the target path.  A sys_mount-created backend (owned) is freed by the table
  * layer; a boot/static mount is detached without freeing.  @p flags (MNT_FORCE
- * etc.) accepted but ignored -- CinuxOS does not yet model forced unmount.
+ * etc.) accepted but ignored -- Cinux does not yet model forced unmount.
  */
 
 #include "kernel/syscall/sys_umount2.hpp"

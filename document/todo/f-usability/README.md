@@ -4,8 +4,8 @@
 
 ## 目标
 
-从「手搓 rootfs 夹具」升级到「**证明 CinuxOS 真能跑真实 Linux 用户态**」：
-Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟（CinuxOS 上 `gcc hello.c → ./a.out`）。
+从「手搓 rootfs 夹具」升级到「**证明 Cinux 真能跑真实 Linux 用户态**」：
+Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟（Cinux 上 `gcc hello.c → ./a.out`）。
 
 ## 用户决策（2026-07-02 会话）
 
@@ -31,7 +31,7 @@ Buildroot 工业级 rootfs + 进 shell 跑真实工具 + gcc/g++ 冒烟（CinuxO
 ```
 Buildroot 产出(busybox+musl+目录骨架) ──┐
                                         ├─→ assemble staging ─→ mkfs ─→ rootfs.img
-rootfs/overlay/(CinuxOS 专有:inittab    ─┤   (按 profile)
+rootfs/overlay/(Cinux 专有:inittab    ─┤   (按 profile)
   + 可用性测试脚本 + smoke 源码)         │
 extract.sh 产出(GCC 工具链闭包, 批3+) ──┘
 ```
@@ -62,6 +62,6 @@ extract.sh 产出(GCC 工具链闭包, 批3+) ──┘
 
 ## 头号坑：target vs cross 工具链
 
-进 rootfs 的 GCC 必须是 **native**（在 CinuxOS 跑、产 CinuxOS 二进制）。extract.sh 拷的是 host 的 cc1/as/ld —— 它们是 glibc 动态的 host 二进制，靠一起拷进来的 glibc `.so` 在 CinuxOS 跑（已验证）。**绝不能塞 Buildroot 的 cross compiler**（host 程序，CinuxOS 跑不了，一跑 SIGSEGV 且难分辨是内核问题还是工具链塞错）。
+进 rootfs 的 GCC 必须是 **native**（在 Cinux 跑、产 Cinux 二进制）。extract.sh 拷的是 host 的 cc1/as/ld —— 它们是 glibc 动态的 host 二进制，靠一起拷进来的 glibc `.so` 在 Cinux 跑（已验证）。**绝不能塞 Buildroot 的 cross compiler**（host 程序，Cinux 跑不了，一跑 SIGSEGV 且难分辨是内核问题还是工具链塞错）。
 
 详见 PLAN「🔄 F-USABILITY」段。

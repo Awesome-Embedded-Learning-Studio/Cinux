@@ -170,7 +170,7 @@ set(BUSYBOX_ELF "${CMAKE_BINARY_DIR}/musl/busybox")
 # B4-B1: optionally stage the host's glibc-dynamic GCC toolchain subset
 # (as/ld + glibc runtime + crt + libgcc; no cc1/headers yet) into the ext2 disk
 # for the GCC self-host smoke. Off by default: CI lacks GCC-private crt, and the
-# subset is a host artifact, not a CinuxOS build product. Local builds enable it
+# subset is a host artifact, not a Cinux build product. Local builds enable it
 # with -DCINUX_GCC_TOOLCHAIN=ON. (The option() itself lives in cmake/options.cmake.)
 if(CINUX_GCC_TOOLCHAIN)
     set(GCC_ROOT "${CMAKE_BINARY_DIR}/gcc-root")
@@ -651,7 +651,7 @@ add_custom_target(run-nvme-buildroot-usability
 
 # F-USABILITY stage 3: assemble the gcc-profile rootfs.ext2 (buildroot base
 # target + GCC toolchain closure via tools/gcc-toolchain/extract.sh).  Produces
-# a rootfs that ships a native gcc driver so `gcc /hello.c` runs on CinuxOS.
+# a rootfs that ships a native gcc driver so `gcc /hello.c` runs on Cinux.
 # Assumes the buildroot base target dir (<buildroot>/output/target) already
 # exists (built out-of-tree by buildroot); CMake does not track that dependency.
 add_custom_command(

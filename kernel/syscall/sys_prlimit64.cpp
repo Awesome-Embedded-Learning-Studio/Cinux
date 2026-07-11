@@ -3,7 +3,7 @@
  * @brief sys_prlimit64 handler (gcc/g++ self-host batch, 2026-07-05)
  *
  * glibc's malloc probes RLIMIT_AS / RLIMIT_DATA via prlimit64 at startup to
- * size its arenas.  CinuxOS enforces no resource limits (brk/mmap grow on
+ * size its arenas.  Cinux enforces no resource limits (brk/mmap grow on
  * demand up to the user VA window), so every limit is reported as unlimited.
  * The new_rlim argument is accepted but ignored -- there is no enforcement
  * path.  pid/resource validation is intentionally loose: callers either pass

@@ -1,7 +1,7 @@
 # M6: Socket API（BSD socket 系统调用）
 
 > 用户态网络编程接口。TCP/UDP 协议层（M4/M5）之上的 socket 适配层 + socket 系统调用。
-> 本里程碑让 CinuxOS 网络走到「可用」：一个 musl 用户程序能用 socket()/connect()/send()/recv() 收发数据。
+> 本里程碑让 Cinux 网络走到「可用」：一个 musl 用户程序能用 socket()/connect()/send()/recv() 收发数据。
 
 > **F7-M6 范围栅栏（2026-06-30 立项，worktree-f7-m6-socket，从干净 main `f1f29aa`）**：socket fd 走 **InodeOps 子类**（对齐 PTY/pipe，socket fd → File → Inode → SocketOps，`sys_read/write/ioctl/close` 零改动）。TcpModule/UdpModule **保持纯协议层不动**，per-socket RX 环 + 阻塞 + accept 队列放进 Socket 适配器，在 listener 缝（`UdpListener::on_udp` / `TcpListener::on_accept/on_data/on_close`）上挂——回调里**拷贝借来的帧**进环，send 直接调 module。阻塞用现成 `prepare_to_wait/schedule_blocked/unblock`（F8 pipe 那套），从 `net_poll` kthread 上下文唤醒，**不需 timer**。生产 `net_init.cpp` 注册 TCP/UDP（`add_l4`）+ 挂 LoopbackDevice + dev 路由选择。
 >

@@ -39,18 +39,18 @@ static constexpr uint32_t kProcMeminfoMax = 160;
 /// Format a simplified /proc/meminfo into @p buf (NUL-terminated).  busybox
 /// `free` parses MemTotal / MemFree / MemAvailable / Buffers / Cached; we report
 /// MemTotal/MemFree/MemAvailable from @p total_kb/@p free_kb and zero the rest
-/// (CinuxOS tracks no buffer/cache/swap).  @return content length (excl. NUL).
+/// (Cinux tracks no buffer/cache/swap).  @return content length (excl. NUL).
 uint32_t format_proc_meminfo(uint32_t total_kb, uint32_t free_kb, char* buf, uint32_t cap);
 
 /// Format a simplified /proc/<pid>/stat line into @p buf (NUL-terminated).
 /// Layout: "pid (name) state ppid tgid uid gid\n".  This is a documented subset
-/// of Linux's /proc/<pid>/stat (CinuxOS keeps no per-task accounting fields).
+/// of Linux's /proc/<pid>/stat (Cinux keeps no per-task accounting fields).
 /// @return content length in bytes (excluding the NUL).
 uint32_t format_proc_stat(const cinux::proc::TaskSnapshot& s, char* buf, uint32_t cap);
 
 /// Copy the task name (bounded) into @p dst and append a NUL; return the length
 /// including the NUL.  /proc/<pid>/cmdline is NUL-separated argv on Linux;
-/// CinuxOS keeps no argv, so the task name (comm) is exposed as a best-effort
+/// Cinux keeps no argv, so the task name (comm) is exposed as a best-effort
 /// single field.
 uint32_t format_proc_cmdline(const cinux::proc::TaskSnapshot& s, char* dst, uint32_t cap);
 

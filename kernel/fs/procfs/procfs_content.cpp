@@ -106,7 +106,7 @@ uint32_t format_proc_cmdline(const cinux::proc::TaskSnapshot& s, char* dst, uint
 
 uint32_t format_proc_meminfo(uint32_t total_kb, uint32_t free_kb, char* buf, uint32_t cap) {
     // busybox `free` greps these keys (alignment is irrelevant to the parser).
-    // CinuxOS tracks no buffers/cached/swap, so those read 0 -- honest, not
+    // Cinux tracks no buffers/cached/swap, so those read 0 -- honest, not
     // fabricated; the "used" column free prints is total-free, "buff/cache" 0.
     LineBuilder b{buf, cap};
     b.put_s("MemTotal:");

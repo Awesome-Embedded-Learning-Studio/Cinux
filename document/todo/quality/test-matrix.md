@@ -1,4 +1,4 @@
-# CinuxOS — 测试覆盖矩阵（Test Coverage Matrix）
+# Cinux — 测试覆盖矩阵（Test Coverage Matrix）
 
 > **F-VERIFY M1 交付物 — 2026-06-27 全子系统坐实（6-agent workflow 审计）。** 平行 [debt.md](debt.md)（代码债）的另一根轴：debt.md 量「代码写得对不对」，本表量「**代码有没有真被测到**」。
 >

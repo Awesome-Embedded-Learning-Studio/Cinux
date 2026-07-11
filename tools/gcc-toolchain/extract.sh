@@ -131,7 +131,7 @@ done
 #     cc1plus + the g++ driver land in stage 4 (C++ smoke below); lto1/
 #     lto-wrapper still stay out (no -flto in the smoke). ---
 # The driver installs at the fixed PT_INTERP-independent name /usr/bin/gcc on the
-# rootfs (what CinuxOS users invoke), but is sourced from $GCC_BIN so it matches
+# rootfs (what Cinux users invoke), but is sourced from $GCC_BIN so it matches
 # cc1/collect2/libgcc -- one version end to end.
 cp -aL "$GCC_DRIVER" "$ROOT/usr/bin/gcc"
 COLLECT2="$("$GCC_BIN" -print-prog-name=collect2)"
@@ -167,7 +167,7 @@ int main(void) {
     return 0;
 }
 EOF
-# gcc defaults to PIE on modern distros (--enable-default-pie); CinuxOS now loads
+# gcc defaults to PIE on modern distros (--enable-default-pie); Cinux now loads
 # PIE main (ET_DYN + ELF-base ASLR, kernel PIE batch 1), so emit PIE assembly
 # (RIP-relative, links with Scrt1.o + crtbeginS.o under ld -pie) by leaving the
 # default alone. Forcing -fno-pie would yield the legacy ET_EXEC path.
@@ -193,7 +193,7 @@ done
 [ -f /usr/include/stdc-predef.h ] && install -Dm0644 /usr/include/stdc-predef.h "$ROOT/usr/include/stdc-predef.h"
 
 # --- F-USABILITY stage 4 (C++): cc1plus + g++ driver + libstdc++ + the C++
-#     header closure so `g++ /hello.cpp` runs on CinuxOS as a default-PIE binary.
+#     header closure so `g++ /hello.cpp` runs on Cinux as a default-PIE binary.
 #     Mirrors the C path: stage the binary + .so closure + headers computed
 #     live via g++ -H.  libstdc++.so carries the EH runtime (__cxa_* / STL);
 #     libgcc_s.so (staged above) carries the DWARF unwinder (_Unwind_*).  No
@@ -222,7 +222,7 @@ ldd "$CC1PLUS" 2>/dev/null | grep '=> /' | awk '{print $3}' | sort -u | while re
     cp_lib "$lib"
 done
 
-# g++ driver at /usr/bin/g++ (what CinuxOS users invoke).  Sourced from GXX_BIN
+# g++ driver at /usr/bin/g++ (what Cinux users invoke).  Sourced from GXX_BIN
 # so it matches cc1plus/collect2/libstdc++ -- one GCC version end to end.
 cp -aL "$GXX_DRIVER" "$ROOT/usr/bin/g++"
 

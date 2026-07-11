@@ -37,10 +37,10 @@ int64_t do_uname_kernel(kutsname* out) {
         return -cinux::kEinval;
     }
     memset(out, 0, sizeof(*out));
-    set_field(out->sysname, "CinuxOS");
+    set_field(out->sysname, "Cinux");
     set_field(out->nodename, "cinux");
-    set_field(out->release, "0.1.0");
-    set_field(out->version, "#1 SMP CinuxOS");
+    set_field(out->release, "1.0.0");
+    set_field(out->version, "#1 SMP Cinux");
     set_field(out->machine, "x86_64");
     set_field(out->domainname, "(none)");
     return 0;

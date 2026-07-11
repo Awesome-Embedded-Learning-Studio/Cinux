@@ -1,6 +1,6 @@
 # CinuxBase — Design Specification
 
-> 零 OS 耦合的 C++ 基础类型库，为 CinuxOS 内核及未来项目提供 header-only、constexpr、无堆分配的核心组件。
+> 零 OS 耦合的 C++ 基础类型库，为 Cinux 内核及未来项目提供 header-only、constexpr、无堆分配的核心组件。
 
 ## 1. 项目约束
 
@@ -648,7 +648,7 @@ endif()
 
 ## 7. 消费方接入方式
 
-CinuxOS 内核通过 CMake FetchContent 或 add_subdirectory 引入：
+Cinux 内核通过 CMake FetchContent 或 add_subdirectory 引入：
 
 ```cmake
 # kernel/CMakeLists.txt

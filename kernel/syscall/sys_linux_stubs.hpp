@@ -3,7 +3,7 @@
  * @brief Linux ABI probing stubs (gcc/g++ self-host syscall batch, 2026-07-05)
  *
  * glibc/musl probe several Linux syscalls at startup or link time to detect
- * kernel features.  CinuxOS does not implement the feature behind them; the
+ * kernel features.  Cinux does not implement the feature behind them; the
  * probe only needs a value the libc can fall back from.  Registering these
  * (vs leaving them unhandled) also stops the dispatch log from spamming
  * "unhandled syscall N" on every compile.

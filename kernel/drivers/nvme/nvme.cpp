@@ -6,7 +6,7 @@
  * reinterpret_cast).  BAR0 is mapped at KMEM_MMIO+0x70000 (4 pages = 16 KB),
  * avoiding every existing MMIO sub-allocation (AHCI/xHCI/MSI-X/e1000/HPET).
  *
- * BAR self-assignment.  The CinuxOS PCI layer reads BARs but does not assign
+ * BAR self-assignment.  The Cinux PCI layer reads BARs but does not assign
  * them -- it relies on SeaBIOS, which configures AHCI/e1000 but NOT the QEMU
  * nvme controller (dev.bar[0] reads 0).  Reading CAP/VS through an unassigned
  * BAR maps phys 0x0 (low RAM) and returns garbage that still satisfies a naive

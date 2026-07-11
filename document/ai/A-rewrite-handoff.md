@@ -5,7 +5,7 @@
 ## 粘贴用 prompt
 
 ```
-继续 CinuxOS 的 fork child-setup A 重写(治 CI Release+ubsan gcc-13 #GP)。
+继续 Cinux 的 fork child-setup A 重写(治 CI Release+ubsan gcc-13 #GP)。
 
 背景(都已查清,别重查):CI (Release,ubsan,gcc-13.3.0) 的 -smp2 ring-3 smoke 在
 首个 /hello fork 子处 #GP(vector 13)。根因锁定:fork child-setup 的

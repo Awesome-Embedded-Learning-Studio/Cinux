@@ -5,12 +5,12 @@
 
 ## 实现决策
 
-**用户决策（2026-07-02）：砍 Lua/TinyCC 自建，走 GCC 自举**——不造轮子，直接让现成 GCC/binutils 在 CinuxOS 跑通并自举编译。真实状态：
+**用户决策（2026-07-02）：砍 Lua/TinyCC 自建，走 GCC 自举**——不造轮子，直接让现成 GCC/binutils 在 Cinux 跑通并自举编译。真实状态：
 
 - **M1 调试工具**：KALLSYMS ✅（合 F-INFRA/FO，panic backtrace 已用）；GDB stub 内核侧 ⏳ 未做
 - **M2 GCC 自举** ✅（2026-07-05 阶段收尾，PR#61/62/66）：cc1→as→ld→./hello 全闭环 + 默认 PIE gcc/g++ + syscall 补全 + perf 降编译 I/O 25%
 - ~~M2 Lua 5.4~~ / ~~M3 TinyCC~~：**砍**（01-lua.md / 02-tinycc.md 为砍前历史规划，保留作决策溯源）
-- **M3 self-hosting** ⏳ 远期（在 CinuxOS 编 CinuxOS 自己）
+- **M3 self-hosting** ⏳ 远期（在 Cinux 编 Cinux 自己）
 - **M4 编辑器 + 包管理器** ⏳ 未立项
 
 ## Milestone 依赖（修订后）

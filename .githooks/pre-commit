@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CinuxOS pre-commit hook -- run the same checks CI runs, BEFORE the push.
+# Cinux pre-commit hook -- run the same checks CI runs, BEFORE the push.
 #
 # Activate for your clone (one-time):
 #     git config core.hooksPath .githooks

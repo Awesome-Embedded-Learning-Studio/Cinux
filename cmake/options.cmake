@@ -86,7 +86,7 @@ option(CINUX_FB_MMAP_SMOKE "Enable /dev/fb0 mmap ring-3 smoke in run-kernel-test
 # (tools/musl/build-input-event-test.sh; not a CMake target). Default OFF.
 option(CINUX_INPUT_SMOKE "Enable /dev/event0 input ring-3 smoke in run-kernel-test" OFF)
 
-# F-GUI-USERSPACE batch 3a: userspace GUI host smoke (Cinux-GUI core + CinuxOS
+# F-GUI-USERSPACE batch 3a: userspace GUI host smoke (Cinux-GUI core + Cinux
 # host adapter fork+execve'd -- exercises the core compiled into a userspace
 # ELF + Host ABI wiring + fb render path). Built by tools/musl/build-cinux-gui-host.sh.
 option(CINUX_GUI_HOST_SMOKE "Enable userspace GUI host ring-3 smoke in run-kernel-test" OFF)
