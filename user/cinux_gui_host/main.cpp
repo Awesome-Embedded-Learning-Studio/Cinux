@@ -304,6 +304,14 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
                 write(st->sh_master_fd, "\r", 1);
             } else if (k.scancode == 0x0e) {         // set-1 Backspace
                 write(st->sh_master_fd, "\x7f", 1);  // DEL (line discipline)
+            } else if (k.scancode == 0x52) {         // HID Up arrow    -> ESC [ A
+                write(st->sh_master_fd, "\x1b[A", 3);
+            } else if (k.scancode == 0x51) {         // HID Down arrow  -> ESC [ B
+                write(st->sh_master_fd, "\x1b[B", 3);
+            } else if (k.scancode == 0x4f) {         // HID Right arrow -> ESC [ C
+                write(st->sh_master_fd, "\x1b[C", 3);
+            } else if (k.scancode == 0x50) {         // HID Left arrow  -> ESC [ D
+                write(st->sh_master_fd, "\x1b[D", 3);
             } else if (k.ascii != 0) {
                 char c = k.ascii;
                 write(st->sh_master_fd, &c, 1);
