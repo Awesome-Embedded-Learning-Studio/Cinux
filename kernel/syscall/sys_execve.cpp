@@ -112,17 +112,13 @@ int copy_strvec(uint64_t user_virt, const char** out, char* pool, size_t pool_ca
 // ============================================================
 
 int64_t do_execve_kernel(const char* kpath, const char* const* kargv, const char* const* kenvp) {
-    cinux::lib::kprintf("[EXECVE] loading '%s'\n", kpath);
     cinux::proc::ElfAuxInfo elf_aux{};
     auto                    result = cinux::proc::execve(kpath, kargv, kenvp, &elf_aux);
-    cinux::lib::kprintf("[EXECVE] execve result=%d entry=%p\n", static_cast<int>(result),
-                        reinterpret_cast<void*>(elf_aux.at_entry));
     if (result != cinux::proc::ExecveResult::Ok) {
         return static_cast<int64_t>(result);
     }
     // Success: replace this image and resume at the new entry. Never returns;
     // any pool leak is intentional (the old image's stack is gone).
-    cinux::lib::kprintf("[EXECVE] entering loaded program\n");
     cinux::proc::enter_loaded_program(kpath, kargv, kenvp, elf_aux);
     return 0;  // unreachable
 }
@@ -133,10 +129,6 @@ int64_t do_execve_kernel(const char* kpath, const char* const* kargv, const char
 
 int64_t sys_execve(uint64_t path_virt, uint64_t argv_virt, uint64_t envp_virt, uint64_t, uint64_t,
                    uint64_t) {
-    cinux::lib::kprintf(
-        "[EXECVE] sys_execve path=%p argv=%p envp=%p\n", reinterpret_cast<const void*>(path_virt),
-        reinterpret_cast<const void*>(argv_virt), reinterpret_cast<const void*>(envp_virt));
-
     // Stage path/argv/envp into kernel memory via accessors BEFORE execve()
     // unmaps the user pages they live in. Pool is heap-allocated.
     auto pool = std::unique_ptr<char[]>(new char[kStrPoolSize]);
@@ -159,7 +151,6 @@ int64_t sys_execve(uint64_t path_virt, uint64_t argv_virt, uint64_t envp_virt, u
     }
     int argc = copy_strvec(argv_virt, kargv.get(), pool_base, kStrPoolSize, used);
     int envc = copy_strvec(envp_virt, kenvp.get(), pool_base, kStrPoolSize, used);
-    cinux::lib::kprintf("[EXECVE] copy argc=%d envc=%d\n", argc, envc);
     if (argc < 0 || envc < 0) {
         cinux::lib::kprintf("[EXECVE] copy failed -> EINVAL\n");
         return -cinux::kEinval;  // argv/envp too large / inaccessible

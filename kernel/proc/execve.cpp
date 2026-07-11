@@ -408,10 +408,6 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         aux_out->stack_executable = stack_executable;  // F4-B0: PT_GNU_STACK PF_X
     }
 
-    cinux::lib::kprintf("[EXECVE] loaded %s entry=%p base=%p%s pid=%d\n", path,
-                        reinterpret_cast<void*>(entry_va), reinterpret_cast<void*>(main_base),
-                        has_interp ? " (dynamic)" : "", task->pid);
-
     if (task->vfork_parent != nullptr) {
         Scheduler::unblock(task->vfork_parent);
         task->vfork_parent = nullptr;

@@ -286,11 +286,6 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         PointerPayload p;
         memcpy(&p, payload, sizeof(p));
-        if (p.kind != kPointerKindMove) {
-            host_log(st, "[gui] ptr %s x=%d y=%d",
-                     p.kind == kPointerKindDown ? "down" : "up",
-                     static_cast<int>(p.x), static_cast<int>(p.y));
-        }
         st->wm.process_pointer(p);  // cursor + drag + icon click (on_activate)
     } else if (ev->type == EventCode::kKeycode) {
         if (ev->payload_len < sizeof(KeycodePayload)) {
