@@ -14,6 +14,8 @@
 
 #include "kernel/syscall/sys_linux_stubs.hpp"
 
+#include "kernel/arch/x86_64/user_access.hpp"  // copy_to_user (sched_getaffinity mask)
+#include "kernel/drivers/acpi/acpi.hpp"        // g_acpi_info (cpu_count)
 #include "kernel/errno.hpp"
 
 namespace cinux::syscall {
@@ -38,6 +40,32 @@ int64_t sys_set_robust_list(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, ui
 
 int64_t sys_sendfile(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
     return -cinux::kEnosys;
+}
+
+// sched_getaffinity(204): busybox `nproc` + glibc probe it to learn the online
+// CPU set.  Cinux marks every online CPU (BSP + APs from g_acpi_info) eligible,
+// so the mask has cpu_count low bits set and nproc reports the real topology.
+// Returns the byte count placed (Linux raw-syscall contract; glibc/musl wrappers
+// translate non-negative to 0).  pid is ignored -- Cinux has one global affinity.
+int64_t sys_sched_getaffinity(uint64_t /*pid*/, uint64_t cpusetsize, uint64_t mask_virt,
+                               uint64_t, uint64_t, uint64_t) {
+    if (mask_virt == 0 || cpusetsize == 0) {
+        return -cinux::kEfault;
+    }
+    const auto& info = cinux::drivers::acpi::g_acpi_info;
+    uint32_t    n    = info.cpu_count > 0 ? info.cpu_count : 1;
+    uint8_t     buf[128] = {0};  // up to 1024 CPUs
+    for (uint32_t i = 0; i < n && i < sizeof(buf) * 8; ++i) {
+        buf[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+    }
+    uint64_t bytes = (static_cast<uint64_t>(n) + 7) / 8;
+    if (bytes > cpusetsize) {
+        bytes = cpusetsize;
+    }
+    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(mask_virt), buf, bytes)) {
+        return -cinux::kEfault;
+    }
+    return static_cast<int64_t>(bytes);
 }
 
 }  // namespace cinux::syscall

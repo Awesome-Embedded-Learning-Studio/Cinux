@@ -233,6 +233,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_sendfile, sys_sendfile);
     syscall_register(SyscallNr::SYS_gettimeofday, sys_gettimeofday);
     syscall_register(SyscallNr::SYS_getcpu, sys_getcpu);
+    syscall_register(SyscallNr::SYS_sched_getaffinity, sys_sched_getaffinity);
     syscall_register(SyscallNr::SYS_set_robust_list, sys_set_robust_list);
     syscall_register(SyscallNr::SYS_prlimit64, sys_prlimit64);
     syscall_register(SyscallNr::SYS_getrandom, sys_getrandom);

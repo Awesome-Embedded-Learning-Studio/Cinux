@@ -136,6 +136,7 @@ enum class SyscallNr : uint64_t {
     SYS_rseq            = 334,  ///< restartable-sequence probe (stub -ENOSYS)
     SYS_clone3          = 435,  ///< clone3 probe (stub -ENOSYS; libc falls back to clone)
     SYS_time            = 201,  ///< time in seconds (CLOCK_REALTIME)
+    SYS_sched_getaffinity = 204,  ///< CPU affinity mask (busybox nproc / glibc probe)
 };
 
 /// Dispatch table covers all assigned Linux x86_64 numbers (max ~440) with

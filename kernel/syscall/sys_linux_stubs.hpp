@@ -22,5 +22,7 @@ int64_t sys_rseq(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 int64_t sys_clone3(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 int64_t sys_set_robust_list(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 int64_t sys_sendfile(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+int64_t sys_sched_getaffinity(uint64_t pid, uint64_t cpusetsize, uint64_t mask, uint64_t,
+                               uint64_t, uint64_t);
 
 }  // namespace cinux::syscall
