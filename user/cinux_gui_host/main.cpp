@@ -116,10 +116,15 @@ struct HostState {
     DesktopIcon    shell_icon;
     DesktopIcon    calc_icon;
     Desktop        desktop;
-    // b4: shell terminal, created on Shell icon click
-    Window         term_win;
-    TerminalWidget term;
-    int            sh_master_fd = -1;  // PTY master (-1 = no shell yet)
+    // v1.0.0: multiple shell terminals (one PTY + window per Shell icon click).
+    struct ShellSession {
+        Window         win;
+        TerminalWidget term;
+        int            master_fd = -1;  // -1 = free slot
+    };
+    static constexpr uint32_t kMaxShells = 4;
+    ShellSession shells_[kMaxShells];
+    int          focus_slot = -1;  // index into shells_[] receiving keyboard
 };
 
 // File-scope HostState (BSS) -- NOT a function-local static, to avoid emitting
@@ -184,12 +189,15 @@ void host_render_frame(void* ctx, Frame* frame) {
     if (frame == nullptr) {
         return;
     }
-    // b4: drain shell output (non-blocking; O_NONBLOCK set at spawn) → TerminalWidget.
-    if (st->sh_master_fd >= 0) {
-        char    buf[512];
+    // drain every active shell's PTY → its TerminalWidget (v1.0.0: multi-terminal).
+    char buf[512];
+    for (uint32_t i = 0; i < HostState::kMaxShells; ++i) {
+        if (st->shells_[i].master_fd < 0) {
+            continue;
+        }
         ssize_t n;
-        while ((n = read(st->sh_master_fd, buf, sizeof(buf))) > 0) {
-            st->term.write(buf, static_cast<uint32_t>(n));
+        while ((n = read(st->shells_[i].master_fd, buf, sizeof(buf))) > 0) {
+            st->shells_[i].term.write(buf, static_cast<uint32_t>(n));
         }
     }
     // [DIAG] (removed) scroll/drain instrumentation -- kept the host_render_frame
@@ -293,23 +301,27 @@ void host_dispatch_event(void* ctx, const EventHeader* ev, const void* payload) 
         }
         KeycodePayload k;
         memcpy(&k, payload, sizeof(k));
-        // b4: route key to the shell PTY (printable + Enter + Backspace).
-        if (st->sh_master_fd >= 0 && (ev->flags & kEventFlagPressed)) {
+        // route key to the focused shell PTY (v1.0.0: multi-terminal; focus =
+        // most-recently-spawned shell until click-to-focus is wired).
+        const int focus = st->focus_slot;
+        if (focus >= 0 && focus < static_cast<int>(HostState::kMaxShells) &&
+            st->shells_[focus].master_fd >= 0 && (ev->flags & kEventFlagPressed)) {
+            const int fd = st->shells_[focus].master_fd;
             if (k.ascii == '\r' || k.ascii == '\n') {
-                write(st->sh_master_fd, "\r", 1);
+                write(fd, "\r", 1);
             } else if (k.scancode == 0x0e) {         // set-1 Backspace
-                write(st->sh_master_fd, "\x7f", 1);  // DEL (line discipline)
+                write(fd, "\x7f", 1);  // DEL (line discipline)
             } else if (k.scancode == 0x52) {         // HID Up arrow    -> ESC [ A
-                write(st->sh_master_fd, "\x1b[A", 3);
+                write(fd, "\x1b[A", 3);
             } else if (k.scancode == 0x51) {         // HID Down arrow  -> ESC [ B
-                write(st->sh_master_fd, "\x1b[B", 3);
+                write(fd, "\x1b[B", 3);
             } else if (k.scancode == 0x4f) {         // HID Right arrow -> ESC [ C
-                write(st->sh_master_fd, "\x1b[C", 3);
+                write(fd, "\x1b[C", 3);
             } else if (k.scancode == 0x50) {         // HID Left arrow  -> ESC [ D
-                write(st->sh_master_fd, "\x1b[D", 3);
+                write(fd, "\x1b[D", 3);
             } else if (k.ascii != 0) {
                 char c = k.ascii;
-                write(st->sh_master_fd, &c, 1);
+                write(fd, &c, 1);
             }
         }
     }
@@ -327,24 +339,46 @@ void host_free(void* /*ctx*/, void* p) {
     free(p);
 }
 
-// b4 fix: the WM fires this after remove_window(term_win), so the host closes
-// the PTY master and resets sh_master_fd. Without it shell_activate sees the
-// shell as "still open" (sh_master_fd >= 0) and silently refuses to reopen --
-// the reopen bug.
+// WM fires this after remove_window(): close the PTY master of the matching
+// shell slot and free it.  If the closed shell held keyboard focus, fall back
+// to another active shell so input isn't lost.
 void on_win_removed(void* ctx, Window* w) {
     auto* st = static_cast<HostState*>(ctx);
-    if (w == &st->term_win && st->sh_master_fd >= 0) {
-        close(st->sh_master_fd);
-        st->sh_master_fd = -1;  // allow the next Shell click to respawn
+    for (uint32_t i = 0; i < HostState::kMaxShells; ++i) {
+        if (w == &st->shells_[i].win && st->shells_[i].master_fd >= 0) {
+            close(st->shells_[i].master_fd);
+            st->shells_[i].master_fd = -1;  // free the slot for reuse
+            if (st->focus_slot == static_cast<int>(i)) {
+                st->focus_slot = -1;
+                for (uint32_t j = 0; j < HostState::kMaxShells; ++j) {
+                    if (st->shells_[j].master_fd >= 0) {
+                        st->focus_slot = static_cast<int>(j);
+                        break;
+                    }
+                }
+            }
+            break;
+        }
     }
 }
 
-// b4: Shell icon click → spawn /bin/sh on a Cinux PTY + open a terminal window.
+// Shell icon click → spawn /bin/sh on a fresh PTY + open a terminal window.
+// v1.0.0: up to kMaxShells concurrent terminals (was single-slot, which is why
+// the 2nd click did nothing).  Each click grabs a free slot, spawns, and
+// staggers the window so concurrent terminals don't fully overlap.
 void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     auto* st = static_cast<HostState*>(ctx);
-    host_log(st, "[gui] shell_activate (sh_master_fd=%d)", st->sh_master_fd);
-    if (st->sh_master_fd >= 0) {
-        return;  // already open
+    int slot = -1;
+    for (uint32_t i = 0; i < HostState::kMaxShells; ++i) {
+        if (st->shells_[i].master_fd < 0) {
+            slot = static_cast<int>(i);
+            break;
+        }
+    }
+    if (slot < 0) {
+        host_log(st, "[gui] shell_activate: no free slot (max %u shells)",
+                 HostState::kMaxShells);
+        return;
     }
     int master = open("/dev/ptmx", O_RDWR | O_NOCTTY);
     if (master < 0) {
@@ -352,8 +386,6 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
         return;
     }
     unsigned int pty_num = 0;
-    host_log(st, "[gui] shell: ioctl req=0x%lx master=%d", static_cast<unsigned long>(TIOCGPTN),
-             master);
     if (ioctl(master, TIOCGPTN, &pty_num) < 0) {
         int saved_errno = errno;
         host_log(st, "[gui] shell: TIOCGPTN failed errno=%d master=%d", saved_errno, master);
@@ -364,16 +396,9 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
     snprintf(slave, sizeof(slave), "/dev/pts/%u", pty_num);
     pid_t pid = fork();
     if (pid == 0) {
-        // child: slave becomes stdio, then exec /bin/sh.  Trace each step to
-        // serial (fd 1 still = /dev/console here, inherited from parent) so we
-        // can see where the child stalls -- pre-dup2 logs reach the serial log;
-        // post-dup2 logs (fd 1 -> slave PTY) land in the terminal window.
-        host_log(st, "[gui] child: entered slave=%s pid=%d", slave,
-                 static_cast<int>(getpid()));
+        // child: slave becomes stdio, then exec /bin/sh.
         close(master);
-        host_log(st, "[gui] child: closed master");
         int sfd = open(slave, O_RDWR);
-        host_log(st, "[gui] child: open slave sfd=%d errno=%d", sfd, errno);
         if (sfd >= 0) {
             dup2(sfd, 0);
             dup2(sfd, 1);
@@ -382,15 +407,11 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
                 close(sfd);
             }
         }
-        // envp PATH so gcc's driver finds /usr/bin (cc1); argv[0]="sh" non-login.
         char* argv[] = {const_cast<char*>("sh"), nullptr};
         char* envp[] = {const_cast<char*>("TERM=xterm-256color"),
                         const_cast<char*>("PATH=/bin:/sbin:/usr/bin:/usr/sbin"),
                         nullptr};
         execve("/bin/sh", argv, envp);
-        // Reached only on execve failure (fd 1 may be the slave PTY here, so
-        // this lands in the terminal window, not serial).
-        host_log(st, "[gui] child: execve FAILED errno=%d", errno);
         _exit(127);
     }
     if (pid < 0) {
@@ -399,18 +420,23 @@ void shell_activate(void* ctx, DesktopIcon* /*self*/) {
         return;
     }
     fcntl(master, F_SETFL, O_NONBLOCK);
-    st->sh_master_fd = master;
-    // build terminal window over the TerminalWidget
-    st->term.set_cols_rows(kTermCols, kTermRows);
-    st->term.set_theme(&st->theme);
-    st->term_win.set_title("Shell");
-    st->term_win.set_theme(&st->theme);
-    st->term_win.set_rect(80, 60, kTermCols * TerminalWidget::kGlyphW,
-                          kTermRows * TerminalWidget::kGlyphH + Window::kTitleBarHeight);
-    st->term_win.set_content(&st->term);
-    st->term_win.layout();
-    st->wm.add_window(&st->term_win);
-    host_log(st, "[gui] shell spawned pid=%d master=%d", static_cast<int>(pid), master);
+    auto& s = st->shells_[slot];
+    s.master_fd = master;
+    s.term.set_cols_rows(kTermCols, kTermRows);
+    s.term.set_theme(&st->theme);
+    // stagger each window so concurrent terminals don't fully overlap.
+    constexpr int32_t kStagger = 24;
+    s.win.set_title("Shell");
+    s.win.set_theme(&st->theme);
+    s.win.set_rect(80 + slot * kStagger, 60 + slot * kStagger,
+                   kTermCols * TerminalWidget::kGlyphW,
+                   kTermRows * TerminalWidget::kGlyphH + Window::kTitleBarHeight);
+    s.win.set_content(&s.term);
+    s.win.layout();
+    st->wm.add_window(&s.win);
+    st->focus_slot = slot;  // newest terminal takes the keyboard
+    host_log(st, "[gui] shell spawned slot=%d/%u pid=%d master=%d", slot,
+             HostState::kMaxShells, static_cast<int>(pid), master);
 }
 
 void calc_activate(void* /*ctx*/, DesktopIcon* /*self*/) {
