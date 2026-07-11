@@ -13,6 +13,7 @@
 
 #include "hid.hpp"  // HID keycode->ASCII tables + modifier bits (USB keyboard)
 #include "kernel/arch/x86_64/io.hpp"
+#include "kernel/drivers/hpet/hpet.hpp"  // g_hpet.monotonic_ns (USB autorepeat)
 #include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/sync.hpp"
@@ -110,6 +111,8 @@ bool Keyboard::alt_held_   = false;
 bool                  Keyboard::usb_primary_      = false;
 uint8_t               Keyboard::usb_prev_keys_[6] = {};
 Keyboard::KeyListener Keyboard::key_listener_     = nullptr;
+uint8_t               Keyboard::usb_repeat_key_      = 0;
+uint64_t              Keyboard::usb_repeat_deadline_ = 0;
 
 // ============================================================
 // Internal helpers
@@ -334,17 +337,34 @@ void Keyboard::inject_usb_report(uint8_t modifier, const uint8_t* keycodes, uint
     ctrl_held_       = ctrl;
     alt_held_        = alt;
 
-    // Press edges: held now but absent from the previous report.
+    // Press edges + autorepeat.  USB HID reports the same key every interval
+    // (~10ms) while held; without software repeat the line discipline would
+    // only see one backspace per keypress.  Arm a deadline on the first edge,
+    // then re-emit at kUsbRepeatIntervalNs once it passes (Linux-style).
+    const uint64_t now = g_hpet.available() ? g_hpet.monotonic_ns() : 0;
     for (uint8_t i = 0; i < n; ++i) {
         const uint8_t code = keycodes[i];
-        if (code <= 1 || key_in(usb_prev_keys_, 6, code)) {
-            continue;  // 0 = none, 1 = rollover error; or already held
+        if (code <= 1) {
+            continue;  // 0 = none, 1 = rollover error
         }
-        char ascii = 0;
-        if (code < usb::kHidKeymapSize) {
-            ascii = shift ? usb::kHidShifted[code] : usb::kHidUnshifted[code];
+        if (!key_in(usb_prev_keys_, 6, code)) {
+            // new press edge -> dispatch + arm autorepeat
+            char ascii = 0;
+            if (code < usb::kHidKeymapSize) {
+                ascii = shift ? usb::kHidShifted[code] : usb::kHidUnshifted[code];
+            }
+            dispatch_key(code, ascii, /*pressed=*/true, shift, ctrl, alt);
+            usb_repeat_key_      = code;
+            usb_repeat_deadline_ = now + kUsbRepeatDelayNs;
+        } else if (now != 0 && code == usb_repeat_key_ && now >= usb_repeat_deadline_) {
+            // held past the deadline -> emit a repeat
+            char ascii = 0;
+            if (code < usb::kHidKeymapSize) {
+                ascii = shift ? usb::kHidShifted[code] : usb::kHidUnshifted[code];
+            }
+            dispatch_key(code, ascii, /*pressed=*/true, shift, ctrl, alt);
+            usb_repeat_deadline_ = now + kUsbRepeatIntervalNs;
         }
-        dispatch_key(code, ascii, /*pressed=*/true, shift, ctrl, alt);
     }
 
     // Release edges: in the previous report but not held now.
@@ -354,6 +374,9 @@ void Keyboard::inject_usb_report(uint8_t modifier, const uint8_t* keycodes, uint
             continue;
         }
         dispatch_key(code, 0, /*pressed=*/false, shift, ctrl, alt);
+        if (code == usb_repeat_key_) {
+            usb_repeat_key_ = 0;  // releasing the repeating key stops autorepeat
+        }
     }
 
     // Save this report for the next edge comparison.
