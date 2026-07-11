@@ -1,0 +1,107 @@
+name: Release
+
+# Triggered by a `v*` tag push → builds two rootfs variants + boot disk +
+# one-liner run.sh, uploads everything to the corresponding GitHub Release.
+# Also runnable manually via workflow_dispatch (debug/迭代 release job 用).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag/version label stamped onto asset filenames (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write   # softprops/action-gh-release needs this to create release + upload assets
+
+jobs:
+  build:
+    name: build (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # console — handcrafted ext2 (busybox/musl, fast, no GCC);
+        # desktop  — buildroot rootfs + GCC toolchain closure + cinux_gui_host.
+        variant: [console, desktop]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-cinux
+        with:
+          # desktop needs the full gcc-13 family (cc1 ships in cpp-13) + buildroot deps;
+          # console only needs musl/busybox.
+          apt-packages: qemu-system-x86_64 e2fsprogs python3 curl bzip2 linux-libc-dev ${{ matrix.variant == 'desktop' && 'bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev' || '' }}
+          cache-musl: 'true'
+          cache-busybox: 'true'
+          cache-buildroot: ${{ matrix.variant == 'desktop' }}
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_TESTS=ON ${{ matrix.variant == 'desktop' && '-DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2' || '-DCINUX_ROOTFS_PROFILE=handcrafted' }}
+
+      - name: Build musl + busybox user binaries
+        run: |
+          tools/musl/build-musl.sh
+          tools/musl/build-hello.sh
+          tools/musl/build-forktest.sh
+          tools/musl/build-busybox.sh
+
+      - name: Build buildroot base rootfs (desktop only, cached)
+        if: matrix.variant == 'desktop'
+        run: scripts/build-buildroot.sh build/buildroot-ci cinuxos_base_defconfig
+
+      - name: Build kernel + boot disk image (cinux.img = MBR + stage2 + mini + big_kernel)
+        run: cmake --build build --target image -j$(nproc)
+
+      - name: Build console rootfs (handcrafted ext2.img)
+        if: matrix.variant == 'console'
+        run: cmake --build build --target regenerate-ext2-image -j$(nproc)
+
+      - name: Assemble desktop rootfs (buildroot + GCC closure -> rootfs-gcc.ext2)
+        if: matrix.variant == 'desktop'
+        env:
+          BR_TARGET: ${{ github.workspace }}/build/buildroot-ci/output/target
+          GCC_BIN: gcc-13
+        run: cmake --build build --target assemble-gcc-rootfs -j$(nproc)
+
+      - name: Stage release assets
+        id: stage
+        run: |
+          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          mkdir -p staging
+          # boot disk (kernel image) — identical across variants, re-uploaded harmlessly
+          cp build/cinux.img "staging/cinux-${TAG}.img"
+          # rootfs per variant
+          if [ "${{ matrix.variant }}" = "desktop" ]; then
+            cp build/rootfs-gcc.ext2 "staging/cinux-${TAG}-desktop.ext2"
+          else
+            cp build/ext2.img "staging/cinux-${TAG}-console.ext2"
+          fi
+          ls -la staging/
+
+      - name: Upload boot disk + rootfs to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.stage.outputs.tag }}
+          name: Cinux ${{ steps.stage.outputs.tag }}
+          generate_release_notes: true
+          files: staging/*
+          fail_on_unmatched_files: true
+
+  upload-run-script:
+    name: run.sh one-liner
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload run-release.sh to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: scripts/run-release.sh
+          fail_on_unmatched_files: true
