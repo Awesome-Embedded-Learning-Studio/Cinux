@@ -9,8 +9,11 @@
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
 | 协议取证 | 删除 `clflush`/CMake workaround；IO SQE 使用递增 CID，CQ phase 命中后先校验 echo CID；错误时打印 raw status/CID/SQ head/SQ id/driver head/phase/提交命令；QEMU 常开 `pci_nvme_err_invalid_lba_range` error-only trace，记录设备实际解出的 start/len/limit | 🟡 GUI 多轮未复现，保留取证观察 | 两 leg 937/937，0 failed；SMP shootdown PASS；GUI gcc + 光标活动多轮无 `0x4080`/CID mismatch/QEMU range trace |
+| CQ 超时修复 | CI Debug+lockdep SMP 约 80% 在首次 NVM write 静默超时；IO CQ 等待从 `1,000,000` 次循环改 HPET 500 ms deadline + `pause`，无 HPET 时保留迭代兜底；timeout 打印 CQE/CID/SQ-CQ head/phase/命令；IO 路径拆 `nvme_io.cpp` 避免 `nvme.cpp` 超 500 行 | 🟡 本地绿，待远程 Debug+lockdep SMP 复验 | `run-kernel-test` 934/934，0 failed；本地无 timeout/CID/status 诊断 |
 
 > 判读：QEMU trace 的 start 若越界而 driver `cmd(... slba=920 nlb=2)` 合法，说明 SQE 在 doorbell 前后被改坏；若先报 `CQ CID mismatch`，说明 driver 看到了不属于当前命令的旧/错 completion；若两边 LBA 都合法却 QEMU 仍报 range，才查 QEMU/device-model。范围栅栏：证据出来前不做 uncached DMA 映射或 cache flush。详见 [note](../notes/2026-07-10-nvme-status-4080-investigation.md)。
+
+> 2026-07-11 CI timeout 与 `0x4080` 分案：失败 run 的单核腿 934/934，SMP 腿唯一失败在 `test_nvme.cpp:104`；无 CQ error/CID mismatch/QEMU LBA trace，代码只能从无日志的迭代耗尽路径返回 `TimedOut`。详见 [CQ timeout note](../notes/2026-07-11-nvme-cq-timeout.md)。
 
 ## ✅ F6-M6 ext2 独立库 — 收官 2026-07-10（分支 `feat/f6-m6-ext2-lib`，从 main `482f126`[含 M1]，4 commit `ec320f2`→`c486595`，两 leg 937/937 + test_host 66/66）
 
