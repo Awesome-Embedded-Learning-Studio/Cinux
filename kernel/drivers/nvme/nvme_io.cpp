@@ -18,12 +18,11 @@ constexpr uint64_t kIoTimeoutNs     = 500'000'000;
 }  // namespace
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
-    // Manual lock (not the RAII guard): the poll loop releases io_lock_ around
-    // Scheduler::yield() so a long I/O wait -- gcc/cc1 page-faults a ~50 MB
-    // binary through here -- doesn't starve every other task (GUI host stops
-    // pumping, other shells freeze).  CID match keeps us correct across the
-    // unlock window: another CPU's io_submit may advance io_cq_head_, but it
-    // consumes only its own CID, so our completion is still in the CQ.
+    // io_submit is called UNDER NvmeBlockDevice::lock_ (SMP dma_buf_ serialise,
+    // memory 749e7db), so it must NOT yield/schedule -- "spinlock held across
+    // schedule" panics lockdep.  Synchronous poll only; a long I/O wait (gcc/cc1
+    // page-faulting ~50 MB through here) can stall other tasks, but the cure is
+    // async IO (blocking + wait queue, v1.1+), not yielding under a held lock.
     io_lock_.acquire();
     NvmeCmd submitted = cmd;
     submitted.cid     = io_next_cid_++;
