@@ -42,6 +42,15 @@ int64_t sys_sendfile(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
     return -cinux::kEnosys;
 }
 
+// setitimer(38): busybox ping uses ITIMER_REAL to fire SIGALRM every second
+// (send next echo + per-packet timeout).  We don't run a real itimer, so accept
+// the call as a no-op (ping falls back to blocking recv; Ctrl+C interrupts).
+// A faithful itimer -> SIGALRM is a follow-up (needs kernel timer + signal).
+int64_t sys_setitimer(uint64_t /*which*/, uint64_t /*new_value*/, uint64_t /*old_value*/,
+                       uint64_t, uint64_t, uint64_t) {
+    return 0;
+}
+
 // sched_getaffinity(204): busybox `nproc` + glibc probe it to learn the online
 // CPU set.  Cinux marks every online CPU (BSP + APs from g_acpi_info) eligible,
 // so the mask has cpu_count low bits set and nproc reports the real topology.

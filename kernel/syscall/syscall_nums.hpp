@@ -113,6 +113,7 @@ enum class SyscallNr : uint64_t {
     SYS_getpeername     = 52,   ///< retrieve peer addr (F-ECO batch 7b)
     SYS_socketpair      = 53,   ///< create a pair of connected sockets (F-ECO batch 7b)
     SYS_setsockopt      = 54,   ///< set a socket option (no-op accept) (F-ECO batch 7a)
+    SYS_setitimer       = 38,   ///< setitimer (stub 0; busybox ping SIGALRM probe)
     SYS_getsockopt      = 55,   ///< get a socket option (SO_TYPE/SO_ERROR) (F-ECO batch 7a)
     SYS_accept4         = 288,  ///< accept + flags (SOCK_CLOEXEC) (F-ECO batch 7a)
     // --- F-ECO batch 2: VFS metadata + dirent syscalls (Linux x86_64 numbers) ---

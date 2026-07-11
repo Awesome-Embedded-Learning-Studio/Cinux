@@ -329,6 +329,23 @@ void Keyboard::dispatch_key(uint8_t code, char ascii, bool pressed, bool shift, 
     }
 }
 
+// Ctrl+letter -> POSIX control char (^A=0x01..^Z=0x1A); Ctrl+C becomes the
+// 0x03 INTR the TTY line discipline maps to SIGINT.  HID only gives us the
+// shifted/unshifted letter, so without this the INTR byte never reaches the
+// tty and Ctrl+C can't interrupt a foreground process (e.g. busybox ping).
+char apply_ctrl_modifier(char ascii, bool ctrl) {
+    if (!ctrl) {
+        return ascii;
+    }
+    if (ascii >= 'A' && ascii <= 'Z') {
+        return static_cast<char>(ascii - 'A' + 1);
+    }
+    if (ascii >= 'a' && ascii <= 'z') {
+        return static_cast<char>(ascii - 'a' + 1);
+    }
+    return ascii;
+}
+
 void Keyboard::inject_usb_report(uint8_t modifier, const uint8_t* keycodes, uint8_t n) {
     const bool shift = (modifier & (usb::HidKbdMod::kLShift | usb::HidKbdMod::kRShift)) != 0;
     const bool ctrl  = (modifier & (usb::HidKbdMod::kLCtrl | usb::HidKbdMod::kRCtrl)) != 0;
@@ -353,6 +370,7 @@ void Keyboard::inject_usb_report(uint8_t modifier, const uint8_t* keycodes, uint
             if (code < usb::kHidKeymapSize) {
                 ascii = shift ? usb::kHidShifted[code] : usb::kHidUnshifted[code];
             }
+            ascii = apply_ctrl_modifier(ascii, ctrl);  // ^C=0x03 INTR, ^D=0x04 EOF, ^Z=0x1A SUSP
             dispatch_key(code, ascii, /*pressed=*/true, shift, ctrl, alt);
             usb_repeat_key_      = code;
             usb_repeat_deadline_ = now + kUsbRepeatDelayNs;
@@ -362,6 +380,7 @@ void Keyboard::inject_usb_report(uint8_t modifier, const uint8_t* keycodes, uint
             if (code < usb::kHidKeymapSize) {
                 ascii = shift ? usb::kHidShifted[code] : usb::kHidUnshifted[code];
             }
+            ascii = apply_ctrl_modifier(ascii, ctrl);  // ^C=0x03 INTR, ^D=0x04 EOF, ^Z=0x1A SUSP
             dispatch_key(code, ascii, /*pressed=*/true, shift, ctrl, alt);
             usb_repeat_deadline_ = now + kUsbRepeatIntervalNs;
         }
