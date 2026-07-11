@@ -7,6 +7,7 @@
 
 #include "kernel/drivers/hpet/hpet.hpp"
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/proc/scheduler.hpp"  // Scheduler::yield (don't starve during poll)
 #include "nvme.hpp"
 
 namespace cinux::drivers::nvme {
@@ -18,9 +19,13 @@ constexpr uint64_t kIoTimeoutNs     = 500'000'000;
 }  // namespace
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
-    // SQ/CQ state is shared across CPUs. Keep the lock across polling so only
-    // one command is outstanding and each completion has one unambiguous owner.
-    auto    guard     = io_lock_.guard();
+    // Manual lock (not the RAII guard): the poll loop releases io_lock_ around
+    // Scheduler::yield() so a long I/O wait -- gcc/cc1 page-faults a ~50 MB
+    // binary through here -- doesn't starve every other task (GUI host stops
+    // pumping, other shells freeze).  CID match keeps us correct across the
+    // unlock window: another CPU's io_submit may advance io_cq_head_, but it
+    // consumes only its own CID, so our completion is still in the CQ.
+    io_lock_.acquire();
     NvmeCmd submitted = cmd;
     submitted.cid     = io_next_cid_++;
 
@@ -35,6 +40,16 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
     const uint64_t deadline =
         has_deadline ? cinux::drivers::g_hpet.monotonic_ns() + kIoTimeoutNs : 0;
     uint32_t fallback_iters = 0;
+    uint32_t since_yield    = 0;
+    constexpr uint32_t kYieldEveryIters = 4096;  // ~poll cadence between yields
+
+    auto advance_cq = [this]() {
+        io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
+        if (io_cq_head_ == 0) {
+            io_cq_phase_ ^= 1;
+        }
+        *io_cq_hdbell_ = io_cq_head_;
+    };
 
     while (has_deadline ? cinux::drivers::g_hpet.monotonic_ns() < deadline
                         : fallback_iters++ < kIoFallbackIters) {
@@ -43,6 +58,11 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         if ((status_field & 0x1) == io_cq_phase_) {
             const uint16_t completion_cid = cqe.cid;
             if (completion_cid != submitted.cid) {
+                // A completion for a different command is at our CQ head --
+                // another CPU's io_submit advanced here while we'd yielded
+                // (or a stale entry).  Consume it and keep polling for ours;
+                // the old "report + continue without advancing" deadlocks once
+                // yields let the head move.
                 if (!cid_mismatch_reported) {
                     cinux::lib::kprintf(
                         "[NVMe] CQ CID mismatch raw=0x%x got=%u expected=%u sq_head=%u "
@@ -51,6 +71,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
                         io_cq_head_, io_cq_phase_);
                     cid_mismatch_reported = true;
                 }
+                advance_cq();
                 continue;
             }
 
@@ -66,15 +87,17 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
                     io_cq_phase_, submitted.opcode, submitted.nsid,
                     static_cast<unsigned long long>(slba), nlb);
             }
-
-            io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
-            if (io_cq_head_ == 0) {
-                io_cq_phase_ ^= 1;
-            }
-            *io_cq_hdbell_ = io_cq_head_;
+            advance_cq();
+            io_lock_.release();
             return status;
         }
         __asm__ volatile("pause");
+        if (++since_yield >= kYieldEveryIters) {
+            since_yield = 0;
+            io_lock_.release();
+            cinux::proc::Scheduler::yield();  // let other tasks run while we wait
+            io_lock_.acquire();
+        }
     }
 
     volatile NvmeCqe& timed_out_cqe = cq[io_cq_head_];
@@ -87,6 +110,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         timed_out_cqe.status, timed_out_cqe.cid, submitted.cid, timed_out_cqe.sq_head,
         timed_out_cqe.sq_id, io_sq_tail_, io_cq_head_, io_cq_phase_, submitted.opcode,
         submitted.nsid, static_cast<unsigned long long>(slba), nlb);
+    io_lock_.release();
     return cinux::lib::Error::TimedOut;
 }
 
