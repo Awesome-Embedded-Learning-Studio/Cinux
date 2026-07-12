@@ -7,12 +7,12 @@
 [![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](document/changelogs/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)]()
-[![GCC](https://img.shields.io/badge/GCC-11%2B-blue)]()
-[![QEMU](https://img.shields.io/badge/QEMU-8.0%2B-orange)]()
+[![GCC](https://img.shields.io/badge/GCC-16.1.1%2B-blue)]()
+[![QEMU](https://img.shields.io/badge/QEMU-11.0.2%2B-orange)]()
 
 一个基于 x86_64 架构的操作系统——从 **Bootloader 到 GUI 桌面、从内核到 GCC 自举**,全链路实现。
 
-> **Note:** 本项目迁移自教程操作系统 [Cinux](https://github.com/Charliechen114514/Cinux),已演进为完整的 13 Feature / ~50 Milestone 长弧。
+> **Note:** 本项目迁移自教程操作系统 [Cinux](https://github.com/Awesome-Embedded-Learning-Studio/Cinux-Book)
 
 </div>
 
@@ -41,22 +41,19 @@
 </p>
 
 <p align="center">
-  <img src="assets/README/run_example.gif" width="45%" alt="Boot to Shell">
+  <img src="assets/README/boot_from_log_to_uname.gif" width="45%" alt="Boot to Shell">
   <img src="assets/README/multi_shell.gif" width="45%" alt="Multi Terminal">
 </p>
 <p align="center">
-  <em>从启动到 Shell（左） · 多终端窗口（右）</em>
+  <em>从启动到 Shell（左） · 使用Buildroot编译的Rootfs</em>
 </p>
 
 <p align="center">
-  <img src="assets/README/parallel_work.gif" width="45%" alt="Parallel Work">
-  <img src="assets/README/filesystem.gif" width="45%" alt="Filesystem">
+  <img src="assets/README/gcc_g++.gif" width="45%" alt="Parallel Work">
 </p>
 <p align="center">
-  <em>多终端并发执行（左） · Ext2 文件操作（右）</em>
+  <em>使用gcc, g++编译C/C++文件，支持多达100+的syscall!</em>
 </p>
-
-> 📹 录像将随 v1.0.0 Release 更新(新增 SMP 双核 / TCP/IP ping / GCC 自举编译 demo),见 [assets/README/RECORDING.md](assets/README/RECORDING.md)。
 
 ---
 
@@ -67,7 +64,7 @@
 <td width="50%">
 
 🧠 **完整 x86_64 内核**
-Bootloader → Mini Kernel → Big Kernel → User Space → GUI,全链路打通;112 个系统调用,对齐 Linux ABI
+Bootloader → Mini Kernel → Big Kernel → User Space → GUI,全链路打通;113 个系统调用,对齐 Linux ABI
 
 </td>
 <td width="50%">
@@ -127,6 +124,145 @@ NXE + SMEP + SMAP(机制回读验证)+ ASLR + UID/GID + Stack Canary(-fstack-pro
 </td>
 </tr>
 </table>
+
+---
+
+## 📋 完整功能清单
+
+> 以下清单**交叉读源码确认**(syscall 注册表 / 驱动目录 / 各子系统实现文件),非仅靠文档声明。
+
+<details>
+<summary><b>🔍 点击展开完整功能清单(13 个子系统)</b></summary>
+
+### 🧠 内核与启动链
+
+- **启动链**:MBR(stage1)→ stage2(A20 / E820 / VESA 1024×768×32 / 实模式→保护模式→长模式 / BootInfo@0x7000)→ Mini Kernel(higher-half)→ Big Kernel → 用户态 → GUI
+- **架构**:x86_64 长模式,higher-half 内核(`-mcmodel=kernel`),GDT/IDT `constexpr` 生成,IST1/IST2 独立中断栈
+- **中断/系统调用**:LAPIC(xAPIC)per-CPU timer + IPI、IOAPIC GSI 路由、MSI-X、8259 PIC 兼容回退、SYSCALL/SYSRET(LSTAR/STAR/SFMASK)
+
+### 📡 系统调用(113 个,对齐 Linux x86_64 ABI)
+
+| 类别 | 实现 |
+|---|---|
+| 进程 | fork / vfork / clone / clone3(stub) / execve / waitpid / exit / exit_group / yield / getpid / getppid / set_tid_address / tkill |
+| 进程组/会话 | setpgid / getpgid / setsid / getsid |
+| 文件 I/O | read / write / pread64 / readv / writev / open / openat / close / creat / lseek / dup / dup2 / pipe / fcntl / flock / sendfile(stub) / ioctl |
+| 文件系统 | stat / fstat / lstat / newfstatat / access / getdents / getdents64 / chdir / getcwd / mkdir / rmdir / unlink / rename / link / symlink / readlink / mknod / chmod / chown / umask / utimensat / mount / umount2 |
+| 网络/Socket | socket / connect / accept / accept4 / bind / listen / sendto / recvfrom / shutdown / getsockname / getpeername / socketpair / setsockopt(stub) / getsockopt |
+| 信号 | kill / tkill / rt_sigaction / rt_sigprocmask / rt_sigtimedwait / setitimer |
+| IPC | futex / shmget / shmat / shmdt / shmctl |
+| 时间 | nanosleep / clock_gettime / gettimeofday / time |
+| 内存 | mmap / munmap / mprotect / brk |
+| 凭证 | getuid / geteuid / getgid / getegid / setuid / setgid / getgroups / setgroups |
+| 信息 | uname / sysinfo / getrusage / dmesg |
+| I/O 多路 | poll / select |
+| 其它 | getrandom / sched_getaffinity / arch_prctl / reboot / prlimit64(stub) / rseq(stub) / getcpu(stub) / set_robust_list(stub) / ping(自定义) / cinux_exit(自定义) |
+
+### 💾 内存管理
+
+- **按需分页**:VMA + 缺页处理;匿名页零填充,文件页走 Page Cache
+- **CoW fork**:fork 标记 `FLAG_COW`,写时复制;设备映射(`FLAG_PCD`)直共享
+- **Page Cache**:inode+offset 哈希,命中/回填/写失效,cache 所有权 refcount
+- **Slab 分配器**:16~2048B 通用 cache + 专用 cache,double-free 毒哨兵,`kmalloc`/`kfree`
+- **mmap/munmap/mprotect/brk**:VMA 合并/分裂/查找空闲区
+- **每进程页表**:`AddressSpace` 拥有 PML4,execve 清用户映射
+- **TLB shootdown IPI**:vector 0xE1,all-excl-self + invlpg + ack
+- **refcount/mapcount 分离**:`PhysRef` 所有权 + `pte_count` 映射计数(防 lto_plugin UAF)
+
+### ⚡ SMP 多核
+
+- **-smp 2**:ACPI MADT 探测 AP,INIT-SIPI-SIPI + trampoline@0x8000 引导
+- **per-CPU**:GS.base → PerCpu 块(kernel_stack / current),每 CPU 独立 GDT/TSS/idle
+- **IPI**:reschedule(0xE0)唤醒 idle AP、TLB shootdown(0xE1)
+- **lockdep**:per-CPU 持锁栈 + 全局锁序图 + AB-BA 死锁检测 + `assert_held`
+- **RaceWatchpoint**(`RACE_DETECT`):`RACE_TOUCH` 抓"根本没锁"的跨 CPU 交错 → kpanic
+- **迁移竞态修复**:`task->on_cpu` 防 ctx 保存/恢复竞态
+
+### 🖥️ 设备驱动
+
+| 类别 | 驱动 | 说明 |
+|---|---|---|
+| 存储 | NVMe / AHCI / VirtIO-blk | 三套块设备,均可作 boot disk(默认 AHCI),sync poll IO,512B 扇区 |
+| 网络 | e1000 / VirtIO-net | TX/RX 环,SLIRP 用户态网络(`ping 10.0.2.2`) |
+| 输入 | xHCI USB HID | boot keyboard + tablet(绝对指针)+ autorepeat;PS/2 键鼠回退 |
+| 定时器 | PIT / HPET / RTC / LAPIC timer | PIT 100Hz 时钟源(mode 2)、HPET 单调时、RTC 墙钟、LAPIC per-CPU 抢占 |
+| 控制台 | Serial 16550 / Console TTY / PTY | 行规范 + 信号,PTY master/slave 对(多终端) |
+| 图形 | Framebuffer / PSF1 font | `/dev/fb0` mmap,2MB huge page 映射 |
+| 平台 | PCI / MSI-X / ACPI(MADT/HPET) / 8259 PIC | 设备枚举、中断路由、拓扑发现 |
+
+### 📁 文件系统与 VFS
+
+- **ext2 / ext4**:统一驱动,**只读**;ext4 extent(depth-0 leaf)支持;inode cache;块大小 1/2/4K
+- **tmpfs**:内存 FS,读写,`/tmp` 默认挂载
+- **procfs**:`/proc/cpuinfo`、`/proc/meminfo`、`/proc/<pid>/{stat,cmdline}`
+- **devfs**:`/dev/null`、`/dev/zero`、`/dev/console`、`/dev/ptmx`、`/dev/pts/N`、`/dev/fb0`、`/dev/event0`、`/dev/tty`(按调用者 controlling tty 动态解析)
+- **ramdisk**:ustar initrd(早期引导文件)
+- **VFS**:Dentry Cache(256 桶哈希;DevFs 动态 lookup 不缓存)、mount 表(最长前缀匹配)、符号链接(循环检测 max 40)、POSIX flock(SH/EX/UN + LOCK_NB)、fd 表(CLOEXEC)
+
+### 🔌 IPC
+
+- **pipe**:环形缓冲 + 阻塞 + `O_NONBLOCK` + SIGPIPE/BrokenPipe + EINTR
+- **FIFO**:命名管道,内存名注册表
+- **AF_UNIX socket**:字节流,bind/listen/accept/connect,4KB RX 环,accept 队列 4
+- **socketpair**:AF_UNIX 匿名连接对
+- **SysV shm**:shmget/shmat/shmdt/shmctl,物理页 + pte_count,IPC_RMID 延迟清理,SHM_RDONLY
+- **poll/select**:共享引擎,pollfd 64 / fd_set,超时,POLLIN/OUT/HUP/ERR
+- **futex**:用户态快速互斥
+
+### 🌐 网络协议栈
+
+- **L2**:以太网帧(14B 头),`NetDevice` 抽象,loopback
+- **ARP**:缓存 + 异步请求/回复,自学习
+- **IPv4**:20B 头 + 校验和 + L4 分发(ICMP/UDP/TCP),TTL=64
+- **ICMP**:echo request/reply,raw socket 投递 reply
+- **UDP**:无连接,端口 demux,8 槽 RX 环,自动临时端口,伪首部校验和
+- **TCP**:三次握手 / 状态机(CLOSED…ESTABLISHED…FIN_WAIT)/ 四次挥手 / RST,8KB RX 环,accept 队列 8,序号-ACK
+- **Socket API**:AF_INET / AF_UNIX,SOCK_STREAM / SOCK_DGRAM / SOCK_RAW,bind/connect/listen/accept/sendto/recvfrom/shutdown
+- **SLIRP**:QEMU 用户态网络,10.0.2.2 网关,busybox ping 可用(SOCK_RAW + setitimer 每秒发包)
+
+### 🚦 信号
+
+- **22 个 POSIX 信号**(SIGHUP…SIGTTOU),默认动作表(Terminate / CoreDump / Ignore / Stop / Continue)
+- **自定义 handler**:sigaction 安装,signal frame(user 栈)+ sigreturn trampoline(`int $0x80` @ USER_SIGRETURN_PAGE),RSP%16==8 对齐
+- **信号掩码**:rt_sigprocmask(BLOCK/UNBLOCK/SETMASK),SIGKILL/SIGSTOP 不可挡
+- **force_send**:同步故障(#PF/#UD)强制投递,绕过 SIG_IGN 防自循环
+- **EINTR**:阻塞 IO(pipe/socket/poll)可被信号打断(`wait_queue_head` + `schedule_blocked` signal-aware);Mutex/futex/waitpid 不可打断
+- **setitimer**:ITIMER_REAL → 周期 SIGALRM(PIT tick 驱动,periodic / one-shot)
+- **作业控制**:SIGTSTP(^Z)/ SIGTTIN / SIGTTOU 经 PTY 行规范投递前台 pgrp;SIGCONT 恢复
+- **SIGCHLD**:子退出通知 + waitpid 回收 + Zombie
+
+### 🔒 安全
+
+- **SMEP / SMAP**:CR4 开启(CPUID 门控),`stac`/`clac` + `access_ok` + 异常表修复
+- **ASLR**:PIE base(0~16MiB)+ 栈(0~8MiB)+ mmap(0~1GiB)+ brk(0~16MiB)抖动
+- **NX / W^X**:EFER.NXE,非可执行 VMA 置 NX,PT_GNU_STACK 解析
+- **凭证**:UID/GID/eUID/eGID + supplementary groups + setuid/setgid
+- **Stack Canary**:`-fstack-protector-strong`
+
+### 🖼️ GUI 桌面(用户态)
+
+- **用户态 host**:`cinux_gui_host` 是普通用户进程(mmap `/dev/fb0` + poll `/dev/event0`)
+- **Widget 工具包**:WindowManager + Window + DesktopIcon + TerminalWidget + Label
+- **多终端**:最多 4 个 PTY shell,点 Shell 图标生成 + 窗口错开
+- **点击聚焦**:窗口内点击切键盘焦点到对应 shell
+- **xHCI USB HID**:键盘(scancode→ASCII + Ctrl 控制码 + autorepeat)+ 鼠标(绝对/相对)
+- **Ctrl+C**:经 PTY 行规范 → 前台 pgrp SIGINT;`setsid` + `TIOCSCTTY` 隔离
+
+### 👨‍💻 GCC 自举
+
+- **gcc / g++**:`gcc hello.c && ./a.out`、`g++ hello.cpp`,cc1→as→ld 全闭环
+- **musl 动态链接**:PT_INTERP + ldso 加载 + auxv,USER_INTERP_BASE@256MiB
+- **PIE**:默认 PIE,ET_DYN + ASLR base
+- **busybox init**:PID 1,/etc/inittab respawn /bin/sh
+
+### 🧪 测试与可观测
+
+- **run-kernel-test-all**:单核 + `-smp 2` 两 leg,~1946 项,`isa-debug-exit` 自动退出
+- **sanitizer 矩阵**:Debug/Release × UBSAN/LOCKDEP/ASAN/TSAN,CI 6 cell
+- **KALLSYMS + backtrace + panic + memstats**:FO 可观测性
+- **机制回读**:SMEP/SMAP/CR4/EFER/LSTAR 写后读验证(不靠"没崩就算对")
+
+</details>
 
 ---
 
