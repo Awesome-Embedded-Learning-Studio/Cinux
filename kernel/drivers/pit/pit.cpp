@@ -17,6 +17,7 @@
 #include "kernel/arch/x86_64/pic.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signal.hpp"  // itimer_real_tick (ITIMER_REAL -> SIGALRM)
 
 using cinux::arch::InterruptFrame;
 using cinux::arch::PIC;
@@ -79,6 +80,11 @@ void PIT::irq0_handler(InterruptFrame* /*frame*/) {
     // inline from IRQ context.  EOI after the tick keeps irq0 non-reentrant
     // while timer_queue_tick() runs.
     cinux::proc::Scheduler::tick();
+    // ITIMER_REAL wall-clock advance: the PIT is the global tick source (BSP;
+    // the AP's LAPIC timer drives preemption only), so decrement every task's
+    // itimer here and queue SIGALRM on expiry.  Runs before EOI so a periodic
+    // 1 s timer (busybox ping) fires ~every 100 ticks at 100 Hz.
+    cinux::proc::itimer_real_tick(1'000'000'000ULL / freq_hz_);
     cinux::arch::irq_eoi(0);
 }
 

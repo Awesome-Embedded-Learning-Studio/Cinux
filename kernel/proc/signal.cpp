@@ -293,6 +293,41 @@ int killpg(int pgid, Signal sig) {
     return sent;
 }
 
+void itimer_real_tick(uint64_t delta_ns) {
+    // Walk every task under the registry lock, decrement its ITIMER_REAL, and
+    // collect those that expired.  signal_send() runs AFTER releasing the lock:
+    // it may wake/terminate the target (queue_signal -> unblock / exit_current),
+    // none of which needs the registry lock, and holding it across that would
+    // risk lockdep/deadlock.  The PIT IRQ is non-reentrant (irq0, EOI after),
+    // so this runs once per tick; cross-CPU setitimer races the fields but
+    // aligned 64-bit rw are atomic and a missed/repeated SIGALRM is benign.
+    constexpr int kMaxExpired = 64;  // matches killpg's cap; rarely >1 timer armed
+    Task*         expired[kMaxExpired];
+    int           nexpired = 0;
+    {
+        auto g = g_registry_lock.irq_guard();
+        for (Task* t = g_registry_head; t != nullptr; t = t->registry_next) {
+            if (t->itimer_real_value_ns == 0) {
+                continue;  // disarmed
+            }
+            if (t->itimer_real_value_ns > delta_ns) {
+                t->itimer_real_value_ns -= delta_ns;
+            } else {
+                // Expired: reload from interval (0 = one-shot -> disarms) and
+                // queue SIGALRM.  Reload BEFORE signalling so a periodic timer
+                // keeps ticking even while the handler is pending.
+                t->itimer_real_value_ns = t->itimer_real_interval_ns;
+                if (nexpired < kMaxExpired) {
+                    expired[nexpired++] = t;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < nexpired; ++i) {
+        signal_send(expired[i], Signal::kSigalrm);
+    }
+}
+
 int signal_pick_deliverable(Task* task, bool allow_custom) {
     if (task == nullptr) {
         return 0;

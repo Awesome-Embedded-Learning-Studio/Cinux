@@ -307,6 +307,12 @@ struct Task {
     //                              and returns -EINTR after unlinking itself
     //                              (under its own lock -- no cross-CPU remove).
     Task** wait_queue_head{nullptr};
+
+    // ITIMER_REAL (setitimer): wall-clock timer ticked from the PIT IRQ (100 Hz);
+    // expiry -> SIGALRM + reload from interval (0 = one-shot).  value==0 disarms.
+    // Aligned 64-bit rw atomic (TSO); cross-CPU race vs setitimer is benign.
+    uint64_t itimer_real_value_ns{0};
+    uint64_t itimer_real_interval_ns{0};
 };
 
 /// True if @p task has a deliverable pending signal (unblocked or forced) --

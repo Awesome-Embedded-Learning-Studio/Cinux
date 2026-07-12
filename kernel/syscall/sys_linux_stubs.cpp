@@ -14,10 +14,13 @@
 
 #include "kernel/syscall/sys_linux_stubs.hpp"
 
-#include "kernel/arch/x86_64/user_access.hpp"  // copy_to_user (sched_getaffinity mask)
+#include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (setitimer / affinity)
 #include "kernel/drivers/acpi/acpi.hpp"        // g_acpi_info (cpu_count)
 #include "kernel/errno.hpp"
+#include "kernel/proc/process.hpp"  // Task::itimer_real_*
+#include "kernel/proc/scheduler.hpp"  // Scheduler::current()
 #include "kernel/proc/signal.hpp"  // signal_find_task_by_pid / signal_send (tkill)
+#include "kernel/proc/sync.hpp"  // InterruptGuard (setitimer field update)
 
 namespace cinux::syscall {
 
@@ -55,12 +58,72 @@ int64_t sys_tkill(uint64_t tid, uint64_t sig, uint64_t, uint64_t, uint64_t, uint
     return cinux::proc::signal_send(t, static_cast<cinux::proc::Signal>(sig));
 }
 
-// setitimer(38): busybox ping uses ITIMER_REAL to fire SIGALRM every second
-// (send next echo + per-packet timeout).  We don't run a real itimer, so accept
-// the call as a no-op (ping falls back to blocking recv; Ctrl+C interrupts).
-// A faithful itimer -> SIGALRM is a follow-up (needs kernel timer + signal).
-int64_t sys_setitimer(uint64_t /*which*/, uint64_t /*new_value*/, uint64_t /*old_value*/,
-                       uint64_t, uint64_t, uint64_t) {
+// Linux x86-64 struct itimerval { struct timeval it_interval; struct timeval it_value; }
+// where struct timeval { long tv_sec; long tv_usec; } (16 B + 16 B = 32 B).
+namespace {
+struct TimevalStub {
+    int64_t tv_sec;
+    int64_t tv_usec;
+};
+struct ItimervalStub {
+    TimevalStub it_interval;
+    TimevalStub it_value;
+};
+
+/// Convert a Linux timeval to nanoseconds.  Negative / out-of-range usec is
+/// treated as 0 (disarm) -- matches the "no timer" intent of a malformed value.
+uint64_t timeval_to_ns(const TimevalStub& tv) {
+    if (tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1'000'000) {
+        return 0;
+    }
+    return static_cast<uint64_t>(tv.tv_sec) * 1'000'000'000ULL +
+           static_cast<uint64_t>(tv.tv_usec) * 1'000ULL;
+}
+void ns_to_timeval(uint64_t ns, TimevalStub& tv) {
+    tv.tv_sec  = static_cast<int64_t>(ns / 1'000'000'000ULL);
+    tv.tv_usec = static_cast<int64_t>((ns % 1'000'000'000ULL) / 1'000ULL);
+}
+}  // namespace
+
+// setitimer(38): busybox ping arms ITIMER_REAL (1 s interval) so SIGALRM fires
+// every second to send the next echo.  We store it_value/it_interval on the task
+// (in ns); the PIT IRQ's itimer_real_tick() decrements and queues SIGALRM on
+// expiry, reloading from it_interval.  Only ITIMER_REAL is supported (the only
+// one busybox/glibc probe); ITIMER_VIRTUAL / ITIMER_PROF return -EINVAL.
+int64_t sys_setitimer(uint64_t which, uint64_t new_value, uint64_t old_value, uint64_t,
+                      uint64_t, uint64_t) {
+    constexpr uint64_t kItimerReal = 0;
+    if (which != kItimerReal) {
+        return -cinux::kEinval;
+    }
+    cinux::proc::Task* self = cinux::proc::Scheduler::current();
+    if (self == nullptr) {
+        return -cinux::kEinval;
+    }
+
+    // Return the previous setting before installing the new one.
+    if (old_value != 0) {
+        ItimervalStub oldv{};
+        ns_to_timeval(self->itimer_real_value_ns, oldv.it_value);
+        ns_to_timeval(self->itimer_real_interval_ns, oldv.it_interval);
+        if (!cinux::user::copy_to_user(reinterpret_cast<void*>(old_value), &oldv, sizeof(oldv))) {
+            return -cinux::kEfault;
+        }
+    }
+    if (new_value == 0) {
+        return -cinux::kEfault;  // Linux: new_value must be non-NULL
+    }
+    ItimervalStub newv{};
+    if (!cinux::user::copy_from_user(&newv, reinterpret_cast<const void*>(new_value), sizeof(newv))) {
+        return -cinux::kEfault;
+    }
+    // Install under a brief IRQ guard so a concurrent PIT tick on this CPU does
+    // not read a half-updated (value, interval) pair.  it_value == 0 disarms.
+    {
+        cinux::proc::InterruptGuard guard;
+        self->itimer_real_value_ns    = timeval_to_ns(newv.it_value);
+        self->itimer_real_interval_ns = timeval_to_ns(newv.it_interval);
+    }
     return 0;
 }
 
