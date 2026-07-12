@@ -45,7 +45,7 @@
   <img src="assets/README/multi_shell.gif" width="45%" alt="Multi Terminal">
 </p>
 <p align="center">
-  <em>从启动到 Shell（左） · 使用Buildroot编译的Rootfs</em>
+  <em>从启动到 Shell（左） · 使用Buildroot编译的Rootfs（右）</em>
 </p>
 
 <p align="center">

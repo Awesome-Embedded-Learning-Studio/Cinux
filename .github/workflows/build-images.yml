@@ -1,0 +1,90 @@
+name: Build Images
+
+# Manually-triggered image builder: click "Run workflow", type a version label,
+# get cinux-<version>.img + console/desktop rootfs back as workflow artifacts
+# (downloadable from the run page, 90-day retention). Deliberately creates NO
+# git tag and NO GitHub Release -- that is release.yml's job (tag push -> Release).
+# Use this one for pre-release image validation, ad-hoc test builds, or "I just
+# want the img" without publishing anything. You stay in control of releasing.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label stamped onto image filenames (e.g. v1.0.0, v1.1.0-rc1)'
+        required: true
+
+jobs:
+  build:
+    name: build (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # console -- handcrafted ext2 (busybox/musl, fast, no GCC);
+        # desktop  -- buildroot rootfs + GCC toolchain closure + cinux_gui_host.
+        variant: [console, desktop]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-cinux
+        with:
+          # desktop needs the full gcc-13 family (cc1 ships in cpp-13) + buildroot deps;
+          # console only needs musl/busybox.
+          apt-packages: qemu-system-x86_64 e2fsprogs python3 curl bzip2 linux-libc-dev ${{ matrix.variant == 'desktop' && 'bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev' || '' }}
+          cache-musl: 'true'
+          cache-busybox: 'true'
+          cache-buildroot: ${{ matrix.variant == 'desktop' }}
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release ${{ matrix.variant == 'desktop' && '-DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2' || '-DCINUX_ROOTFS_PROFILE=handcrafted' }}
+
+      - name: Build musl + busybox user binaries
+        run: |
+          tools/musl/build-musl.sh
+          tools/musl/build-hello.sh
+          tools/musl/build-forktest.sh
+          tools/musl/build-busybox.sh
+
+      - name: Build buildroot base rootfs (desktop only, cached)
+        if: matrix.variant == 'desktop'
+        run: scripts/build-buildroot.sh build/buildroot-ci cinuxos_base_defconfig
+
+      - name: Build kernel + boot disk image (cinux.img = MBR + stage2 + mini + big_kernel)
+        run: cmake --build build --target image -j$(nproc)
+
+      - name: Build console rootfs (handcrafted ext2.img)
+        if: matrix.variant == 'console'
+        run: cmake --build build --target regenerate-ext2-image -j$(nproc)
+
+      - name: Assemble desktop rootfs (buildroot + GCC closure -> rootfs-gcc.ext2)
+        if: matrix.variant == 'desktop'
+        env:
+          BR_TARGET: ${{ github.workspace }}/build/buildroot-ci/output/target
+          GCC_BIN: gcc-13
+        run: cmake --build build --target assemble-gcc-rootfs -j$(nproc)
+
+      - name: Stage images with the version label
+        id: stage
+        run: |
+          VER="${{ github.event.inputs.version }}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          mkdir -p staging
+          # boot disk (kernel image) -- identical across variants; kept in each
+          # artifact so either download is self-contained.
+          cp build/cinux.img "staging/cinux-${VER}.img"
+          if [ "${{ matrix.variant }}" = "desktop" ]; then
+            cp build/rootfs-gcc.ext2 "staging/cinux-${VER}-desktop.ext2"
+          else
+            cp build/ext2.img "staging/cinux-${VER}-console.ext2"
+          fi
+          # one-liner runner so the downloaded image boots with the right qemu flags.
+          cp scripts/run-release.sh "staging/run.sh"
+          ls -la staging/
+
+      - name: Upload images as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinux-${{ steps.stage.outputs.version }}-${{ matrix.variant }}
+          path: staging/*
+          retention-days: 90
+          if-no-files-found: error
