@@ -268,21 +268,32 @@ NXE + SMEP + SMAP(机制回读验证)+ ASLR + UID/GID + Stack Canary(-fstack-pro
 
 ## 🏗️ 架构全链路
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Boot: MBR → stage2(实模式→保护模式→长模式)→ Mini Kernel       │
-│           ↓ 两阶段加载                                            │
-│  Big Kernel(higher-half,-mcmodel=kernel)                         │
-│   ├─ F1 类型库 + F2 mm(VMA/PageCache/Buddy/Slab)                 │
-│   ├─ F3 进程线程 + F4 SMP(per-CPU/APIC/多核调度)                │
-│   ├─ F5 驱动(AHCI/VirtIO/NVMe/xHCI/e1000/HPET)                  │
-│   ├─ F6 VFS(ext2/ext4/tmpfs/ProcFS/DevFS)                        │
-│   ├─ F7 网络(L2~L4 + Socket) + F8 IPC(Pipe/FIFO/Unix/shm/poll) │
-│   ├─ F9 安全(SMEP/SMAP/ASLR/Canary)                             │
-│   └─ F10 用户态(musl/ELF ldso/TTY/PTY)                          │
-│           ↓ Ring 3                                                │
-│  User Space: busybox + gcc/g++ + Cinux-GUI host(用户态进程)      │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Boot["Boot 阶段"]
+        direction LR
+        MBR["MBR"] --> S2["stage2<br/>实模式 → 保护模式 → 长模式"] --> MK["Mini Kernel"]
+    end
+
+    Boot -->|两阶段加载| Kernel
+
+    subgraph Kernel["Big Kernel(higher-half,-mcmodel=kernel)"]
+        direction TB
+        F1F2["F1 类型库 + F2 mm<br/>VMA / PageCache / Buddy / Slab"]
+        F3F4["F3 进程线程 + F4 SMP<br/>per-CPU / APIC / 多核调度"]
+        F5["F5 驱动<br/>AHCI / VirtIO / NVMe / xHCI / e1000 / HPET"]
+        F6["F6 VFS<br/>ext2 / ext4 / tmpfs / ProcFS / DevFS"]
+        F7F8["F7 网络 L2~L4 + Socket<br/>F8 IPC Pipe / FIFO / Unix / shm / poll"]
+        F9["F9 安全<br/>SMEP / SMAP / ASLR / Canary"]
+        F10["F10 用户态<br/>musl / ELF ldso / TTY / PTY"]
+        F1F2 ~~~ F3F4 ~~~ F5 ~~~ F6 ~~~ F7F8 ~~~ F9 ~~~ F10
+    end
+
+    F10 -->|Ring 3| User
+
+    subgraph User["User Space"]
+        USP["busybox + gcc/g++ + Cinux-GUI host(用户态进程)"]
+    end
 ```
 
 ---
@@ -300,17 +311,18 @@ sudo apt install -y gcc g++ binutils qemu-system-x86_64 cmake
 
 > 支持最新的 g++ 15.2 编译(CMake 门禁要求 GCC >= 11)。
 
-### 方式一:下载预编译镜像一键跑(v1.0.0 Release)
+### 方式一:下载预编译镜像一键跑
 
-> v1.0.0 tag 推送后,GitHub Release 自动产出两个镜像 variant + 一键启动脚本。
+笔者会手动打Image来发布（不计划做麻烦的自动化）
 
 ```bash
-# 1. 从 Release 下载(任选其一)
+# 1. 从 Release 下载(boot disk 必下 + 任选一个 variant 的 rootfs + run.sh)
+#    cinux-v1.0.0.img           — boot disk(内核镜像,必下)
 #    cinux-v1.0.0-console.ext2  — 精简 console(busybox/musl)
 #    cinux-v1.0.0-desktop.ext2  — 完整桌面(含 gcc/g++ + cinux_gui_host)
 #    run.sh                     — 一键启动脚本(内嵌 qemu 命令)
 
-# 2. 跑起来
+# 2. 三个文件放同一目录,跑起来
 bash run.sh console   # 或 desktop
 ```
 

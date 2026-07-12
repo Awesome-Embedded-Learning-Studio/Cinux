@@ -32,7 +32,7 @@ jobs:
         with:
           # desktop needs the full gcc-13 family (cc1 ships in cpp-13) + buildroot deps;
           # console only needs musl/busybox.
-          apt-packages: qemu-system-x86_64 e2fsprogs python3 curl bzip2 linux-libc-dev ${{ matrix.variant == 'desktop' && 'bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev' || '' }}
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev ${{ matrix.variant == 'desktop' && 'bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev' || '' }}
           cache-musl: 'true'
           cache-busybox: 'true'
           cache-buildroot: ${{ matrix.variant == 'desktop' }}
