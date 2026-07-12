@@ -15,7 +15,6 @@
 #include <cinux/checksum.hpp>
 
 #include "kernel/net/net_stack.hpp"  // NetStack (full def for ipv4.send path)
-#include "kernel/net/raw_socket.hpp"  // RawSocket (complete type for on_icmp_reply)
 
 namespace cinux::net {
 
@@ -84,7 +83,7 @@ void IcmpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev,
     }
 }
 
-void IcmpModule::register_raw_socket(RawSocket* s) {
+void IcmpModule::register_raw_socket(RawListener* s) {
     if (s == nullptr) {
         return;
     }
@@ -102,7 +101,7 @@ void IcmpModule::register_raw_socket(RawSocket* s) {
     // table full -- ignore (kMaxRawSockets covers the realistic ping load)
 }
 
-void IcmpModule::unregister_raw_socket(RawSocket* s) {
+void IcmpModule::unregister_raw_socket(RawListener* s) {
     if (s == nullptr) {
         return;
     }

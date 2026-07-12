@@ -52,16 +52,27 @@ inline void build_icmp_header(const IcmpHeader& in, uint8_t* p) {
     p[7] = static_cast<uint8_t>(in.seq & 0xFF);
 }
 
-/// Forward -- the raw-socket adapter registers itself so echo replies are
-/// delivered to its RX ring (see on_icmp_reply).  Kept opaque here: the header
-/// only needs the pointer type for the registration list.
-class RawSocket;
+/// @brief Inbound ICMP echo-reply observer -- the SOCK_RAW adapter (busybox
+/// ping) implements this and registers itself so IcmpModule delivers every
+/// echo reply into its RX ring.  Mirrors UdpListener: the protocol module
+/// talks to the abstract interface, never the concrete socket, so IcmpModule
+/// stays host-testable without dragging in the Socket adapter layer.
+///
+/// @p payload is BORROWED (valid only for the call); the listener copies if it
+/// needs the bytes past on_icmp_reply (the device recycles the frame after
+/// dispatch).
+class RawListener {
+public:
+    virtual ~RawListener() = default;
+    /// @brief An ICMP echo reply arrived.  Copy it now if you need it later.
+    virtual void on_icmp_reply(const Ipv4Header& ip, FrameView payload) = 0;
+};
 
 class IcmpModule : public L4Handler {
 public:
     /// @brief Handle an inbound ICMP message (L4Handler, dispatched for proto==1).
     ///        Echo request -> echo reply (via ipv4.send); echo reply -> record +
-    ///        deliver a COPY to every registered RawSocket (SOCK_RAW ping path).
+    ///        deliver a COPY to every registered RawListener (SOCK_RAW ping path).
     void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
                 NetStack& stack) override;
 
@@ -81,13 +92,14 @@ public:
     }
 
     /// @name SOCK_RAW delivery (busybox ping reads echo replies via recvfrom()).
-    /// A RawSocket registers itself on construct; on every inbound echo reply
-    /// IcmpModule::handle copies the whole ICMP message into each registered
-    /// socket's ring.  unregisters on close() / destruct.  Best-effort list: a
-    /// duplicate register is a no-op; unregister of an absent entry is a no-op.
+    /// A RawListener (the RawSocket adapter) registers itself on construct; on
+    /// every inbound echo reply IcmpModule::handle copies the whole ICMP message
+    /// into each registered listener's ring.  unregisters on close() / destruct.
+    /// Best-effort list: a duplicate register is a no-op; unregister of an
+    /// absent entry is a no-op.
     ///@{
-    void register_raw_socket(RawSocket* s);
-    void unregister_raw_socket(RawSocket* s);
+    void register_raw_socket(RawListener* s);
+    void unregister_raw_socket(RawListener* s);
     ///@}
 
 private:
@@ -96,7 +108,7 @@ private:
     uint16_t last_seq_    = 0;
 
     static constexpr uint32_t kMaxRawSockets = 8;  ///< concurrent SOCK_RAW ping users
-    RawSocket*                raw_sockets_[kMaxRawSockets]{};
+    RawListener*              raw_sockets_[kMaxRawSockets]{};
 };
 
 }  // namespace cinux::net

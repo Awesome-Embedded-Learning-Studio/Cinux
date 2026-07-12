@@ -10,7 +10,7 @@
 |----|------|------|
 | 1 | 命名统一 CinuxOS→Cinux + VERSION 1.0.0（sys_uname/CMakeLists/全仓注释/hello.c/ci-04） | ✅ `e9fb931`（两 leg 1946/0）|
 | 2 | ROADMAP/todo 统计刷新 + 清过期立项段（F-VERIFY/F8/F-QA/F4-followup 待 PR 全清）+ PLAN 焦点 | ✅ `78c6b21` |
-| 3 | 新建 document/changelogs/CHANGELOG.md（13 Feature 用户可读特性 + Known Issues） | ✅ `9d000ac` |
+| 3 | 新建 document/changelogs/v1.0.0.md（per-version,13 Feature 用户可读特性 + Known Issues) | ✅ `9d000ac` |
 | 4 | README 重写（大改结构保留语气 + 真实数字 + 下载镜像段） | ✅ `cceb045` |
 | 5 | CI release.yml（tag v* 触发，两 variant 镜像 console/desktop + run-release.sh） | ✅ `85efec8` |
 | 6 | gif 录制清单 RECORDING.md（用户录：boot/gui/gcc/smp/net/fs） | ✅ `d41cc2c`（清单建好；gif 待录）|

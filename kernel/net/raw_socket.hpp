@@ -38,6 +38,7 @@
 // udp_socket.hpp reaches via udp.hpp -> ipv4.hpp; pulled here directly so the
 // header is self-contained.
 #include "kernel/net/ipv4.hpp"  // Ipv4Header, FrameView (via net_types.hpp)
+#include "kernel/net/icmp.hpp"  // RawListener (echo-reply delivery interface we implement)
 
 namespace cinux::proc {
 struct Task;  // forward -- wait queue holds blocked recv'ers (host-guarded)
@@ -54,7 +55,7 @@ class IcmpModule;
 /// echo replies IcmpModule pushed into the per-socket ring.  Blocking mirrors
 /// UdpSocket: an empty ring parks on a wait queue via prepare_to_wait /
 /// schedule_blocked, and the producer (IcmpModule::handle) wake_one()s it.
-class RawSocket : public Socket {
+class RawSocket : public Socket, public RawListener {
 public:
     /// Route resolver: pick the egress NetDevice for a destination address.
     /// Same shape as UdpSocket::DevRoute (production routes 127/8 -> loopback,
@@ -88,7 +89,7 @@ public:
     ///        then wake_one()s a blocked recv.
     /// @param ip      the IPv4 header (src = echo-reply sender).
     /// @param payload the full ICMP message (header + data).  Borrowed: copied.
-    void on_icmp_reply(const Ipv4Header& ip, FrameView payload);
+    void on_icmp_reply(const Ipv4Header& ip, FrameView payload) override;
 
 private:
     static constexpr uint32_t kRxSlots = 8;      ///< queued ICMP messages per socket
