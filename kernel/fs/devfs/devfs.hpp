@@ -125,6 +125,12 @@ public:
     cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
                                              uint32_t namelen) override;
 
+    /// DevFs lookups are dynamic (/dev/tty -> caller's controlling terminal,
+    /// /dev/pts/N -> N-th PTY), so the DentryCache must not pin the first
+    /// resolution -- otherwise every opener after the first sees the first
+    /// opener's terminal (multi-shell SIGTTIN bug).
+    bool dcache_enabled() const override { return false; }
+
     /// Number of registered device nodes (excludes the root directory).
     uint32_t node_count() const { return node_count_; }
 

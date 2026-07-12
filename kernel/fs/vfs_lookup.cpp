@@ -135,7 +135,12 @@ cinux::lib::ErrorOr<LookupResult> vfs_lookup(const char* path, uint32_t flags,
                     return child_r.error();
                 }
                 child = child_r.value();  // child owns its own ref
-                DentryCache::add(cur, p, comp_len, child);
+                // Skip the DentryCache for filesystems whose lookups are dynamic
+                // (DevFs: /dev/tty resolves per-caller).  Caching the first result
+                // would make every later opener see the first opener's terminal.
+                if (fs->dcache_enabled()) {
+                    DentryCache::add(cur, p, comp_len, child);
+                }
             }
 
             // Follow symlink unless it is the trailing component and Follow is
