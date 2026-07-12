@@ -1,5 +1,5 @@
 ---
-# CinuxOS clang-tidy configuration (F-INFRA I-8).
+# Cinux clang-tidy configuration (F-INFRA I-8).
 #
 # Curated allowlist for a freestanding C++17 kernel: high-signal checks only.
 # Hosted/RTTI/exception/STL-library assumptions are DISABLED (the kernel is

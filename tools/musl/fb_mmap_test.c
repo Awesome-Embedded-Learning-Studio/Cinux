@@ -6,7 +6,7 @@
  * end-to-end exercise of the batch-1a IoPhys VMA path: sys_mmap -> fb_dev
  * mmap hook -> IoPhys VMA -> handle_pf IoPhys branch -> uncached device page.
  *
- * Built static against the CinuxOS musl sysroot (see build-fb-mmap-test.sh).
+ * Built static against the Cinux musl sysroot (see build-fb-mmap-test.sh).
  */
 #include <fcntl.h>
 #include <stddef.h>

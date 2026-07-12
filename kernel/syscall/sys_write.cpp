@@ -75,6 +75,12 @@ int64_t do_write_kernel(int fd, const void* kbuf, uint64_t count) {
             }
             return -err;
         }
+        // EINTR sentinel from a signal-interrupted blocking write (pipe full):
+        // InodeOps returns -1 as a success value (it cannot extend lib::Error
+        // without touching the Cinux-Base submodule).  Map to -EINTR.
+        if (write_result.value() == static_cast<int64_t>(-1)) {
+            return -kEintr;
+        }
         if (write_result.value() > 0) {
             file->offset += static_cast<uint64_t>(write_result.value());
         }

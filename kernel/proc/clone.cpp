@@ -209,6 +209,10 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
     child->vfork_parent = nullptr;
     child->children     = nullptr;
     child->exit_status  = 0;
+    // The child is brand-new -- never on a wait queue.  Clear any inherited
+    // wait_queue_head from the memcpy so a later signal_send does not wake a
+    // phantom queue.  (EINTR support.)
+    child->wait_queue_head = nullptr;
 
     // F3-M3 batch 1: derive process-group / session membership (threads and
     // forked processes alike stay in the caller's group/session; a root fork

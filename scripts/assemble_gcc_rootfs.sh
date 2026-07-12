@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assemble the gcc-profile rootfs.ext2: buildroot base target + GCC toolchain
 # closure (extract.sh) + overlay, packed with mkfs.ext2 -d.  The result ships a
-# native gcc driver so `gcc /hello.c` runs on CinuxOS as a default-PIE binary.
+# native gcc driver so `gcc /hello.c` runs on Cinux as a default-PIE binary.
 #
 # Usage: assemble_gcc_rootfs.sh <output_img> [buildroot_target] [gcc_root]
 #   buildroot_target : buildroot output/target dir
@@ -11,7 +11,7 @@
 #
 # This is the gcc-profile counterpart to the handcrafted create_ext2_disk.sh:
 # buildroot builds the base musl/busybox target out-of-tree, and this script
-# merges in the host GCC closure (glibc-dynamic) plus the CinuxOS overlay.  The
+# merges in the host GCC closure (glibc-dynamic) plus the Cinux overlay.  The
 # two dynamic loaders coexist: /lib64/ld-linux-x86-64.so.2 (gcc/cc1/as/ld) and
 # /lib/ld-musl-x86_64.so.1 (busybox).
 set -euo pipefail

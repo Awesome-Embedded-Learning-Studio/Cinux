@@ -152,12 +152,6 @@ extern "C" void kernel_main() {
     // that M2 consumes.  Only needs the loader's direct map, which is already up.
     cinux::drivers::acpi::init();
 
-    // Step 8: Trigger a software breakpoint to verify exception
-    // handling still works after PIC/IRQ setup
-    cinux::lib::kprintf("[BIG] Triggering int $3 breakpoint...\n");
-    __asm__ volatile("int $3");
-    cinux::lib::kprintf("[BIG] Breakpoint returned, continuing.\n");
-
     // Step 9: Initialise Physical Memory Manager
     auto* boot_info = reinterpret_cast<const BootInfo*>(BOOT_INFO_PHYS);
     cinux::mm::g_pmm.init(*boot_info);

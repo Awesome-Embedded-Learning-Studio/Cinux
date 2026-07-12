@@ -22,7 +22,7 @@
 #include <cstdint>
 
 #ifndef CINUX_HOST_TEST
-#    include "kernel/proc/process.hpp"    // Task::wait_next
+#    include "kernel/proc/process.hpp"  // Task + signal_deliverable_pending
 #    include "kernel/proc/scheduler.hpp"  // prepare_to_wait/schedule_blocked/unblock
 #endif
 
@@ -185,6 +185,15 @@ cinux::lib::ErrorOr<Socket*> UnixSocket::accept(Ipv4Addr* /*out_remote*/, uint16
         if (need_block) {
             Scheduler::schedule_blocked();
         }
+        // EINTR: a signal landed while parked waiting for a connection.  Return
+        // the sentinel (-1 cast to Socket*) so do_accept maps it to -EINTR.
+        // Unlink under lock_ first so a producer does not wake a stale link.
+        if (Scheduler::current() != nullptr &&
+            signal_deliverable_pending(Scheduler::current())) {
+            auto g = lock_.irq_guard();
+            wait_remove(accept_waiters_, Scheduler::current());
+            return reinterpret_cast<Socket*>(static_cast<uintptr_t>(-1));  // EINTR sentinel
+        }
 #endif
     }
 }
@@ -269,6 +278,15 @@ cinux::lib::ErrorOr<int64_t> UnixSocket::recv(uint8_t* buf, uint32_t len, Ipv4Ad
 #ifndef CINUX_HOST_TEST
         if (need_block) {
             Scheduler::schedule_blocked();
+        }
+        // EINTR: a signal landed while parked.  Return sentinel -1 (a value a
+        // real byte-count can never take) so sys_recvfrom maps it to -EINTR.
+        // Unlink under lock_ first so a producer does not wake a stale link.
+        if (Scheduler::current() != nullptr &&
+            signal_deliverable_pending(Scheduler::current())) {
+            auto g = lock_.irq_guard();
+            wait_remove(recv_waiters_, Scheduler::current());
+            return static_cast<int64_t>(-1);  // sentinel: sys_recvfrom -> -EINTR
         }
 #endif
     }

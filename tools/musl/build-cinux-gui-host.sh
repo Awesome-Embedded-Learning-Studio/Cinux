@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# build-cinux-gui-host.sh — compile the CinuxOS userspace GUI host (F-GUI-USERSPACE b3a).
+# build-cinux-gui-host.sh — compile the Cinux userspace GUI host (F-GUI-USERSPACE b3a).
 #
 # Links the Cinux-GUI host-neutral core (21 freestanding C++ sources under
-# third_party/Cinux-GUI/core) + the CinuxOS host adapter (user/cinux_gui_host/)
+# third_party/Cinux-GUI/core) + the Cinux host adapter (user/cinux_gui_host/)
 # into a static musl ELF the kernel smoke harness fork+execve's at
 # /cinux_gui_host. g++ -ffreestanding -fno-rtti -fno-exceptions: core has ZERO
 # libstdc++ deps (audited), so operator-new/delete stubs (crt_stub.cpp) +

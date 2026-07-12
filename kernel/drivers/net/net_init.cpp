@@ -38,6 +38,7 @@
 #include "kernel/net/ipv4.hpp"
 #include "kernel/net/loopback_device.hpp"
 #include "kernel/net/net_stack.hpp"
+#include "kernel/net/raw_socket.hpp"  // RawSocket (SOCK_RAW, busybox ping)
 #include "kernel/net/socket.hpp"
 #include "kernel/net/tcp.hpp"
 #include "kernel/net/tcp_socket.hpp"
@@ -264,6 +265,12 @@ Socket* create_socket(int domain, int type) {
         }
         if (type == kSockStream) {
             return new TcpSocket(g_tcp, *g_ipv4, g_stack, dev_for);
+        }
+        if (type == kSockRaw) {
+            // SOCK_RAW + IPPROTO_ICMP: busybox ping.  Wired to the ICMP module so
+            // echo replies land in the socket's ring (RawSocket registers itself
+            // on construct).  Same Ipv4Module + route resolver as UDP/TCP.
+            return new RawSocket(g_icmp, *g_ipv4, g_stack, dev_for);
         }
     }
     return new Socket(domain, type);

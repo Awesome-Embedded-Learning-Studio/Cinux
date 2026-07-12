@@ -188,7 +188,7 @@ static void musl_hello_smoke_entry() {
                         static_cast<unsigned long>(g_test_fb.phys_base()));
 
     // Ring-0 unit tests share one global fd table, and some leak an open fd
-    // onto slot 0/1/2: CinuxOS FDTable does NOT reserve stdin/stdout/stderr,
+    // onto slot 0/1/2: Cinux FDTable does NOT reserve stdin/stdout/stderr,
     // so the first open() in a leaking test claims fd 0. Smoke children
     // inherit that polluted table via fork, and a stale inode on fd=1 turns
     // busybox echo's `return fflush(stdout)==0 ? 0 : 1` into exit(1) (echo/cat
@@ -419,7 +419,7 @@ static void musl_hello_smoke_entry() {
 
 #    ifdef CINUX_GUI_HOST_SMOKE
     // F-GUI-USERSPACE batch 3a: userspace GUI host smoke. fork+execve
-    // /cinux_gui_host (Cinux-GUI core + CinuxOS host adapter, static musl ELF).
+    // /cinux_gui_host (Cinux-GUI core + Cinux host adapter, static musl ELF).
     // Proves the host-neutral core compiles into a userspace ELF + the Host ABI
     // surface + operator-new stub all work under a real user process. SPIKE
     // main: construct GuiCore + pump(1) + exit 0 (the full Widget tree + fb
@@ -700,7 +700,7 @@ static void musl_hello_smoke_entry() {
     // B4-C1: glibc-dynamic `cc1 --version` -- the BIGGEST ELF on Cinux (~47 MB,
     // 9 DT_NEEDED: libisl/libmpc/libmpfr/libgmp/libm + as/ld's libz/libzstd/
     // libc/ldso).  cc1 is the GCC C front end; --version needs no headers, so it
-    // isolates "can CinuxOS run cc1 at all" (heaviest ldso bring-up + TLS + glibc
+    // isolates "can Cinux run cc1 at all" (heaviest ldso bring-up + TLS + glibc
     // -O2 constructors) from the header/compile question (B4-C2).  Gate on
     // exit==0 like the as smoke; stdout is not console-wired so do not gate on
     // the version text.
@@ -745,8 +745,8 @@ static void musl_hello_smoke_entry() {
     // closure at /usr/include, where cc1's built-in include search looks).
     // Overwrites the host-precompiled /hello.s, so the downstream as/ld/./hello
     // chain (B4-B2/B3) now exercises cc1's OWN output -- a ./hello PASS plus
-    // "Hello from GCC!" on serial closes the full self-host loop (CinuxOS
-    // compiles + assembles + links + runs a C program built on CinuxOS).
+    // "Hello from GCC!" on serial closes the full self-host loop (Cinux
+    // compiles + assembles + links + runs a C program built on Cinux).
     bool cc1_compile_ok = false;
     {
         int child_pid = cinux::proc::fork(cinux::proc::g_pid_alloc);

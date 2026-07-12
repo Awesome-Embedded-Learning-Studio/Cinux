@@ -201,6 +201,8 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_listen, sys_listen);
     syscall_register(SyscallNr::SYS_accept4, sys_accept4);          // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_setsockopt, sys_setsockopt);    // F-ECO batch 7a
+    syscall_register(SyscallNr::SYS_setitimer, sys_setitimer);
+    syscall_register(SyscallNr::SYS_tkill, sys_tkill);
     syscall_register(SyscallNr::SYS_getsockopt, sys_getsockopt);    // F-ECO batch 7a
     syscall_register(SyscallNr::SYS_shutdown, sys_shutdown);        // F-ECO batch 7b
     syscall_register(SyscallNr::SYS_getsockname, sys_getsockname);  // F-ECO batch 7b
@@ -233,6 +235,7 @@ void register_builtin_handlers() {
     syscall_register(SyscallNr::SYS_sendfile, sys_sendfile);
     syscall_register(SyscallNr::SYS_gettimeofday, sys_gettimeofday);
     syscall_register(SyscallNr::SYS_getcpu, sys_getcpu);
+    syscall_register(SyscallNr::SYS_sched_getaffinity, sys_sched_getaffinity);
     syscall_register(SyscallNr::SYS_set_robust_list, sys_set_robust_list);
     syscall_register(SyscallNr::SYS_prlimit64, sys_prlimit64);
     syscall_register(SyscallNr::SYS_getrandom, sys_getrandom);

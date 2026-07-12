@@ -5,7 +5,7 @@
 
 ## 为什么 busybox 当试金石
 
-- **C 干净**:musl 直接编,CinuxOS 已跑通 musl C(hello / hello-dyn),零新变量。
+- **C 干净**:musl 直接编,Cinux 已跑通 musl C(hello / hello-dyn),零新变量。
 - **信号纯**:崩了基本就是 syscall 缺口,定位干净(无额外运行时变量)。
 - **梯度不丢**:busybox `menuconfig` 照样选 applet 子集(minimal → full)。
 
@@ -29,9 +29,9 @@
 
 **远期路线(用户决策:砍 Lua/TinyCC 自建,GCC 自举)**:
 - **层3 init/login**(批6 mount/init PID1):从"手动 execve shell"到"系统自动启动"。
-- **层4 GCC 自举**(F12-M2):GCC+binutils 在 CinuxOS 上跑 → `gcc hello.c -o hello && ./hello` → 从"能跑别人的二进制"到"能编自己的二进制"。**最不可控里程碑**。做法:纯 musl 编 GCC 或 glibc GCC。
+- **层4 GCC 自举**(F12-M2):GCC+binutils 在 Cinux 上跑 → `gcc hello.c -o hello && ./hello` → 从"能跑别人的二进制"到"能编自己的二进制"。**最不可控里程碑**。做法:纯 musl 编 GCC 或 glibc GCC。
 - **层5 UEFI**(F11):BIOS→UEFI 双启动。
-- **层6 近日常使用**:GUI+稳定+GCC 自举闭环 → **在 CinuxOS 上编 CinuxOS**。
+- **层6 近日常使用**:GUI+稳定+GCC 自举闭环 → **在 Cinux 上编 Cinux**。
 
 **节奏**:批 0 摸底先行 → 批 1/2 低垂果 → 批 4(sh)硬骨头 → 批 5/6 内核工作多 → 批 7 蹭网络 workflow。
 
@@ -55,7 +55,7 @@
 ## 批 0 动作(摸底)
 
 1. 获取 busybox 源码(`menuconfig` 最小:echo/cat/ls)。
-2. musl 静态编译(CinuxOS sysroot),产单二进制。
+2. musl 静态编译(Cinux sysroot),产单二进制。
 3. 塞 ext2 image + QEMU 裸跑,拿第一个 crash 信号。
 4. 立 echo/cat/ls 四件套用例 + ≥1 负用例(试金石第一批种子)。
 

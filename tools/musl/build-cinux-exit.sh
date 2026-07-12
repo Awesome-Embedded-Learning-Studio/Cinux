@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # build-cinux-exit.sh — compile the cinux-exit helper statically against the
-# CinuxOS musl sysroot, into the Buildroot overlay (rootfs/overlay/sbin/) so
+# Cinux musl sysroot, into the Buildroot overlay (rootfs/overlay/sbin/) so
 # Buildroot (BR2_ROOTFS_OVERLAY) packs it into rootfs.ext2. cinux-exit triggers
 # sys_cinux_exit (=221, Cinux-custom) -> QEMU isa-debug-exit, gating the
 # buildroot-usability CI job.

@@ -23,7 +23,7 @@ namespace cinux::drivers {
 namespace {
 // Simplified screen-info reply: geometry + format.  Deliberately NOT Linux
 // fb_var_screeninfo (a ~160-byte struct of fields we do not model) -- we
-// expose only what a CinuxOS GUI host needs.
+// expose only what a Cinux GUI host needs.
 struct FbScreenInfo {
     uint32_t width;
     uint32_t height;

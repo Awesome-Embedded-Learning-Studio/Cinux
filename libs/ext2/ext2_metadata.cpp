@@ -98,10 +98,10 @@ int64_t Ext2::readlink(uint32_t ino, char* buf, uint64_t buf_size) {
         (static_cast<uint64_t>(d.i_size) < buf_size) ? static_cast<uint64_t>(d.i_size) : buf_size;
     // Fast symlink: NO data block allocated (i_blocks == 0) and target ≤60B
     // inlines in the i_block[] array. Long symlink: target in the i_block[0]
-    // data block. i_blocks==0 is the real discriminator -- CinuxOS sys_symlink
+    // data block. i_blocks==0 is the real discriminator -- Cinux sys_symlink
     // always allocates a data block (so its short symlinks are long-format,
     // i_blocks > 0; ext2_links.cpp), while mkfs.ext2 -d / Buildroot store short
-    // symlinks as fast (i_blocks == 0). i_size alone would misread CinuxOS
+    // symlinks as fast (i_blocks == 0). i_size alone would misread Cinux
     // short symlinks (regression caught by symlink_b2 roundtrip test).
     if (d.i_blocks == 0 && static_cast<uint64_t>(d.i_size) <= sizeof(d.i_block)) {
         const uint8_t* src = reinterpret_cast<const uint8_t*>(d.i_block);

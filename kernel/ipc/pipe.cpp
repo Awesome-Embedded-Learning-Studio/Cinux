@@ -16,8 +16,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/errno.hpp"  // kEintr
+
 #ifndef CINUX_HOST_TEST
-#    include "kernel/proc/process.hpp"    // Task::wait_next
+#    include "kernel/proc/process.hpp"  // Task + signal_deliverable_pending
 #    include "kernel/proc/scheduler.hpp"  // prepare_to_wait/schedule_blocked/unblock
 #endif
 
@@ -29,8 +31,11 @@ using cinux::proc::Scheduler;
 using cinux::proc::Task;
 
 /// Append @p t to the tail of a wait queue (intrusive via Task::wait_next).
+/// Records the head address in t->wait_queue_head so signal_send() can wake
+/// @p t for EINTR (see Task::wait_queue_head).
 void wait_enqueue(Task*& head, Task* t) {
     t->wait_next = nullptr;
+    t->wait_queue_head = &head;
     if (head == nullptr) {
         head = t;
         return;
@@ -46,24 +51,24 @@ void wait_enqueue(Task*& head, Task* t) {
 Task* wait_dequeue(Task*& head) {
     Task* t = head;
     if (t != nullptr) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
+        head               = t->wait_next;
+        t->wait_next       = nullptr;
+        t->wait_queue_head = nullptr;
     }
     return t;
 }
 
-/// Unlink @p t from the wait queue (F8-M5 poll).  A poller registers on a pipe's
-/// queue, then -- after it is woken by ANY fd -- detaches from every queue it
-/// touched so it is not left linked here (a stale link would spuriously wake a
-/// later, unrelated block, or dangle after the task dies).  No-op if @p t is not
-/// queued.  Caller holds lock_.
+/// Unlink @p t from the wait queue (F8-M5 poll, or a signal-woken task
+/// unlinking itself after EINTR).  No-op if @p t is not queued.  Caller
+/// holds lock_.
 void wait_remove(Task*& head, Task* t) {
     if (head == nullptr || t == nullptr) {
         return;
     }
     if (head == t) {
-        head         = t->wait_next;
-        t->wait_next = nullptr;
+        head               = t->wait_next;
+        t->wait_next       = nullptr;
+        t->wait_queue_head = nullptr;
         return;
     }
     Task* prev = head;
@@ -71,8 +76,9 @@ void wait_remove(Task*& head, Task* t) {
         prev = prev->wait_next;
     }
     if (prev->wait_next == t) {
-        prev->wait_next = t->wait_next;
-        t->wait_next    = nullptr;
+        prev->wait_next    = t->wait_next;
+        t->wait_next       = nullptr;
+        t->wait_queue_head = nullptr;
     }
 }
 
@@ -166,6 +172,16 @@ int64_t Pipe::write(const char* data, uint64_t count, bool nonblock) {
         if (need_block) {
             Scheduler::schedule_blocked();
         }
+        // EINTR: a signal landed while we were parked.  Return what we have so
+        // far (partial writes are valid POSIX), or -EINTR if nothing was pushed
+        // yet.  The woken task must unlink itself from the write queue -- do it
+        // under lock_ so a concurrent producer does not see a stale link.
+        if (Scheduler::current() != nullptr &&
+            signal_deliverable_pending(Scheduler::current())) {
+            auto g = lock_.irq_guard();
+            wait_remove(write_waiters_, Scheduler::current());
+            return written > 0 ? static_cast<int64_t>(written) : -cinux::kEintr;
+        }
         // Woken by a reader freeing space (or by close_reader); loop and retry.
 #endif
     }
@@ -236,6 +252,15 @@ int64_t Pipe::read(char* buf, uint64_t count, bool nonblock) {
 #ifndef CINUX_HOST_TEST
         if (need_block) {
             Scheduler::schedule_blocked();
+        }
+        // EINTR: a signal landed while we were parked.  Return what we have so
+        // far (partial reads are valid POSIX), or -EINTR if nothing was read.
+        // Unlink ourselves under lock_ so a producer does not wake a stale link.
+        if (Scheduler::current() != nullptr &&
+            signal_deliverable_pending(Scheduler::current())) {
+            auto g = lock_.irq_guard();
+            wait_remove(read_waiters_, Scheduler::current());
+            return total_read > 0 ? static_cast<int64_t>(total_read) : -cinux::kEintr;
         }
 #endif
     }

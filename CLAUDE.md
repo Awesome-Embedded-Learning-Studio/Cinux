@@ -1,4 +1,4 @@
-# CinuxOS — Claude Code 工作指引
+# Cinux — Claude Code 工作指引
 
 C++17 内核，13 Feature / ~60 Milestone 长弧。Claude 是长期主力开发。
 

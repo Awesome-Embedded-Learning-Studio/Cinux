@@ -1,4 +1,4 @@
-# CinuxOS — Codex 工作指引
+# Cinux — Codex 工作指引
 
 > Codex 自动读本文件；看不到 CLAUDE.md 与 Claude 私有 memory，故本文件自洽。等价命令的粘贴式 prompt 见 `document/ai/prompts.md`。
 

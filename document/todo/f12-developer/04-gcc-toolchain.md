@@ -1,6 +1,6 @@
 # F12-M2 — GCC 自举（glibc 动态工具链）
 
-> 批4。从「能跑别人二进制」到「能编自己二进制」。终极目标 `gcc hello.c -o hello && ./hello` 在 CinuxOS 跑通,且编出来的 hello 能直接跑（自举闭环）。
+> 批4。从「能跑别人二进制」到「能编自己二进制」。终极目标 `gcc hello.c -o hello && ./hello` 在 Cinux 跑通,且编出来的 hello 能直接跑（自举闭环）。
 > 详尽批级切片见 plan `~/.claude/plans/parsed-zooming-fog.md`。
 
 ## 用户决策（2026-07-02,校正旧 musl 静态自编方向）

@@ -1,6 +1,6 @@
-# CinuxOS Infrastructure Audit Guide — 基建深度审计指南
+# Cinux Infrastructure Audit Guide — 基建深度审计指南
 
-> Tier 1.5（审计方法）。本文回答“从哪些维度严肃检查 CinuxOS 基建”。审计发现登记到 `debt.md`；每轮报告写入 `reports/`；每轮提交门禁见 `document/ai/QUALITY-GATES.md`。
+> Tier 1.5（审计方法）。本文回答“从哪些维度严肃检查 Cinux 基建”。审计发现登记到 `debt.md`；每轮报告写入 `reports/`；每轮提交门禁见 `document/ai/QUALITY-GATES.md`。
 
 ## 0. 审计原则
 

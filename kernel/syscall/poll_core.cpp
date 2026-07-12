@@ -18,10 +18,11 @@
 #include "kernel/drivers/hpet/hpet.hpp"
 #include "kernel/drivers/pit/pit.hpp"          // monotonic fallback when HPET is absent
 #include "kernel/drivers/tty/console_tty.hpp"  // legacy console stdin (fds 0/1/2)
+#include "kernel/errno.hpp"                    // kEintr
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/inode.hpp"
 #include "kernel/fs/vfs_mount.hpp"  // current_fd_table()
-#include "kernel/proc/process.hpp"  // Task + TaskState
+#include "kernel/proc/process.hpp"  // Task + TaskState + signal_deliverable_pending
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/sync.hpp"         // InterruptGuard
 #include "kernel/proc/timer_queue.hpp"  // timer_queue_arm/disarm (finite-timeout wake)
@@ -204,6 +205,13 @@ int64_t do_poll_core(kpollfd* pfds, uint64_t nfds, int64_t timeout_ms) {
         detach_all(pfds, nfds, self);
         if (armed) {
             cinux::proc::timer_queue_disarm(self);  // free the timer slot
+        }
+        // EINTR: a signal landed while parked.  Return -EINTR (POSIX poll is
+        // interruptible).  detach_all already unlinked us from every fd's wait
+        // queue, so no stale link remains.  We do NOT consume the signal here --
+        // the syscall return path (signal_check_and_deliver) runs it next.
+        if (signal_deliverable_pending(self)) {
+            return -cinux::kEintr;
         }
         // loop: re-scan (a fd is ready, or the timeout expired)
     }

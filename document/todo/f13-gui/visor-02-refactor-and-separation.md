@@ -4,18 +4,18 @@
 >
 > **v2 修订(2026-06-21)**:吸收外部审查 `review.md`——**PIT-IRQ-composite 反转提前到绘制抽象之前**("调度模型先正确,绘制抽象后正确",审查 S1.4)。PIT 反转用现有 Canvas/WindowManager(不依赖 visor ABI 空壳),行为不变去 IRQ composite。原顺序 spawn→骨架→绘制→PAT 调整为 **spawn(✓)→ PIT 反转 → Host ABI → dirty → SwRaster → Surface/Widget**。
 >
-> **核心策略**:先在 CinuxOS 仓库内重构(改形状),再物理分离(visor 独立仓库 submodule)。**绝不一次性大爆炸**——每步独立成批 + `timeout 40` QEMU 验证。
+> **核心策略**:先在 Cinux 仓库内重构(改形状),再物理分离(visor 独立仓库 submodule)。**绝不一次性大爆炸**——每步独立成批 + `timeout 40` QEMU 验证。
 
 ## §0 两条主线:重构(改形状)vs 分离(挪位置)
 
 | | 重构(refactor) | 分离(separation) |
 |---|---|---|
 | 目标 | GUI 底层长成 visor 形状(Host ABI 表 / 后端可插拔 / pump / dirty-region / static-only) | 平台无关 core 物理挪到独立 visor 仓库 |
-| 在哪做 | **CinuxOS 仓库内** | visor 仓库(submodule) |
+| 在哪做 | **Cinux 仓库内** | visor 仓库(submodule) |
 | 何时 | 先做(每步可验证) | L4a core 可独立时(M1 后) |
 | 风险 | 中(碰 spawn/PIT,易回归) | 低(文件移动 + 构建接线) |
 
-**铁律**:重构期 visor core 物理留 CinuxOS 仓库内(`kernel/gui/visor_core/`),先验证形状对,再分离。**别在形状没验证前挪仓库**。
+**铁律**:重构期 visor core 物理留 Cinux 仓库内(`kernel/gui/visor_core/`),先验证形状对,再分离。**别在形状没验证前挪仓库**。
 
 ## §1 步骤 0:spawn 公共化前置 ✅ 已完成(commit `82e9023`)
 
@@ -74,9 +74,9 @@
 
 **机制**(对齐 [third_party/Cinux-Base](../../third_party/Cinux-Base)):
 1. 建 visor 独立仓库(用户单独开发),`third_party/visor` submodule。
-2. **CinuxOS CMake 用 `add_library(visor_core STATIC <core 源>)` 重新编译**——内核 include + `-fno-exceptions -fno-rtti -ffreestanding` + kmalloc allocator。**不链 visor 自建 `.a`**(三套工具链各异,跟 Cinux-Base 一样)。
+2. **Cinux CMake 用 `add_library(visor_core STATIC <core 源>)` 重新编译**——内核 include + `-fno-exceptions -fno-rtti -ffreestanding` + kmalloc allocator。**不链 visor 自建 `.a`**(三套工具链各异,跟 Cinux-Base 一样)。
 3. host SDL simulator 与 MCU 各自独立构建。
-4. profile 由 CinuxOS 侧注入(`-DVISOR_PROFILE=DESKTOP`)。
+4. profile 由 Cinux 侧注入(`-DVISOR_PROFILE=DESKTOP`)。
 
 ## §7 剥离顺序(v2 调整:PIT 反转提前)
 

@@ -26,6 +26,9 @@ namespace cinux::net {
 
 inline void wait_enqueue(cinux::proc::Task*& head, cinux::proc::Task* t) {
     t->wait_next = nullptr;
+    // Record the queue head address so signal_send() can wake us for EINTR
+    // (see Task::wait_queue_head).  Cleared on dequeue/remove/wake.
+    t->wait_queue_head = &head;
     if (head == nullptr) {
         head = t;
         return;
@@ -42,6 +45,7 @@ inline cinux::proc::Task* wait_dequeue(cinux::proc::Task*& head) {
     if (t != nullptr) {
         head         = t->wait_next;
         t->wait_next = nullptr;
+        t->wait_queue_head = nullptr;  // no longer queued
     }
     return t;
 }
@@ -58,7 +62,8 @@ inline void wake_all(cinux::proc::Task*& head) {
     }
 }
 
-/// Unlink @p t from the wait queue (poll detach).  No-op if not queued.
+/// Unlink @p t from the wait queue (poll detach, or a signal-woken task
+/// unlinking itself after EINTR).  No-op if not queued.
 inline void wait_remove(cinux::proc::Task*& head, cinux::proc::Task* t) {
     if (head == nullptr || t == nullptr) {
         return;
@@ -66,6 +71,7 @@ inline void wait_remove(cinux::proc::Task*& head, cinux::proc::Task* t) {
     if (head == t) {
         head         = t->wait_next;
         t->wait_next = nullptr;
+        t->wait_queue_head = nullptr;
         return;
     }
     cinux::proc::Task* prev = head;
@@ -75,6 +81,7 @@ inline void wait_remove(cinux::proc::Task*& head, cinux::proc::Task* t) {
     if (prev->wait_next == t) {
         prev->wait_next = t->wait_next;
         t->wait_next    = nullptr;
+        t->wait_queue_head = nullptr;
     }
 }
 

@@ -219,6 +219,21 @@ int queue_signal(Task* target, Signal sig, bool force) {
         target->sigwait_blocked = false;
         Scheduler::unblock(target);
     }
+    // EINTR: a task parked in a blocking syscall (pipe/socket/poll) recorded
+    // its wait-queue head in wait_queue_head.  Wake it so its blocking loop
+    // resumes, sees signal_deliverable_pending(), and returns -EINTR.  Only
+    // fires when the signal is actually deliverable right now (unblocked or
+    // forced) -- a blocked-but-pending signal (e.g. SIGINT while sigprocmask
+    // hides it) must NOT spuriously kick a sleeper out (it would busy-loop).
+    // Scheduler::unblock is idempotent: if a fd/timer already woke it, this is
+    // a no-op and the loop's normal data-ready path still wins.  Mutex/
+    // Semaphore/futex/waitpid sleeps leave wait_queue_head == nullptr and so
+    // are never interrupted here (matches Linux: kernel mutexes are
+    // TASK_UNINTERRUPTIBLE).
+    if (target->wait_queue_head != nullptr && target->state == TaskState::Blocked &&
+        signal_deliverable_pending(target)) {
+        Scheduler::unblock(target);
+    }
     return 0;
 }
 
@@ -228,6 +243,19 @@ int signal_send(Task* target, Signal sig) {
 
 int signal_force_send(Task* target, Signal sig) {
     return queue_signal(target, sig, /*force=*/true);
+}
+
+bool signal_deliverable_pending(const Task* task) {
+    // EINTR check for blocking IO loops: does @p task have ANY signal that
+    // would be delivered if it returned to user mode right now?  Mirrors the
+    // avail-mask of signal_pick_deliverable() (unblocked OR forced) but peeks
+    // WITHOUT consuming -- a wake followed by -EINTR only makes sense if the
+    // signal will actually fire on the return-to-user path.
+    if (task == nullptr) {
+        return false;
+    }
+    const SigSet avail = (task->sig_pending & ~task->sig_blocked) | task->sig_forced;
+    return avail != 0;
 }
 
 int killpg(int pgid, Signal sig) {
@@ -263,6 +291,41 @@ int killpg(int pgid, Signal sig) {
         ++sent;
     }
     return sent;
+}
+
+void itimer_real_tick(uint64_t delta_ns) {
+    // Walk every task under the registry lock, decrement its ITIMER_REAL, and
+    // collect those that expired.  signal_send() runs AFTER releasing the lock:
+    // it may wake/terminate the target (queue_signal -> unblock / exit_current),
+    // none of which needs the registry lock, and holding it across that would
+    // risk lockdep/deadlock.  The PIT IRQ is non-reentrant (irq0, EOI after),
+    // so this runs once per tick; cross-CPU setitimer races the fields but
+    // aligned 64-bit rw are atomic and a missed/repeated SIGALRM is benign.
+    constexpr int kMaxExpired = 64;  // matches killpg's cap; rarely >1 timer armed
+    Task*         expired[kMaxExpired];
+    int           nexpired = 0;
+    {
+        auto g = g_registry_lock.irq_guard();
+        for (Task* t = g_registry_head; t != nullptr; t = t->registry_next) {
+            if (t->itimer_real_value_ns == 0) {
+                continue;  // disarmed
+            }
+            if (t->itimer_real_value_ns > delta_ns) {
+                t->itimer_real_value_ns -= delta_ns;
+            } else {
+                // Expired: reload from interval (0 = one-shot -> disarms) and
+                // queue SIGALRM.  Reload BEFORE signalling so a periodic timer
+                // keeps ticking even while the handler is pending.
+                t->itimer_real_value_ns = t->itimer_real_interval_ns;
+                if (nexpired < kMaxExpired) {
+                    expired[nexpired++] = t;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < nexpired; ++i) {
+        signal_send(expired[i], Signal::kSigalrm);
+    }
 }
 
 int signal_pick_deliverable(Task* task, bool allow_custom) {

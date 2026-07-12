@@ -240,7 +240,7 @@ caller(Cinux 内核线程 / MCU main loop / 用户态 epoll)决定何时调。co
 
 ## §6 profile 选择规则
 
-- **Cinux 桌面 MVP** → `VISOR_PROFILE=DESKTOP`,host adapter = CinuxOS 仓库内填表。第一个真后端。
+- **Cinux 桌面 MVP** → `VISOR_PROFILE=DESKTOP`,host adapter = Cinux 仓库内填表。第一个真后端。
 - **MCU 验证可移植性** → 先 `MCU-Color`(STM32H7/ESP32 + ILI9341),**MCU-F1 推迟到 M2 真板/真 QEMU RAM<20KB 实测后才承诺**。
 - **host 开发主战场** → Desktop + SDL simulator,不刷板子快速迭代。
 

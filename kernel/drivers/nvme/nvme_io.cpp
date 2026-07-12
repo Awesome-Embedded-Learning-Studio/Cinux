@@ -18,9 +18,12 @@ constexpr uint64_t kIoTimeoutNs     = 500'000'000;
 }  // namespace
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
-    // SQ/CQ state is shared across CPUs. Keep the lock across polling so only
-    // one command is outstanding and each completion has one unambiguous owner.
-    auto    guard     = io_lock_.guard();
+    // io_submit is called UNDER NvmeBlockDevice::lock_ (SMP dma_buf_ serialise,
+    // memory 749e7db), so it must NOT yield/schedule -- "spinlock held across
+    // schedule" panics lockdep.  Synchronous poll only; a long I/O wait (gcc/cc1
+    // page-faulting ~50 MB through here) can stall other tasks, but the cure is
+    // async IO (blocking + wait queue, v1.1+), not yielding under a held lock.
+    io_lock_.acquire();
     NvmeCmd submitted = cmd;
     submitted.cid     = io_next_cid_++;
 
@@ -36,6 +39,14 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         has_deadline ? cinux::drivers::g_hpet.monotonic_ns() + kIoTimeoutNs : 0;
     uint32_t fallback_iters = 0;
 
+    auto advance_cq = [this]() {
+        io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
+        if (io_cq_head_ == 0) {
+            io_cq_phase_ ^= 1;
+        }
+        *io_cq_hdbell_ = io_cq_head_;
+    };
+
     while (has_deadline ? cinux::drivers::g_hpet.monotonic_ns() < deadline
                         : fallback_iters++ < kIoFallbackIters) {
         volatile NvmeCqe& cqe          = cq[io_cq_head_];
@@ -43,6 +54,11 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         if ((status_field & 0x1) == io_cq_phase_) {
             const uint16_t completion_cid = cqe.cid;
             if (completion_cid != submitted.cid) {
+                // A completion for a different command is at our CQ head --
+                // another CPU's io_submit advanced here while we'd yielded
+                // (or a stale entry).  Consume it and keep polling for ours;
+                // the old "report + continue without advancing" deadlocks once
+                // yields let the head move.
                 if (!cid_mismatch_reported) {
                     cinux::lib::kprintf(
                         "[NVMe] CQ CID mismatch raw=0x%x got=%u expected=%u sq_head=%u "
@@ -51,6 +67,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
                         io_cq_head_, io_cq_phase_);
                     cid_mismatch_reported = true;
                 }
+                advance_cq();
                 continue;
             }
 
@@ -66,12 +83,8 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
                     io_cq_phase_, submitted.opcode, submitted.nsid,
                     static_cast<unsigned long long>(slba), nlb);
             }
-
-            io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
-            if (io_cq_head_ == 0) {
-                io_cq_phase_ ^= 1;
-            }
-            *io_cq_hdbell_ = io_cq_head_;
+            advance_cq();
+            io_lock_.release();
             return status;
         }
         __asm__ volatile("pause");
@@ -87,6 +100,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         timed_out_cqe.status, timed_out_cqe.cid, submitted.cid, timed_out_cqe.sq_head,
         timed_out_cqe.sq_id, io_sq_tail_, io_cq_head_, io_cq_phase_, submitted.opcode,
         submitted.nsid, static_cast<unsigned long long>(slba), nlb);
+    io_lock_.release();
     return cinux::lib::Error::TimedOut;
 }
 

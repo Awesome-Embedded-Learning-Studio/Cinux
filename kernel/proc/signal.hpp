@@ -236,6 +236,12 @@ int signal_force_send(Task* target, Signal sig);
 /// to -ESRCH).
 int killpg(int pgid, Signal sig);
 
+/// Advance every task's ITIMER_REAL by @p delta_ns; on expiry queue SIGALRM
+/// and reload from it_interval (periodic; 0 disarms).  Called from the PIT IRQ
+/// (wall-clock tick) so timers fire even while the owning task is blocked in a
+/// syscall (e.g. busybox ping asleep in recvfrom).  signal.cpp.
+void itimer_real_tick(uint64_t delta_ns);
+
 /// Pick the next deliverable signal for @p task, clear its pending bit, and
 /// return its number.  When @p allow_custom is false (the syscall return
 /// path, which cannot build a signal frame) Custom dispositions are skipped;

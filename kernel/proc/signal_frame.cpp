@@ -21,15 +21,23 @@ using cinux::arch::InterruptFrame;
 void signal_setup_frame(InterruptFrame* frame, Signal sig, uint64_t handler_addr, [[maybe_unused]] SigSet sa_mask) {
     // TODO: block sa_mask (+ sig) during the handler
     const uint64_t user_rsp = frame->rsp;
-    // Align so the handler entry RSP satisfies the SysV AMD64 ABI (RSP%16==8).
-    const uint64_t pad      = user_rsp & 0x0F;  // 0 or 8
+    // Align so the handler entry RSP satisfies the SysV AMD64 ABI (RSP%16==8):
+    // the handler is entered with RSP=R as if a `call` had pushed the 8-byte
+    // return address at [R], so R must be %16==8.  sizeof(SignalFrame) is a
+    // multiple of 16, so (user_rsp - 8 - pad) with pad = user_rsp & 0x0F makes
+    // R%16 == 8 for any user_rsp.  The previous formula omitted the -8 for the
+    // return-address slot, leaving R%16==0 (handler ran with a misaligned RSP
+    // -- any `movaps` in the musl/busybox -O2 handler raised #GP, surfacing as
+    // the ping ^C "Illegal Instruction" exit) and, when user_rsp%16==0, writing
+    // the SignalFrame 8 bytes past user_rsp (live-stack corruption).
+    const uint64_t pad = user_rsp & 0x0F;
 
     // Layout (low -> high address):
-    //   return-addr slot (= USER_SIGRETURN_PAGE)  @ R    <- handler RSP
-    //   SignalFrame                               @ R+8  <- sigreturn reads here
-    //   (alignment pad)                           @ R+8+sizeof(SignalFrame)
-    //   original user RSP                         @ U
-    const uint64_t R = user_rsp - pad - sizeof(SignalFrame);
+    //   return-addr slot (= USER_SIGRETURN_PAGE)  @ R        <- handler RSP
+    //   SignalFrame                               @ R+8      <- sigreturn reads here
+    //   (alignment pad, 0..15 bytes)              @ R+8+sizeof(SignalFrame)
+    //   original user RSP                         @ user_rsp
+    const uint64_t R = user_rsp - 8 - pad - sizeof(SignalFrame);
 
     Task* task = Scheduler::current();
     if (task != nullptr && task->addr_space != nullptr) {

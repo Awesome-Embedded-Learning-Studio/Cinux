@@ -1,4 +1,4 @@
-# CinuxOS — 代码质量债务登记表（Code Quality Debt Registry）
+# Cinux — 代码质量债务登记表（Code Quality Debt Registry）
 
 > **持续迭代的技术债登记**。审计发现 → 登记在此 → **不急着修**，按优先级排期，分批闭环。
 > 跨 Feature 域，单一事实源。每条给稳定 ID（`DEBT-NNN`），便于后续引用 / 排期 / 闭环。
@@ -235,7 +235,7 @@
 ### DEBT-019 用户指针 validate 后直接解引用（非 copy_to_from_user，PF 兜底）
 - **维度**: 用户/内核边界(D6)　**优先级**: P3　**状态**: 🆕 登记待办（F-QA Q3-2 审计）　**核验**: ✅ grep 坐实（零 copy_from_user/copy_to_user）
 - **位置**: `kernel/syscall/path_util.hpp:26`(`validate_user_ptr` 只查 canonical address) / 各 syscall(sys_stat/sys_pipe/sys_creat 等)validate 后直接解引用用户指针
-- **现象**: CinuxOS 用户边界用 `validate_user_ptr`(canonical address 检查)+ 直接解引用,PF handler(F2-M5 硬门控:user PF 无 VMA→segfault)兜底。**非 Linux copy_to_from_user + access_ok 模型**。
+- **现象**: Cinux 用户边界用 `validate_user_ptr`(canonical address 检查)+ 直接解引用,PF handler(F2-M5 硬门控:user PF 无 VMA→segfault)兜底。**非 Linux copy_to_from_user + access_ok 模型**。
 - **根因**: (1) validate 不查映射存在/权限/长度(多字节结构跨页未映射→PF,kernel-mode 解引用容错零页);(2) 多核 TOCTOU(user 另核改映射 + kernel 解引用 race);(3) 不对齐 Linux copy 模型。当前单核 + 用户态串行不触发;多核用户态 + SMP 理论风险。
 - **修复建议**: 未来多核用户态时引入 copy_to_from_user(access_ok + 长度 + 页 copy),或至少 validate 查 VMA + 长度。当前 PF 兜底可接受(单核)。
 - **F9 批4 更新（SMAP 启用）**: 合法访用户经 syscall/ISR entry STAC 显式放行,意外（漏 STAC）访用户 → SMAP #PF（双层保护,不再仅 PF 兜底）。validate 行为不变;完整 copy_from_user 修复仍留 F10。

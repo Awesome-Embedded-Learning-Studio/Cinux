@@ -1,4 +1,4 @@
-# CinuxOS Coding Taste
+# Cinux Coding Taste
 
 > 代码风格的**单一权威**。`DIRECTIVES.md` B 与 `CLAUDE.md`/`AGENTS.md` 指向本文。
 > **铁律**：机械风格（缩进/换行/对齐/指针位置/include 排序）以 `.clang-format` 为准——**用 clang-format 格式化，不手调**；本文只管 clang-format 管不到的：命名、惯用法、注释、结构。

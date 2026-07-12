@@ -32,7 +32,7 @@
 
 namespace cinux::proc {
 
-// Linux auxiliary-vector types (uapi/linux/auxvec.h); the subset CinuxOS emits.
+// Linux auxiliary-vector types (uapi/linux/auxvec.h); the subset Cinux emits.
 constexpr uint64_t AT_NULL         = 0;
 constexpr uint64_t AT_PHDR         = 3;
 constexpr uint64_t AT_PHENT        = 4;

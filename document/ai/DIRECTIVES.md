@@ -1,4 +1,4 @@
-# CinuxOS DIRECTIVES — 架构铁律 / 约定 / 操作模型
+# Cinux DIRECTIVES — 架构铁律 / 约定 / 操作模型
 
 > Tier 1（年级稳定，改动稀少）。事实来源 `document/design/cinuxbase-design.md` §1（已核对）。`[待补]`=需填实。改本文件前按操作模型 L4 查牵连。
 

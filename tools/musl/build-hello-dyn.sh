@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build-hello-dyn.sh — compile a DYNAMIC musl hello world against the CinuxOS
+# build-hello-dyn.sh — compile a DYNAMIC musl hello world against the Cinux
 # sysroot. This is the F10-M2 smoke binary: a PIE dynamic executable
 # (ET_DYN) carrying PT_INTERP = /lib/ld-musl-x86_64.so.1, so the kernel's
 # new PT_INTERP path loads musl's ldso, which relocates the program in user

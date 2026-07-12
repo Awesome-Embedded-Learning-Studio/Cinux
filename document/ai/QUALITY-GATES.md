@@ -1,4 +1,4 @@
-# CinuxOS Quality Gates — AI 预审 / 审查 / 修复流程
+# Cinux Quality Gates — AI 预审 / 审查 / 修复流程
 
 > Tier 1.5（工程流程，稳定但可演进）。本文定义每轮代码变更前后必须回答的问题，让本地 Claude Code / Codex 能按清单预审、审查、修复，而不是只靠经验。
 >
@@ -190,7 +190,7 @@ Commit message:
 
 ## 6. 参考基线
 
-本流程对齐 Linux 的工程分层，但按 CinuxOS 当前体量裁剪：
+本流程对齐 Linux 的工程分层，但按 Cinux 当前体量裁剪：
 - Development process: https://docs.kernel.org/process/development-process.html
 - Kernel testing guide: https://docs.kernel.org/dev-tools/testing-overview.html
 - Submit checklist: https://docs.kernel.org/process/submit-checklist.html

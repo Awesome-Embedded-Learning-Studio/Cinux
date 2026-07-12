@@ -65,6 +65,12 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
         if (!read_result.ok()) {
             return -to_errno(read_result.error());
         }
+        // EINTR sentinel from a signal-interrupted blocking read (pipe/pty):
+        // InodeOps returns -1 as a success value (it cannot extend lib::Error
+        // without touching the Cinux-Base submodule).  Map to -EINTR.
+        if (read_result.value() == static_cast<int64_t>(-1)) {
+            return -kEintr;
+        }
         if (read_result.value() > 0) {
             file->offset += static_cast<uint64_t>(read_result.value());
         }

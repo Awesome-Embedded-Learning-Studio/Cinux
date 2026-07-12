@@ -2,7 +2,7 @@
  * @file kernel/net/byte_order.hpp
  * @brief Host <-> network byte-order helpers.
  *
- * CinuxOS is little-endian; network order is big-endian, so htons/ntohs swap
+ * Cinux is little-endian; network order is big-endian, so htons/ntohs swap
  * the two bytes of a 16-bit value.  Kept OUT of net_types.hpp on purpose --
  * that header is ZERO-logic POD/constants by design (its own header comment
  * says so), and byte-order conversion is logic.  Tcp/Udp socket .cpp files

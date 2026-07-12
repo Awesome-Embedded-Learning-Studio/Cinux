@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(cinux 
-    VERSION 0.1.0 
+project(cinux
+    VERSION 1.0.0
     LANGUAGES C CXX ASM)
 
 # All user-facing build switches live in the single registry below. Add a new
@@ -9,7 +9,7 @@ project(cinux
 # definition) -- not here. Included before any if() that reads a CINUX_ flag.
 include(cmake/options.cmake)
 
-# Toolchain version gate (G2). CinuxOS is freestanding C++17 with -mcmodel=kernel
+# Toolchain version gate (G2). Cinux is freestanding C++17 with -mcmodel=kernel
 # codegen, inline asm, and (F-INFRA) GCC-sensitive UBSAN (-fsanitize=undefined) and
 # strict warning flags whose behavior varies across major GCC releases. Fail fast at
 # configure time if GCC predates the tested floor so a too-old toolchain does not
@@ -18,7 +18,7 @@ include(cmake/options.cmake)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
         message(FATAL_ERROR
-            "CinuxOS requires GCC >= 11 (C++17 freestanding + strict warnings + UBSAN); "
+            "Cinux requires GCC >= 11 (C++17 freestanding + strict warnings + UBSAN); "
             "found GCC ${CMAKE_CXX_COMPILER_VERSION}.")
     endif()
 endif()

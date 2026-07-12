@@ -113,7 +113,7 @@ constexpr uint64_t kOTrunc      = 0x200;    ///< truncate to 0 on open (O_TRUNC)
 /// AT_FDCWD: "relative to current working directory".
 [[maybe_unused]] constexpr int64_t kAtFdcwd = -100;
 
-/// Map Linux access-mode bits to CinuxOS OpenFlags.
+/// Map Linux access-mode bits to Cinux OpenFlags.
 cinux::fs::OpenFlags access_to_open_flags(uint64_t flags) {
     switch (flags & kOAccessMode) {
     case 1:

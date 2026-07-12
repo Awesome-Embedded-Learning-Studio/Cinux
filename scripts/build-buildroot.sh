@@ -1,5 +1,5 @@
 #!/bin/bash
-# Download + configure + build the CinuxOS buildroot base rootfs.ext2.
+# Download + configure + build the Cinux buildroot base rootfs.ext2.
 # Used by CI (gcc-smoke job) and local repro.  Caches well: skips the download
 # when the source tree already exists, and buildroot's own make is incremental
 # (setup-cinux's cache-buildroot snapshots <output_dir> across runs).
@@ -43,7 +43,7 @@ if [ ! -d "$BR_SRC" ]; then
     tar xzf "$cache_tarball" -C "$OUTPUT_DIR"
 fi
 
-# Configure from the CinuxOS defconfig.  BR2_DL_DIR isolates the toolchain
+# Configure from the Cinux defconfig.  BR2_DL_DIR isolates the toolchain
 # download cache under <output_dir>/dl so it survives across runs.
 cp "$REPO_ROOT/rootfs/buildroot/$DEFCONFIG" "$BR_SRC/configs/$DEFCONFIG"
 # $DEFCONFIG is already the buildroot defconfig target name (file
