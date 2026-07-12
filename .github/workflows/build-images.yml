@@ -36,7 +36,7 @@ jobs:
           cache-musl: 'true'
           cache-busybox: 'true'
           cache-buildroot: ${{ matrix.variant == 'desktop' }}
-          cmake-flags: -DCMAKE_BUILD_TYPE=Release ${{ matrix.variant == 'desktop' && '-DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2' || '-DCINUX_ROOTFS_PROFILE=handcrafted' }}
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release ${{ matrix.variant == 'desktop' && '-DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot' || '-DCINUX_ROOTFS_PROFILE=handcrafted' }}
 
       - name: Build musl + busybox user binaries
         run: |
