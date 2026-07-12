@@ -22,7 +22,6 @@
 #include "kernel/fs/inode.hpp"
 #include "kernel/lib/echo_trace.hpp"
 #include "kernel/lib/string.hpp"      // memset for stat
-#include "kernel/lib/kprintf.hpp"     // diagnostic on signal delivery
 #include "kernel/proc/process.hpp"    // Task::session_leader / controlling_tty
 #include "kernel/proc/scheduler.hpp"  // Scheduler::current()
 #include "kernel/proc/signal.hpp"     // killpg + Signal (foreground pgrp delivery)
@@ -181,8 +180,6 @@ public:
         }
         cinux::proc::Signal sig;
         if (pending_sig != TtySignal::kNone && fg_pgid > 0 && tty_signal_to_signo(pending_sig, sig)) {
-            cinux::lib::kprintf("[PTY] signal %d -> fg pgrp %d\n",
-                                static_cast<int>(sig), fg_pgid);
             cinux::proc::killpg(fg_pgid, sig);
         }
         return r;
