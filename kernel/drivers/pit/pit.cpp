@@ -51,13 +51,20 @@ void PIT::init(uint32_t freq_hz) {
         divisor = 1;
     }
 
-    // Command byte 0x36:
+    // Command byte 0x34:
     //   0x30 = channel 0, LSB-then-MSB access mode
-    //   0x06 = square wave generator (mode 3)
+    //   0x04 = rate generator (mode 2)
     //   0x00 = binary counter (not BCD)
-    // Total: 0x36
+    // Total: 0x34
+    // Mode 2 (rate generator), not mode 3 (square wave): mode 3's counter
+    // reaches terminal count twice per output period (it decrements by 2 and
+    // toggles at 0), and QEMU raises IRQ0 at each terminal count -- so mode 3
+    // fires IRQ0 at 2x the configured frequency (a 100 Hz timer ran at 200 Hz,
+    // surfacing as busybox ping's 1 s interval firing every ~0.5 s).  Mode 2
+    // decrements by 1 and pulses once per period -> exactly freq_hz_ IRQs/s.
+    // This is the mode Linux uses for the periodic clock source.
     io_outb(PitHW::COMMAND,
-            PitHW::CMD_CHANNEL_0 | PitHW::CMD_LSB_MSB | PitHW::CMD_MODE_3 | PitHW::CMD_BINARY);
+            PitHW::CMD_CHANNEL_0 | PitHW::CMD_LSB_MSB | PitHW::CMD_MODE_2 | PitHW::CMD_BINARY);
 
     // Write divisor: low byte first, then high byte
     io_outb(PitHW::CHANNEL_0, static_cast<uint8_t>(divisor & 0xFF));
