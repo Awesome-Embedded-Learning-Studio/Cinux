@@ -3,9 +3,12 @@ name: Build Images
 # Manually-triggered image builder: click "Run workflow", type a version label,
 # get cinux-<version>.img + console/desktop rootfs back as workflow artifacts
 # (downloadable from the run page, 90-day retention). Deliberately creates NO
-# git tag and NO GitHub Release -- that is release.yml's job (tag push -> Release).
-# Use this one for pre-release image validation, ad-hoc test builds, or "I just
-# want the img" without publishing anything. You stay in control of releasing.
+# git tag and NO GitHub Release -- releasing is a separate manual step.
+#
+# Both variants share the SAME rootfs (buildroot base + GCC closure, packed by
+# assemble-gcc-rootfs into rootfs-gcc.ext2). They differ only in the KERNEL:
+#   console -- GUI=OFF (shell_launch -> /bin/sh; boots to a shell)
+#   desktop -- GUI=ON  (desktop_launch -> /cinux_gui_host; boots to the desktop)
 on:
   workflow_dispatch:
     inputs:
@@ -21,8 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # console -- handcrafted ext2 (busybox/musl, fast, no GCC);
-        # desktop  -- buildroot rootfs + GCC toolchain closure + cinux_gui_host.
+        # Same rootfs (buildroot + GCC + cinux_gui_host); the kernel differs.
         variant: [console, desktop]
     steps:
       - uses: actions/checkout@v4
@@ -30,13 +32,15 @@ jobs:
           submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
-          # desktop needs the full gcc-13 family (cc1 ships in cpp-13) + buildroot deps;
-          # console only needs musl/busybox.
-          apt-packages: qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev ${{ matrix.variant == 'desktop' && 'bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev' || '' }}
+          # Both variants build buildroot + assemble the GCC closure now, so both
+          # need the gcc-13 family (cc1 ships in cpp-13) + buildroot deps.
+          apt-packages: qemu-system-x86 e2fsprogs python3 curl bzip2 linux-libc-dev bc xxd rsync cpio ncurses-dev libssl-dev bison flex gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev
           cache-musl: 'true'
           cache-busybox: 'true'
-          cache-buildroot: ${{ matrix.variant == 'desktop' }}
-          cmake-flags: -DCMAKE_BUILD_TYPE=Release ${{ matrix.variant == 'desktop' && '-DCINUX_ROOTFS_PROFILE=buildroot' || '-DCINUX_ROOTFS_PROFILE=handcrafted' }}
+          cache-buildroot: 'true'
+          # console = GUI=OFF (shell); desktop = GUI=ON (desktop, default). Both
+          # use the buildroot rootfs profile (no handcrafted ext2 anymore).
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_ROOTFS_PROFILE=buildroot ${{ matrix.variant == 'console' && '-DCINUX_GUI=OFF' || '' }}
 
       - name: Build musl + busybox user binaries
         run: |
@@ -45,19 +49,13 @@ jobs:
           tools/musl/build-forktest.sh
           tools/musl/build-busybox.sh
 
-      - name: Build buildroot base rootfs (desktop only, cached)
-        if: matrix.variant == 'desktop'
+      - name: Build buildroot base rootfs (cached)
         run: scripts/build-buildroot.sh build/buildroot-ci cinuxos_base_defconfig
 
       - name: Build kernel + boot disk image (cinux.img = MBR + stage2 + mini + big_kernel)
         run: cmake --build build --target image -j$(nproc)
 
-      - name: Build console rootfs (handcrafted ext2.img)
-        if: matrix.variant == 'console'
-        run: cmake --build build --target regenerate-ext2-image -j$(nproc)
-
-      - name: Assemble desktop rootfs (buildroot + GCC closure -> rootfs-gcc.ext2)
-        if: matrix.variant == 'desktop'
+      - name: Assemble rootfs (buildroot + GCC closure + cinux_gui_host -> rootfs-gcc.ext2)
         env:
           BR_TARGET: ${{ github.workspace }}/build/buildroot-ci/output/target
           GCC_BIN: gcc-13
@@ -69,14 +67,10 @@ jobs:
           VER="${{ github.event.inputs.version }}"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           mkdir -p staging
-          # boot disk (kernel image) -- identical across variants; kept in each
-          # artifact so either download is self-contained.
+          # boot disk (kernel) -- differs per variant (console=GUI=OFF, desktop=GUI=ON).
           cp build/cinux.img "staging/cinux-${VER}.img"
-          if [ "${{ matrix.variant }}" = "desktop" ]; then
-            cp build/rootfs-gcc.ext2 "staging/cinux-${VER}-desktop.ext2"
-          else
-            cp build/ext2.img "staging/cinux-${VER}-console.ext2"
-          fi
+          # same rootfs for both variants; suffix distinguishes the variant.
+          cp build/rootfs-gcc.ext2 "staging/cinux-${VER}-${{ matrix.variant }}.ext2"
           # one-liner runner so the downloaded image boots with the right qemu flags.
           cp scripts/run-release.sh "staging/run.sh"
           ls -la staging/

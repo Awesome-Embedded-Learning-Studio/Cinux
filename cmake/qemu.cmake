@@ -654,12 +654,23 @@ add_custom_target(run-nvme-buildroot-usability
 # a rootfs that ships a native gcc driver so `gcc /hello.c` runs on Cinux.
 # Assumes the buildroot base target dir (<buildroot>/output/target) already
 # exists (built out-of-tree by buildroot); CMake does not track that dependency.
+set(_assemble_rootfs_deps
+    ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
+    ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh)
+# GUI=ON: the rootfs must ship /cinux_gui_host (static musl ELF built by
+# build-cinux-gui-host.sh via the cinux_gui_host target) so desktop_launch's
+# fork+execve finds it.  Pull the ELF in as a build dependency so
+# `cmake --build --target assemble-gcc-rootfs` builds it FIRST -- otherwise
+# assemble ships a rootfs without the host and the desktop boot ENOENTs on
+# /cinux_gui_host (the release rc1 miss; the CI musl step never built it).
+if(CINUX_GUI)
+    list(APPEND _assemble_rootfs_deps ${CINUX_GUI_HOST_ELF})
+endif()
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
             ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
-            ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh
+    DEPENDS ${_assemble_rootfs_deps}
     VERBATIM
 )
 add_custom_target(assemble-gcc-rootfs DEPENDS ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2)
