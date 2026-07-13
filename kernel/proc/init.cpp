@@ -90,19 +90,27 @@ void kernel_init_thread() {
     auto*            nvme_bd = cinux::drivers::nvme::nvme_block_device();
     if (nvme_bd != nullptr) {
         static cinux::fs::Ext2 nvme_ext2(nvme_bd);
-        if (nvme_ext2.mount().ok()) {
+        auto                   nvme_m = nvme_ext2.mount();
+        if (nvme_m.ok()) {
             rootfs    = &nvme_ext2;
             root_bdev = nvme_bd;
             cinux::lib::kprintf("[INIT] rootfs on NVMe (perf path)\n");
+        } else {
+            // Log why the NVMe ext2 mount failed -- otherwise this fallback is
+            // silent and the boot mysteriously drops to AHCI (or #GPs on the
+            // AHCI fallback when no AHCI controller exists, as in the release
+            // run.sh boot: IDE boot disk + NVMe rootfs, no AHCI device).
+            cinux::lib::kprintf("[INIT] NVMe ext2 mount failed: %s (try AHCI)\n",
+                                cinux::lib::error_string(nvme_m.error()));
         }
     }
-    if (rootfs == nullptr) {
+    if (rootfs == nullptr && cinux::drivers::ahci::AHCI::is_present()) {
         static auto ahci_blk = cinux::drivers::ahci::AHCIBlockDevice::create(
             cinux::drivers::ahci::AHCI::instance(), 1);
         static cinux::fs::Ext2 ahci_ext2(ahci_blk.ok() ? &ahci_blk.value() : nullptr);
         auto                   m = ahci_ext2.mount();
         if (!m.ok()) {
-            cinux::lib::kprintf("[INIT] ext2 mount failed: %s\n",
+            cinux::lib::kprintf("[INIT] AHCI ext2 mount failed: %s\n",
                                 cinux::lib::error_string(m.error()));
         }
         rootfs    = &ahci_ext2;
@@ -198,10 +206,12 @@ void kernel_init_thread() {
         if (nbd != nullptr) {
             perf_read("NVMe", *nbd, perf_buf);
         }
-        auto ahci_blk = cinux::drivers::ahci::AHCIBlockDevice::create(
-            cinux::drivers::ahci::AHCI::instance(), 0);
-        if (ahci_blk.ok()) {
-            perf_read("AHCI", ahci_blk.value(), perf_buf);
+        if (cinux::drivers::ahci::AHCI::is_present()) {
+            auto ahci_blk = cinux::drivers::ahci::AHCIBlockDevice::create(
+                cinux::drivers::ahci::AHCI::instance(), 0);
+            if (ahci_blk.ok()) {
+                perf_read("AHCI", ahci_blk.value(), perf_buf);
+            }
         }
     }
 
