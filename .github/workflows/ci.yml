@@ -202,7 +202,7 @@ jobs:
           # + crt), so every piece must come from the same N.  (Arch's gcc is one
           # monolithic package with cc1 inside, which hides this gap locally.)
           apt-packages: bc cmake xxd qemu-system-x86 e2fsprogs python3 curl rsync cpio ncurses-dev libssl-dev bison flex linux-libc-dev gcc-13 g++-13 cpp-13 binutils libc6-dev libgcc-13-dev libstdc++-13-dev
-          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot -DCINUX_ROOTFS_BUILDROOT_IMG=${{ github.workspace }}/build/rootfs-gcc.ext2
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILD_TESTS=ON -DCINUX_GUI=OFF -DCINUX_BUILDROOT_DIR=${{ github.workspace }}/build/buildroot-ci
           cache-buildroot: 'true'
 
       - name: Build buildroot base rootfs (cached)
