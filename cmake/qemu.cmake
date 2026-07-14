@@ -78,23 +78,15 @@ add_custom_command(
 # ext2 filesystem disk image (4 MB, mounted at AHCI port 1)
 set(EXT2_IMAGE "${CMAKE_BINARY_DIR}/ext2.img")
 
-# F-USABILITY: rootfs image selected by CINUX_ROOTFS_PROFILE (set in
-# cmake/options.cmake; CINUX_ROOTFS_BUILDROOT_IMG supplies the buildroot path).
-#   buildroot   -- external Buildroot rootfs.ext2 (real Linux userland; the
-#                  buildroot-usability CI gate). No CMake rebuild dep.
-#   handcrafted -- create_ext2_disk.sh-built ext2.img (default; the kernel
-#                  test rootfs with /hello, /forktest, busybox, ...).
-if(CINUX_ROOTFS_PROFILE STREQUAL "buildroot")
-    if(NOT CINUX_ROOTFS_BUILDROOT_IMG)
-        message(FATAL_ERROR
-            "CINUX_ROOTFS_PROFILE=buildroot requires -DCINUX_ROOTFS_BUILDROOT_IMG=<rootfs.ext2>")
-    endif()
-    set(ROOTFS_IMG "${CINUX_ROOTFS_BUILDROOT_IMG}")
-    set(ROOTFS_DEPS "")                  # 外部产,CMake 不重建
-else()
-    set(ROOTFS_IMG "${EXT2_IMAGE}")
-    set(ROOTFS_DEPS "${EXT2_IMAGE}")     # create_ext2_disk.sh custom command OUTPUT
-endif()
+# F-USABILITY: production rootfs = buildroot base + GCC closure, packed by
+# assemble-gcc-rootfs into rootfs-gcc.ext2 (the OUTPUT of the custom_command
+# near the bottom of this file). ROOTFS_DEPS points at that OUTPUT so
+# run/run-buildroot-usability/run-nvme-buildroot-usability rebuild it
+# automatically -- no manual assemble step.
+# (The handcrafted ext2.img TEST disk for run-kernel-test-all is separate --
+# EXT2_IMAGE below -- and unrelated to this production rootfs.)
+set(ROOTFS_IMG "${CINUX_ROOTFS_BUILDROOT_IMG}")
+set(ROOTFS_DEPS "${ROOTFS_IMG}")
 set(USER_SHELL_ELF "${CMAKE_BINARY_DIR}/user/shell")
 # F10-M1 batch 6: musl static hello at /hello when present (built by
 # tools/musl/build-musl.sh + build-hello.sh; not a CMake target, so not a hard
@@ -157,7 +149,7 @@ set(CINUX_GUI_HOST_SRCS
 add_custom_command(
     OUTPUT ${CINUX_GUI_HOST_ELF}
     COMMAND ${CINUX_GUI_HOST_SCRIPT} ${CINUX_GUI_HOST_ELF}
-    DEPENDS ${CINUX_GUI_HOST_SRCS}
+    DEPENDS ${CINUX_GUI_HOST_SRCS} ${CMAKE_SOURCE_DIR}/build/musl-sysroot/lib/libc.a
     COMMENT "Building userspace GUI host (static musl ELF)"
     VERBATIM
 )
@@ -408,7 +400,7 @@ if(CINUX_GUI AND ROOTFS_IMG)
     add_custom_target(update-rootfs-host
         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/update_rootfs_host.sh
                 ${ROOTFS_IMG} ${CINUX_GUI_HOST_ELF}
-        DEPENDS ${CINUX_GUI_HOST_ELF}
+        DEPENDS ${CINUX_GUI_HOST_ELF} ${ROOTFS_IMG}
         COMMENT "Refreshing /cinux_gui_host in production rootfs (debugfs, no full assemble)"
         VERBATIM
     )
@@ -607,8 +599,8 @@ add_custom_target(run-kernel-test-all
 # cinux-usability-test.sh (inittab ::once:) runs ls/cat/uname/mkdir/pipe/
 # fork-exec, then cinux-exit -> sys_cinux_exit (221) -> port 0xf4 -> QEMU exits
 # (code<<1)|1 (0 -> exit 1 = pass, 1 -> exit 3 = fail); qemu_test_wrapper.sh
-# maps 1 -> SUCCESS. Build with -DCINUX_GUI=OFF -DCINUX_ROOTFS_PROFILE=buildroot
-# -DCINUX_ROOTFS_BUILDROOT_IMG=<rootfs.ext2>.
+# maps 1 -> SUCCESS. Build with -DCINUX_GUI=OFF (the production rootfs is
+# buildroot+GCC by default; assemble-gcc-rootfs builds rootfs-gcc.ext2 for you).
 add_custom_target(run-buildroot-usability
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/qemu_test_wrapper.sh
         ${QEMU_EXECUTABLE} ${QEMU_COMMON_FLAGS}
@@ -649,31 +641,71 @@ add_custom_target(run-nvme-buildroot-usability
     VERBATIM
 )
 
-# F-USABILITY stage 3: assemble the gcc-profile rootfs.ext2 (buildroot base
-# target + GCC toolchain closure via tools/gcc-toolchain/extract.sh).  Produces
-# a rootfs that ships a native gcc driver so `gcc /hello.c` runs on Cinux.
-# Assumes the buildroot base target dir (<buildroot>/output/target) already
-# exists (built out-of-tree by buildroot); CMake does not track that dependency.
+# F-USABILITY stage 3: assemble the production rootfs.ext2 (buildroot base +
+# GCC toolchain closure via tools/gcc-toolchain/extract.sh + /cinux_gui_host).
+# Ships a native gcc driver so `gcc /hello.c` runs on Cinux.
+#
+# The whole chain is CMake-tracked so `cmake --build build --target run` builds
+# it from scratch with NO manual steps:
+#   run -> rootfs-gcc.ext2 -> assemble-gcc-rootfs custom_command
+#                                |- cinux_gui_host ELF -> musl libc.a
+#                                `- buildroot-base stamp
+# buildroot-base / musl-sysroot use custom_command + a REAL OUTPUT (a stamp file
+# for buildroot's directory tree; libc.a for musl), so the chain is genuinely
+# incremental: an unchanged tree is skipped entirely (not re-invoked). The
+# underlying scripts are idempotent too, as a second line of defense. File-level
+# DEPENDS (libc.a / stamp paths) fire reliably even when a target is reached via
+# its OUTPUT file (run depends on rootfs-gcc.ext2, not the assemble target).
+
+# Buildroot base rootfs (musl + busybox userland) -- the out-of-tree base that
+# assemble merges the GCC closure into. build-buildroot.sh downloads the
+# buildroot tarball + Bootlin musl toolchain + builds busybox (~5-10 min first
+# run). The stamp marks "base built". CINUX_BUILDROOT_DIR defaults to
+# <source>/build/buildroot (matches assemble_gcc_rootfs.sh's default BR_TARGET);
+# CI overrides it to build/buildroot-ci to share the cached buildroot tree.
+set(CINUX_BUILDROOT_DIR "${CMAKE_SOURCE_DIR}/build/buildroot" CACHE PATH
+    "buildroot output dir; CI overrides to build/buildroot-ci to reuse its cache")
+set(CINUX_BUILDROOT_STAMP "${CINUX_BUILDROOT_DIR}/.cinux-buildroot.stamp")
+add_custom_command(
+    OUTPUT ${CINUX_BUILDROOT_STAMP}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-buildroot.sh
+            ${CINUX_BUILDROOT_DIR} cinuxos_base_defconfig
+    COMMAND ${CMAKE_COMMAND} -E touch ${CINUX_BUILDROOT_STAMP}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/build-buildroot.sh
+            ${CMAKE_SOURCE_DIR}/rootfs/buildroot/cinuxos_base_defconfig
+    COMMENT "Building buildroot base rootfs (musl + busybox; ~5-10min first run, incremental after)"
+    VERBATIM
+)
+add_custom_target(buildroot-base DEPENDS ${CINUX_BUILDROOT_STAMP})
+
+# musl sysroot (libc.a + crt + UAPI headers) -- the static-libc sysroot that
+# build-cinux-gui-host.sh links against. build-musl.sh builds it from the musl
+# tarball with the host GCC; libc.a is the real OUTPUT so this is incremental.
+set(CINUX_MUSL_SYSROOT "${CMAKE_SOURCE_DIR}/build/musl-sysroot")
+add_custom_command(
+    OUTPUT ${CINUX_MUSL_SYSROOT}/lib/libc.a
+    COMMAND ${CMAKE_SOURCE_DIR}/tools/musl/build-musl.sh
+    DEPENDS ${CMAKE_SOURCE_DIR}/tools/musl/build-musl.sh
+    COMMENT "Building musl sysroot (libc.a + crt for static user ELFs)"
+    VERBATIM
+)
+add_custom_target(musl-sysroot DEPENDS ${CINUX_MUSL_SYSROOT}/lib/libc.a)
+
 set(_assemble_rootfs_deps
     ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
     ${CMAKE_SOURCE_DIR}/tools/gcc-toolchain/extract.sh)
-# GUI=ON: the rootfs must ship /cinux_gui_host (static musl ELF built by
-# build-cinux-gui-host.sh via the cinux_gui_host target) so desktop_launch's
-# fork+execve finds it.  Pull the ELF in as a build dependency so
-# `cmake --build --target assemble-gcc-rootfs` builds it FIRST -- otherwise
-# assemble ships a rootfs without the host and the desktop boot ENOENTs on
-# /cinux_gui_host (the release rc1 miss; the CI musl step never built it).
+# GUI=ON: the rootfs must ship /cinux_gui_host (static musl ELF built by the
+# cinux_gui_host target) so desktop_launch's fork+execve finds it.
 if(CINUX_GUI)
     list(APPEND _assemble_rootfs_deps ${CINUX_GUI_HOST_ELF})
 endif()
 add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh
-            ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2
-    DEPENDS ${_assemble_rootfs_deps}
+    OUTPUT ${ROOTFS_IMG}
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/assemble_gcc_rootfs.sh ${ROOTFS_IMG}
+    DEPENDS ${_assemble_rootfs_deps} ${CINUX_BUILDROOT_STAMP}
     VERBATIM
 )
-add_custom_target(assemble-gcc-rootfs DEPENDS ${CMAKE_BINARY_DIR}/rootfs-gcc.ext2)
+add_custom_target(assemble-gcc-rootfs DEPENDS ${ROOTFS_IMG})
 
 # 测试内核调试模式
 add_custom_target(run-kernel-test-debug

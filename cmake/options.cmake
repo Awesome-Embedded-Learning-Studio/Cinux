@@ -128,25 +128,17 @@ option(CINUX_BUILD_TESTS "Build host unit tests (top-level test/ dir -> test_hos
 option(CINUX_USE_KVM "Use KVM acceleration (default OFF; TCG until host /dev/kvm GID is fixed)" OFF)
 
 # =============================================================================
-# Rootfs profile (F-USABILITY stage 2)
+# Production rootfs (buildroot base + GCC closure)
 # =============================================================================
-# Selects the rootfs the `run` / `run-*` QEMU targets attach as the ext2 disk.
-#   buildroot (default): real Linux userland (busybox + optional gcc/g++
-#     closure) pointed at by CINUX_ROOTFS_BUILDROOT_IMG. The default for local
-#     `make run` -- a real userland, not the tiny handcrafted fs. Build the img
-#     first: `cmake --build build --target assemble-gcc-rootfs` (-> rootfs-gcc.ext2).
-#   handcrafted: create_ext2_disk.sh-built ext2.img (tiny: musl /hello, /forktest,
-#     busybox). NOT the `make run` default anymore; kept because run-kernel-test-all
-#     attaches ext2.img directly (EXT2_IMAGE, regardless of profile) for a fast
-#     2290-test gate + musl ring-3 SMAP smoke + kernel-vs-rootfs isolation.
+# The production rootfs is ALWAYS buildroot-based now: assemble-gcc-rootfs packs
+# buildroot base + GCC closure + /cinux_gui_host into rootfs-gcc.ext2. `run` (and
+# the usability targets) depend on it, so `cmake --build build --target run`
+# builds it automatically -- no manual assemble step.
+# (The handcrafted ext2.img stays only as the run-kernel-test-all TEST disk --
+# EXT2_IMAGE in cmake/qemu.cmake -- a separate concern, not a user-facing rootfs
+# profile anymore.)
 set(CINUX_ROOTFS_BUILDROOT_IMG "${CMAKE_BINARY_DIR}/rootfs-gcc.ext2"
-    CACHE FILEPATH "Buildroot rootfs.ext2 (default: gcc closure from assemble-gcc-rootfs)")
-if(NOT DEFINED CINUX_ROOTFS_PROFILE)
-    set(CINUX_ROOTFS_PROFILE "buildroot")
-endif()
-set(CINUX_ROOTFS_PROFILE "${CINUX_ROOTFS_PROFILE}"
-    CACHE STRING "rootfs profile: handcrafted | buildroot")
-set_property(CACHE CINUX_ROOTFS_PROFILE PROPERTY STRINGS handcrafted buildroot)
+    CACHE FILEPATH "Production rootfs.ext2 (buildroot + GCC closure, assemble-gcc-rootfs output)")
 
 # =============================================================================
 # Switches that map 1:1 to a same-named PUBLIC compile definition on

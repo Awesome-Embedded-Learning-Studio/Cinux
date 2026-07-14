@@ -38,9 +38,10 @@ jobs:
           cache-musl: 'true'
           cache-busybox: 'true'
           cache-buildroot: 'true'
-          # console = GUI=OFF (shell); desktop = GUI=ON (desktop, default). Both
-          # use the buildroot rootfs profile (no handcrafted ext2 anymore).
-          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_ROOTFS_PROFILE=buildroot ${{ matrix.variant == 'console' && '-DCINUX_GUI=OFF' || '' }}
+          # console = GUI=OFF (shell); desktop = GUI=ON (desktop, default). The
+          # production rootfs is always buildroot+GCC now (no handcrafted ext2).
+          # Point cmake's buildroot-base at the CI-cached build/buildroot-ci tree.
+          cmake-flags: -DCMAKE_BUILD_TYPE=Release -DCINUX_BUILDROOT_DIR=${{ github.workspace }}/build/buildroot-ci ${{ matrix.variant == 'console' && '-DCINUX_GUI=OFF' || '' }}
 
       - name: Build musl + busybox user binaries
         run: |
