@@ -170,6 +170,14 @@ private:
     /// create_io_queues().
     cinux::lib::ErrorOr<uint16_t> io_submit(const NvmeCmd& cmd);
 
+    /// Poll the IO CQ head once for @p expected_cid's completion (NVMe async IO
+    /// B1).  Returns true with @p out_status set (phase bit stripped) when this
+    /// command's completion is at the head (phase tag flipped to io_cq_phase_);
+    /// consumes any mismatched entry at the head first and returns false so the
+    /// caller keeps polling.  Shared by io_submit (poll mode) and the MSI-X
+    /// completion IRQ handler (async mode, B2).
+    bool poll_one_completion(uint16_t expected_cid, uint16_t& out_status, bool& mismatch_reported);
+
     /// Build + submit an NVM Read (opcode 0x02) or Write (0x01) command
     /// (batch 4b).  cdw10/11 = SLBA, cdw12[15:0] = nlb-1, PRP1 = buf.phys(),
     /// PRP2 = 0 (single-page transfers only).
