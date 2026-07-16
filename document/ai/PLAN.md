@@ -17,6 +17,23 @@
 
 > 不在本批：git tag v1.0.0 + gh release（用户外发）。NVMe status=0x4080 根因未定位，后果已兜底（SIGBUS/SIGILL 杀进程不杀内核），列 CHANGELOG Known Issues。
 
+## ✅ v1.0.0 发版后可用化 + rc1 修订 + cmake 一键构建 — 2026-07-05→07-14
+
+> 发版门面（`d41cc2c`）合 main 后，真机/录屏/首启动暴露一批可用性与打包问题，逐主题打磨并修订 rc1（tag `v1.0.0-rc1`，`fccabb2`）。`d41cc2c`→`4fc5f72` 约 25 commit，按主题汇总（不逐条）：
+
+| 主题 | 代表 commit | 要点 |
+|----|------|------|
+| 网络可用化 | `79996b2` SOCK_RAW+ICMP / `c60a375` Ctrl 控制码+setitimer stub / `99e62c7` ping Ctrl+C+signal EINTR / `ff58be3` PTY 转发 ^C / `36798b9` EINTR re-sleep+handler 栈对齐 / `ba895d7` 真 setitimer(ITIMER_REAL) | 用户态 `ping 10.0.2.2` + Ctrl+C 打断全链通；busybox ping 每秒发包 |
+| 走时修正 | `490d8ac` PIT mode 3→2 | 修 IRQ0 2x 触发（square wave 每周期到 0 两次抬 IRQ），全系统走时归正 |
+| VFS/自省 | `075ef63` DevFs 不进 DentryCache / `070faeb` /proc/cpuinfo+version 常量统一 / `4680917` sched_getaffinity(204) | /dev/tty 按调用者 controlling tty 每进程动态解析（不缓存）；`nproc` 报对核数 |
+| GUI 交互 | `fcf1691` 键盘 USB HID 软件自动重复 / `ac68c98` 多终端 / `cdf1458` click-to-focus | 桌面交互打磨（点 Shell 图标开新终端、窗口内点击切键盘焦点） |
+| nvme yield 探索 | `c3dca73` io_submit poll 加 yield → `3c15fed` revert（lockdep panic）→ `93e2b55` revert host pump poll 10ms → `83ec5a2` 注释 | io_submit 持 `NvmeBlockDevice::lock_` schedule → lockdep panic；回退留 v1.1 异步 IO 注释提醒 |
+| 清理 | `63fb155` 删 production int$3 残留 / `818ce94` 录屏 mp4→gif / `bd3b88f` README 完整功能清单（13 子系统折叠）/ `16a2205` CHANGELOG 移 document/changelogs/ | |
+| 首启动盲区 + rc1 | `27b8155` AHCI 空单例守卫+NVMe mount 日志+desktop GUI=ON / `db58b2f` assemble-gcc-rootfs 依赖 cinux_gui_host / `ed1d21c`+`a3b4749`+`19a940d`+`74a9a76` CI 桌面镜像修复 / `fccabb2` rc1 修订 | 生产 `kernel_init` 首次真 boot 暴露连环 bug（run-kernel-test 测试盲区）；详见 [生产启动盲区 note](../notes/2026-07-13-production-kernel-init-blindspot.md) |
+| cmake 一键构建 | `4fc5f72` | `cmake --build build --target run` 从零跑起带 gcc 的 desktop（依赖链修复）；详见 [note](../notes/2026-07-14-cmake-one-command-run.md) |
+
+> **收官状态**：两 leg run-kernel-test-all 1946/0 绿；桌面 GUI + gcc/g++ + 用户态 ping 真跑通；rc1 tag 已发，正式 v1.0.0 tag 待打（用户外发）。本弧工作记录见 [notes 2026-07-*](../notes/)。NVMe `status=0x4080` 取证仍 🔄（见下段）。
+
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 
 > FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。

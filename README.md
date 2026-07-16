@@ -156,7 +156,7 @@ NXE + SMEP + SMAP(机制回读验证)+ ASLR + UID/GID + Stack Canary(-fstack-pro
 | 凭证 | getuid / geteuid / getgid / getegid / setuid / setgid / getgroups / setgroups |
 | 信息 | uname / sysinfo / getrusage / dmesg |
 | I/O 多路 | poll / select |
-| 其它 | getrandom / sched_getaffinity / arch_prctl / reboot / prlimit64(stub) / rseq(stub) / getcpu(stub) / set_robust_list(stub) / ping(自定义) / cinux_exit(自定义) |
+| 其它 | getrandom / sched_getaffinity / arch_prctl / reboot / prlimit64 / rseq(stub) / getcpu(stub) / set_robust_list(stub) / ping(自定义) / cinux_exit(自定义) |
 
 ### 💾 内存管理
 
