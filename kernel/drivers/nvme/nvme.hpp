@@ -133,6 +133,16 @@ public:
     /// batch 4b NVM Read/Write.
     cinux::lib::ErrorOr<void> create_io_queues();
 
+    /// Enable IRQ-driven async IO (B2): unmask the MSI-X completion entries and
+    /// flip io_submit from polling to Semaphore-blocked wait.  Production only --
+    /// the test kernel (IF=0, masked) never calls it, so its io_submit polls.
+    cinux::lib::ErrorOr<void> enable_async_irq();
+
+    /// Top half of the MSI-X completion IRQ (vector 0x41): poll the IO CQ for
+    /// the pending command, store its status, post io_completion_sema_.  Internal
+    /// -- invoked by nvme_irq_handler via active_nvme_ctrl().
+    void handle_completion_irq();
+
     /// Read @p nlb LBAs starting at @p slba from namespace @p nsid into @p buf
     /// (batch 4b).  @p buf is a DMA buffer, page-aligned, holding at least
     /// nlb*lba_size bytes; only single-page transfers are supported (PRP1 only,
@@ -212,6 +222,23 @@ private:
     // io_cq_phase_ -- two CPUs submitting concurrently clobber each other's SQ
     // slot and desynchronize completion handling. Serialize.
     cinux::proc::Spinlock          io_lock_;
+    // NVMe async IO (B2): IRQ-driven completion.  io_irq_mode_ gates the IRQ
+    // path -- production unmask + true; the test kernel keeps IF=0 + entries
+    // masked, so io_submit stays in poll mode there.  Single in-flight:
+    // io_pending_cid_ is the one outstanding command; the IRQ handler polls the
+    // CQ for it, stores io_last_status_, and posts io_completion_sema_.
+    bool                   io_irq_mode_     = false;
+    uint16_t               io_pending_cid_  = 0;
+    uint16_t               io_last_status_  = 0;
+    cinux::proc::Semaphore io_completion_sema_;
 };
+
+/// Production NVMe controller accessor: main.cpp sets the boot controller once
+/// create_io_queues() succeeds; the MSI-X IRQ handler reads it to dispatch
+/// completions.  nullptr in the test kernel (IF=0, no IRQ path).
+///@{
+NvmeController* active_nvme_ctrl();
+void            set_active_nvme_ctrl(NvmeController* ctrl);
+///@}
 
 }  // namespace cinux::drivers::nvme

@@ -33,10 +33,6 @@ bool NvmeController::poll_one_completion(uint16_t expected_cid, uint16_t& out_st
 
     const uint16_t completion_cid = cqe.cid;
     if (completion_cid != expected_cid) {
-        // A completion for a different command is at our CQ head -- another CPU's
-        // io_submit advanced here while we'd yielded, or a stale entry.  Consume
-        // it and keep polling for ours; the old "report + continue without
-        // advancing" deadlocks once yields let the head move.
         if (!mismatch_reported) {
             cinux::lib::kprintf(
                 "[NVMe] CQ CID mismatch raw=0x%x got=%u expected=%u sq_head=%u "
@@ -64,10 +60,29 @@ bool NvmeController::poll_one_completion(uint16_t expected_cid, uint16_t& out_st
 }
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
-    // Called under NvmeBlockDevice::lock_ (now a Mutex, batch B1) + holds
-    // io_lock_ (Spinlock) for the SQ enqueue + CQ poll.  B1 keeps synchronous
-    // poll; B2 swaps the poll loop for blocking on the MSI-X completion IRQ
-    // (dma_buf_ stays single-in-flight under the Mutex, so the wait is safe).
+    if (io_irq_mode_) {
+        // Production (B2): IRQ-driven.  Submit under io_lock_ (short critical
+        // section), then block on io_completion_sema_ -- the MSI-X IRQ handler
+        // (nvme_irq_handler -> handle_completion_irq) polls the CQ and posts.
+        // NvmeBlockDevice::lock_ (Mutex) is held across this sleep by the caller;
+        // Mutex is not on lockdep's held stack, so sleeping here is safe.  Single
+        // in-flight: io_pending_cid_ is set before the doorbell write so the IRQ
+        // handler polls the right command.
+        io_lock_.acquire();
+        io_pending_cid_   = io_next_cid_++;
+        NvmeCmd submitted = cmd;
+        submitted.cid     = io_pending_cid_;
+        auto* sq          = static_cast<NvmeCmd*>(io_sq_buf_.virt());
+        sq[io_sq_tail_]   = submitted;
+        io_sq_tail_       = (io_sq_tail_ + 1) % kIoQSize;
+        *io_sq_tdbell_    = io_sq_tail_;
+        io_lock_.release();
+        io_completion_sema_.wait();  // blocks until handle_completion_irq() posts
+        return io_last_status_;
+    }
+
+    // Test kernel (IF=0, MSI-X masked): synchronous poll.  Held under
+    // NvmeBlockDevice::lock_ (Mutex) + io_lock_ (Spinlock) for the poll.
     io_lock_.acquire();
     NvmeCmd submitted = cmd;
     submitted.cid     = io_next_cid_++;
@@ -92,8 +107,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
                                       (static_cast<uint64_t>(submitted.cdw11) << 32);
                 const uint16_t nlb  = static_cast<uint16_t>(submitted.cdw12) + 1;
                 cinux::lib::kprintf(
-                    "[NVMe] CQ error status=0x%x cid=%u cmd(op=0x%x nsid=%u slba=%llu "
-                    "nlb=%u)\n",
+                    "[NVMe] CQ error status=0x%x cid=%u cmd(op=0x%x nsid=%u slba=%llu nlb=%u)\n",
                     status, submitted.cid, submitted.opcode, submitted.nsid,
                     static_cast<unsigned long long>(slba), nlb);
             }
@@ -103,7 +117,6 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         __asm__ volatile("pause");
     }
 
-    // Timed out: completion never arrived within kIoTimeoutNs / kIoFallbackIters.
     auto*             cq = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
     volatile NvmeCqe& timed_out_cqe = cq[io_cq_head_];
     const uint64_t    slba =

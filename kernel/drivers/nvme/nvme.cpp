@@ -395,6 +395,38 @@ cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
     return {};
 }
 
+namespace {
+NvmeController* g_active_nvme_ctrl = nullptr;
+}  // namespace
+NvmeController* active_nvme_ctrl() { return g_active_nvme_ctrl; }
+void            set_active_nvme_ctrl(NvmeController* ctrl) { g_active_nvme_ctrl = ctrl; }
+
+void NvmeController::handle_completion_irq() {
+    if (!io_irq_mode_) {
+        return;  // poll mode (test kernel): IRQ should not fire -- defensive
+    }
+    uint16_t status            = 0;
+    bool     mismatch_reported = false;
+    if (poll_one_completion(io_pending_cid_, status, mismatch_reported)) {
+        io_last_status_ = status;
+        io_completion_sema_.post();  // wake the blocked io_submit
+    }
+    // No/mismatched completion at the head: leave the waiter blocked; the next
+    // real completion IRQ posts.  Single in-flight should not hit this.
+}
+
+cinux::lib::ErrorOr<void> NvmeController::enable_async_irq() {
+    // init_msi_x left every entry masked for poll mode; re-program + unmask the
+    // IO CQ interrupt vectors (program_vector clears the entry Mask bit per its
+    // contract).  switch_to_apic ran early in boot, so EOI targets the LAPIC.
+    msix_.program_vector(0, kNvmeIrqVector, 0);
+    msix_.program_vector(1, kNvmeIrqVector, 0);
+    io_irq_mode_ = true;
+    cinux::lib::kprintf("[NVMe] async IRQ mode enabled (MSI-X unmasked, vector 0x%x)\n",
+                        kNvmeIrqVector);
+    return {};
+}
+
 }  // namespace cinux::drivers::nvme
 
 namespace cinux::arch {
@@ -404,4 +436,7 @@ struct InterruptFrame;  // fwd decl for the ISR C handler signature
 volatile uint64_t g_nvme_irq_count = 0;
 extern "C" void   nvme_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
     g_nvme_irq_count = g_nvme_irq_count + 1;  // EOI by ISR_IRQ stub
+    if (cinux::drivers::nvme::NvmeController* ctrl = cinux::drivers::nvme::active_nvme_ctrl()) {
+        ctrl->handle_completion_irq();
+    }
 }

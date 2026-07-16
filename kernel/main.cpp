@@ -279,6 +279,13 @@ extern "C" void kernel_main() {
         if (nvme_ctrl.init(nvme_dev).ok() && nvme_ctrl.enable().ok() &&
             nvme_ctrl.init_msi_x().ok() && nvme_ctrl.identify_namespace(1, ns).ok() &&
             nvme_ctrl.create_io_queues().ok()) {
+            // B2: switch NVMe IO to IRQ-driven async (unmask MSI-X + flip
+            // io_submit to Semaphore-blocked wait).  switch_to_apic ran at Step
+            // 17, so completion IRQs (vector 0x41) reach the LAPIC, not the PIC.
+            cinux::drivers::nvme::set_active_nvme_ctrl(&nvme_ctrl);
+            if (auto irq_r = nvme_ctrl.enable_async_irq(); !irq_r.ok()) {
+                cinux::lib::kprintf("[NVMe] enable_async_irq failed\n");
+            }
             auto bd =
                 cinux::drivers::nvme::NvmeBlockDevice::create(nvme_ctrl, 1, ns.nsze, ns.lba_size);
             if (bd.ok()) {
