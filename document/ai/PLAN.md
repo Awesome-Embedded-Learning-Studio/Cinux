@@ -42,10 +42,10 @@
 
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
-| B0 | 立项 docs（本段 + ROADMAP F5 follow-up + todo 02-nvme 范围栅栏） | 🔄 | docs-only |
-| B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + NvmeController 加 `Semaphore io_completion_sema_`/`io_last_status_`/`io_pending_cid_` + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | 🔄 | 两 leg 绿（行为不变） |
-| B2 | 核心：`nvme_irq_handler` 填实（poll_one_completion + post）+ `io_submit` poll→`sema.wait` + HPET 超时兜底 | 🔄 | 两 leg 绿 + NVMe read/write round-trip 正确（-smp 2 关键） |
-| B3 | 注释更新（83ec5a2「为何不能 yield」→「现 blocking 等 IRQ」）+ GUI gcc/多 shell 不饿死验证（用户启）+ note | 🔄 | 两 leg 绿 + GUI gcc 不卡 |
+| B0 | 立项 docs（本段 + ROADMAP F5 follow-up + todo 02-nvme 范围栅栏） | ✅ `4c03874` | docs-only |
+| B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | ✅ `9a96218` | 两 leg 934/0 + NVMe round-trip 绿（行为不变）|
+| B2 | 核心：`nvme_irq_handler` 填实 + `enable_async_irq`（unmask）+ `io_submit` 双模式（prod sema.wait / test poll）+ main 接线 | ✅ `7d63c13`（test poll 绿）| 两 leg 934/0；**production IRQ 路径待 boot 验证** |
+| B3 | production boot 验证（用户启 GUI/run + gcc + 多 shell）+ 收官 note | ⏳ | 待 boot：日志 `async IRQ mode enabled` + gcc 编译时别的 shell 不卡 |
 
 > **风险**：lost-wakeup（Semaphore count 规避）；IRQ 丢失（HPET 兜底）；CQ phase 跨 CPU 一致性（单 in-flight + Semaphore 屏障）；Mutex 持锁 sleep（不入 lockdep 栈，B1 验证）。范围栅栏：不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
 
