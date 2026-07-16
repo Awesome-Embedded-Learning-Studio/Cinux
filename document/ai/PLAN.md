@@ -34,6 +34,21 @@
 
 > **收官状态**：两 leg run-kernel-test-all 1946/0 绿；桌面 GUI + gcc/g++ + 用户态 ping 真跑通；rc1 tag 已发，正式 v1.0.0 tag 待打（用户外发）。本弧工作记录见 [notes 2026-07-*](../notes/)。NVMe `status=0x4080` 取证仍 🔄（见下段）。
 
+## 🔄 NVMe 异步 IO（io_submit poll→IRQ-driven blocking）— 2026-07-16
+
+> 治 NVMe 同步 poll 饿死（gcc 编译时 `io_submit` 占满 CPU，别的 shell 卡；[note](../notes/2026-07-11-nvme-io-submit-yield-revert.md) 留的 v1.1+ 债）。单 IO in-flight 不变（不追吞吐，只治饿死）。分支 `feat/nvme-async-io`，从 main `62e96c6`。
+
+> **核心设计**：`io_submit` 提交 SQE（持 `io_lock_` Spinlock 短段）→ `Semaphore::wait` 阻塞等 completion → 醒后返回。`nvme_irq_handler`（@IST2，EOI 由 ISR_IRQ stub 拥有）填实：解析 CQ（复用抽出的 `poll_one_completion`）+ `Semaphore::post`。`NvmeBlockDevice::lock_` Spinlock→**Mutex**（要跨 `schedule_blocked`；Mutex 不入 lockdep held 栈，持锁 sleep 不 panic）。Semaphore 防 lost-wakeup（post 先于 wait 时 count>0 立返）；HPET 500ms deadline 兜底（IRQ 丢失则超时主动 poll）。
+
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| B0 | 立项 docs（本段 + ROADMAP F5 follow-up + todo 02-nvme 范围栅栏） | 🔄 | docs-only |
+| B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + NvmeController 加 `Semaphore io_completion_sema_`/`io_last_status_`/`io_pending_cid_` + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | 🔄 | 两 leg 绿（行为不变） |
+| B2 | 核心：`nvme_irq_handler` 填实（poll_one_completion + post）+ `io_submit` poll→`sema.wait` + HPET 超时兜底 | 🔄 | 两 leg 绿 + NVMe read/write round-trip 正确（-smp 2 关键） |
+| B3 | 注释更新（83ec5a2「为何不能 yield」→「现 blocking 等 IRQ」）+ GUI gcc/多 shell 不饿死验证（用户启）+ note | 🔄 | 两 leg 绿 + GUI gcc 不卡 |
+
+> **风险**：lost-wakeup（Semaphore count 规避）；IRQ 丢失（HPET 兜底）；CQ phase 跨 CPU 一致性（单 in-flight + Semaphore 屏障）；Mutex 持锁 sleep（不入 lockdep 栈，B1 验证）。范围栅栏：不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
+
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 
 > FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。
