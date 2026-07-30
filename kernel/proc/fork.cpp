@@ -430,15 +430,14 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
 
         // F10 SMP fix: copy_page_table_level() just cleared FLAG_WRITABLE and set
         // FLAG_COW on the PARENT's own live PTEs -- this CPU still has the parent's
-        // cr3 loaded, and fork() runs with IF=0 (SFMASK clears IF on syscall entry,
-        // no sti before dispatch) so the parent cannot migrate or be preempted. Until
-        // we invalidate the TLB the parent CPU keeps the stale WRITABLE entries and
-        // its next user-mode write goes THROUGH to the now-shared physical page,
-        // silently corrupting the child's later CoW copy. That is the SMP fork race;
-        // single-CPU was stable only because the next context switch reloads cr3
-        // (flushing the TLB) before the parent writes again. A LOCAL flush suffices
-        // here: only this CPU holds the parent's cr3, and the child's distinct cr3
-        // has never been loaded (clean TLB on first run). A cross-CPU shootdown
+        // cr3 loaded. fork() may now be preempted, but context switches load a
+        // different CR3; resuming this task reloads its CR3 before it can return
+        // to user mode. Until we invalidate the local TLB, a same-CPU continuation
+        // could keep stale WRITABLE entries and write THROUGH to the now-shared
+        // physical page, silently corrupting the child's later CoW copy. A LOCAL
+        // flush suffices for a single-threaded address space: another CPU can only
+        // run this Task after its old CPU switched CR3 away, and migration reloads
+        // the parent CR3. A cross-CPU shootdown
         // (needed for CLONE_VM threads sharing one address space) is a separate
         // follow-up, not required for the fork path. See note + [[f10-shell-launch-smp-fork-race]].
         flush_tlb_all();

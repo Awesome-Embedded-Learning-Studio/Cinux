@@ -35,9 +35,8 @@ InputEventDevice& InputEventDevice::instance() {
 void InputEventDevice::push_event(const cinux::gui::Event& ev) {
     // irq_guard: serialises the two producers (mouse IRQ12 + keyboard listener)
     // against the reader, and closes the lost-wakeup window vs a reader in the
-    // middle of prepare_to_wait().  wake_all() only flips waiters to runnable
-    // (Scheduler::unblock) -- it must not schedule() inline from the ISR
-    // (sti-in-syscall -> LAPIC tick traps the kernel stack -> sysret corrupts).
+    // middle of prepare_to_wait(). wake_all() only flips waiters to runnable;
+    // the common post-EOI irq_exit hook owns any resulting context switch.
     auto g = lock_.irq_guard();
     if (!events_.full()) {
         events_.push(ev);  // silent drop on overflow (matches the GUI EventQueue)

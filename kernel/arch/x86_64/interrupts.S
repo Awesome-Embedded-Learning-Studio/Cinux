@@ -72,9 +72,9 @@
     testb $3, %al                     # CPL bits (low 2 bits of CS)
     jz 1f                             # kernel mode (CPL=0) -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */
@@ -188,9 +188,9 @@
     testb $3, %al                     # CPL bits (low 2 bits of CS)
     jz 1f                             # kernel mode (CPL=0) -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */
@@ -304,9 +304,9 @@
     testb $3, %al                     # CPL bits
     jz 1f                             # kernel mode -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */

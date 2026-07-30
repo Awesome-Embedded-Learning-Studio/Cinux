@@ -11,10 +11,11 @@
  *     user args / writing user results, signal frame delivery, execve reading
  *     argv/envp) MUST go through these accessors. Each accessor raises AC only
  *     for the copy window via stac(), then clears it with clac().
- *   - RFLAGS.AC is a per-CPU bit and context_switch does NOT save RFLAGS, so an
- *     accessor window must NEVER block/schedule. Callers that need to block
- *     (blocking read, waitpid) stage data in a kernel buffer while blocked and
- *     copy_to_user() only after they are runnable again.
+ *   - RFLAGS.AC is a per-CPU bit. Hard-IRQ/exception entry executes CLAC before
+ *     any C code or preemption; IRET restores the interrupted AC state. An
+ *     accessor window must still NEVER block or voluntarily schedule. Callers
+ *     that need to block stage data in a kernel buffer and copy only after they
+ *     are runnable again.
  *
  * Fault handling (F-EXTABLE): copy_to_user / copy_from_user are a single
  * rep movsb whose only faulting instruction is annotated with _ASM_EXTABLE.

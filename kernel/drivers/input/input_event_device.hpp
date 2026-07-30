@@ -57,9 +57,8 @@ public:
 
     /// Enqueue one event from a hard-IRQ handler (mouse ISR / keyboard listener).
     /// Drops silently if the buffer is full (matches the GUI EventQueue policy).
-    /// Wakes every blocked reader.  ISR-safe: takes the Spinlock under
-    /// irq_guard and only wake_all()s (Scheduler::unblock -- sets runnable,
-    /// never schedule()s inline, per the sti-in-syscall #DF rule).
+    /// Wakes every blocked reader. ISR-safe: takes the Spinlock under irq_guard
+    /// and only wake_all()s; the common IRQ epilogue performs any switch.
     void push_event(const cinux::gui::Event& ev);
 
 private:

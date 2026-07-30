@@ -7,7 +7,7 @@
  * until one is ready or the timeout elapses.  select() just converts its fd_set
  * bitmaps into a pollfd[] and back.
  *
- * Blocking (event-driven, #DF-safe -- no sti/hlt in the syscall path):
+ * Blocking (event-driven):
  *  - timeout < 0 (infinite): park on every pollable fd's wait queue via the
  *    scheduler's prepare_to_wait() + schedule_blocked() (the same triplet a
  *    blocked pipe read / socket recv uses).  A producer on any of those fds

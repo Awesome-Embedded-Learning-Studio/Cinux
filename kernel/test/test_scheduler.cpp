@@ -766,7 +766,8 @@ void test_timer_preempts_kernel_task() {
     observed_preempt     = false;
 
     Scheduler::init();
-    RoundRobin rr;
+    static RoundRobin rr;
+    rr.clear();
     Scheduler::register_class(&rr);
 
     Task* boot   = TaskBuilder()

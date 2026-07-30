@@ -64,7 +64,8 @@ syscall_entry:
     # Step 1: SWAPGS -- activate kernel GS base, then STAC (F9 batch 4: SMAP --
     # allow user-memory access in the syscall handler; CLAC clears it before SYSRETQ).
     swapgs                              # kernel_gsbase↔user_gsbase: activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
+    cld                                 # kernel C ABI requires forward string operations
+    clac                                # user AC must never open a kernel uaccess window
 
     # Step 2: Save user RSP to per-CPU scratch, load kernel stack
     movq %rsp, %gs:8                   # %rsp→%gs:8: save user RSP in scratch slot
@@ -134,7 +135,7 @@ syscall_entry:
     movq 584(%rsp), %r8                # frame+56→%r8:  5th arg = a4 (original R10)
     movq 592(%rsp), %r9                # frame+64→%r9:  6th arg = a5 (original R8)
 
-    call syscall_dispatch              # call C dispatcher
+    call syscall_dispatch_preemptible  # dispatch with IRQs enabled
 
     addq $16, %rsp                     # $16→%rsp: remove 7th arg + alignment pad from stack
 
@@ -191,6 +192,21 @@ syscall_entry:
     sysretq                            # return to Ring 3
 
 .size syscall_entry, . - syscall_entry
+
+# ============================================================
+# Function: syscall_dispatch_preemptible
+# Purpose: Enable IRQ preemption only around the C syscall body
+# ============================================================
+.global syscall_dispatch_preemptible
+.type syscall_dispatch_preemptible, @function
+syscall_dispatch_preemptible:
+    sti                                # frame is complete; allow timer preemption
+    pushq 8(%rsp)                      # forward the seventh C argument + align stack
+    call syscall_dispatch
+    cli                                # freeze the frame-restore/SYSRET tail
+    addq $8, %rsp
+    ret
+.size syscall_dispatch_preemptible, . - syscall_dispatch_preemptible
 
 # ============================================================
 # Function: ret_from_fork

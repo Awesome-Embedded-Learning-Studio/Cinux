@@ -8,7 +8,7 @@
  * + schedule_blocked triplet) so a producer on ANY of them wakes it.
  *
  * The infinite-timeout path is true event-driven sleep (no spin); the finite
- * path yields between scans.  #DF-safe -- never sti/hlt inside the syscall path.
+ * path yields between scans.
  */
 
 #include "kernel/syscall/poll_core.hpp"

@@ -75,12 +75,22 @@ extern "C" {
  *   1. SWAPGS (swap GS base to kernel's GS)
  *   2. Switch to the per-CPU kernel stack
  *   3. Save user RSP, RCX, R11, and argument registers
- *   4. Call syscall_dispatch
+ *   4. Enable IRQs and call syscall_dispatch
  *   5. Restore state and return via SYSRETQ
  *
  * Never call this directly from C code.
  */
 void syscall_entry();
+
+/**
+ * @brief Dispatch with IRQs enabled, returning with IRQs disabled
+ *
+ * syscall_entry calls this only after its complete user/FPU frame is durable.
+ * Exported so the kernel mechanism test can exercise the exact production
+ * preemption window; normal C++ code must call syscall_dispatch() instead.
+ */
+int64_t syscall_dispatch_preemptible(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
+                                     uint64_t a4, uint64_t a5, uint64_t a6);
 
 /**
  * @brief C-level syscall dispatcher called from syscall_entry

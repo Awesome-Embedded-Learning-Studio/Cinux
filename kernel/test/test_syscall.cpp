@@ -29,8 +29,12 @@
 
 #include "big_kernel_test.h"
 #include "kernel/arch/x86_64/gdt.hpp"
+#include "kernel/arch/x86_64/irq.hpp"
+#include "kernel/arch/x86_64/pic.hpp"
 #include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/arch/x86_64/user_access.hpp"
 #include "kernel/drivers/hpet/hpet.hpp"  // monotonic_ns (nanosleep duration check)
+#include "kernel/drivers/pit/pit.hpp"
 #include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"  // FDTable / File (F-ECO batch 4 dup/fcntl tests)
@@ -68,6 +72,8 @@ using cinux::syscall::sys_clock_gettime;
 using cinux::proc::Task;
 using cinux::proc::TaskState;
 using cinux::proc::TaskBuilder;
+using cinux::proc::RoundRobin;
+using cinux::proc::Scheduler;
 
 // ============================================================
 // Helper: read MSR via inline assembly
@@ -79,6 +85,12 @@ uint64_t read_msr(uint32_t msr) {
     uint32_t low, high;
     __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
     return (static_cast<uint64_t>(high) << 32) | low;
+}
+
+uint64_t read_rflags() {
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0" : "=rm"(flags));
+    return flags;
 }
 
 class CurrentFdTableGuard {
@@ -238,7 +250,139 @@ void test_dispatch_max_valid() {
 }  // namespace test_dispatch
 
 // ============================================================
-// Test 4: syscall_get_kernel_rsp
+// Test 4: exact syscall dispatcher window is timer-preemptible
+// ============================================================
+
+namespace test_preemptible_dispatch {
+
+constexpr uint64_t kTestSlot  = 198;
+constexpr int64_t  kReturnTag = 0x51C411;
+constexpr uint64_t kRflagsAc  = 1ULL << 18;
+constexpr uint64_t kRflagsDf  = 1ULL << 10;
+
+static volatile bool handler_entered_with_if;
+static volatile bool handler_started;
+static volatile bool handler_saw_peer;
+static volatile bool handler_ac_restored;
+static volatile bool handler_df_restored;
+static volatile bool peer_ran;
+static volatile bool peer_entered_with_if;
+static volatile bool peer_saw_ac_clear;
+static volatile bool peer_saw_df_clear;
+static volatile bool wrapper_returned_with_cli;
+static volatile bool result_ok;
+
+int64_t long_handler(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
+    handler_entered_with_if = cinux::arch::irq_enabled();
+    cinux::arch::stac();
+    __asm__ volatile("std" ::: "cc");
+    handler_started = true;
+
+    uint64_t start = cinux::drivers::PIT::get_ticks();
+    while (!peer_ran && cinux::drivers::PIT::get_ticks() - start < 8) {
+        __asm__ volatile("pause");
+    }
+
+    handler_saw_peer    = peer_ran;
+    handler_ac_restored = (read_rflags() & kRflagsAc) != 0;
+    handler_df_restored = (read_rflags() & kRflagsDf) != 0;
+    __asm__ volatile("cld" ::: "cc");
+    cinux::arch::clac();
+    return kReturnTag;
+}
+
+void dispatch_worker() {
+    cinux::arch::irq_disable();
+    int64_t result            = syscall_dispatch_preemptible(kTestSlot, 1, 2, 3, 4, 5, 6);
+    result_ok                 = result == kReturnTag;
+    wrapper_returned_with_cli = !cinux::arch::irq_enabled();
+}
+
+void peer_worker() {
+    peer_entered_with_if = cinux::arch::irq_enabled();
+    peer_saw_ac_clear    = (read_rflags() & kRflagsAc) == 0;
+    peer_saw_df_clear    = (read_rflags() & kRflagsDf) == 0;
+    peer_ran             = handler_started;
+}
+
+void test_long_syscall_is_timer_preempted() {
+    const bool irq_was_enabled = cinux::arch::irq_enabled();
+
+    handler_entered_with_if   = false;
+    handler_started           = false;
+    handler_saw_peer          = false;
+    handler_ac_restored       = false;
+    handler_df_restored       = false;
+    peer_ran                  = false;
+    peer_entered_with_if      = false;
+    peer_saw_ac_clear         = false;
+    peer_saw_df_clear         = false;
+    wrapper_returned_with_cli = false;
+    result_ok                 = false;
+
+    syscall_register(static_cast<SyscallNr>(kTestSlot), long_handler);
+    Scheduler::init();
+    static RoundRobin rr;
+    rr.clear();
+    Scheduler::register_class(&rr);
+
+    Task* boot   = TaskBuilder()
+                       .set_entry(dispatch_worker)
+                       .set_name("sys_preempt_boot")
+                       .set_priority(255)
+                       .set_sched_class(&rr)
+                       .build();
+    Task* worker = TaskBuilder()
+                       .set_entry(dispatch_worker)
+                       .set_name("sys_preempt_worker")
+                       .set_priority(1)
+                       .set_sched_class(&rr)
+                       .build();
+    Task* peer   = TaskBuilder()
+                       .set_entry(peer_worker)
+                       .set_name("sys_preempt_peer")
+                       .set_priority(1)
+                       .set_sched_class(&rr)
+                       .build();
+    TEST_ASSERT_NOT_NULL(boot);
+    TEST_ASSERT_NOT_NULL(worker);
+    TEST_ASSERT_NOT_NULL(peer);
+
+    boot->state  = TaskState::Running;
+    boot->on_cpu = 0;
+    Scheduler::set_current(boot);
+    cinux::arch::GDT::tss_set_ist2(boot->irq_stack_top);
+    Scheduler::add_task(worker, false);
+    Scheduler::add_task(peer, false);
+
+    cinux::drivers::PIT::init(100);
+    cinux::arch::PIC::unmask(0);
+    cinux::arch::irq_enable();
+    Scheduler::schedule();
+    cinux::arch::irq_disable();
+    cinux::arch::PIC::mask(0);
+
+    Scheduler::reap_deferred();
+    Scheduler::set_current(nullptr);
+    if (irq_was_enabled) {
+        cinux::arch::irq_enable();
+    }
+
+    TEST_ASSERT_TRUE(handler_entered_with_if);
+    TEST_ASSERT_TRUE(handler_saw_peer);
+    TEST_ASSERT_TRUE(handler_ac_restored);
+    TEST_ASSERT_TRUE(handler_df_restored);
+    TEST_ASSERT_TRUE(peer_entered_with_if);
+    TEST_ASSERT_TRUE(peer_saw_ac_clear);
+    TEST_ASSERT_TRUE(peer_saw_df_clear);
+    TEST_ASSERT_TRUE(wrapper_returned_with_cli);
+    TEST_ASSERT_TRUE(result_ok);
+}
+
+}  // namespace test_preemptible_dispatch
+
+// ============================================================
+// Test 5: syscall_get_kernel_rsp
 // ============================================================
 
 namespace test_kernel_rsp {
@@ -811,6 +955,7 @@ extern "C" void run_syscall_tests() {
     RUN_TEST(test_dispatch::test_dispatch_unregistered_returns_enosys);
     RUN_TEST(test_dispatch::test_dispatch_out_of_range_returns_enosys);
     RUN_TEST(test_dispatch::test_dispatch_max_valid);
+    RUN_TEST(test_preemptible_dispatch::test_long_syscall_is_timer_preempted);
 
     RUN_TEST(test_kernel_rsp::test_kernel_rsp_nonzero);
     RUN_TEST(test_kernel_rsp::test_kernel_rsp_matches_init);

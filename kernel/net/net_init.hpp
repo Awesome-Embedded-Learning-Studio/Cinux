@@ -11,12 +11,9 @@
  * #ifdef).
  *
  * RX is driven by a resident net_poll kernel thread (start_poll_driver()) that
- * polls NetStack + sti/hlt's to keep QEMU's main loop running.  ping() drives
- * an INJECTABLE pump: the production default yields (no sti/hlt inside the
- * syscall -- sti mid-syscall re-enables the timer IRQ and corrupts the syscall
- * trap frame -> #DF), while tests inject rx_pump_sti_hlt (or a mock).  This
- * "driven method" seam is what lets the #DF-safe production path coexist with
- * the test kernel's non-preemptive inline-sti/hlt RX driver.
+ * polls NetStack + sti/hlt's to keep QEMU's main loop running. ping() drives an
+ * INJECTABLE pump: production yields to the resident driver, while tests inject
+ * rx_pump_sti_hlt (or a mock).
  *
  * Namespace: cinux::net
  */
@@ -51,16 +48,14 @@ using RxPump = bool (*)();
 /// @brief Send one ICMP echo request to @p dst and drive @p pump until the
 ///        reply lands (drained by the net_poll kthread) or the budget is
 ///        exhausted (-ETIMEDOUT).  @p pump defaults to the production
-///        yield-pump (NO sti/hlt inside the syscall -- the #DF hazard);
-///        tests pass rx_pump_sti_hlt or a mock.
+///        yield-pump; tests pass rx_pump_sti_hlt or a mock.
 /// @return PingResult (got_reply set on success); Error::NotImplemented if the
 ///         stack is not up (no NIC / init() not called).
 cinux::lib::ErrorOr<PingResult> ping(Ipv4Addr dst, uint16_t id, uint16_t seq,
                                      RxPump pump = nullptr);
 
 /// @brief Legacy inline RX pump (poll + sti/hlt) for tests exercising real
-///        SLIRP delivery.  Safe in the test kernel (its timer handler does not
-///        tick); NEVER call from a production syscall (sti there is the #DF).
+///        SLIRP delivery. Production uses the resident poll driver instead.
 bool rx_pump_sti_hlt();
 
 /// @brief Spawn the background net RX poll-driver kernel thread.  Call ONCE
