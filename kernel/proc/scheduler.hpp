@@ -173,6 +173,9 @@ public:
     };
 
     static void tick();
+    /// Consume a deferred reschedule request at the outermost hardware-IRQ
+    /// return point.  Called with IF=0 after the controller EOI.
+    static void preempt_from_irq();
     static void schedule();
     static void block(lib::NotNull<Task*> task, const char* reason);
     static void unblock(lib::NotNull<Task*> task);
@@ -229,5 +232,8 @@ private:
     static lib::Atomic<int> tick_count_;
     static int              no_reschedule_depth_;  ///< >0 only inside the test harness
 };
+
+/// Assembly/C IRQ-epilogue bridge.
+extern "C" void irq_exit();
 
 }  // namespace cinux::proc

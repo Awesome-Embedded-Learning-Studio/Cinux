@@ -67,11 +67,31 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
     // Flag a preempt so this CPU reschedules at the next IRQ-return point.  If the
     // woken task should run on another CPU, wake_idle_ap()'s IPI sets need_resched
     // there instead.
-    percpu()->need_resched = true;
+    __atomic_store_n(&percpu()->need_resched, true, __ATOMIC_RELEASE);
 
     // Wake an idle AP so it can pick up this freshly runnable task (F4-M4 M4-2).
     // No-op on a single-core system.
     arch::wake_idle_ap();
+}
+
+void Scheduler::preempt_from_irq() {
+    PerCpu* cpu = percpu();
+    if (!initialized_ || cpu->current == nullptr || no_reschedule_depth_ > 0 ||
+        cpu->preempt_count != 0) {
+        return;
+    }
+    if (!__atomic_exchange_n(&cpu->need_resched, false, __ATOMIC_ACQ_REL)) {
+        return;
+    }
+
+    // The IRQ stub has already EOI'd its controller and still owns a complete
+    // frame on current()->irq_stack.  context_switch saves IF=0 for this
+    // continuation; the incoming task restores its own IF state.
+    schedule();
+}
+
+extern "C" void irq_exit() {
+    Scheduler::preempt_from_irq();
 }
 
 void Scheduler::prepare_to_wait(lib::NotNull<Task*> task) {

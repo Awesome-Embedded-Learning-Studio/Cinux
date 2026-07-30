@@ -93,6 +93,7 @@ void PIT::irq0_handler(InterruptFrame* /*frame*/) {
     // 1 s timer (busybox ping) fires ~every 100 ticks at 100 Hz.
     cinux::proc::itimer_real_tick(1'000'000'000ULL / freq_hz_);
     cinux::arch::irq_eoi(0);
+    cinux::proc::irq_exit();
 }
 
 // ============================================================

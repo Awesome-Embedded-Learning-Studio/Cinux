@@ -59,11 +59,13 @@
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
 | B0 | 安全切换底座：`CpuContext` 保存 IF；每任务 8 KiB guarded IRQ 栈，调度切换 IST2；spin/IRQ guard 接 `preempt_count`，Mutex 不污染 per-CPU 计数；fork/clone/回收全生命周期接线 | ✅ 本次 | `run-kernel-test-all` 两 leg 937/937；AP wake + shootdown PASS |
-| B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ⏳ | 两 leg + timer 强制切换机制测 + SMP |
+| B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ✅ 本次 | `run-kernel-test-all` 两 leg 938/938；timer 强制切换机制测 + AP wake/shootdown PASS |
 | B2 | syscall 内核段抢占：完整 syscall frame 后开 IRQ，返回尾 `cli`；内核临界区审计与抢占压力测 | ⏳ | 两 leg + syscall 长路径被定时器抢占证据 |
 | B3 | production 收官：NVMe IRQ blocking + gcc/多 shell/GUI 压测，文档同步 | ⏳ | production gate + full build |
 
-> B0 设计与 ABI 约束详见 [note](../notes/2026-07-30-scheduler-preempt-b0-context.md)。
+> B0 设计与 ABI 约束详见 [B0 note](../notes/2026-07-30-scheduler-preempt-b0-context.md)；
+> B1 IRQ-exit 切换协议与机制证据详见
+> [B1 note](../notes/2026-07-30-scheduler-preempt-b1-irq-exit.md)。
 
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 

@@ -336,6 +336,9 @@
     mov $\irq, %edi                   # ISA IRQ for PIC EOI
     call irq_eoi_isr                  # EOI via the active back-end
 
+    /* EOI is complete; the full frame remains on current()->irq_stack. */
+    call irq_exit
+
     /* deliver one pending signal before returning to user mode */
     leaq 520(%rsp), %rdi              # FXSAVE + padding -> InterruptFrame
     call signal_check_deliver_isr     # may rewrite the frame to enter a handler
@@ -443,10 +446,7 @@ ISR_IRQ irq15_stub, irq_default_handler, 15  /* IRQ15(0x2F): Secondary ATA */
 # ============================================================
 # Reschedule IPI (F4-M4 M4-2)
 # ============================================================
-# Vector 0xE0, sent by the BSP (wake_idle_ap) to pull an idle AP out of hlt
-# so it re-checks the shared run queue.  The handler body is now empty (the
-# ISR_IRQ stub EOIs); the AP's idle loop does the actual reschedule after the
-# stub returns.  \irq=0 is unused (IPIs are APIC-only).
+# Wake or preempt an AP: publish need_resched, EOI, then switch at irq_exit.
 # ============================================================
 ISR_IRQ reschedule_ipi_stub, reschedule_ipi_handler, 0
 

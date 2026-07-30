@@ -157,6 +157,7 @@ void Scheduler::ap_idle_entry() {
 void Scheduler::init() {
     class_count_      = 0;
     percpu()->current = nullptr;  // current() reads per-CPU (GS is anchored before init)
+    __atomic_store_n(&percpu()->need_resched, false, __ATOMIC_RELEASE);
     for (uint32_t i = 0; i < kMaxCpus; i++) {
         idle_tasks_[i] = nullptr;  // pristine per-CPU idle table (re-init isolation)
     }
@@ -383,18 +384,15 @@ void Scheduler::tick() {
     // for the pick below.
     timer_queue_tick();
 
-    // Account the running task's quantum, but do not context-switch inline from
-    // the timer IRQ.  context_switch.S enables IF before jumping to the next
-    // task; doing that while the old irq0 frame is still live lets the PIT
-    // re-enter recursively.  Real preemption needs a return-from-IRQ resched
-    // point; until then tasks switch via yield/block/exit only.
+    // Account the running task's quantum, but do not context-switch inside the
+    // timer handler.  irq_exit() runs after controller EOI while the complete
+    // interrupt continuation remains parked on this task's private IRQ stack.
     if (cur->sched_class != nullptr) {
         // task_tick returns true when the quantum is exhausted -- request a
-        // preempt at the next IRQ-return point (signal_check_deliver_isr).  tick()
-        // itself never context-switches inline (ISR reentry #DF, see pit.cpp); it
-        // only flags, and the IRQ-return preempt point honours it.
+        // preempt at the next IRQ-return point.  tick() only publishes the
+        // request; the common IRQ epilogue consumes it.
         if (cur->sched_class->task_tick(cur)) {
-            percpu()->need_resched = true;
+            __atomic_store_n(&percpu()->need_resched, true, __ATOMIC_RELEASE);
         }
     }
 }

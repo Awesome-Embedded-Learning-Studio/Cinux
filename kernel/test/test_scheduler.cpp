@@ -32,6 +32,9 @@ void kmemset(void* dst, int val, size_t n) {
 }  // anonymous namespace
 
 #include "big_kernel_test.h"
+#include "kernel/arch/x86_64/gdt.hpp"
+#include "kernel/arch/x86_64/pic.hpp"
+#include "kernel/drivers/pit/pit.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
 
@@ -42,6 +45,7 @@ using cinux::proc::CpuContext;
 using cinux::proc::Scheduler;
 using cinux::proc::RoundRobin;
 using cinux::proc::SchedulingClass;
+using cinux::proc::Spinlock;
 using cinux::proc::context_switch;
 
 // ============================================================
@@ -722,6 +726,94 @@ void test_pick_next_from_first_class_wins() {
 }  // namespace test_multi_class
 
 // ============================================================
+// Test 14: timer IRQ preempts kernel code and defers across Spinlock
+// ============================================================
+
+namespace test_irq_preempt {
+
+static volatile bool worker_entered       = false;
+static volatile bool peer_ran             = false;
+static volatile bool protected_phase_safe = false;
+static volatile bool observed_preempt     = false;
+static Spinlock      critical_lock;
+
+void cpu_bound_worker() {
+    worker_entered = true;
+
+    critical_lock.acquire();
+    uint64_t protected_start = cinux::drivers::PIT::get_ticks();
+    while (cinux::drivers::PIT::get_ticks() - protected_start < 4) {
+        __asm__ volatile("pause");
+    }
+    protected_phase_safe = !peer_ran;
+    critical_lock.release();
+
+    uint64_t preempt_start = cinux::drivers::PIT::get_ticks();
+    while (!peer_ran && cinux::drivers::PIT::get_ticks() - preempt_start < 8) {
+        __asm__ volatile("pause");
+    }
+    observed_preempt = peer_ran;
+}
+
+void peer_worker() {
+    peer_ran = worker_entered;
+}
+
+void test_timer_preempts_kernel_task() {
+    worker_entered       = false;
+    peer_ran             = false;
+    protected_phase_safe = false;
+    observed_preempt     = false;
+
+    Scheduler::init();
+    RoundRobin rr;
+    Scheduler::register_class(&rr);
+
+    Task* boot   = TaskBuilder()
+                       .set_entry(test_task_builder::dummy_entry)
+                       .set_name("preempt_boot")
+                       .set_priority(255)
+                       .set_sched_class(&rr)
+                       .build();
+    Task* worker = TaskBuilder()
+                       .set_entry(cpu_bound_worker)
+                       .set_name("preempt_worker")
+                       .set_priority(1)
+                       .set_sched_class(&rr)
+                       .build();
+    Task* peer   = TaskBuilder()
+                       .set_entry(peer_worker)
+                       .set_name("preempt_peer")
+                       .set_priority(1)
+                       .set_sched_class(&rr)
+                       .build();
+    TEST_ASSERT_NOT_NULL(boot);
+    TEST_ASSERT_NOT_NULL(worker);
+    TEST_ASSERT_NOT_NULL(peer);
+
+    boot->state  = TaskState::Running;
+    boot->on_cpu = 0;
+    Scheduler::set_current(boot);
+    cinux::arch::GDT::tss_set_ist2(boot->irq_stack_top);
+    Scheduler::add_task(worker, false);
+    Scheduler::add_task(peer, false);
+
+    cinux::drivers::PIT::init(100);
+    cinux::arch::PIC::unmask(0);
+    __asm__ volatile("sti");
+    Scheduler::schedule();
+    __asm__ volatile("cli");
+    cinux::arch::PIC::mask(0);
+
+    Scheduler::reap_deferred();
+    TEST_ASSERT_TRUE(protected_phase_safe);
+    TEST_ASSERT_TRUE(observed_preempt);
+    Scheduler::set_current(nullptr);
+}
+
+}  // namespace test_irq_preempt
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -760,6 +852,7 @@ extern "C" void run_scheduler_tests() {
     RUN_TEST(test_multi_class::test_pick_next_from_skips_empty);
     RUN_TEST(test_multi_class::test_pick_next_from_all_empty);
     RUN_TEST(test_multi_class::test_pick_next_from_first_class_wins);
+    RUN_TEST(test_irq_preempt::test_timer_preempts_kernel_task);
 
     TEST_SUMMARY();
 }

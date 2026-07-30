@@ -302,19 +302,13 @@ void boot_aps() {
 }
 
 // ============================================================
-// Reschedule IPI (F4-M4 M4-2): wake an idle AP so it re-checks the shared
-// run queue.  Once M4-2-2 switches the AP idle loop to sti;hlt, an IPI here
-// pulls the AP out of hlt and its loop runs schedule() again.
+// Reschedule IPI (F4-M4 M4-2): wake an idle AP and request a switch at the
+// common IRQ-exit preemption point.
 // ============================================================
 
-// The handler body is empty: the ISR_IRQ stub sends the EOI.  The actual
-// reschedule happens in the AP's idle loop after this stub returns control to
-// the hlt instruction.
 extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
-    // EOI is sent by the ISR_IRQ stub. Flag deferred preempt: the IRQ-return-to-user
-    // hook (signal_check_deliver_isr) calls schedule() so a cross-CPU-woken task is
-    // picked now, instead of waiting for this CPU's task to voluntarily yield.
-    cinux::proc::percpu()->need_resched = true;
+    // The ISR_IRQ epilogue EOIs, then irq_exit() consumes this request.
+    __atomic_store_n(&cinux::proc::percpu()->need_resched, true, __ATOMIC_RELEASE);
 }
 
 // ============================================================
@@ -327,6 +321,7 @@ extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
 extern "C" void lapic_timer_handler(InterruptFrame* /*frame*/) {
     cinux::proc::Scheduler::tick();
     cinux::arch::irq_eoi(0);
+    cinux::proc::irq_exit();
 }
 
 uint32_t online_ap_count() {
