@@ -322,6 +322,7 @@ void Scheduler::exit_current() {
     percpu()->current = next;
     // F4-followup (SMP migration race): claim next for this CPU (see schedule()).
     __atomic_store_n(&next->on_cpu, static_cast<int>(percpu()->cpu_id), __ATOMIC_RELEASE);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
     if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
         update_syscall_stack(next->kernel_stack_top);
@@ -336,6 +337,9 @@ void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
     percpu()->current = boot_task;
     boot_task->on_cpu = 0;  // F4-followup: runs on BSP, never went through ctx save
     cinux::arch::GDT::tss_set_rsp0(boot_task->kernel_stack_top);
+    if (boot_task->irq_stack_top != 0) {
+        cinux::arch::GDT::tss_set_ist2(boot_task->irq_stack_top);
+    }
 
     Task* next = pick_next_task();
     if (next == nullptr) {
@@ -345,6 +349,7 @@ void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
     percpu()->current = next;
     next->on_cpu      = 0;  // F4-followup: claim next for the BSP before context_switch
     cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
     update_syscall_stack(next->kernel_stack_top);
     __asm__ volatile("fxsave %0" : : "m"(boot_task->fpu_state));
     switch_addr_space(boot_task, next);
@@ -384,7 +389,13 @@ void Scheduler::tick() {
     // re-enter recursively.  Real preemption needs a return-from-IRQ resched
     // point; until then tasks switch via yield/block/exit only.
     if (cur->sched_class != nullptr) {
-        (void)cur->sched_class->task_tick(cur);
+        // task_tick returns true when the quantum is exhausted -- request a
+        // preempt at the next IRQ-return point (signal_check_deliver_isr).  tick()
+        // itself never context-switches inline (ISR reentry #DF, see pit.cpp); it
+        // only flags, and the IRQ-return preempt point honours it.
+        if (cur->sched_class->task_tick(cur)) {
+            percpu()->need_resched = true;
+        }
     }
 }
 
@@ -465,6 +476,7 @@ void Scheduler::schedule() {
     // F4-followup: claim next for this CPU before context_switch loads its ctx
     // (see Task::on_cpu).  pick_next() only returns on_cpu == -1 tasks.
     __atomic_store_n(&next->on_cpu, static_cast<int>(percpu()->cpu_id), __ATOMIC_RELEASE);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
 
     if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);

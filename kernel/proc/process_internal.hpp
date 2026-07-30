@@ -39,6 +39,15 @@ void inherit_process_identity(Task* child, const Task* parent, int child_pid);
 uint64_t alloc_stack_vaddr(uint64_t pages);
 
 /**
+ * @brief Allocate and map a guarded task-owned hardware-IRQ stack
+ *
+ * The stack is separate from the syscall/kernel stack because an IRQ-exit
+ * context may be suspended while another task runs.  Context switching updates
+ * IST2 to the incoming task's irq_stack_top.
+ */
+bool alloc_irq_stack(Task* task);
+
+/**
  * @brief Size of the syscall_entry pt_regs frame (16 qwords: user_rsp..rbp)
  *
  * It sits at the very top of the kernel stack
@@ -58,15 +67,15 @@ struct KernelForkCalleeRegs {
 
 inline KernelForkCalleeRegs capture_kernel_fork_callee_regs() {
     KernelForkCalleeRegs regs{};
-    __asm__ volatile("movq %%r15, %0\n\t"
-                     "movq %%r14, %1\n\t"
-                     "movq %%r13, %2\n\t"
-                     "movq %%r12, %3\n\t"
-                     "movq %%rbx, %4"
-                     : "=m"(regs.r15), "=m"(regs.r14), "=m"(regs.r13), "=m"(regs.r12),
-                       "=m"(regs.rbx)
-                     :
-                     : "memory");
+    __asm__ volatile(
+        "movq %%r15, %0\n\t"
+        "movq %%r14, %1\n\t"
+        "movq %%r13, %2\n\t"
+        "movq %%r12, %3\n\t"
+        "movq %%rbx, %4"
+        : "=m"(regs.r15), "=m"(regs.r14), "=m"(regs.r13), "=m"(regs.r12), "=m"(regs.rbx)
+        :
+        : "memory");
     return regs;
 }
 
@@ -74,8 +83,8 @@ inline KernelForkCalleeRegs capture_kernel_fork_callee_regs() {
 // is the VA of the table's entry 0 (PML4 caller passes i<<39); @p vmas is the
 // parent's VMA list -- at the leaf, MAP_SHARED entries stay writable (no CoW)
 // so writes hit the real shared page.
-void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level,
-                           uint64_t virt_base, cinux::mm::IVMAStore& vmas);
+void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level, uint64_t virt_base,
+                           cinux::mm::IVMAStore& vmas);
 
 /**
  * @brief Set up a USER fork/clone child to resume via ret_from_fork
@@ -120,15 +129,16 @@ void prepare_user_fork_context(Task* child, uint64_t parent_kernel_stack_top);
  */
 void prepare_kernel_fork_context(Task* child, uint64_t parent_stack_start,
                                  uint64_t parent_stack_top, uint64_t child_stack_start,
-                                 uint64_t parent_frame_base,
+                                 uint64_t                    parent_frame_base,
                                  const KernelForkCalleeRegs& caller_regs);
 
 /**
- * @brief Free a task's kernel stack (mapped, not direct-map)
+ * @brief Free a task's kernel and hardware-IRQ stacks
  *
  * Defined in process_new.cpp; used by waitpid reap (Q4e-2) and the scheduler's
  * deferred-free reaper (Q4e-3). Recovers phys via translate, unmaps each page,
- * frees the physical block. Safe only when the task is NOT running on it.
+ * frees each physical block. Safe only when the task is NOT running on either
+ * stack.
  */
 void free_kernel_stack(Task* task);
 

@@ -35,12 +35,15 @@ constexpr uint32_t kMaxCpus = 8;
 /// below lock these offsets so future field edits cannot silently break
 /// syscall.
 struct PerCpu {
-    uint64_t kernel_stack;  ///< @0  syscall %gs:0  — current task kernel stack top
-    uint64_t scratch1;      ///< @8  syscall %gs:8  — user RSP scratch
-    uint64_t scratch2;      ///< @16 syscall %gs:16 — syscall return value scratch
-    Task*    current;       ///< @24 task currently running on this CPU
-    uint32_t cpu_id;        ///< @32 logical CPU index (BSP = 0)
-    uint32_t apic_id;       ///< @36 Local APIC id
+    uint64_t kernel_stack;   ///< @0  syscall %gs:0  — current task kernel stack top
+    uint64_t scratch1;       ///< @8  syscall %gs:8  — user RSP scratch
+    uint64_t scratch2;       ///< @16 syscall %gs:16 — syscall return value scratch
+    Task*    current;        ///< @24 task currently running on this CPU
+    uint32_t cpu_id;         ///< @32 logical CPU index (BSP = 0)
+    uint32_t apic_id;        ///< @36 Local APIC id
+    bool     need_resched;   ///< deferred preempt request set by reschedule IPI / tick
+    int      preempt_count;  ///< >0 inside a lock / IRQ-disabled critical section:
+                             ///< involuntary preempt is forbidden until it hits 0.
 };
 
 static_assert(offsetof(PerCpu, kernel_stack) == 0, "kernel_stack MUST be @0 (syscall %gs:0)");

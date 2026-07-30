@@ -19,6 +19,10 @@ namespace cinux::proc {
 // ============================================================
 
 void Spinlock::acquire() {
+    // Disable involuntary preemption BEFORE publishing lock ownership.  If a
+    // timer IRQ lands after test-and-set but before the count increment, IRQ
+    // exit could otherwise switch away while this CPU still owns the lock.
+    ++percpu()->preempt_count;
     while (__atomic_test_and_set(&locked_, __ATOMIC_ACQUIRE)) {
         __asm__ volatile("pause");
     }
@@ -30,6 +34,8 @@ void Spinlock::acquire() {
 void Spinlock::release() {
     lockdep_releasing(this);
     __atomic_clear(&locked_, __ATOMIC_RELEASE);
+    // Publish the unlock before allowing an IRQ-exit preemption.
+    --percpu()->preempt_count;
 }
 
 Spinlock::IrqGuard::IrqGuard(Spinlock* lock) : lock_(lock) {
@@ -94,6 +100,7 @@ void Mutex::lock() {
         Scheduler::prepare_to_wait(self);
     }  // guard drops: release spin + restore IRQs, BEFORE switching out
     Scheduler::schedule_blocked();
+    // Re-acquired: unlock() transferred ownership to us during wake.
 }
 
 void Mutex::unlock() {
@@ -211,9 +218,11 @@ int64_t Semaphore::count() const {
 
 InterruptGuard::InterruptGuard() {
     __asm__ volatile("pushfq; popq %0; cli" : "=rm"(saved_flags_));
+    ++percpu()->preempt_count;  // IRQs disabled: non-preemptable section
 }
 
 InterruptGuard::~InterruptGuard() {
+    --percpu()->preempt_count;
     __asm__ volatile("pushq %0; popfq" : : "rm"(saved_flags_));
 }
 

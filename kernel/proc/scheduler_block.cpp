@@ -10,6 +10,7 @@
  */
 
 #include "kernel/arch/x86_64/smp.hpp"  // arch::wake_idle_ap (unblock)
+#include "kernel/proc/percpu.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"  // signal_deliverable_pending (TASK_INTERRUPTIBLE)
 
@@ -63,6 +64,10 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
         task->sched_class = &default_rr_;
     }
     task->sched_class->enqueue(task);
+    // Flag a preempt so this CPU reschedules at the next IRQ-return point.  If the
+    // woken task should run on another CPU, wake_idle_ap()'s IPI sets need_resched
+    // there instead.
+    percpu()->need_resched = true;
 
     // Wake an idle AP so it can pick up this freshly runnable task (F4-M4 M4-2).
     // No-op on a single-core system.

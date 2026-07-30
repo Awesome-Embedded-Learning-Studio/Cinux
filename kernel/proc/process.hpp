@@ -136,19 +136,9 @@ struct Task {
      *  Refilled by SchedulingClass::pick_next / task_fork / TaskBuilder::build. */
     int32_t  quantum_remaining;
 
-    /** Base of the kernel stack allocation (for freeing). */
-    uint64_t kernel_stack;
-
-    /** Top of the kernel stack (initial rsp). */
-    uint64_t kernel_stack_top;
-
-    /**
-     * Virtual address of the guard page below the kernel stack.
-     * This page is intentionally left unmapped; a fault here
-     * indicates a kernel stack overflow.
-     * Zero means no guard page (e.g. the boot task).
-     */
-    uint64_t kernel_stack_guard_page;
+    uint64_t kernel_stack;             ///< Mapped stack base (for freeing)
+    uint64_t kernel_stack_top;         ///< Initial RSP
+    uint64_t kernel_stack_guard_page;  ///< Unmapped guard below the stack; 0 for boot task
 
     /** Per-process page tables (nullptr for kernel-only threads). */
     cinux::mm::AddressSpace* addr_space;
@@ -263,6 +253,12 @@ struct Task {
 
     /** FPU/SSE state (512 bytes, 16-byte aligned for fxsave/fxrstor). */
     alignas(16) uint8_t fpu_state[512];
+
+    // Task-owned IST2 stack: a suspended IRQ frame cannot be overwritten by a
+    // later IRQ.  Kept here because assembly pins fpu_state at Task+384.
+    uint64_t irq_stack;
+    uint64_t irq_stack_top;
+    uint64_t irq_stack_guard_page;
 
     // F-ECO batch 8: supplementary groups (getgroups/setgroups -- `id`/`newgrp`).
     // Placed AFTER fpu_state so the fpu_state offset (pinned by the static_assert

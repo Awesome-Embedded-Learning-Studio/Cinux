@@ -12,9 +12,9 @@
 
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging.hpp"
-#include "kernel/arch/x86_64/tlb.hpp"  // B3 defect C: enqueue_pending_shootdown
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/phys_virt.hpp"
+#include "kernel/arch/x86_64/tlb.hpp"  // B3 defect C: enqueue_pending_shootdown
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"  // Q4e-2: free_kernel_stack translate/unmap
@@ -48,6 +48,20 @@ namespace {
 
 using namespace cinux::arch;
 
+void free_mapped_stack(uint64_t stack, uint64_t stack_top) {
+    if (stack == 0 || stack_top <= stack) {
+        return;
+    }
+
+    uint64_t stack_phys = cinux::mm::g_vmm.translate(stack);
+    for (uint64_t v = stack; v < stack_top; v += PAGE_SIZE) {
+        cinux::mm::g_vmm.unmap(v);
+    }
+    if (stack_phys != 0) {
+        cinux::mm::g_pmm.free_pages(stack_phys, (stack_top - stack) / PAGE_SIZE);
+    }
+}
+
 PageEntry* get_pte(uint64_t pml4_phys, uint64_t virt) {
     auto*      pml4  = phys_to_virt(pml4_phys);
     PageEntry& pml4e = pml4[PML4_INDEX(virt)];
@@ -69,6 +83,35 @@ PageEntry* get_pte(uint64_t pml4_phys, uint64_t virt) {
 }
 
 }  // anonymous namespace
+
+bool alloc_irq_stack(Task* task) {
+    constexpr uint64_t kPages = TaskBuilder::IRQ_STACK_PAGES;
+
+    uint64_t stack_phys = cinux::mm::g_pmm.alloc_pages(kPages);
+    if (stack_phys == 0) {
+        return false;
+    }
+
+    uint64_t guard_virt = alloc_stack_vaddr(kPages + 1);
+    uint64_t stack_virt = guard_virt + cinux::arch::PAGE_SIZE;
+    uint64_t mapped     = 0;
+    for (; mapped < kPages; mapped++) {
+        uint64_t phys = stack_phys + mapped * cinux::arch::PAGE_SIZE;
+        uint64_t virt = stack_virt + mapped * cinux::arch::PAGE_SIZE;
+        if (!cinux::mm::g_vmm.map(virt, phys, 0x03)) {
+            for (uint64_t i = 0; i < mapped; i++) {
+                cinux::mm::g_vmm.unmap(stack_virt + i * cinux::arch::PAGE_SIZE);
+            }
+            cinux::mm::g_pmm.free_pages(stack_phys, kPages);
+            return false;
+        }
+    }
+
+    task->irq_stack            = stack_virt;
+    task->irq_stack_top        = stack_virt + kPages * cinux::arch::PAGE_SIZE;
+    task->irq_stack_guard_page = guard_virt;
+    return true;
+}
 
 bool handle_cow_fault(uint64_t fault_vaddr) {
     auto* task = Scheduler::current();
@@ -130,7 +173,7 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
 }
 
 // ============================================================
-// F-QA Q4e-2 (DEBT-002): free a reaped task's kernel stack
+// F-QA Q4e-2 (DEBT-002): free a reaped task's private kernel stacks
 // ============================================================
 
 // The stack was mapped (g_vmm.map, NOT direct-map) at [kernel_stack,
@@ -143,18 +186,12 @@ bool handle_cow_fault(uint64_t fault_vaddr) {
 // reaper (waitpid on the parent). exit_current() cannot use this directly
 // (it runs on its own stack); that path uses deferred free (Q4e-3).
 void free_kernel_stack(Task* task) {
-    if (task->kernel_stack == 0) {
-        return;
-    }
-    uint64_t stack_phys = cinux::mm::g_vmm.translate(task->kernel_stack);
-    for (uint64_t v = task->kernel_stack; v < task->kernel_stack_top; v += cinux::arch::PAGE_SIZE) {
-        cinux::mm::g_vmm.unmap(v);
-    }
-    if (stack_phys != 0) {
-        uint64_t count = (task->kernel_stack_top - task->kernel_stack) / cinux::arch::PAGE_SIZE;
-        cinux::mm::g_pmm.free_pages(stack_phys, count);
-    }
-    task->kernel_stack = 0;
+    free_mapped_stack(task->kernel_stack, task->kernel_stack_top);
+    free_mapped_stack(task->irq_stack, task->irq_stack_top);
+    task->kernel_stack     = 0;
+    task->kernel_stack_top = 0;
+    task->irq_stack        = 0;
+    task->irq_stack_top    = 0;
 }
 
 // ============================================================

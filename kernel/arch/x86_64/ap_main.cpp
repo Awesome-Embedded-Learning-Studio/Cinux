@@ -212,6 +212,7 @@ extern "C" void ap_main(uint64_t cpu_id) {
     //    resolves to idle.  setup_ap_idle() is idempotent.
     proc::Task* ap_idle = proc::Scheduler::setup_ap_idle(static_cast<uint32_t>(cpu_id));
     pcpu->current       = ap_idle;
+    cinux::arch::GDT::tss_set_ist2(ap_idle->irq_stack_top);
 
     // 7. First context switch into ap_idle_entry.  `dummy` is write-only
     //    (context_switch saves callee-saved regs + .restore rip + fs_base into
@@ -310,7 +311,10 @@ void boot_aps() {
 // reschedule happens in the AP's idle loop after this stub returns control to
 // the hlt instruction.
 extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
-    // EOI is sent by the ISR_IRQ stub.
+    // EOI is sent by the ISR_IRQ stub. Flag deferred preempt: the IRQ-return-to-user
+    // hook (signal_check_deliver_isr) calls schedule() so a cross-CPU-woken task is
+    // picked now, instead of waiting for this CPU's task to voluntarily yield.
+    cinux::proc::percpu()->need_resched = true;
 }
 
 // ============================================================

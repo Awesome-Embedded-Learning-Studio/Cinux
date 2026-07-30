@@ -89,12 +89,16 @@ void test_lock_unlock() {
     TEST_ASSERT_NOT_NULL(task);
 
     Scheduler::set_current(task);
+    percpu()->preempt_count = 0;
 
     Mutex m;
     m.lock();
-    // Lock succeeded without deadlock
+    // Sleeping locks are task-owned and may block.  They must not pin a
+    // per-CPU preemption counter across a context switch.
+    TEST_ASSERT_EQ(percpu()->preempt_count, 0);
 
     m.unlock();
+    TEST_ASSERT_EQ(percpu()->preempt_count, 0);
     TEST_ASSERT_TRUE(true);  // unlock succeeded without crash
 }
 

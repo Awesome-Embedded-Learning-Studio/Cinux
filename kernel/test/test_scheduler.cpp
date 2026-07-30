@@ -69,11 +69,16 @@ void test_build_basic_task() {
 
     // CpuContext should have rip pointing to dummy_entry
     TEST_ASSERT_EQ(task->ctx.rip, reinterpret_cast<uint64_t>(dummy_entry));
+    TEST_ASSERT_NE(task->ctx.rflags & 0x200u, 0u);
 
     // Stack should be non-zero and aligned
     TEST_ASSERT_NE(task->kernel_stack, 0u);
     TEST_ASSERT_NE(task->kernel_stack_top, 0u);
     TEST_ASSERT_GT(task->kernel_stack_top, task->kernel_stack);
+    TEST_ASSERT_NE(task->irq_stack, 0u);
+    TEST_ASSERT_NE(task->irq_stack_top, 0u);
+    TEST_ASSERT_GT(task->irq_stack_top, task->irq_stack);
+    TEST_ASSERT_NE(task->irq_stack_guard_page, task->kernel_stack_guard_page);
 
     // Stack overflow magic at the bottom
     TEST_ASSERT_EQ(*reinterpret_cast<uint64_t*>(task->kernel_stack), TaskBuilder::STACK_MAGIC);
@@ -206,7 +211,7 @@ void test_layout() {
     TEST_ASSERT_EQ(offsetof(CpuContext, rbx), 40u);
     TEST_ASSERT_EQ(offsetof(CpuContext, rsp), 48u);
     TEST_ASSERT_EQ(offsetof(CpuContext, rip), 56u);
-    TEST_ASSERT_EQ(offsetof(CpuContext, gs_base), 64u);
+    TEST_ASSERT_EQ(offsetof(CpuContext, rflags), 64u);
     TEST_ASSERT_EQ(offsetof(CpuContext, kgs_base), 72u);
     TEST_ASSERT_EQ(offsetof(CpuContext, fs_base), 80u);
     TEST_ASSERT_EQ(alignof(CpuContext), 16u);

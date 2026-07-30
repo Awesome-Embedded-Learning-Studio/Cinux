@@ -75,6 +75,9 @@ public:
     static_assert(STACK_PAGES == 2,
                   "kernel stacks must stay 8KB; fix stack depth instead of growing them");
 
+    /** Number of 4 KB pages per task-owned hardware-IRQ stack. */
+    static constexpr uint64_t IRQ_STACK_PAGES = 2;
+
 private:
     void (*entry_)()                      = nullptr;
     const char*              name_        = "unnamed";

@@ -46,8 +46,8 @@ using namespace cinux::arch;
  * new page table pages and recurses.  Shared with clone.cpp (declared in
  * process_internal.hpp).
  */
-void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level,
-                           uint64_t virt_base, cinux::mm::IVMAStore& vmas) {
+void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level, uint64_t virt_base,
+                           cinux::mm::IVMAStore& vmas) {
     auto* src_table = phys_to_virt(src_phys);
     auto* dst_table = phys_to_virt(dst_phys);
 
@@ -106,7 +106,8 @@ void copy_page_table_level(uint64_t src_phys, uint64_t dst_phys, int level,
             // MAP_SHARED stays writable: a write hits the real shared page,
             // not a private CoW copy (defect D CoW-decap).
             bool shared = false;
-            if (const cinux::mm::VMA* vma = vmas.find(virt_base + (static_cast<uint64_t>(i) << 12))) {
+            if (const cinux::mm::VMA* vma =
+                    vmas.find(virt_base + (static_cast<uint64_t>(i) << 12))) {
                 shared = cinux::mm::has_flag(vma->flags, cinux::mm::VmaFlags::Shared);
             }
             if ((entry_flags & FLAG_WRITABLE) && !shared) {
@@ -163,8 +164,11 @@ void prepare_user_fork_context(Task* child, uint64_t parent_kernel_stack_top) {
     std::memcpy(reinterpret_cast<void*>(child->kernel_stack_top - kSyscallFrameSize),
                 reinterpret_cast<void*>(parent_kernel_stack_top - kSyscallFrameSize),
                 kSyscallFrameSize);
-    child->ctx.rsp = child->kernel_stack_top - kSyscallFrameSize;
-    child->ctx.rip = reinterpret_cast<uint64_t>(ret_from_fork);
+    child->ctx.rsp    = child->kernel_stack_top - kSyscallFrameSize;
+    child->ctx.rip    = reinterpret_cast<uint64_t>(ret_from_fork);
+    // ret_from_fork restores registers before its own cli/swapgs/SYSRETQ tail;
+    // keep IRQs disabled until that assembly path reaches user mode.
+    child->ctx.rflags = 0;
 }
 
 void prepare_kernel_fork_context(Task* child, uint64_t parent_stack_start,
@@ -194,6 +198,9 @@ void prepare_kernel_fork_context(Task* child, uint64_t parent_stack_start,
     child->ctx.rbx = relocate_copied_stack_addr(caller_regs.rbx, parent_stack_start,
                                                 parent_stack_top, child_stack_start);
     child->ctx.rip = reinterpret_cast<uint64_t>(fork_child_trampoline);
+    uint64_t current_rflags;
+    __asm__ volatile("pushfq; popq %0" : "=rm"(current_rflags));
+    child->ctx.rflags = current_rflags;
 
     // CRITICAL (gcc-13 -O2 #GP root cause): the kernel caller may save stack
     // POINTERS in its own frame beyond the saved-rbp chain.  musl_hello_smoke_entry
@@ -242,6 +249,14 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     }
 
     std::memcpy(child, parent, sizeof(Task));
+    // Private stacks are allocated below.  Never let an early child teardown
+    // retain the parent's stack addresses inherited by the TCB memcpy.
+    child->kernel_stack            = 0;
+    child->kernel_stack_top        = 0;
+    child->kernel_stack_guard_page = 0;
+    child->irq_stack               = 0;
+    child->irq_stack_top           = 0;
+    child->irq_stack_guard_page    = 0;
 
     // F3-M2 batch 3: the memcpy just copied the parent's shared-resource
     // POINTERS (sig_actions / cwd / fd_table) into the child.  Give the child
@@ -324,6 +339,13 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     child->kernel_stack            = child_stack_virt;
     child->kernel_stack_top        = child_stack_virt + stack_size;
     child->kernel_stack_guard_page = child_guard_virt;
+    if (!alloc_irq_stack(child)) {
+        cinux::lib::kprintf("[PROC] fork: child IRQ stack allocation failed\n");
+        free_kernel_stack(child);
+        delete child;
+        pid_alloc.free(child_pid);
+        return -1;
+    }
 
     // ---- Child resume context (Linux-style fork child) ----
     if (parent->addr_space != nullptr) {
@@ -367,6 +389,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         child->addr_space = new cinux::mm::AddressSpace();
         if (child->addr_space == nullptr) {
             cinux::lib::kprintf("[PROC] fork: child address space allocation failed\n");
+            free_kernel_stack(child);
             delete child;
             pid_alloc.free(child_pid);
             return -1;
@@ -389,6 +412,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
             if (new_page == 0) {
                 cinux::lib::kprintf("[PROC] fork: page table allocation failed at PML4[%u]\n", i);
                 delete child->addr_space;
+                free_kernel_stack(child);
                 delete child;
                 pid_alloc.free(child_pid);
                 return -1;
@@ -401,8 +425,7 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
 
             child_pml4_table[i].raw = new_page | FLAG_PRESENT | FLAG_WRITABLE | FLAG_USER;
             copy_page_table_level(parent_pml4_table[i].phys_addr(), new_page, 3,
-                                  static_cast<uint64_t>(i) << 39,
-                                  parent->addr_space->vmas());
+                                  static_cast<uint64_t>(i) << 39, parent->addr_space->vmas());
         }
 
         // F10 SMP fix: copy_page_table_level() just cleared FLAG_WRITABLE and set

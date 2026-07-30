@@ -49,6 +49,22 @@
 
 > **风险**：lost-wakeup（Semaphore count 规避）；IRQ 丢失（HPET 兜底）；CQ phase 跨 CPU 一致性（单 in-flight + Semaphore 屏障）；Mutex 持锁 sleep（不入 lockdep 栈，B1 验证）。范围栅栏：不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
 
+## 🔄 调度器任意内核态抢占 — 2026-07-30
+
+> 接管 NVMe 异步 IO 后审查发现，原 `need_resched` 草案仍是合作式调度，且直接在共享 IST2
+> IRQ 栈上 `schedule()` 会让后续 IRQ 覆盖被挂起的返回帧；`context_switch` 无条件 `sti` 还会在旧
+> IRQ 未 IRET 时打开重入窗口。用户确认目标为真正的任意内核态抢占，按“任务自有 IRQ
+> 栈 → IRQ-exit 抢占 → syscall 内核段可中断/可抢占 → production 压测”分批落地。
+
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| B0 | 安全切换底座：`CpuContext` 保存 IF；每任务 8 KiB guarded IRQ 栈，调度切换 IST2；spin/IRQ guard 接 `preempt_count`，Mutex 不污染 per-CPU 计数；fork/clone/回收全生命周期接线 | ✅ 本次 | `run-kernel-test-all` 两 leg 937/937；AP wake + shootdown PASS |
+| B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ⏳ | 两 leg + timer 强制切换机制测 + SMP |
+| B2 | syscall 内核段抢占：完整 syscall frame 后开 IRQ，返回尾 `cli`；内核临界区审计与抢占压力测 | ⏳ | 两 leg + syscall 长路径被定时器抢占证据 |
+| B3 | production 收官：NVMe IRQ blocking + gcc/多 shell/GUI 压测，文档同步 | ⏳ | production gate + full build |
+
+> B0 设计与 ABI 约束详见 [note](../notes/2026-07-30-scheduler-preempt-b0-context.md)。
+
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 
 > FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。
