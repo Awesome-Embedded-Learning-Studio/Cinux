@@ -930,8 +930,8 @@ TEST("waitpid_semantics: zombie child can be reaped") {
     child.parent      = &parent;
 
     // Link child into parent's children list
-    child.wait_next = parent.children;
-    parent.children = &child;
+    child.child_next = parent.children;
+    parent.children  = &child;
 
     // Verify the setup
     ASSERT_EQ(parent.children, &child);
@@ -944,7 +944,7 @@ TEST("waitpid_semantics: zombie child can be reaped") {
     ASSERT_EQ(status, 42);
 
     // Simulate reap: unlink from children list
-    parent.children = child.wait_next;
+    parent.children = child.child_next;
     ASSERT_NULL(parent.children);
 
     // Simulate reap: free PID
@@ -972,12 +972,12 @@ TEST("waitpid_semantics: reap preserves sibling list") {
     child2.exit_status = 1;
 
     // children list: child1 -> child2
-    child1.wait_next = &child2;
-    child2.wait_next = nullptr;
-    parent.children  = &child1;
+    child1.child_next = &child2;
+    child2.child_next = nullptr;
+    parent.children   = &child1;
 
     // Reap child1 (head of list)
-    parent.children = child1.wait_next;
+    parent.children = child1.child_next;
     ASSERT_EQ(parent.children, &child2);
 }
 
@@ -997,27 +997,27 @@ TEST("waitpid_semantics: reap middle child from list") {
     child3.pid = 13;
 
     // children list: child1 -> child2 -> child3
-    child1.wait_next = &child2;
-    child2.wait_next = &child3;
-    child3.wait_next = nullptr;
-    parent.children  = &child1;
+    child1.child_next = &child2;
+    child2.child_next = &child3;
+    child3.child_next = nullptr;
+    parent.children   = &child1;
 
     // Reap child2 (middle): find prev (child1), skip child2
     Task* prev = nullptr;
     Task* cur  = parent.children;
     while (cur != nullptr && cur->pid != 12) {
         prev = cur;
-        cur  = cur->wait_next;
+        cur  = cur->child_next;
     }
     ASSERT_NOT_NULL(cur);
     ASSERT_EQ(prev, &child1);
 
     if (prev != nullptr) {
-        prev->wait_next = cur->wait_next;
+        prev->child_next = cur->child_next;
     } else {
-        parent.children = cur->wait_next;
+        parent.children = cur->child_next;
     }
-    ASSERT_EQ(child1.wait_next, &child3);
+    ASSERT_EQ(child1.child_next, &child3);
 }
 
 TEST("waitpid_semantics: no children returns ECHILD") {
@@ -1037,8 +1037,8 @@ TEST("waitpid_semantics: non-zombie child returns NotExited") {
     child.pid   = 11;
     child.state = TaskState::Running;
 
-    child.wait_next = nullptr;
-    parent.children = &child;
+    child.child_next = nullptr;
+    parent.children  = &child;
 
     // Child exists but is not zombie
     ASSERT_EQ(parent.children->state, TaskState::Running);
@@ -1059,9 +1059,9 @@ TEST("waitpid_semantics: pid=-1 waits for any zombie child") {
     child2.exit_status = 7;
 
     // children list: child1 -> child2
-    child1.wait_next = &child2;
-    child2.wait_next = nullptr;
-    parent.children  = &child1;
+    child1.child_next = &child2;
+    child2.child_next = nullptr;
+    parent.children   = &child1;
 
     // Scan for first zombie (pid=-1 semantics)
     Task* target   = nullptr;
@@ -1075,7 +1075,7 @@ TEST("waitpid_semantics: pid=-1 waits for any zombie child") {
             break;
         }
         cur_prev = cur;
-        cur      = cur->wait_next;
+        cur      = cur->child_next;
     }
 
     // Should find child2 (the zombie), skipping child1 (running)
@@ -1097,9 +1097,9 @@ TEST("waitpid_semantics: pid=-1 no zombie returns NotExited") {
     child2.pid   = 12;
     child2.state = TaskState::Ready;
 
-    child1.wait_next = &child2;
-    child2.wait_next = nullptr;
-    parent.children  = &child1;
+    child1.child_next = &child2;
+    child2.child_next = nullptr;
+    parent.children   = &child1;
 
     // Scan for any zombie: none found
     Task* target = nullptr;
@@ -1109,7 +1109,7 @@ TEST("waitpid_semantics: pid=-1 no zombie returns NotExited") {
             target = cur;
             break;
         }
-        cur = cur->wait_next;
+        cur = cur->child_next;
     }
 
     ASSERT_NULL(target);

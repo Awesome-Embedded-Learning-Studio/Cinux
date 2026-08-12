@@ -25,7 +25,7 @@ constexpr int kMaxEdges = 256;  ///< global lock-order graph edges
 constexpr int kMaxDfs   = 64;   ///< visited-node bound for the cycle DFS
 
 // Per-CPU stack of spinlock addresses currently held on that CPU.  Indexed by
-// percpu()->cpu_id (a single global depth counter, as Part1 used, is wrong on
+// current_cpu_id() (a single global depth counter, as Part1 used, is wrong on
 // SMP -- two CPUs would mutate one counter).
 struct HeldStack {
     const void* held[kMaxHeld];
@@ -74,9 +74,9 @@ bool reaches(const void* from, const void* to) {
     static const void* visited[kMaxDfs];
     int                nvis = 0;
     static const void* stack[kMaxDfs];
-    int                sp   = 0;
-    stack[sp++]     = from;
-    visited[nvis++] = from;
+    int                sp = 0;
+    stack[sp++]           = from;
+    visited[nvis++]       = from;
     while (sp > 0) {
         const void* cur = stack[--sp];
         for (uint32_t i = 0; i < g_edge_count; i++) {
@@ -115,7 +115,7 @@ bool has_edge(const void* from, const void* to) {
 }  // namespace
 
 void lockdep_acquired(const void* lock) {
-    uint32_t cpu = percpu()->cpu_id;
+    uint32_t cpu = current_cpu_id();
     if (cpu >= kMaxCpus) {
         return;  // pre-percpu boot (GS not yet anchored): skip
     }
@@ -156,7 +156,7 @@ void lockdep_acquired(const void* lock) {
 }
 
 void lockdep_releasing(const void* lock) {
-    uint32_t cpu = percpu()->cpu_id;
+    uint32_t cpu = current_cpu_id();
     if (cpu >= kMaxCpus) {
         return;
     }
@@ -182,12 +182,12 @@ void lockdep_releasing(const void* lock) {
 }
 
 uint32_t lockdep_held_depth() {
-    uint32_t cpu = percpu()->cpu_id;
+    uint32_t cpu = current_cpu_id();
     return (cpu < kMaxCpus) ? static_cast<uint32_t>(g_held[cpu].depth) : 0;
 }
 
 bool lockdep_is_held(const void* lock) {
-    uint32_t cpu = percpu()->cpu_id;
+    uint32_t cpu = current_cpu_id();
     if (cpu >= kMaxCpus) {
         return false;  // pre-percpu boot: nothing is held
     }

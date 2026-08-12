@@ -218,6 +218,9 @@ private:
 
     /** Remove and return the head of the wait queue. */
     Task* dequeue_waiter();
+
+    /** True while @p task is still queued and has not received a post grant. */
+    bool has_waiter(Task* task) const;
 };
 
 // ============================================================

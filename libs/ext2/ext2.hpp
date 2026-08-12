@@ -20,14 +20,14 @@
 #include <stdint.h>
 
 #include "ext2_common.hpp"
+#include "ext2_mutex.hpp"
 #include "ext2_types.hpp"
 #include "fs/vfs_filesystem.hpp"
 #include "kernel/drivers/block_device.hpp"
-#include "kernel/proc/sync.hpp"  // Spinlock (inode_cache_lock_)
 
 namespace cinux::fs {
 
-uint64_t ext2_read_count();   ///< cumulative ext2 read I/O (B2.5 dump_memory_stats)
+uint64_t ext2_read_count();  ///< cumulative ext2 read I/O (B2.5 dump_memory_stats)
 uint64_t ext2_read_bytes();
 uint64_t ext2_read_ns();
 
@@ -118,9 +118,9 @@ public:
     uint32_t blocks_count() const { return sb_.s_blocks_count; }
 
     /// Read into block_buf_ (NOT SMP-safe; see dst overload).  @return true on success.
-    bool read_block(uint32_t block_num);
+    bool                      read_block(uint32_t block_num);
     /// SMP-safe: read straight into @p dst (caller-provided).
-    bool read_block(uint32_t block_num, void* dst);
+    bool                      read_block(uint32_t block_num, void* dst);
     /// B3a: read @p block_count contiguous on-disk blocks straight into @p buf (one DMA,
     /// skipping block_buf_). Callers guarantee contiguity + block_count ≤ dma_buf (4 blk).
     cinux::lib::ErrorOr<void> read_disk_range(uint32_t start_disk_block, uint64_t block_count,
@@ -491,9 +491,9 @@ private:
     Ext2CachedInode* inode_cache_[EXT2_INODE_CACHE_SIZE]{};
 
     /// Live object count; capped at EXT2_INODE_CACHE_MAX (evict refcount==0).
-    uint32_t inode_cache_count_{0};
-    mutable cinux::proc::Spinlock inode_cache_lock_;  ///< SMP: serialize cache walks/evicts
-    mutable cinux::proc::Spinlock block_alloc_lock_;  ///< SMP: serialize block+inode bitmap alloc/free
+    uint32_t          inode_cache_count_{0};
+    mutable Ext2Mutex inode_cache_lock_;  ///< Sleepable: cache miss may issue block I/O
+    mutable Ext2Mutex block_alloc_lock_;  ///< Sleepable: bitmap RMW issues block I/O
 };
 
 }  // namespace cinux::fs

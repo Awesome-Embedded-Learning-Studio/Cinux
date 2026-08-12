@@ -141,6 +141,14 @@
 - **最低动作**: 立刻订正 signal.cpp:79-81 + note 的过时「安全」注释，防误导。
 - **✅ 已修（fix/procfs-toctou-snapshot，2026-06-30）**: 加 `TaskSnapshot` POD（process.hpp，name 拷字节防悬）+ `signal_snapshot_task(pid,snap&)` 锁内拷字段（signal.hpp/cpp，对齐 killpg 范式但 snapshot 值非指针）+ ProcFS stat/cmdline read 改走 snapshot（format 签名 `const Task*`→`const TaskSnapshot&`）+ 订正 find_by_pid 过时注释。run-kernel-test-all 两 leg 1020/0 + host 69/69。详见 [note](../../notes/2026-06-30-debt-022-procfs-toctou-snapshot.md)。
 
+### DEBT-024 `Task::parent` 裸指针跨父任务 deferred-free → 子退出 UAF
+- **维度**: 生命周期(D2/D4)　**优先级**: P0　**状态**: 🆕 登记待办（2026-08-12 NVMe/preempt 收官审计）　**核验**: ✅ production 调用链坐实
+- **位置**: `kernel/proc/process.hpp`(`Task::parent`) / `kernel/proc/scheduler.cpp`(`exit_current`→`reap_deferred` delete) / `kernel/syscall/sys_exit.cpp:58-78`(子退出 `signal_send(parent)` + `unblock(parent)`)
+- **现象**: kernel thread/launcher 可经 `exit_current()` 直接进入 deferred-free，但它 fork 的子任务仍保存裸 `parent`。父 TCB 被下一轮 schedule 删除后，子任务退出会解引用该地址发送 SIGCHLD并尝试 unblock；slab 若已复用该槽，可向无关 Task 投信号/改 runqueue，未复用时也是 UAF。
+- **根因**: DEBT-002 让 Task 真释放后，原有 parent 指针的“父活得比子久”隐含契约失效；当前既没有 orphan reparent，也没有 parent Task refcount/PID lookup lifetime。
+- **修复建议**: 对齐 Unix 生命周期，在父退出锁定 children 链并把存活子任务 reparent 给 init/PID1；子退出只通过受生命周期保护的 parent 引用通知。备选是 Task refcount + registry lookup acquire/release，但不能只在 sys_exit 做空指针判断（悬垂值非 null）。补“父先退出→子后退出→init reap”真实 SMP 测试。
+- **范围说明**: 该债早于本次 NVMe hang；原冻结发生在任何 child exit 之前，不是 owner/head/CID mismatch 根因。单独排期，避免在抢占根修里 ad-hoc 改进程语义。
+
 ## 🟡 Medium
 
 ### DEBT-018 `kMaxCpus` 两处定义不一致（同名不同值不同类型）✅
@@ -284,9 +292,9 @@
 ## ✅ 审计中确认已正确处理的项（对照清单，非债务）
 
 > 并发/SMP 维度审计确认 F4 核心同步原语质量高，以下**非债务**，记录在此防重复报告：
-> - GOTCHA#21（current_ 静态）✅ 已修：`Scheduler::current()` 读 `percpu()->current`
+> - GOTCHA#21（current_ 静态）✅ 已修：`Scheduler::current()` 用单条 `%gs:24` 读取本 CPU current，避免迁移时旧 PerCpu 指针
 > - GOTCHA#23（context_switch 恢复点读 per-CPU current）✅ 已修
-> - GOTCHA#24（prepare-to-wait）✅ 已修：Mutex/Sem/futex/waitpid 四处正确，lost-wakeup 窗口关闭
+> - GOTCHA#24（prepare-to-wait）✅ 已修：lost-wakeup 窗口关闭；Mutex/Semaphore 另以 handoff/grant predicate 拒绝通用虚假唤醒
 > - GOTCHA#25/#26（GS_BASE 清零 / 长模式禁 mov %gs）✅ 已修：`GDT::load()` 只 flush ds/es/ss
 > - lockdep per-CPU held stack + schedule-while-locked assert + AB-BA 图 ✅
 > - RoundRobin runqueue `irq_guard()` 保护，pick_next 原子取出 ✅

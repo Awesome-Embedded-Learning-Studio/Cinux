@@ -206,8 +206,10 @@ public:
 
     /// Switch away from the current task unless a NoRescheduleGuard is active.
     /// The wait-path partner of prepare_to_wait(); production (depth == 0) always
-    /// switches.  Equivalent to block()'s tail for the prepare-to-wait pattern.
-    static void schedule_blocked();
+    /// switches. Returns false only when the in-kernel test harness suppresses
+    /// dispatch, allowing blocking primitives to expose their queued state
+    /// without spinning inside a single-threaded test.
+    static bool schedule_blocked();
 
     // Ask each class in `classes` (precedence = array order, index 0 first) for
     // its next runnable task; return the first non-null, or nullptr if every

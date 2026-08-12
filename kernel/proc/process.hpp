@@ -239,6 +239,9 @@ struct Task {
     /** Singly-linked list of child tasks (head pointer). */
     Task* children;
 
+    /** Intrusive sibling link used only by the parent's children list. */
+    Task* child_next;
+
     /** Pointer to the parent task (nullptr for the kernel init task). */
     Task* parent;
 
@@ -248,9 +251,6 @@ struct Task {
     /** Intrusive link for wait-queue linked lists (Mutex / Semaphore). */
     Task* wait_next;
 
-    /** Generic per-task private data (set before first schedule). */
-    void* private_data;
-
     /** FPU/SSE state (512 bytes, 16-byte aligned for fxsave/fxrstor). */
     alignas(16) uint8_t fpu_state[512];
 
@@ -259,6 +259,9 @@ struct Task {
     uint64_t irq_stack;
     uint64_t irq_stack_top;
     uint64_t irq_stack_guard_page;
+
+    /** Generic per-task private data (set before first schedule). */
+    void* private_data;
 
     // F-ECO batch 8: supplementary groups (getgroups/setgroups -- `id`/`newgrp`).
     // Placed AFTER fpu_state so the fpu_state offset (pinned by the static_assert

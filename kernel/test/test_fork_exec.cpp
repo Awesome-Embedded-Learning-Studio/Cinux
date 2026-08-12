@@ -271,6 +271,24 @@ void test_pid_ppid_assignable() {
     TEST_ASSERT_EQ(t.exit_status, 5);
 }
 
+void test_child_link_is_independent_from_wait_queue_link() {
+    static Task parent{};
+    static Task child{};
+    static Task waiter{};
+
+    parent.children  = &child;
+    child.child_next = nullptr;
+    child.wait_next  = &waiter;
+
+    TEST_ASSERT_EQ(parent.children, &child);
+    TEST_ASSERT_NULL(child.child_next);
+    TEST_ASSERT_EQ(child.wait_next, &waiter);
+
+    child.wait_next = nullptr;
+    TEST_ASSERT_EQ(parent.children, &child);
+    TEST_ASSERT_NULL(child.child_next);
+}
+
 }  // namespace test_task_fields
 
 // ============================================================
@@ -928,8 +946,8 @@ void test_waitpid_zombie_child_reaped() {
     child.exit_status = 7;
 
     // Link child into parent
-    child.wait_next = tmp.children;
-    tmp.children    = &child;
+    child.child_next = tmp.children;
+    tmp.children     = &child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -961,9 +979,9 @@ void test_waitpid_any_zombie() {
     child2.exit_status = 99;
 
     // children: child1 -> child2
-    child1.wait_next = &child2;
-    child2.wait_next = nullptr;
-    tmp.children     = &child1;
+    child1.child_next = &child2;
+    child2.child_next = nullptr;
+    tmp.children      = &child1;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -992,8 +1010,8 @@ void test_waitpid_not_exited() {
     child.pid   = 41;
     child.state = TaskState::Running;
 
-    child.wait_next = nullptr;
-    tmp.children    = &child;
+    child.child_next = nullptr;
+    tmp.children     = &child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -1014,10 +1032,10 @@ void test_waitpid_not_found() {
     tmp.ppid = 1;
 
     Task child{};
-    child.pid       = 51;
-    child.state     = TaskState::Zombie;
-    child.wait_next = nullptr;
-    tmp.children    = &child;
+    child.pid        = 51;
+    child.state      = TaskState::Zombie;
+    child.child_next = nullptr;
+    tmp.children     = &child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -1038,10 +1056,10 @@ void test_waitpid_invalid_pid() {
     tmp.ppid = 1;
 
     Task child{};
-    child.pid       = 61;
-    child.state     = TaskState::Zombie;
-    child.wait_next = nullptr;
-    tmp.children    = &child;
+    child.pid        = 61;
+    child.state      = TaskState::Zombie;
+    child.child_next = nullptr;
+    tmp.children     = &child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -1116,7 +1134,7 @@ void test_reaped_pid_is_freed() {
     child.ppid        = 80;
     child.state       = TaskState::Zombie;
     child.exit_status = 0;
-    child.wait_next   = nullptr;
+    child.child_next  = nullptr;
     tmp.children      = &child;
 
     Task* prev = cinux::proc::Scheduler::current();
@@ -1163,6 +1181,7 @@ extern "C" void run_fork_exec_tests() {
 
     RUN_TEST(test_task_fields::test_pid_ppid_default_zero);
     RUN_TEST(test_task_fields::test_pid_ppid_assignable);
+    RUN_TEST(test_task_fields::test_child_link_is_independent_from_wait_queue_link);
 
     RUN_TEST(test_sys_fork_constant::test_sys_fork_number);
     RUN_TEST(test_sys_fork_constant::test_sys_fork_distinct);

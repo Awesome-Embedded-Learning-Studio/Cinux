@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/lockdep.hpp"
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/process.hpp"
@@ -22,7 +23,7 @@ void Spinlock::acquire() {
     // Disable involuntary preemption BEFORE publishing lock ownership.  If a
     // timer IRQ lands after test-and-set but before the count increment, IRQ
     // exit could otherwise switch away while this CPU still owns the lock.
-    ++percpu()->preempt_count;
+    preempt_disable();
     while (__atomic_test_and_set(&locked_, __ATOMIC_ACQUIRE)) {
         __asm__ volatile("pause");
     }
@@ -35,7 +36,7 @@ void Spinlock::release() {
     lockdep_releasing(this);
     __atomic_clear(&locked_, __ATOMIC_RELEASE);
     // Publish the unlock before allowing an IRQ-exit preemption.
-    --percpu()->preempt_count;
+    preempt_enable();
 }
 
 Spinlock::IrqGuard::IrqGuard(Spinlock* lock) : lock_(lock) {
@@ -79,28 +80,40 @@ Task* Mutex::dequeue_waiter() {
 }
 
 void Mutex::lock() {
-    Task* self = percpu()->current;
-    // Hold the metadata spinlock with IRQs disabled (F4-M4 prepare-to-wait): the
-    // state flip to Blocked + enqueue onto the wait queue must be atomic vs a
-    // concurrent unlock() on another CPU, and no local tick may preempt us while
-    // we hold the lock.  The guard drops (re-enables IRQs) before we switch out.
-    {
-        auto g = spin_.irq_guard();
-
-        // Fast path: mutex is free -- take ownership and return (guard drops).
-        if (owner_ == nullptr) {
-            owner_ = self;
-            return;
+    Task* self   = current_task();
+    bool  queued = false;
+    for (;;) {
+        // Hold the metadata spinlock with IRQs disabled: enqueue + Blocked must
+        // be atomic against unlock's ownership handoff. The local `queued`
+        // survives a context switch on this task's stack and distinguishes a
+        // real handoff from a recursive lock attempt.
+        {
+            auto g = spin_.irq_guard();
+            if (owner_ == nullptr) {
+                owner_ = self;
+                return;
+            }
+            if (queued && owner_ == self) {
+                return;  // unlock() dequeued us and transferred ownership
+            }
+            if (!queued) {
+                if (self != nullptr && owner_ == self) {
+                    cinux::lib::kpanic("mutex: recursive lock by tid=%lu", self->tid);
+                }
+                enqueue_waiter(self);
+                queued = true;
+            }
+            Scheduler::prepare_to_wait(self);
         }
 
-        // Contended: enqueue + mark ourselves Blocked under the lock.  A concurrent
-        // unlock() racing through the window finds us already Blocked and unblocks
-        // us; schedule()'s next==prev path then keeps us running -- no lost wakeup.
-        enqueue_waiter(self);
-        Scheduler::prepare_to_wait(self);
-    }  // guard drops: release spin + restore IRQs, BEFORE switching out
-    Scheduler::schedule_blocked();
-    // Re-acquired: unlock() transferred ownership to us during wake.
+        // Scheduler::unblock() is deliberately generic: signals, timers, child
+        // exit, and device queues may all call it. Treat such wakes as spurious
+        // until unlock() has explicitly handed this mutex to us; never return
+        // from lock() merely because Task::state became runnable.
+        if (!Scheduler::schedule_blocked()) {
+            return;  // single-threaded in-kernel test harness
+        }
+    }
 }
 
 void Mutex::unlock() {
@@ -108,7 +121,11 @@ void Mutex::unlock() {
     // the new owner (never wake a task while still holding its lock).
     Task* waiter;
     {
-        auto g = spin_.guard();
+        auto  g    = spin_.guard();
+        Task* self = current_task();
+        if (owner_ != self && (owner_ != nullptr || self != nullptr)) {
+            cinux::lib::kpanic("mutex: unlock by non-owner");
+        }
         waiter = dequeue_waiter();
         if (waiter == nullptr) {
             owner_ = nullptr;
@@ -127,7 +144,7 @@ bool Mutex::try_lock() {
         return false;  // g releases
     }
 
-    owner_ = percpu()->current;
+    owner_ = current_task();
     return true;  // g releases
 }
 
@@ -163,6 +180,15 @@ Task* Semaphore::dequeue_waiter() {
     return task;
 }
 
+bool Semaphore::has_waiter(Task* task) const {
+    for (Task* waiter = wait_head_; waiter != nullptr; waiter = waiter->wait_next) {
+        if (waiter == task) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void Semaphore::post() {
     // Increment + dequeue under the lock; release BEFORE unblocking the waiter.
     Task* waiter;
@@ -178,23 +204,30 @@ void Semaphore::post() {
 }
 
 void Semaphore::wait() {
-    Task* self = percpu()->current;
-    {
-        // IRQ-safe (F4-M4 prepare-to-wait): the Blocked flip + enqueue must be
-        // atomic vs a concurrent post() on another CPU, and no local tick may
-        // preempt us while we hold the lock.  The guard drops before we switch.
-        auto g = spin_.irq_guard();
-        count_--;
-
-        // Resource available: return immediately (guard drops).
-        if (count_ >= 0) {
-            return;
+    Task* self   = current_task();
+    bool  queued = false;
+    for (;;) {
+        {
+            // Decrement and enqueue exactly once. A real post grant removes us
+            // from this queue under the same spinlock; unrelated scheduler wakes
+            // leave us linked and therefore cannot satisfy wait().
+            auto g = spin_.irq_guard();
+            if (!queued) {
+                count_--;
+                if (count_ >= 0) {
+                    return;
+                }
+                enqueue_waiter(self);
+                queued = true;
+            } else if (!has_waiter(self)) {
+                return;  // post() dequeued us: the semaphore grant is ours
+            }
+            Scheduler::prepare_to_wait(self);
         }
-
-        enqueue_waiter(self);
-        Scheduler::prepare_to_wait(self);
-    }  // guard drops: release spin + restore IRQs, BEFORE switching out
-    Scheduler::schedule_blocked();
+        if (!Scheduler::schedule_blocked()) {
+            return;  // single-threaded in-kernel test harness
+        }
+    }
 }
 
 bool Semaphore::try_wait() {
@@ -218,11 +251,11 @@ int64_t Semaphore::count() const {
 
 InterruptGuard::InterruptGuard() {
     __asm__ volatile("pushfq; popq %0; cli" : "=rm"(saved_flags_));
-    ++percpu()->preempt_count;  // IRQs disabled: non-preemptable section
+    preempt_disable();  // IRQs disabled: non-preemptable section
 }
 
 InterruptGuard::~InterruptGuard() {
-    --percpu()->preempt_count;
+    preempt_enable();
     __asm__ volatile("pushq %0; popfq" : : "rm"(saved_flags_));
 }
 

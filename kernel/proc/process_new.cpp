@@ -228,7 +228,7 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
                 break;
             }
             cur_prev = cur;
-            cur      = cur->wait_next;
+            cur      = cur->child_next;
         }
 
         if (target != nullptr) {
@@ -241,9 +241,9 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
                 *reaped_pid = target_pid;
             }
             if (prev != nullptr) {
-                prev->wait_next = target->wait_next;
+                prev->child_next = target->child_next;
             } else {
-                parent->children = target->wait_next;
+                parent->children = target->child_next;
             }
             pid_alloc.free(target->pid);
             target->state  = TaskState::Dead;
@@ -302,7 +302,7 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
                     is_child = true;
                     break;
                 }
-                cur = cur->wait_next;
+                cur = cur->child_next;
             }
             if (!is_child) {
                 cinux::lib::kprintf("[WAITPID] pid=%d is not a child of pid=%d\n", pid,

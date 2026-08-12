@@ -13,9 +13,9 @@
  *   cinux::lib::kprintf / kvprintf / kpanic + sink-registration no-ops
  *   cinux::mm::kmalloc / kfree  (aligned + zeroed, matching the slab contract)
  *
- * Spinlock comes from host_spinlock.cpp; inode_ref / inode_unref from
- * kernel/fs/file.cpp (host-safe, the devfs test precedent). Both are linked
- * into the same integration test target.
+ * Ext2Mutex uses std::mutex in host builds; inode_ref / inode_unref come from
+ * kernel/fs/file.cpp (host-safe, the devfs test precedent). host_spinlock.cpp
+ * supplies FDTable's link-time Spinlock symbols from that translation unit.
  */
 
 #include <stdarg.h>
@@ -60,11 +60,13 @@ void kprintf_init() {}
 namespace cinux::mm {
 
 void* kmalloc(size_t size, size_t align) {
-    if (size == 0) return nullptr;
-    if (align < sizeof(void*)) align = sizeof(void*);
+    if (size == 0)
+        return nullptr;
+    if (align < sizeof(void*))
+        align = sizeof(void*);
     // aligned_alloc requires size to be a multiple of alignment.
     size_t rounded = (size + align - 1) & ~(align - 1);
-    void* p = aligned_alloc(align, rounded);
+    void*  p       = aligned_alloc(align, rounded);
     // Match the kernel slab contract: returned memory is zeroed (no stale-data
     // leak), which ext2 scratch buffers (KmBuf) and the allocator paths assume.
     if (p != nullptr) {

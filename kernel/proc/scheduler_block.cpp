@@ -67,7 +67,7 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
     // Flag a preempt so this CPU reschedules at the next IRQ-return point.  If the
     // woken task should run on another CPU, wake_idle_ap()'s IPI sets need_resched
     // there instead.
-    __atomic_store_n(&percpu()->need_resched, true, __ATOMIC_RELEASE);
+    request_reschedule();
 
     // Wake an idle AP so it can pick up this freshly runnable task (F4-M4 M4-2).
     // No-op on a single-core system.
@@ -75,12 +75,11 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
 }
 
 void Scheduler::preempt_from_irq() {
-    PerCpu* cpu = percpu();
-    if (!initialized_ || cpu->current == nullptr || no_reschedule_depth_ > 0 ||
-        cpu->preempt_count != 0) {
+    if (!initialized_ || current_task() == nullptr || no_reschedule_depth_ > 0 ||
+        local_preempt_count() != 0) {
         return;
     }
-    if (!__atomic_exchange_n(&cpu->need_resched, false, __ATOMIC_ACQ_REL)) {
+    if (!consume_reschedule()) {
         return;
     }
 
@@ -105,7 +104,7 @@ void Scheduler::prepare_to_wait(lib::NotNull<Task*> task) {
     task->state = TaskState::Blocked;
 }
 
-void Scheduler::schedule_blocked() {
+bool Scheduler::schedule_blocked() {
     // TASK_INTERRUPTIBLE for user-facing blocking IO: a task that recorded a
     // wait-queue head (pipe/socket/poll -- set via net::wait_enqueue / pipe's
     // enqueue) AND has a deliverable signal pending must NOT sleep.  prepare_to_wait()
@@ -124,14 +123,16 @@ void Scheduler::schedule_blocked() {
     if (self != nullptr && no_reschedule_depth_ == 0 && self->wait_queue_head != nullptr &&
         signal_deliverable_pending(self)) {
         self->state = TaskState::Running;  // undo prepare_to_wait()'s Blocked flip
-        return;
+        return true;
     }
     // Wait-path partner of prepare_to_wait(): switch out unless the in-kernel
     // test harness is role-playing (NoRescheduleGuard).  Production (depth == 0)
     // always switches.
     if (no_reschedule_depth_ == 0) {
         schedule();
+        return true;
     }
+    return false;
 }
 
 }  // namespace cinux::proc

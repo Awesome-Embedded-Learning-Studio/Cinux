@@ -279,7 +279,9 @@ add_cinux_integration_test(ext2_inode_ops
 # integration test (net_tcp pattern -- no STATIC lib: the kernel build needs
 # -mcmodel=kernel codegen, the host build must not, so one target cannot serve
 # both). EXT2_HOST_LIB_SOURCES is the shared link list: the real ext2 sources
-# + the host PAL (kprintf/kmalloc) + Spinlock + inode_ref/unref.
+# + the host PAL (kprintf/kmalloc) + inode_ref/unref. Ext2Mutex uses the host's
+# std::mutex directly; host_spinlock still backs FDTable symbols pulled in with
+# kernel/fs/file.cpp.
 set(EXT2_HOST_LIB_SOURCES
     unit/ext2_host_pal.cpp
     unit/host_spinlock.cpp
@@ -302,6 +304,7 @@ add_cinux_integration_test(ext2_host_link
     unit/test_ext2_host_link.cpp
     ${EXT2_HOST_LIB_SOURCES}
 )
+target_link_libraries(test_ext2_host_link PRIVATE -pthread)
 
 # B1b: real-logic ASAN test. Mounts the prebuilt 64 KiB image and exercises
 # readdir / multi-level lookup / read / create / write / read-back / unlink
@@ -313,6 +316,7 @@ add_cinux_integration_test(ext2_host
 )
 target_compile_definitions(test_ext2_host PRIVATE
     EXT2_TEST_IMG_PATH="${CMAKE_SOURCE_DIR}/test/data/ext2_test.img")
+target_link_libraries(test_ext2_host PRIVATE -pthread)
 
 # B2: host TSAN concurrency test. N threads over one Ext2 stress the
 # block_alloc_lock_ (alloc/free) and inode_cache_lock_ (lookup); TSan sees

@@ -69,11 +69,11 @@ void GDT::init() {
 }
 
 void GDT::tss_set_rsp0(uint64_t rsp0) {
-    gdt_blocks[cinux::proc::percpu()->cpu_id].tss_.rsp[0] = rsp0;
+    gdt_blocks[cinux::proc::current_cpu_id()].tss_.rsp[0] = rsp0;
 }
 
 void GDT::tss_set_ist2(uint64_t stack_top) {
-    gdt_blocks[cinux::proc::percpu()->cpu_id].tss_.ist[1] = stack_top;
+    gdt_blocks[cinux::proc::current_cpu_id()].tss_.ist[1] = stack_top;
 }
 
 void GDT::load() {

@@ -1,6 +1,9 @@
 # NVMe IO 异步化(io_submit poll→IRQ-driven blocking)
 
 > 日期：2026-07-16 · 分支 `feat/nvme-async-io` · B0-B2 ✅(test poll)，production IRQ 待 boot 验证
+>
+> **2026-08-12 更新**：B3 已完成，production SMP 卡死的设备/调度/同步取证与根修见
+> [收官 note](2026-08-12-nvme-preempt-stall-root-fix.md)。下文保留 B2 当时状态作历史记录。
 
 ## 背景
 

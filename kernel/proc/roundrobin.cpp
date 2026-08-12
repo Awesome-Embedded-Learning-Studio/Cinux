@@ -9,7 +9,7 @@
  */
 
 #include "kernel/lib/kprintf.hpp"
-#include "kernel/proc/percpu.hpp"  // F4-followup: percpu()->cpu_id in pick_next()
+#include "kernel/proc/percpu.hpp"  // F4-followup: current_cpu_id in pick_next()
 #include "kernel/proc/scheduler.hpp"
 
 namespace cinux::proc {
@@ -105,7 +105,7 @@ Task* RoundRobin::pick_next() {
     // own upcoming context_switch) -- we may pick it back (next==prev), which
     // keeps single-core round-robin correct (yield with no other runnable task
     // continues the same task instead of bouncing to idle).
-    const int my_cpu = static_cast<int>(percpu()->cpu_id);
+    const int my_cpu = static_cast<int>(current_cpu_id());
     int       best   = -1;
     for (int i = 0; i < count_; i++) {
         int   idx    = (head_ + i) % MAX_TASKS;

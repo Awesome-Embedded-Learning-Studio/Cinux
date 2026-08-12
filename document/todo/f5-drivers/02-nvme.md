@@ -3,20 +3,21 @@
 > 现代 SSD 协议。PCIe 设备，Admin Queue + I/O Queue。
 > 高性能存储接口，实现 IBlockDevice。
 
-## Follow-up：NVMe IO 异步化（2026-07-16，分支 `feat/nvme-async-io`，从 main `62e96c6`）
+## ✅ Follow-up：NVMe IO 异步化（2026-07-16→08-12，分支 `feat/nvme-async-io`）
 
 > M3 收官后 NVMe IO 是同步 poll（`io_submit` 轮询 CQ 占满 CPU），gcc 编译时饿死别的 shell（[note](../../notes/2026-07-11-nvme-io-submit-yield-revert.md) 留的 v1.1+ 债）。本 follow-up 改 IRQ-driven blocking。
 
 **范围栅栏**：单 IO in-flight 不变（不追吞吐，只治饿死）；不改 `IBlockDevice` 接口（调用方透明）；不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）；不碰 NVMe `0x4080` 取证（独立弧）。
 
-**核心设计**：`io_submit` 提交 SQE（持 `io_lock_` Spinlock 短段）→ `Semaphore::wait` 阻塞等 completion → 醒后返回。`nvme_irq_handler`（@IST2，EOI 由 ISR_IRQ stub 拥有）填实：解析 CQ（复用抽出的 `poll_one_completion`）+ `Semaphore::post`。`NvmeBlockDevice::lock_` Spinlock→**Mutex**（要跨 `schedule_blocked`；Mutex 不入 lockdep held 栈，持锁 sleep 不 panic）。
+**最终设计**：controller 的 sleepable submit Mutex 覆盖 SQ 发布到精确 CID completion，`io_lock_` 只护短队列状态；IRQ handler 以 active/ready/completed CID 发布并 post。Ext2 cache/allocator 与 File offset 的跨 IO 临界区均用 sleepable Mutex；所有可抢占 `current` 读取改为单条 GS-relative access，避免迁移后解引用旧 CPU 的 PerCpu。
 
-**批表**：B0 立项 docs / B1 锁基建（Mutex+Semaphore+`poll_one_completion` 抽出，io_submit 仍 poll） / B2 核心切换（IRQ handler 填实 + io_submit poll→sema.wait + HPET 兜底）/ B3 注释+GUI 验证+note。详见 [PLAN](../../ai/PLAN.md)「🔄 NVMe 异步 IO」段。
+**批表**：B0 立项 docs / B1 锁基建 / B2 IRQ blocking 核心 / B3 production SMP 取证与并发根修均完成。fresh SMP 双 exec 3/3 通过；两腿 942/942、host 66/66、Ext2 TSAN 绿。详见 [PLAN](../../ai/PLAN.md) 与 [收官 note](../../notes/2026-08-12-nvme-preempt-stall-root-fix.md)。
 
-**GOTCHA**：
-- Semaphore 防 lost-wakeup（post 先于 wait 时 count>0 立返）；HPET 500ms deadline 兜底 IRQ 丢失。
-- CQ phase 跨 CPU 一致性：单 in-flight + Semaphore 屏障保证「IRQ 处理 CQ → post → io_submit 醒读」顺序。
-- Mutex 持锁 sleep 不 panic（lockdep 只跟踪 Spinlock），但 B1 须验证 Mutex 替换不回归。
+**GOTCHA / 留续**：
+- 不要用“无 IRQ 日志”推断 MSI-X 丢失；热路径 `kprintf` 会争全局打印锁。先以 QEMU trace + LAPIC IRR/ISR/PBA + CQ phase 分层证伪。
+- `percpu()` 返回的 CPU-local 指针不可跨可抢占窗口；字段访问必须用 `%gs:offset` accessor，或先关闭抢占。
+- Mutex/Semaphore 的通用 scheduler wake 是虚假唤醒，只有对应 unlock/post 的 handoff/grant 才能让 wait 返回。
+- async wait 尚无设备超时；16-bit CID 回绕和多 in-flight 需要 generation/CID→waiter 表，留后续。
 
 ## 立项（2026-07-05，分支 `feat/f5-nvme-virtio`，从干净 main `bef86b0`）
 

@@ -34,22 +34,22 @@
 
 > **收官状态**：两 leg run-kernel-test-all 1946/0 绿；桌面 GUI + gcc/g++ + 用户态 ping 真跑通；rc1 tag 已发，正式 v1.0.0 tag 待打（用户外发）。本弧工作记录见 [notes 2026-07-*](../notes/)。NVMe `status=0x4080` 取证仍 🔄（见下段）。
 
-## 🔄 NVMe 异步 IO（io_submit poll→IRQ-driven blocking）— 2026-07-16
+## ✅ NVMe 异步 IO（io_submit poll→IRQ-driven blocking）— 收官 2026-08-12
 
 > 治 NVMe 同步 poll 饿死（gcc 编译时 `io_submit` 占满 CPU，别的 shell 卡；[note](../notes/2026-07-11-nvme-io-submit-yield-revert.md) 留的 v1.1+ 债）。单 IO in-flight 不变（不追吞吐，只治饿死）。分支 `feat/nvme-async-io`，从 main `62e96c6`。
 
-> **核心设计**：`io_submit` 提交 SQE（持 `io_lock_` Spinlock 短段）→ `Semaphore::wait` 阻塞等 completion → 醒后返回。`nvme_irq_handler`（@IST2，EOI 由 ISR_IRQ stub 拥有）填实：解析 CQ（复用抽出的 `poll_one_completion`）+ `Semaphore::post`。`NvmeBlockDevice::lock_` Spinlock→**Mutex**（要跨 `schedule_blocked`；Mutex 不入 lockdep held 栈，持锁 sleep 不 panic）。Semaphore 防 lost-wakeup（post 先于 wait 时 count>0 立返）；HPET 500ms deadline 兜底（IRQ 丢失则超时主动 poll）。
+> **收官设计**：controller 内部以 sleepable submit Mutex 保持单 IO in-flight，从 SQ 发布覆盖到精确 CID completion；IRQ handler 以 active/ready/completed CID 发布结果并唤醒 Semaphore。所有可能跨 Ext2/PageCache/NVMe wait 的锁均为 sleepable Mutex；GS-relative `current_task()` 消除迁移时旧 PerCpu 指针窗口。根因与取证见 [收官 note](../notes/2026-08-12-nvme-preempt-stall-root-fix.md)。
 
 | 批 | 范围 | 状态 | 验证 |
 |----|------|------|------|
 | B0 | 立项 docs（本段 + ROADMAP F5 follow-up + todo 02-nvme 范围栅栏） | ✅ `4c03874` | docs-only |
 | B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | ✅ `9a96218` | 两 leg 934/0 + NVMe round-trip 绿（行为不变）|
 | B2 | 核心：`nvme_irq_handler` 填实 + `enable_async_irq`（unmask）+ `io_submit` 双模式（prod sema.wait / test poll）+ main 接线 | ✅ `7d63c13`（test poll 绿）| 两 leg 934/0；**production IRQ 路径待 boot 验证** |
-| B3 | production boot 验证（用户启 GUI/run + gcc + 多 shell）+ 收官 note | ⏳ | 待 boot：日志 `async IRQ mode enabled` + gcc 编译时别的 shell 不卡 |
+| B3 | production SMP 双 exec/#PF 卡死取证并根修：GS current accessor、条件唤醒、sleepable FS/File 锁、精确 CID completion、调度 IRQ 关窗、children/wait link 分离 + 收官 note | ✅ 本次 | fresh SMP production 3/3 `NVME_REPRO_OK`、零 CID mismatch/panic；两 leg 942/942；host 66/66；Ext2 TSAN 绿 |
 
-> **风险**：lost-wakeup（Semaphore count 规避）；IRQ 丢失（HPET 兜底）；CQ phase 跨 CPU 一致性（单 in-flight + Semaphore 屏障）；Mutex 持锁 sleep（不入 lockdep 栈，B1 验证）。范围栅栏：不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
+> **留续**：async wait 的设备超时、CID generation/多 in-flight request table、parent raw-pointer 生命周期单独处理。范围栅栏仍不做多 dma buffer / SQ 多 slot。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
 
-## 🔄 调度器任意内核态抢占 — 2026-07-30
+## ✅ 调度器任意内核态抢占 — 收官 2026-08-12
 
 > 接管 NVMe 异步 IO 后审查发现，原 `need_resched` 草案仍是合作式调度，且直接在共享 IST2
 > IRQ 栈上 `schedule()` 会让后续 IRQ 覆盖被挂起的返回帧；`context_switch` 无条件 `sti` 还会在旧
@@ -61,7 +61,7 @@
 | B0 | 安全切换底座：`CpuContext` 保存 IF；每任务 8 KiB guarded IRQ 栈，调度切换 IST2；spin/IRQ guard 接 `preempt_count`，Mutex 不污染 per-CPU 计数；fork/clone/回收全生命周期接线 | ✅ 本次 | `run-kernel-test-all` 两 leg 937/937；AP wake + shootdown PASS |
 | B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ✅ 本次 | `run-kernel-test-all` 两 leg 938/938；timer 强制切换机制测 + AP wake/shootdown PASS |
 | B2 | syscall 内核段抢占：完整 syscall frame 后开 IRQ，返回尾 `cli`；IRQ/exception 入口清 DF/AC，IRET 恢复被中断标志；内核临界区审计与抢占压力测 | ✅ 本次 | 两 leg 939/939；长 syscall 被 timer 强制抢占 + AC/DF 隔离/恢复 PASS；ring3 musl hello 20/20 |
-| B3 | production 收官：NVMe IRQ blocking + gcc/多 shell/GUI 压测，文档同步 | ⏳ | production gate + full build |
+| B3 | production 收官：NVMe IRQ blocking 卡死取证；schedule/exit/run_first IRQ 关窗；GS-relative current；Mutex/Semaphore 条件唤醒；AP↔BSP wake 对称化 | ✅ 本次 | fresh SMP production 3/3；两 leg 942/942；host 66/66；详见 [收官 note](../notes/2026-08-12-nvme-preempt-stall-root-fix.md) |
 
 > B0 设计与 ABI 约束详见 [B0 note](../notes/2026-07-30-scheduler-preempt-b0-context.md)；
 > B1 IRQ-exit 切换协议与机制证据详见

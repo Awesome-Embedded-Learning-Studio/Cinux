@@ -68,6 +68,7 @@ void Ext2::invalidate_cached_inode(uint32_t ino) {
     // holds a reference (refcount > 0) we must keep the object (address-stability
     // invariant), so mark it stale: the next get_cached_inode() hit refreshes
     // the disk copy in place at the SAME address.
+    auto           g      = inode_cache_lock_.guard();
     const uint32_t bucket = ino % EXT2_INODE_CACHE_SIZE;
     for (Ext2CachedInode** pp = &inode_cache_[bucket]; *pp != nullptr; pp = &(*pp)->hash_next) {
         Ext2CachedInode* entry = *pp;

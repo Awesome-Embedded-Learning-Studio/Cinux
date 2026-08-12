@@ -215,6 +215,8 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
     child->on_cpu          = -1;
     child->vfork_parent    = nullptr;
     child->children        = nullptr;
+    child->child_next      = nullptr;
+    child->wait_next       = nullptr;
     child->exit_status     = 0;
     // The child is brand-new -- never on a wait queue.  Clear any inherited
     // wait_queue_head from the memcpy so a later signal_send does not wake a
@@ -364,8 +366,8 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
 
     // ---- Linkage: CLONE_THREAD is a sibling, NOT a child of the caller ----
     if (!(flags & kCloneThread)) {
-        child->wait_next = parent->children;
-        parent->children = child;
+        child->child_next = parent->children;
+        parent->children  = child;
     }
 
     if (flags & kCloneVfork) {

@@ -297,6 +297,8 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     child->parent          = parent;
     child->vfork_parent    = nullptr;
     child->children        = nullptr;
+    child->child_next      = nullptr;
+    child->wait_next       = nullptr;
     child->exit_status     = 0;
     // The child is a brand-new task -- never on a wait queue.  The memcpy may
     // have inherited the parent's wait_queue_head (non-null if the parent was
@@ -459,8 +461,8 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         }
     }
 
-    child->wait_next = parent->children;
-    parent->children = child;
+    child->child_next = parent->children;
+    parent->children  = child;
 
     // Copy FDTable from parent
     {

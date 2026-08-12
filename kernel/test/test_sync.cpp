@@ -39,6 +39,7 @@ using cinux::proc::Task;
 using cinux::proc::TaskBuilder;
 using cinux::proc::TaskState;
 using cinux::proc::Scheduler;
+using cinux::proc::local_preempt_count;
 using cinux::proc::percpu;
 
 // ============================================================
@@ -95,10 +96,10 @@ void test_lock_unlock() {
     m.lock();
     // Sleeping locks are task-owned and may block.  They must not pin a
     // per-CPU preemption counter across a context switch.
-    TEST_ASSERT_EQ(percpu()->preempt_count, 0);
+    TEST_ASSERT_EQ(local_preempt_count(), 0);
 
     m.unlock();
-    TEST_ASSERT_EQ(percpu()->preempt_count, 0);
+    TEST_ASSERT_EQ(local_preempt_count(), 0);
     TEST_ASSERT_TRUE(true);  // unlock succeeded without crash
 }
 
@@ -223,14 +224,17 @@ void test_fifo_ordering() {
     m.lock();
 
     // First unlock: should wake w1
+    Scheduler::set_current(owner);
     m.unlock();
     TEST_ASSERT_EQ(static_cast<int>(w1->state), static_cast<int>(TaskState::Ready));
 
     // Second unlock: should wake w2
+    Scheduler::set_current(w1);
     m.unlock();
     TEST_ASSERT_EQ(static_cast<int>(w2->state), static_cast<int>(TaskState::Ready));
 
     // Third unlock: should wake w3
+    Scheduler::set_current(w2);
     m.unlock();
     TEST_ASSERT_EQ(static_cast<int>(w3->state), static_cast<int>(TaskState::Ready));
 }

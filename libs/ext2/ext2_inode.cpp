@@ -14,7 +14,6 @@
 #include "kernel/fs/file.hpp"  // inode_ref / inode_unref (cache returns ref'd inodes)
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
-#include "kernel/proc/race_detect.hpp"  // F-DYN-COV: lockdep_assert_held (inode_cache_lock_ guard)
 
 namespace cinux::fs {
 
@@ -33,7 +32,8 @@ bool Ext2::locate_inode_block(uint32_t ino, InodeLoc& out) {
     }
     // Inode byte offset within its group's inode table.
     const uint64_t byte_offset = static_cast<uint64_t>((ino - 1) % inodes_per_group_) * inode_size_;
-    out.target_block        = bgdt_[group].bg_inode_table + static_cast<uint32_t>(byte_offset / block_size_);
+    out.target_block =
+        bgdt_[group].bg_inode_table + static_cast<uint32_t>(byte_offset / block_size_);
     out.within_block_offset = static_cast<uint32_t>(byte_offset % block_size_);
     // Pure arithmetic bounds check; the block read is the caller's job
     // (read_disk_inode / write_disk_inode each use their own KmBuf so two
@@ -80,7 +80,8 @@ bool Ext2::write_disk_inode(uint32_t ino, const Ext2Inode& inode) {
     }
     memcpy(buf.data() + loc.within_block_offset, &inode, sizeof(Ext2Inode));
     if (!write_block(loc.target_block, buf.get())) {
-        cinux::lib::kprintf("[EXT2] write_disk_inode: failed to write block %u\n", loc.target_block);
+        cinux::lib::kprintf("[EXT2] write_disk_inode: failed to write block %u\n",
+                            loc.target_block);
         return false;
     }
     return true;
@@ -91,13 +92,10 @@ bool Ext2::write_disk_inode(uint32_t ino, const Ext2Inode& inode) {
 // ============================================================
 
 Inode* Ext2::get_cached_inode(uint32_t ino) {
-    // B3 inode cache race: inode_cache_ is shared across CPUs.  Serialize the
-    // walk/evict/insert under inode_cache_lock_.  Held across read_disk_inode
-    // (disk I/O) -- cache miss is rare and slow anyway; dropping the lock for
-    // I/O would need a TOCTOU recheck.  lockdep_assert_held is the regression
-    // guard if a future refactor drops the guard.
+    // inode_cache_ is shared across CPUs. Keep the walk/evict/insert and a
+    // cache-miss read in one transaction; the mutex is sleepable because
+    // read_disk_inode() may wait for asynchronous block I/O.
     auto g = inode_cache_lock_.guard();
-    lockdep_assert_held(&inode_cache_lock_);
     if (ino == 0) {
         return nullptr;
     }
@@ -147,7 +145,7 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
             return nullptr;
         }
         Ext2CachedInode* victim = *victim_prev;
-        *victim_prev             = victim->hash_next;
+        *victim_prev            = victim->hash_next;
         delete victim;
         --inode_cache_count_;
     }
@@ -162,8 +160,8 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
     obj->ino = ino;
     populate_vfs_inode(*obj);
     inode_ref(&obj->vfs_inode);  // caller owns this ref; pair with inode_unref
-    obj->hash_next          = inode_cache_[bucket];
-    inode_cache_[bucket]    = obj;
+    obj->hash_next       = inode_cache_[bucket];
+    inode_cache_[bucket] = obj;
     ++inode_cache_count_;
     return &obj->vfs_inode;
 }
@@ -176,8 +174,8 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
 // ============================================================
 
 uint32_t Ext2::alloc_inode() {
-    // SMP: serialize inode bitmap alloc vs block alloc / other inode allocs
-    // (shared block_buf_ in write_superblock/write_bgdt + bitmap RMW race).
+    // Serialize the bitmap RMW and metadata writes. The mutex may sleep while
+    // the underlying block device completes asynchronous I/O.
     auto g = block_alloc_lock_.guard();
     if (!mounted_) {
         return 0;
@@ -193,7 +191,7 @@ uint32_t Ext2::alloc_inode() {
             continue;
         }
 
-        KmBuf   bitmap_buf(4096);
+        KmBuf bitmap_buf(4096);
         if (!bitmap_buf) {
             return 0;
         }
@@ -250,7 +248,7 @@ uint32_t Ext2::alloc_inode() {
 }
 
 bool Ext2::free_inode(uint32_t ino) {
-    // SMP: serialize inode bitmap free (see alloc_inode above).
+    // Serialize inode bitmap free (see alloc_inode above).
     auto g = block_alloc_lock_.guard();
     if (ino == 0 || !mounted_) {
         return false;
@@ -311,7 +309,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             }
 
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(blk, zbuf.get())) { free_block(blk); return 0; }
+            if (!zbuf || !zero_and_write_block(blk, zbuf.get())) {
+                free_block(blk);
+                return 0;
+            }
 
             disk.i_block[file_block] = blk;
         }
@@ -329,7 +330,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             }
 
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(indirect_blk, zbuf.get())) { free_block(indirect_blk); return 0; }
+            if (!zbuf || !zero_and_write_block(indirect_blk, zbuf.get())) {
+                free_block(indirect_blk);
+                return 0;
+            }
 
             disk.i_block[EXT2_INDIRECT_BLOCK] = indirect_blk;
         }
@@ -355,7 +359,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             // zbuf is a separate buffer: zero_and_write_block zeroes zbuf (not
             // buf), so the indirect array in buf is still intact for patching.
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(data_blk, zbuf.get())) { free_block(data_blk); return 0; }
+            if (!zbuf || !zero_and_write_block(data_blk, zbuf.get())) {
+                free_block(data_blk);
+                return 0;
+            }
 
             indirect[indirect_idx] = data_blk;
             if (!write_block(indirect_blk, buf.get())) {
@@ -395,7 +402,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             }
 
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(di_blk, zbuf.get())) { free_block(di_blk); return 0; }
+            if (!zbuf || !zero_and_write_block(di_blk, zbuf.get())) {
+                free_block(di_blk);
+                return 0;
+            }
 
             disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK] = di_blk;
         }
@@ -418,7 +428,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             }
 
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(child_blk, zbuf.get())) { free_block(child_blk); return 0; }
+            if (!zbuf || !zero_and_write_block(child_blk, zbuf.get())) {
+                free_block(child_blk);
+                return 0;
+            }
             // zbuf was a separate buffer, so di_ptrs (the double-indirect
             // array in di_buf) is still intact -- patch the slot and write.
             di_ptrs[idx1] = child_blk;
@@ -444,7 +457,10 @@ uint32_t Ext2::get_or_alloc_block(Ext2Inode& disk, uint32_t file_block) {
             }
 
             KmBuf zbuf(4096);
-            if (!zbuf || !zero_and_write_block(data_blk, zbuf.get())) { free_block(data_blk); return 0; }
+            if (!zbuf || !zero_and_write_block(data_blk, zbuf.get())) {
+                free_block(data_blk);
+                return 0;
+            }
             // zbuf was separate, so child_ptrs (the child array in child_buf)
             // is still intact -- patch and write.
             child_ptrs[idx2] = data_blk;

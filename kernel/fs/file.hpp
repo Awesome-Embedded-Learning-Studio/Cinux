@@ -66,7 +66,9 @@ struct File {
     OpenFlags flags;    ///< Access mode (RDONLY, WRONLY, RDWR)
     bool      cloexec;  ///< FD_CLOEXEC (F-ECO batch 4: fcntl F_GETFD/F_SETFD)
 
-    mutable cinux::proc::Spinlock offset_lock_;
+    // Shared open-file descriptions serialize seek-position transactions with
+    // a sleepable lock: a page-cache miss may wait for asynchronous disk I/O.
+    mutable cinux::proc::Mutex offset_lock_;
 
     /// Reference count: how many FileRef holders (fd slots) point at this File.
     /// __atomic_* ACQ_REL (a File is shared across FDTables after fork/clone).

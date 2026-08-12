@@ -40,12 +40,12 @@ constexpr uint8_t kNvmeIrqVector = 0x41;
 /// live at BAR0 + 0x1000 + queue_id * (2 * stride) and are computed in enable()
 /// from CAP.DSTRD; they are NOT part of this fixed struct.
 struct NvmeRegs {
-    uint32_t cap_lo;     ///< 0x00 CAP low  (MQES[15:0], CQR[16], AMS[18:17], TO[27:23], DSTRD[31:28])
-    uint32_t cap_hi;     ///< 0x04 CAP high (CSS, BPS, MPS8, ...)
-    uint32_t vs;         ///< 0x08 Version (MJR[31:16].MNR[15:8].TER[7:0]); e.g. 0x00010400 = NVMe 1.4
-    uint32_t intms;      ///< 0x0C Interrupt Mask Set
-    uint32_t intmc;      ///< 0x10 Interrupt Mask Clear
-    uint32_t cc;         ///< 0x14 Controller Configuration
+    uint32_t cap_lo;  ///< 0x00 CAP low  (MQES[15:0], CQR[16], AMS[18:17], TO[27:23], DSTRD[31:28])
+    uint32_t cap_hi;  ///< 0x04 CAP high (CSS, BPS, MPS8, ...)
+    uint32_t vs;      ///< 0x08 Version (MJR[31:16].MNR[15:8].TER[7:0]); e.g. 0x00010400 = NVMe 1.4
+    uint32_t intms;   ///< 0x0C Interrupt Mask Set
+    uint32_t intmc;   ///< 0x10 Interrupt Mask Clear
+    uint32_t cc;      ///< 0x14 Controller Configuration
     uint32_t reserved0;  ///< 0x18
     uint32_t csts;       ///< 0x1C Controller Status (RDY[0], CFS[1], SHST[4:2])
     uint32_t nssr;       ///< 0x20 NVM Subsystem Reset
@@ -191,24 +191,24 @@ private:
     /// Build + submit an NVM Read (opcode 0x02) or Write (0x01) command
     /// (batch 4b).  cdw10/11 = SLBA, cdw12[15:0] = nlb-1, PRP1 = buf.phys(),
     /// PRP2 = 0 (single-page transfers only).
-    cinux::lib::ErrorOr<void> nvm_io(uint8_t opcode, uint32_t nsid, uint64_t slba,
-                                     uint16_t nlb, cinux::drivers::dma::DmaBuffer& buf);
+    cinux::lib::ErrorOr<void> nvm_io(uint8_t opcode, uint32_t nsid, uint64_t slba, uint16_t nlb,
+                                     cinux::drivers::dma::DmaBuffer& buf);
 
-    volatile NvmeRegs* regs_ = nullptr;
-    pci::PCIDevice     dev_{};  // saved for MSI-X config (bus/slot/func + BARs)
+    volatile NvmeRegs*             regs_ = nullptr;
+    pci::PCIDevice                 dev_{};  // saved for MSI-X config (bus/slot/func + BARs)
     // Admin SQ/CQ (4 KiB DMA each).  Batch 2a.
     cinux::drivers::dma::DmaBuffer admin_sq_buf_;
     cinux::drivers::dma::DmaBuffer admin_cq_buf_;
     // Admin doorbell pointers + ring state.  Batch 2b.
-    volatile uint32_t* admin_sq_tdbell_ = nullptr;
-    volatile uint32_t* admin_cq_hdbell_ = nullptr;
-    uint32_t           admin_sq_tail_   = 0;
-    uint32_t           admin_cq_head_   = 0;
-    uint8_t            cq_phase_        = 1;  // NVMe CQ starts at phase = 1
-    uint32_t           doorbell_stride_ = 0;
+    volatile uint32_t*             admin_sq_tdbell_ = nullptr;
+    volatile uint32_t*             admin_cq_hdbell_ = nullptr;
+    uint32_t                       admin_sq_tail_   = 0;
+    uint32_t                       admin_cq_head_   = 0;
+    uint8_t                        cq_phase_        = 1;  // NVMe CQ starts at phase = 1
+    uint32_t                       doorbell_stride_ = 0;
     // MSI-X (batch 3).  Second MsixController instance (xHCI owns the first).
-    pci::msix::MsixCap        msix_cap_{};
-    pci::msix::MsixController msix_;
+    pci::msix::MsixCap             msix_cap_{};
+    pci::msix::MsixController      msix_;
     // IO SQ/CQ (batch 4a).  qid=1.
     cinux::drivers::dma::DmaBuffer io_sq_buf_;
     cinux::drivers::dma::DmaBuffer io_cq_buf_;
@@ -218,19 +218,24 @@ private:
     uint32_t                       io_cq_head_   = 0;
     uint8_t                        io_cq_phase_  = 1;
     uint16_t                       io_next_cid_  = 0;
-    // SMP: io_submit (SQ enqueue + CQ poll) touches io_sq_tail_/io_cq_head_/
-    // io_cq_phase_ -- two CPUs submitting concurrently clobber each other's SQ
-    // slot and desynchronize completion handling. Serialize.
+    // Async mode supports one in-flight request. Hold this sleepable mutex from
+    // SQ publication through the matching CQ completion so the mutable pending
+    // CID and completion semaphore always describe the same caller. io_lock_
+    // remains the short queue-state lock and the poll-mode serialization.
+    cinux::proc::Mutex             io_submit_mutex_;
     cinux::proc::Spinlock          io_lock_;
     // NVMe async IO (B2): IRQ-driven completion.  io_irq_mode_ gates the IRQ
     // path -- production unmask + true; the test kernel keeps IF=0 + entries
     // masked, so io_submit stays in poll mode there.  Single in-flight:
     // io_pending_cid_ is the one outstanding command; the IRQ handler polls the
     // CQ for it, stores io_last_status_, and posts io_completion_sema_.
-    bool                   io_irq_mode_     = false;
-    uint16_t               io_pending_cid_  = 0;
-    uint16_t               io_last_status_  = 0;
-    cinux::proc::Semaphore io_completion_sema_;
+    bool                           io_irq_mode_         = false;
+    bool                           io_request_active_   = false;
+    uint16_t                       io_pending_cid_      = 0;
+    uint16_t                       io_completed_cid_    = 0;
+    uint16_t                       io_last_status_      = 0;
+    bool                           io_completion_ready_ = false;
+    cinux::proc::Semaphore         io_completion_sema_;
 };
 
 /// Production NVMe controller accessor: main.cpp sets the boot controller once

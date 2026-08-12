@@ -74,7 +74,7 @@ public:
 
     /// Set RSP0 in THIS CPU's TSS (F4-M3 P1-3).  Each CPU has its own GDT/TSS
     /// in `gdt_blocks[]`; this targets the running CPU's block (looked up via
-    /// `percpu()->cpu_id`), so concurrent context switches on different CPUs no
+    /// a GS-relative CPU-id read), so concurrent context switches on different CPUs no
     /// longer clobber a shared RSP0.
     static void tss_set_rsp0(uint64_t rsp0);
 

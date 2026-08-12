@@ -398,8 +398,12 @@ cinux::lib::ErrorOr<void> NvmeController::create_io_queues() {
 namespace {
 NvmeController* g_active_nvme_ctrl = nullptr;
 }  // namespace
-NvmeController* active_nvme_ctrl() { return g_active_nvme_ctrl; }
-void            set_active_nvme_ctrl(NvmeController* ctrl) { g_active_nvme_ctrl = ctrl; }
+NvmeController* active_nvme_ctrl() {
+    return g_active_nvme_ctrl;
+}
+void set_active_nvme_ctrl(NvmeController* ctrl) {
+    g_active_nvme_ctrl = ctrl;
+}
 
 void NvmeController::handle_completion_irq() {
     if (!io_irq_mode_) {
@@ -407,12 +411,27 @@ void NvmeController::handle_completion_irq() {
     }
     uint16_t status            = 0;
     bool     mismatch_reported = false;
-    if (poll_one_completion(io_pending_cid_, status, mismatch_reported)) {
-        io_last_status_ = status;
-        io_completion_sema_.post();  // wake the blocked io_submit
+    // MSI-X may coalesce completions. Drain every currently owned CQE until the
+    // pending CID is found or the phase says the queue is empty. In particular,
+    // consuming an unexpected CQE must not return and strand the sole waiter.
+    for (uint16_t drained = 0; drained < kIoQSize; ++drained) {
+        if (!__atomic_load_n(&io_request_active_, __ATOMIC_ACQUIRE)) {
+            return;  // no async submit owns a completion token
+        }
+        const uint32_t old_head = io_cq_head_;
+        const uint16_t expected = __atomic_load_n(&io_pending_cid_, __ATOMIC_ACQUIRE);
+        if (poll_one_completion(expected, status, mismatch_reported)) {
+            __atomic_store_n(&io_last_status_, status, __ATOMIC_RELAXED);
+            __atomic_store_n(&io_completed_cid_, expected, __ATOMIC_RELAXED);
+            __atomic_store_n(&io_request_active_, false, __ATOMIC_RELAXED);
+            __atomic_store_n(&io_completion_ready_, true, __ATOMIC_RELEASE);
+            io_completion_sema_.post();  // wake the matching io_submit
+            return;
+        }
+        if (io_cq_head_ == old_head) {
+            return;  // current phase not owned by the host yet
+        }
     }
-    // No/mismatched completion at the head: leave the waiter blocked; the next
-    // real completion IRQ posts.  Single in-flight should not hit this.
 }
 
 cinux::lib::ErrorOr<void> NvmeController::enable_async_irq() {

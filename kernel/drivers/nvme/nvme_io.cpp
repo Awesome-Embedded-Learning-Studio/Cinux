@@ -24,12 +24,15 @@ bool NvmeController::poll_one_completion(uint16_t expected_cid, uint16_t& out_st
     // the phase bit into out_status, and consumes any mismatched entry first.
     // Shared by io_submit (poll mode) and the MSI-X completion IRQ handler
     // (async mode, B2).
-    auto*             cq = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
+    auto*             cq           = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
     volatile NvmeCqe& cqe          = cq[io_cq_head_];
     const uint16_t    status_field = cqe.status;
     if ((status_field & 0x1) != io_cq_phase_) {
         return false;  // head entry not yet flipped to our phase: no completion
     }
+    // The controller publishes the phase bit with the rest of the CQE. Do not
+    // let later CID/status loads move before observing that ownership change.
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     const uint16_t completion_cid = cqe.cid;
     if (completion_cid != expected_cid) {
@@ -37,8 +40,8 @@ bool NvmeController::poll_one_completion(uint16_t expected_cid, uint16_t& out_st
             cinux::lib::kprintf(
                 "[NVMe] CQ CID mismatch raw=0x%x got=%u expected=%u sq_head=%u "
                 "sq_id=%u driver_head=%u phase=%u\n",
-                status_field, completion_cid, expected_cid, cqe.sq_head, cqe.sq_id,
-                io_cq_head_, io_cq_phase_);
+                status_field, completion_cid, expected_cid, cqe.sq_head, cqe.sq_id, io_cq_head_,
+                io_cq_phase_);
             mismatch_reported = true;
         }
         io_cq_head_ = (io_cq_head_ + 1) % kIoQSize;
@@ -61,24 +64,35 @@ bool NvmeController::poll_one_completion(uint16_t expected_cid, uint16_t& out_st
 
 cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
     if (io_irq_mode_) {
-        // Production (B2): IRQ-driven.  Submit under io_lock_ (short critical
-        // section), then block on io_completion_sema_ -- the MSI-X IRQ handler
-        // (nvme_irq_handler -> handle_completion_irq) polls the CQ and posts.
-        // NvmeBlockDevice::lock_ (Mutex) is held across this sleep by the caller;
-        // Mutex is not on lockdep's held stack, so sleeping here is safe.  Single
-        // in-flight: io_pending_cid_ is set before the doorbell write so the IRQ
-        // handler polls the right command.
+        // Production (B2): IRQ-driven and deliberately single in-flight. The
+        // controller owns this serialization instead of relying on every caller
+        // to wrap it correctly. The short spinlock protects SQ publication; the
+        // sleepable mutex remains held until this exact CID completes.
+        auto submit_guard = io_submit_mutex_.guard();
         io_lock_.acquire();
-        io_pending_cid_   = io_next_cid_++;
+        const uint16_t submitted_cid = io_next_cid_++;
+        __atomic_store_n(&io_completion_ready_, false, __ATOMIC_RELEASE);
+        __atomic_store_n(&io_pending_cid_, submitted_cid, __ATOMIC_RELEASE);
+        __atomic_store_n(&io_request_active_, true, __ATOMIC_RELEASE);
         NvmeCmd submitted = cmd;
-        submitted.cid     = io_pending_cid_;
+        submitted.cid     = submitted_cid;
         auto* sq          = static_cast<NvmeCmd*>(io_sq_buf_.virt());
         sq[io_sq_tail_]   = submitted;
         io_sq_tail_       = (io_sq_tail_ + 1) % kIoQSize;
-        *io_sq_tdbell_    = io_sq_tail_;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        *io_sq_tdbell_ = io_sq_tail_;
         io_lock_.release();
-        io_completion_sema_.wait();  // blocks until handle_completion_irq() posts
-        return io_last_status_;
+
+        // A generic Scheduler::unblock must never be mistaken for an NVMe
+        // completion. Semaphore::wait validates its own post grant, and this
+        // predicate additionally binds that grant to the submitted CID.
+        for (;;) {
+            io_completion_sema_.wait();
+            if (__atomic_load_n(&io_completion_ready_, __ATOMIC_ACQUIRE) &&
+                __atomic_load_n(&io_completed_cid_, __ATOMIC_RELAXED) == submitted_cid) {
+                return __atomic_load_n(&io_last_status_, __ATOMIC_RELAXED);
+            }
+        }
     }
 
     // Test kernel (IF=0, MSI-X masked): synchronous poll.  Held under
@@ -117,7 +131,7 @@ cinux::lib::ErrorOr<uint16_t> NvmeController::io_submit(const NvmeCmd& cmd) {
         __asm__ volatile("pause");
     }
 
-    auto*             cq = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
+    auto*             cq            = reinterpret_cast<volatile NvmeCqe*>(io_cq_buf_.virt());
     volatile NvmeCqe& timed_out_cqe = cq[io_cq_head_];
     const uint64_t    slba =
         static_cast<uint64_t>(submitted.cdw10) | (static_cast<uint64_t>(submitted.cdw11) << 32);
