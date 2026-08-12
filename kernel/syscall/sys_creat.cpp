@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "kernel/errno.hpp"
+#include "kernel/fs/file.hpp"  // inode_unref
 #include "kernel/fs/path.hpp"
 #include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -54,12 +55,15 @@ int64_t do_creat_kernel(const char* resolved_path) {
 
     if (parent->ops == nullptr) {
         kprintf("[SYS_CREAT] Parent inode has no ops\n");
+        cinux::fs::inode_unref(parent);
         return -kEio;
     }
 
     // Step 4: Try to create the file
     auto create_result = parent->ops->create(parent, leaf_name, name_len);
+    cinux::fs::inode_unref(parent);
     if (create_result.ok()) {
+        cinux::fs::inode_unref(create_result.value());
         return 0;  // new file created successfully
     }
 
@@ -71,6 +75,7 @@ int64_t do_creat_kernel(const char* resolved_path) {
         if (!existing_result.ok()) {
             return -to_errno(existing_result.error());
         }
+        cinux::fs::inode_unref(existing_result.value());
         return -kEio;
     }
     cinux::fs::Inode* existing = existing_result.value();
@@ -78,6 +83,7 @@ int64_t do_creat_kernel(const char* resolved_path) {
     if (existing->size > 0) {
         existing->size = 0;
     }
+    cinux::fs::inode_unref(existing);
 
     return 0;
 }

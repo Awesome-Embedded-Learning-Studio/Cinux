@@ -14,8 +14,8 @@
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/lib/string.hpp"
 #ifndef CINUX_HOST_TEST
-#    include "kernel/drivers/hpet/hpet.hpp"  // g_hpet: read I/O timing (B2.5 stats)
 #    include "kernel/arch/x86_64/backtrace.hpp"  // F-DYN-COV: wild-block trace
+#    include "kernel/drivers/hpet/hpet.hpp"      // g_hpet: read I/O timing (B2.5 stats)
 #    include "kernel/mm/page_cache.hpp"
 #endif
 
@@ -33,7 +33,7 @@ uint64_t g_ext2_read_ns    = 0;
 
 /// RAII: time Ext2FileOps::read() from entry to exit (counts every return path).
 class Ext2ReadTimer {
-  public:
+public:
 #ifndef CINUX_HOST_TEST
     Ext2ReadTimer() : t0_(cinux::drivers::g_hpet.monotonic_ns()) {}
     ~Ext2ReadTimer() {
@@ -48,14 +48,20 @@ class Ext2ReadTimer {
     ~Ext2ReadTimer() { __atomic_fetch_add(&g_ext2_read_count, 1, __ATOMIC_RELAXED); }
 #endif
 
-  private:
+private:
     uint64_t t0_;
 };
 }  // namespace
 
-uint64_t ext2_read_count() { return __atomic_load_n(&g_ext2_read_count, __ATOMIC_RELAXED); }
-uint64_t ext2_read_bytes() { return __atomic_load_n(&g_ext2_read_bytes, __ATOMIC_RELAXED); }
-uint64_t ext2_read_ns()    { return __atomic_load_n(&g_ext2_read_ns,    __ATOMIC_RELAXED); }
+uint64_t ext2_read_count() {
+    return __atomic_load_n(&g_ext2_read_count, __ATOMIC_RELAXED);
+}
+uint64_t ext2_read_bytes() {
+    return __atomic_load_n(&g_ext2_read_bytes, __ATOMIC_RELAXED);
+}
+uint64_t ext2_read_ns() {
+    return __atomic_load_n(&g_ext2_read_ns, __ATOMIC_RELAXED);
+}
 
 // ============================================================
 // Ext2FileOps
@@ -73,6 +79,7 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
     if (inode == nullptr || inode->fs_private == nullptr || buf == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
+    auto mutation_guard = ext2_.mutation_lock_.guard();
 
     auto*            cached = ext2_cached_inode(inode);
     const Ext2Inode& disk   = cached->disk_inode;
@@ -110,7 +117,8 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             chunk = to_read - total_read;
         }
 
-        uint32_t disk_block = resolve_disk_block_(disk, file_block, block_ptrs_per_block, scratch.data());
+        uint32_t disk_block =
+            resolve_disk_block_(disk, file_block, block_ptrs_per_block, scratch.data());
         if (disk_block == 0) {  // hole / unmapped / extent-unsupported -> zero fill
             for (uint64_t i = 0; i < chunk; ++i) {
                 dst[total_read + i] = 0;
@@ -132,8 +140,10 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
         uint64_t agg = 1;
         if (block_offset == 0) {  // B3a: agg re-enabled (audit+repair below)
             while (agg < 4 && total_read + agg * bs <= to_read) {
-                uint32_t next = resolve_disk_block_(disk, file_block + agg, block_ptrs_per_block, scratch.data());
-                if (next != disk_block + agg) break;
+                uint32_t next = resolve_disk_block_(disk, file_block + agg, block_ptrs_per_block,
+                                                    scratch.data());
+                if (next != disk_block + agg)
+                    break;
                 agg++;
             }
         }
@@ -151,7 +161,8 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             // (offset 0x84c..0xfff) with file bytes. _rtld_global+0xb50 then
             // read a non-zero file byte as rax -> non-canonical -> #GP. Land the
             // DMA in block_buf_ first, then a bounded memcpy.
-            if (!ext2_.read_disk_range(disk_block, agg, scratch.get()).ok()) break;
+            if (!ext2_.read_disk_range(disk_block, agg, scratch.get()).ok())
+                break;
             uint64_t take = agg * bs;
             if (take > to_read - total_read) {
                 take = to_read - total_read;
@@ -159,7 +170,8 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::read(const Inode* inode, uint64_t offs
             memcpy(dst + total_read, scratch.data(), take);
             total_read += take;
         } else {
-            if (!ext2_.read_block(disk_block, scratch.get())) break;
+            if (!ext2_.read_block(disk_block, scratch.get()))
+                break;
             const auto* src = scratch.data() + block_offset;
             memcpy(dst + total_read, src, chunk);
             total_read += chunk;
@@ -211,26 +223,32 @@ uint32_t Ext2FileOps::resolve_disk_block_(const Ext2Inode& disk, uint64_t file_b
     }
     if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block) {
         const uint32_t indirect_block = disk.i_block[EXT2_INDIRECT_BLOCK];
-        if (indirect_block == 0) return 0;
-        if (!ext2_.read_block(indirect_block, scratch)) return 0;
+        if (indirect_block == 0)
+            return 0;
+        if (!ext2_.read_block(indirect_block, scratch))
+            return 0;
         const auto* indirect = reinterpret_cast<const uint32_t*>(scratch);
         uint32_t    blk      = indirect[file_block - EXT2_DIRECT_BLOCKS];
         ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
         return blk;
     }
-    if (file_block < EXT2_DIRECT_BLOCKS + block_ptrs_per_block +
-                         block_ptrs_per_block * block_ptrs_per_block) {
+    if (file_block <
+        EXT2_DIRECT_BLOCKS + block_ptrs_per_block + block_ptrs_per_block * block_ptrs_per_block) {
         const uint32_t double_block = disk.i_block[EXT2_DOUBLE_INDIRECT_BLOCK];
-        if (double_block == 0) return 0;
-        if (!ext2_.read_block(double_block, scratch)) return 0;
+        if (double_block == 0)
+            return 0;
+        if (!ext2_.read_block(double_block, scratch))
+            return 0;
         const uint32_t di_offset =
             static_cast<uint32_t>(file_block - EXT2_DIRECT_BLOCKS - block_ptrs_per_block);
         const uint32_t idx1           = di_offset / block_ptrs_per_block;
         const uint32_t idx2           = di_offset % block_ptrs_per_block;
         const auto*    double_ptrs    = reinterpret_cast<const uint32_t*>(scratch);
         const uint32_t indirect_block = double_ptrs[idx1];
-        if (indirect_block == 0) return 0;
-        if (!ext2_.read_block(indirect_block, scratch)) return 0;
+        if (indirect_block == 0)
+            return 0;
+        if (!ext2_.read_block(indirect_block, scratch))
+            return 0;
         const auto* child_ptrs = reinterpret_cast<const uint32_t*>(scratch);
         uint32_t    blk        = child_ptrs[idx2];
         ext2_trace_wild_blk(blk, file_block, disk, blocks_count);
@@ -248,82 +266,86 @@ cinux::lib::ErrorOr<int64_t> Ext2FileOps::write(Inode* inode, uint64_t offset, c
     if (count == 0) {
         return 0;
     }
-
-    auto*      cached = ext2_cached_inode(inode);
-    Ext2Inode& disk   = cached->disk_inode;
-
-    uint32_t bs = ext2_.block_size();
-
-    // Highest logical block we can resolve: direct + single-indirect +
-    // double-indirect.  Beyond this (triple-indirect, i_block[14]) the driver
-    // does not allocate, so stop instead of silently truncating mid-chunk.
-    uint64_t ptrs_per_block = bs / sizeof(uint32_t);
-    uint64_t max_file_block = EXT2_DIRECT_BLOCKS + ptrs_per_block + ptrs_per_block * ptrs_per_block;
-
-    // SMP-safe per-call scratch (block_buf_ is shared/non-thread-safe). Heap
-    // not stack: file_write can run deep in the demand-page path (IST2=4KB).
-    KmBuf scratch(4096);
-    if (!scratch) {
-        return cinux::lib::Error::IOError;
-    }
-
-    auto*    src           = static_cast<const uint8_t*>(buf);
     uint64_t total_written = 0;
+    {
+        auto mutation_guard = ext2_.mutation_lock_.guard();
 
-    while (total_written < count) {
-        uint64_t file_block   = (offset + total_written) / bs;
-        uint64_t block_offset = (offset + total_written) % bs;
-        uint64_t chunk        = bs - block_offset;
-        if (chunk > count - total_written) {
-            chunk = count - total_written;
+        auto*      cached = ext2_cached_inode(inode);
+        Ext2Inode& disk   = cached->disk_inode;
+
+        uint32_t bs = ext2_.block_size();
+
+        // Highest logical block we can resolve: direct + single-indirect +
+        // double-indirect.  Beyond this (triple-indirect, i_block[14]) the driver
+        // does not allocate, so stop instead of silently truncating mid-chunk.
+        uint64_t ptrs_per_block = bs / sizeof(uint32_t);
+        uint64_t max_file_block =
+            EXT2_DIRECT_BLOCKS + ptrs_per_block + ptrs_per_block * ptrs_per_block;
+
+        // SMP-safe per-call scratch (block_buf_ is shared/non-thread-safe). Heap
+        // not stack: file_write can run deep in the demand-page path (IST2=4KB).
+        KmBuf scratch(4096);
+        if (!scratch) {
+            return cinux::lib::Error::IOError;
         }
 
-        if (file_block >= max_file_block) {
-            break;
-        }
+        auto* src = static_cast<const uint8_t*>(buf);
 
-        uint32_t disk_block = ext2_.get_or_alloc_block(disk, static_cast<uint32_t>(file_block));
-        if (disk_block == 0) {
-            cinux::lib::kprintf("[EXT2] file_write: failed to alloc block for file_block %u\n",
-                                static_cast<uint32_t>(file_block));
-            break;
-        }
+        while (total_written < count) {
+            uint64_t file_block   = (offset + total_written) / bs;
+            uint64_t block_offset = (offset + total_written) % bs;
+            uint64_t chunk        = bs - block_offset;
+            if (chunk > count - total_written) {
+                chunk = count - total_written;
+            }
 
-        if (block_offset != 0 || chunk != bs) {
-            if (!ext2_.read_block(disk_block, scratch.get())) {
+            if (file_block >= max_file_block) {
                 break;
             }
-        } else {
-            auto* dma = scratch.data();
-            for (uint32_t i = 0; i < bs; ++i) {
-                dma[i] = 0;
+
+            uint32_t disk_block = ext2_.get_or_alloc_block(disk, static_cast<uint32_t>(file_block));
+            if (disk_block == 0) {
+                cinux::lib::kprintf("[EXT2] file_write: failed to alloc block for file_block %u\n",
+                                    static_cast<uint32_t>(file_block));
+                break;
             }
+
+            if (block_offset != 0 || chunk != bs) {
+                if (!ext2_.read_block(disk_block, scratch.get())) {
+                    break;
+                }
+            } else {
+                auto* dma = scratch.data();
+                for (uint32_t i = 0; i < bs; ++i) {
+                    dma[i] = 0;
+                }
+            }
+
+            auto* dst = scratch.data() + block_offset;
+            for (uint64_t i = 0; i < chunk; ++i) {
+                dst[i] = src[total_written + i];
+            }
+
+            if (!ext2_.write_block(disk_block, scratch.get())) {
+                break;
+            }
+
+            total_written += chunk;
         }
 
-        auto* dst = scratch.data() + block_offset;
-        for (uint64_t i = 0; i < chunk; ++i) {
-            dst[i] = src[total_written + i];
+        if (total_written > 0) {
+            uint64_t new_end = offset + total_written;
+            if (new_end > disk.i_size) {
+                disk.i_size = static_cast<uint32_t>(new_end);
+
+                uint32_t sectors_used = ((disk.i_size + bs - 1) / bs) * (bs / 512);
+                disk.i_blocks         = sectors_used;
+            }
+
+            ext2_.write_disk_inode(static_cast<uint32_t>(inode->ino), disk);
+
+            inode->size = disk.i_size;
         }
-
-        if (!ext2_.write_block(disk_block, scratch.get())) {
-            break;
-        }
-
-        total_written += chunk;
-    }
-
-    if (total_written > 0) {
-        uint64_t new_end = offset + total_written;
-        if (new_end > disk.i_size) {
-            disk.i_size = static_cast<uint32_t>(new_end);
-
-            uint32_t sectors_used = ((disk.i_size + bs - 1) / bs) * (bs / 512);
-            disk.i_blocks         = sectors_used;
-        }
-
-        ext2_.write_disk_inode(static_cast<uint32_t>(inode->ino), disk);
-
-        inode->size = disk.i_size;
     }
 
     // b4-bug4: write() bypasses the page cache (writes disk blocks directly),
@@ -344,8 +366,9 @@ cinux::lib::ErrorOr<void> Ext2FileOps::truncate(Inode* inode, uint64_t new_size)
     if (inode == nullptr || inode->fs_private == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-    auto*      cached = ext2_cached_inode(inode);
-    Ext2Inode& disk   = cached->disk_inode;
+    auto       mutation_guard = ext2_.mutation_lock_.guard();
+    auto*      cached         = ext2_cached_inode(inode);
+    Ext2Inode& disk           = cached->disk_inode;
 
     // Shrink-only (O_TRUNC -> 0, or ftruncate down).  Growing would need
     // zero-fill + block alloc; not required for O_TRUNC.  We do NOT free the
@@ -372,7 +395,8 @@ cinux::lib::ErrorOr<void> Ext2::fill_stat(const Inode* inode, struct stat* st) c
     if (inode == nullptr || inode->fs_private == nullptr || st == nullptr) {
         return cinux::lib::Error::InvalidArgument;
     }
-    const Ext2Inode& disk = ext2_cached_inode(inode)->disk_inode;
+    auto             mutation_guard = mutation_lock_.guard();
+    const Ext2Inode& disk           = ext2_cached_inode(inode)->disk_inode;
     // Zero first so the Linux-ABI fields the backend does not set (__pad0,
     // *_nsec, __unused) stay 0 -- no kernel-stack bytes leak to user space.
     memset(st, 0, sizeof(*st));

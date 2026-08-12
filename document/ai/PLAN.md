@@ -46,8 +46,11 @@
 | B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | ✅ `9a96218` | 两 leg 934/0 + NVMe round-trip 绿（行为不变）|
 | B2 | 核心：`nvme_irq_handler` 填实 + `enable_async_irq`（unmask）+ `io_submit` 双模式（prod sema.wait / test poll）+ main 接线 | ✅ `7d63c13`（test poll 绿）| 两 leg 934/0；**production IRQ 路径待 boot 验证** |
 | B3 | production SMP 双 exec/#PF 卡死取证并根修：GS current accessor、条件唤醒、sleepable FS/File 锁、精确 CID completion、调度 IRQ 关窗、children/wait link 分离 + 收官 note | ✅ 本次 | fresh SMP production 3/3 `NVME_REPRO_OK`、零 CID mismatch/panic；两 leg 942/942；host 66/66；Ext2 TSAN 绿 |
+| B4 | GUI 双 GCC follow-up：ELF 初始 RIP 脱离 scheduler context；waitpid/child-exit 原子握手；Ext2 mutation transaction；TmpFs open-unlink lifetime、`O_EXCL` 与 PRNG 并发收敛 | ✅ 本次 | 独立单核 + SMP 各 953/953；core 950/950；AP wake/shootdown PASS；Ext2 TSAN 4/4（连续 20 轮零 race） |
 
 > **留续**：async wait 的设备超时、CID generation/多 in-flight request table、parent raw-pointer 生命周期单独处理。范围栅栏仍不做多 dma buffer / SQ 多 slot。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
+> B4 的固定地址 SIGSEGV、waitpid 静默挂起与并发文件系统边界详见
+> [可抢占 exec + GUI 双 GCC 收敛 note](../notes/2026-08-12-preemptible-exec-concurrent-gcc.md)。
 
 ## ✅ 调度器任意内核态抢占 — 收官 2026-08-12
 

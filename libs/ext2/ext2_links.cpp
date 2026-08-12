@@ -65,6 +65,7 @@ Inode* Ext2::symlink(uint32_t parent_ino, const char* name, uint32_t name_len, c
     if (target_len == 0) {
         return nullptr;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     if (lookup_in_dir(parent_ino, name, name_len) != 0) {
         return nullptr;  // name already exists in parent
@@ -143,13 +144,14 @@ Inode* Ext2::symlink(uint32_t parent_ino, const char* name, uint32_t name_len, c
         return nullptr;
     }
 
-    return get_cached_inode(new_ino);
+    return get_cached_inode_locked(new_ino);
 }
 
 bool Ext2::link(uint32_t parent_ino, const char* name, uint32_t name_len, uint32_t target_ino) {
     if (name == nullptr || name_len == 0 || name_len > EXT2_NAME_MAX) {
         return false;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     if (lookup_in_dir(parent_ino, name, name_len) != 0) {
         return false;  // name already exists in parent
@@ -198,6 +200,7 @@ bool Ext2::rename(uint32_t src_dir_ino, const char* src_name, uint32_t src_len,
     if (src_name == nullptr || dst_name == nullptr || src_len == 0 || dst_len == 0) {
         return false;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     Ext2Inode src_disk;
     if (!read_disk_inode(src_dir_ino, src_disk)) {

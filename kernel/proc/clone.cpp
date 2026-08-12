@@ -208,20 +208,21 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
         child->ppid         = parent->pid;
         child->parent       = parent;
     }
-    child->state           = TaskState::Ready;
+    child->state             = TaskState::Ready;
     // F10 SMP-race: reset the stale on_cpu inherited from the parent's memcpy
     // (see fork.cpp).  A fresh child has never run; its ctx is set up below, so
     // pick_next() must see "not running / ctx saved" (-1), not the parent's CPU.
-    child->on_cpu          = -1;
-    child->vfork_parent    = nullptr;
-    child->children        = nullptr;
-    child->child_next      = nullptr;
-    child->wait_next       = nullptr;
-    child->exit_status     = 0;
+    child->on_cpu            = -1;
+    child->vfork_parent      = nullptr;
+    child->waiting_for_child = false;
+    child->children          = nullptr;
+    child->child_next        = nullptr;
+    child->wait_next         = nullptr;
+    child->exit_status       = 0;
     // The child is brand-new -- never on a wait queue.  Clear any inherited
     // wait_queue_head from the memcpy so a later signal_send does not wake a
     // phantom queue.  (EINTR support.)
-    child->wait_queue_head = nullptr;
+    child->wait_queue_head   = nullptr;
 
     // F3-M3 batch 1: derive process-group / session membership (threads and
     // forked processes alike stay in the caller's group/session; a root fork

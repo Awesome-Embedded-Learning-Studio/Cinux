@@ -66,6 +66,7 @@ int64_t do_mkdir_kernel(const char* resolved_path) {
         kprintf("[SYS_MKDIR] Failed to mkdir '%s'\n", resolved_path);
         return -to_errno(mkdir_result.error());
     }
+    cinux::fs::inode_unref(mkdir_result.value());  // mkdir transfers a result reference
 
     return 0;
 }

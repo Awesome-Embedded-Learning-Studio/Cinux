@@ -18,6 +18,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/proc/sync.hpp"
+
 namespace cinux::lib {
 
 /// Boot-seeded kernel PRNG (xoshiro256**). @see @file header for scope.
@@ -36,8 +38,15 @@ public:
     void fill(void* buf, size_t len);
 
 private:
-    uint64_t state_[4]{};  ///< xoshiro256** state
-    bool     initialized_ = false;
+    /// Seed state while lock_ is held.
+    void init_locked();
+
+    /// Advance the stream once while lock_ is held.
+    uint64_t next64_locked();
+
+    uint64_t              state_[4]{};  ///< xoshiro256** state, protected by lock_
+    bool                  initialized_ = false;
+    cinux::proc::Spinlock lock_;  ///< Serialises seed and stream advancement across CPUs
 };
 
 /// Global kernel PRNG instance. Call init() once at boot before use.

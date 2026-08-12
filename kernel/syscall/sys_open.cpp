@@ -13,8 +13,8 @@
 #include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/path.hpp"
-#include "kernel/fs/vfs_mount.hpp"
 #include "kernel/fs/vfs_lookup.hpp"
+#include "kernel/fs/vfs_mount.hpp"
 #include "kernel/lib/kprintf.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/syscall/path_util.hpp"
@@ -105,10 +105,12 @@ int64_t sys_open(uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t, ui
 namespace {
 
 /// Linux open() flag bits (x86-64 UAPI).
-constexpr uint64_t kOAccessMode = 0x3;      ///< mask: 0=RDONLY,1=WRONLY,2=RDWR
-constexpr uint64_t kOCreat      = 0x40;     ///< create if missing
-constexpr uint64_t kOTrunc      = 0x200;    ///< truncate to 0 on open (O_TRUNC)
-[[maybe_unused]] constexpr uint64_t kOCloexec    = 0x80000;  ///< close-on-exec (recorded by FDTable later)
+constexpr uint64_t                  kOAccessMode = 0x3;    ///< mask: 0=RDONLY,1=WRONLY,2=RDWR
+constexpr uint64_t                  kOCreat      = 0x40;   ///< create if missing
+constexpr uint64_t                  kOExcl       = 0x80;   ///< fail if O_CREAT target exists
+constexpr uint64_t                  kOTrunc      = 0x200;  ///< truncate to 0 on open (O_TRUNC)
+[[maybe_unused]] constexpr uint64_t kOCloexec =
+    0x80000;  ///< close-on-exec (recorded by FDTable later)
 
 /// AT_FDCWD: "relative to current working directory".
 [[maybe_unused]] constexpr int64_t kAtFdcwd = -100;
@@ -146,10 +148,20 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
     constexpr uint32_t kFollow = static_cast<uint32_t>(cinux::fs::LookupFlag::Follow);
     constexpr uint32_t kParent = static_cast<uint32_t>(cinux::fs::LookupFlag::Parent);
 
-    bool              created = false;
-    cinux::fs::Inode* inode   = nullptr;
-    auto              lr      = cinux::fs::vfs_lookup(resolved_path, kFollow, "/");
-    if (!lr.ok()) {
+    bool              created             = false;
+    cinux::fs::Inode* inode               = nullptr;
+    uint32_t          create_race_retries = 0;
+    for (;;) {
+        auto lr = cinux::fs::vfs_lookup(resolved_path, kFollow, "/");
+        if (lr.ok()) {
+            inode = lr.value().target;
+            if ((flags & (kOCreat | kOExcl)) == (kOCreat | kOExcl)) {
+                cinux::fs::inode_unref(inode);
+                return -kEexist;
+            }
+            break;
+        }
+
         // Missing file: create it if O_CREAT, otherwise it is an error.
         if (!(flags & kOCreat) || lr.error() != cinux::lib::Error::NotFound) {
             return -to_errno(lr.error());
@@ -159,15 +171,28 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
             return plr.ok() ? -kEio : -to_errno(plr.error());
         }
         cinux::fs::Inode* parent = plr.value().parent;  // ref'd by vfs_lookup(Parent)
-        auto create_result = parent->ops->create(parent, plr.value().leaf_name, plr.value().leaf_len);
+        auto              create_result =
+            parent->ops->create(parent, plr.value().leaf_name, plr.value().leaf_len);
         cinux::fs::inode_unref(parent);  // drop the parent lookup ref now that create is done
-        if (!create_result.ok()) {
+        if (create_result.ok()) {
+            created = true;
+            inode   = create_result.value();  // create transfers one reference to the caller
+            break;
+        }
+        if (create_result.error() != cinux::lib::Error::AlreadyExists || (flags & kOExcl)) {
             return -to_errno(create_result.error());
         }
-        created = true;
-        inode   = create_result.value();  // create returns a ref'd inode (Ext2::create -> get_cached_inode)
-    } else {
-        inode = lr.value().target;
+
+        // Another creator won after our negative lookup.  Non-exclusive
+        // O_CREAT opens the winner, so restart the lookup; if it was unlinked
+        // again meanwhile the next iteration attempts creation once more. Cap
+        // retries because legacy backends collapse allocation/I/O failures to
+        // AlreadyExists; they must not turn a failed create into an infinite
+        // syscall loop.
+        constexpr uint32_t kMaxCreateRaceRetries = 4;
+        if (++create_race_retries >= kMaxCreateRaceRetries) {
+            return -kEagain;
+        }
     }
 
     // inode carries one lookup/create ref; chmod/O_TRUNC/alloc run against a
@@ -227,8 +252,8 @@ int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mod
 // sys_openat (F10-M1 batch 4) -- musl open()/fopen() entry point
 // ============================================================
 
-int64_t sys_openat([[maybe_unused]] uint64_t dirfd, uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t,
-                   uint64_t) {
+int64_t sys_openat([[maybe_unused]] uint64_t dirfd, uint64_t path_virt, uint64_t flags,
+                   uint64_t mode, uint64_t, uint64_t) {
     // Only AT_FDCWD (-100) is meaningful today; a real dirfd would need per-fd
     // path tracking.  musl always passes AT_FDCWD, so we resolve cwd-relative
     // regardless.  (Documented limitation until per-fd paths are tracked.)

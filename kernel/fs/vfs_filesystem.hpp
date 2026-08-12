@@ -64,18 +64,15 @@ public:
     /// symlink following. Backends that only support whole-path lookup leave the
     /// default, and vfs_lookup falls back to lookup() (end-component follow
     /// only -- sufficient for virtual FSes that rarely have symlinks).
-    virtual cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* /*parent*/,
-                                                     const char* /*name*/,
+    virtual cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* /*parent*/, const char* /*name*/,
                                                      uint32_t /*namelen*/) {
         return cinux::lib::Error::NotImplemented;
     }
 
     /// Whether vfs_lookup may cache this filesystem's lookup_child results in
-    /// the DentryCache.  On-disk FSes (ext2/tmpfs) return true (the default) --
-    /// their entries are stable.  DevFs returns false: its lookups are dynamic
-    /// (/dev/tty resolves to the CALLER's controlling terminal, /dev/pts/N to
-    /// the N-th PTY), so caching the first result (e.g. shell 0's /dev/tty ->
-    /// PTY 0) would make every later opener see shell 0's terminal.
+    /// the DentryCache.  On-disk FSes such as ext2 return true (the default).
+    /// Dynamic DevFs entries and immediately reclaimable TmpFs nodes return
+    /// false so the cache cannot retain a caller-specific or stale alias.
     virtual bool dcache_enabled() const { return true; }
 };
 

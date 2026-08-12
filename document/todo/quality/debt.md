@@ -95,13 +95,14 @@
 - **修复建议**: 引入物理页 `_mapcount`（buddy order_ 数组旁加 int16）。fork CoW 共享页 `_mapcount++`；clear_user_mappings free 前每页 `_mapcount--`，归 0 才真 free；CoW fault 复制后旧页 `--`、新页 `=1`。F3 CoW 共享内存里程碑核心前置。
 - **关联 GOTCHA**: 无（PLAN 列 CoW 未做但未标 UAF 风险）
 
-### DEBT-004 `waiting_for_child` 普通 bool 跨核非原子 → lost-wakeup 偶现挂死 ✅
-- **维度**: 并发/SMP　**优先级**: P0　**状态**: ✅ 已修（F-QA Q4c-1,`7b72659`）　**核验**: ✅ grep 坐实
-- **位置**: `kernel/proc/process.hpp:259`(`bool waiting_for_child`) / `kernel/proc/process_new.cpp:215,218`(父 CPU 写) / `kernel/syscall/sys_exit.cpp:57`(子 CPU 读)
-- **现象**: `waiting_for_child` 普通 bool。父 CPU waitpid 写 true/false，子 CPU exit 读 `task->parent->waiting_for_child` 决定是否 `unblock(parent)` —— 跨 CPU 无 atomic/无内存屏障。
-- **根因**: 子 CPU 读到 stale 值（父刚置 true 但子还见 false）→ 不唤醒 → 父永睡。**头号偶现挂死嫌疑**。F4-M4 prepare-to-wait 修了 waitpid 自身 check-block 窗口，但漏了子 exit 侧对 parent 标志的非原子读。
-- **修复建议**: 最干净 —— sys_exit **无条件** `unblock(parent)`（unblock 已幂等，仅 Blocked 态入队），去掉 `waiting_for_child` 门控，彻底消除 stale 读窗口。或改 `lib::Atomic<bool>` + Acquire/Release。
-- **关联 GOTCHA**: 无（F4-M5 注释自称已分析 children 无需锁，但漏了此标志位的跨核可见性）
+### DEBT-004 waitpid 条件检查与 child-exit 发布非原子 → lost-wakeup 偶现挂死 ✅
+- **维度**: 并发/SMP　**优先级**: P0　**状态**: ✅ 已修（F-QA Q4c-1 `7b72659` 初修；2026-08-12 production 双 GCC 复验补齐原子握手）　**核验**: ✅ 确定性交错测试 + 单核/SMP 953/953
+- **位置**: `kernel/proc/process_new.cpp`(`prepare_child_wait` / `publish_child_exit`) / `kernel/syscall/sys_exit.cpp` / `kernel/proc/process.hpp`(`waiting_for_child`)
+- **现象**: 父任务先扫描 children 未见 Zombie，尚未发布 Blocked 时子任务退出；子侧 `unblock(parent)` 看到父仍 Running 而无操作，父随后睡眠且再无通知。短命的 GCC/assembler/`ls` 子进程在双核下可把 shell 永久挂在 waitpid。
+- **根因**: 原修只处理了 bool 的跨核可见性，没有把“检查退出条件”和“发布等待状态”与子侧 Zombie 发布放进同一个同步协议；单纯 atomic bool 仍关不住 scan→sleep 窗口。反过来，无条件 generic `unblock(parent)` 也不安全：父可能正等 futex/vfork/pipe/IO，会被错误唤醒且可能破坏 intrusive wait queue。
+- **闭环**: 单个 IRQ-safe child-exit lock 串行化 children/Zombie 扫描、精确 `waiting_for_child` 标记与 Blocked 发布；子侧在同锁内发布 Zombie，并且只为真正的 waitpid waiter 生成 wake，锁外再 signal/unblock。`exit_and_reap_current` 用 `IrqSaveGuard` 保证本 CPU 不会在 Zombie publish 与 parent/vfork wake 之间丢掉退出 continuation。
+- **门禁**: parent-first、child-first（旧 scan→prepare 精确窗口）和“Blocked 但在等其他对象，不得被 child exit 唤醒”三类机制测；production 独立单核/SMP 均 953/953。
+- **关联 GOTCHA**: `Task::parent` 裸指针生命周期仍见 DEBT-024；原子握手不声称修复 orphan reparent。
 
 ### DEBT-005 `PidAllocator` 无锁 → 双核分配相同 pid ✅
 - **维度**: 并发/SMP　**优先级**: P1　**状态**: ✅ 已修（F-QA Q4d,`389987c`）　**核验**: ⚠️ 待核验（agent 报告，未亲验）

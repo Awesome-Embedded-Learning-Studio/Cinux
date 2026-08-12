@@ -19,6 +19,37 @@ namespace cinux::proc {
 
 extern cinux::lib::Atomic<uint64_t> next_tid;
 
+enum class ChildWaitAction : uint8_t {
+    kReap,
+    kSleep,
+    kNoChildren,
+    kNotFound,
+    kNotExited,
+};
+
+struct ChildWaitDecision {
+    ChildWaitAction action;
+    Task*           target;
+};
+
+/**
+ * @brief Atomically scan children or publish the caller's blocked state
+ *
+ * Serialises waitpid's condition check with publish_child_exit(), closing the
+ * cross-CPU window where an exiting child could wake a still-Running parent
+ * immediately before the parent marked itself Blocked.
+ */
+ChildWaitDecision prepare_child_wait(Task* parent, int pid, bool no_hang);
+
+/**
+ * @brief Publish a child exit and wake its waitpid parent
+ *
+ * Publishes exit_status + Zombie under the same handshake lock used by
+ * prepare_child_wait(), then sends SIGCHLD and wakes the parent after releasing
+ * that lock.
+ */
+void publish_child_exit(Task* task, int encoded_status);
+
 /**
  * @brief Inherit process-group / session membership into a forked/cloned child
  *

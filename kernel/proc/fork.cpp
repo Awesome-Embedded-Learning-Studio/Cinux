@@ -277,14 +277,14 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
         return -1;
     }
 
-    child->tid             = next_tid.fetch_add(1, cinux::lib::MemoryOrder::Relaxed);
-    child->pid             = child_pid;
-    child->tgid            = child_pid;  // F3-M2: a forked process is its own group leader
-    child->group_leader    = child;
-    child->clear_child_tid = 0;
-    child->set_child_tid   = 0;
-    child->ppid            = parent->pid;
-    child->state           = TaskState::Ready;
+    child->tid               = next_tid.fetch_add(1, cinux::lib::MemoryOrder::Relaxed);
+    child->pid               = child_pid;
+    child->tgid              = child_pid;  // F3-M2: a forked process is its own group leader
+    child->group_leader      = child;
+    child->clear_child_tid   = 0;
+    child->set_child_tid     = 0;
+    child->ppid              = parent->pid;
+    child->state             = TaskState::Ready;
     // F10 SMP-race: memcpy just inherited the parent's on_cpu (= the parent's
     // current CPU).  That trips the F4-followup migration-race guard in
     // pick_next(), which reads on_cpu==X as "CPU X is mid-saving this ctx" and
@@ -293,18 +293,19 @@ __attribute__((noinline)) int fork(PidAllocator& pid_alloc) {
     // ctx saved" (-1), exactly like a TaskBuilder-built task.  Without this,
     // under -smp the child is pinned to the parent's CPU until first run and
     // violates the guard's invariant.  See [[smp-migration-context-race]].
-    child->on_cpu          = -1;
-    child->parent          = parent;
-    child->vfork_parent    = nullptr;
-    child->children        = nullptr;
-    child->child_next      = nullptr;
-    child->wait_next       = nullptr;
-    child->exit_status     = 0;
+    child->on_cpu            = -1;
+    child->parent            = parent;
+    child->vfork_parent      = nullptr;
+    child->waiting_for_child = false;
+    child->children          = nullptr;
+    child->child_next        = nullptr;
+    child->wait_next         = nullptr;
+    child->exit_status       = 0;
     // The child is a brand-new task -- never on a wait queue.  The memcpy may
     // have inherited the parent's wait_queue_head (non-null if the parent was
     // itself mid-block, which it is not here, but defensively clear it so a
     // later signal_send never wakes a phantom queue).  (EINTR support.)
-    child->wait_queue_head = nullptr;
+    child->wait_queue_head   = nullptr;
 
     // F3-M3 batch 1: derive process-group / session membership.  memcpy
     // already copied the parent's pgid/sid/session_leader, but we re-derive

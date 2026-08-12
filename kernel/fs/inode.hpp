@@ -217,23 +217,19 @@ public:
     /// Default: no-op (regular files never register).
     virtual void poll_detach_waiter(const Inode* inode, cinux::proc::Task* waiter);
 
-    /// Called by FDTable::close when a File bound to this inode is closed -- the
-    /// "release" / last-close hook (Linux file_operations->release).  Used to
-    /// free per-open protocol resources: a socket unbinds / sends FIN, a pipe
-    /// end signals EOF to its peer.  Default: no-op, so regular files, pipes and
-    /// FIFOs (whose close-propagation needs end-refcounting -- a separate DEBT)
-    /// are unchanged; only fd types that need it override this.  @p inode is
-    /// non-null; the inode itself is owned by its filesystem and is NOT freed
-    /// here (release only signals "an open description went away").
+    /// Called when the generic inode reference count reaches zero.  For most fd
+    /// types this is the last-close hook (socket FIN, pipe EOF/POLLHUP).  A
+    /// mutable filesystem may also use the zero transition to reclaim an
+    /// unlinked inode after lookup/create/fd/namespace references are gone.
+    /// Default: no-op.  @p inode is non-null; an override that frees it must be
+    /// the inode's sole deletion owner.
     virtual void release(Inode* inode);
 
     /// F6-M1 B1b: backing block device for a block-device inode (e.g. /dev/sda
     /// in DevFs).  sys_mount resolves its source path to an Inode, then calls
     /// this to obtain the IBlockDevice to mount.  Default nullptr -- regular
     /// files, char devices and pseudo-fs nodes have no block-device backing.
-    virtual cinux::drivers::IBlockDevice* block_device(const Inode* /*inode*/) {
-        return nullptr;
-    }
+    virtual cinux::drivers::IBlockDevice* block_device(const Inode* /*inode*/) { return nullptr; }
 };
 
 // ============================================================
@@ -258,13 +254,12 @@ struct Inode {
     uint32_t uid{0};    ///< Owner user ID
     uint32_t gid{0};    ///< Owner group ID
     uint32_t nlink{1};  ///< Hard link count
-    /// Open-description reference count (DEBT-023). Bumped once per File that
-    /// points at this inode (alloc / dup / dup2 / fork-copy), dropped when such
-    /// a File is destroyed. Reaching 0 = last close -> InodeOps::release fires.
-    /// Accessed via __atomic_* because File objects in different FDTables (after
-    /// fork) on different CPUs share one inode. This is what lets a pipe/FIFO
-    /// end emit POLLHUP/EOF only when the LAST referring fd closes -- a dup no
-    /// longer trips an early EOF (the bug that broke `ls|grep` pipelines).
+    /// Generic inode reference count. FileSystem lookup/create/mkdir results,
+    /// DentryCache entries, open File objects, VMAs, and mutable-filesystem
+    /// namespace links may each own references. Reaching zero invokes
+    /// InodeOps::release. Accessed through inode_ref/inode_unref atomics because
+    /// holders on different CPUs can share one inode. For fd-only objects this
+    /// remains the last-close signal used by pipe/FIFO/socket protocols.
     uint32_t refcount{0};
     uint64_t atime{0};   ///< Time of last access
     uint64_t ctime{0};   ///< Time of last status change

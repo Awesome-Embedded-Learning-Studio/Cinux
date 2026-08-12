@@ -92,6 +92,11 @@ bool Ext2::write_disk_inode(uint32_t ino, const Ext2Inode& inode) {
 // ============================================================
 
 Inode* Ext2::get_cached_inode(uint32_t ino) {
+    auto mutation_guard = mutation_lock_.guard();
+    return get_cached_inode_locked(ino);
+}
+
+Inode* Ext2::get_cached_inode_locked(uint32_t ino) {
     // inode_cache_ is shared across CPUs. Keep the walk/evict/insert and a
     // cache-miss read in one transaction; the mutex is sleepable because
     // read_disk_inode() may wait for asynchronous block I/O.
@@ -104,19 +109,17 @@ Inode* Ext2::get_cached_inode(uint32_t ino) {
     const uint32_t bucket = ino % EXT2_INODE_CACHE_SIZE;
     for (Ext2CachedInode* slot = inode_cache_[bucket]; slot != nullptr; slot = slot->hash_next) {
         if (slot->ino == ino) {
-            // Hit.  If the on-disk inode was mutated out-of-band while still
-            // referenced (refcount > 0), the entry was marked stale; refresh
-            // the cached disk copy in place (same object, same address).  Then
-            // take a reference for the caller -- the Linux inode model: lookup
-            // returns a ref'd inode the caller must inode_unref().  This closes
-            // the aliasing window the old code had (returning a refcount==0
-            // pointer that eviction could silently repopulate for a different
-            // ino under a live fd).
+            // Hit. If the on-disk inode was mutated while still referenced,
+            // refresh only its cached disk copy. The VFS inode's identity/type/
+            // ops are immutable once published, so rewriting them here would
+            // race callers before they can enter a locked backend operation.
+            // Then take a reference for the caller -- the Linux inode model:
+            // lookup returns a ref'd inode the caller must inode_unref().
             if (slot->stale) {
                 if (!read_disk_inode(ino, slot->disk_inode)) {
                     return nullptr;
                 }
-                populate_vfs_inode(*slot);
+                refresh_vfs_metadata(*slot);
                 slot->stale = false;
             }
             inode_ref(&slot->vfs_inode);

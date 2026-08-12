@@ -15,7 +15,7 @@
 namespace cinux::fs {
 
 // ============================================================
-// Inode refcount helpers (DEBT-023: last-close release)
+// Inode refcount helpers (generic refs + zero-transition release)
 // ============================================================
 
 void inode_ref(Inode* inode) {
@@ -25,11 +25,9 @@ void inode_ref(Inode* inode) {
 }
 
 void inode_unref(Inode* inode) {
-    // Drop one open-description reference; on the last (refcount -> 0) invoke
-    // InodeOps::release so the fd type can propagate the close (pipe end ->
-    // EOF/POLLHUP, socket -> FIN).  Atomic: File objects in different FDTables
-    // (post-fork) on different CPUs share one inode.  File itself never touches
-    // inode on destruction, so callers/tests may free an inode before its File.
+    // Drop one generic inode reference; on the zero transition invoke release.
+    // Atomic: lookup/cache/namespace/fd holders on different CPUs may share one
+    // inode. File itself never touches inode on destruction.
     if (inode != nullptr && inode->ops != nullptr &&
         __atomic_sub_fetch(&inode->refcount, 1, __ATOMIC_ACQ_REL) == 0) {
         inode->ops->release(inode);

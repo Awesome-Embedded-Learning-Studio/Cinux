@@ -113,7 +113,7 @@ int copy_strvec(uint64_t user_virt, const char** out, char* pool, size_t pool_ca
 
 int64_t do_execve_kernel(const char* kpath, const char* const* kargv, const char* const* kenvp) {
     cinux::proc::ElfAuxInfo elf_aux{};
-    auto                    result = cinux::proc::execve(kpath, kargv, kenvp, &elf_aux);
+    auto                    result = cinux::proc::execve(kpath, kargv, kenvp, elf_aux);
     if (result != cinux::proc::ExecveResult::Ok) {
         return static_cast<int64_t>(result);
     }

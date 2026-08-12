@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "kernel/fs/file.hpp"
 #include "kernel/fs/tmpfs/tmpfs.hpp"
 #include "kernel/lib/string.hpp"  // strlen / memcmp
 #include "kernel/test/big_kernel_test.h"
@@ -66,6 +67,26 @@ void test_mount_and_root() {
 
     // Root is also reachable via "/".
     TEST_ASSERT_NOT_NULL(lookup_or_null(&tfs, "/"));
+}
+
+void test_create_mkdir_return_refs_and_dcache_is_disabled() {
+    TmpFs tfs;
+    TEST_ASSERT_TRUE(tfs.mount().ok());
+    TEST_ASSERT_FALSE(tfs.dcache_enabled());
+
+    Inode* root = lookup_or_null(&tfs, "");
+    Inode* file = create_or_null(root, "file", 4);
+    Inode* dir  = mkdir_or_null(root, "dir", 3);
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_NOT_NULL(dir);
+    TEST_ASSERT_EQ(__atomic_load_n(&file->refcount, __ATOMIC_ACQUIRE), 2u);
+    TEST_ASSERT_EQ(__atomic_load_n(&dir->refcount, __ATOMIC_ACQUIRE), 2u);
+
+    inode_unref(file);
+    inode_unref(dir);
+    TEST_ASSERT_EQ(__atomic_load_n(&file->refcount, __ATOMIC_ACQUIRE), 1u);
+    TEST_ASSERT_EQ(__atomic_load_n(&dir->refcount, __ATOMIC_ACQUIRE), 1u);
+    inode_unref(root);
 }
 
 // ---------- create / write / read ----------
@@ -232,12 +253,39 @@ void test_unlink_file_then_lookup_fails() {
     TmpFs tfs;
     TEST_ASSERT_TRUE(tfs.mount().ok());
     Inode* root = lookup_or_null(&tfs, "");
-    TEST_ASSERT_NOT_NULL(create_or_null(root, "gone", 4));
+    Inode* file = create_or_null(root, "gone", 4);
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQ(write_or_neg1(file, 0, "still open", 10), 10);
 
     TEST_ASSERT_EQ(unlink_rc(root, "gone", 4), 0);
     TEST_ASSERT_NULL(lookup_or_null(&tfs, "gone"));
+    TEST_ASSERT_EQ(file->nlink, 0u);
+
+    // The create result still pins the detached node, just like an open fd.
+    char buf[16]{};
+    TEST_ASSERT_EQ(read_or_neg1(file, 0, buf, sizeof(buf)), 10);
+    TEST_ASSERT_EQ(memcmp(buf, "still open", 10), 0);
+
     // Unlinking a missing name fails.
     TEST_ASSERT_EQ(unlink_rc(root, "gone", 4), -1);
+    inode_unref(file);  // last ref + nlink zero releases the detached node
+    inode_unref(root);
+}
+
+void test_unlink_releases_namespace_only_node() {
+    TmpFs tfs;
+    TEST_ASSERT_TRUE(tfs.mount().ok());
+    Inode* root = lookup_or_null(&tfs, "");
+    Inode* file = create_or_null(root, "namespace-only", 14);
+    TEST_ASSERT_NOT_NULL(file);
+
+    // Drop the create result first: only the directory entry owns the node.
+    // unlink then drops that namespace reference and the last-ref callback is
+    // the sole path that destroys it.
+    inode_unref(file);
+    TEST_ASSERT_EQ(unlink_rc(root, "namespace-only", 14), 0);
+    TEST_ASSERT_NULL(lookup_or_null(&tfs, "namespace-only"));
+    inode_unref(root);
 }
 
 void test_unlink_empty_dir_ok_nonempty_fails() {
@@ -246,18 +294,24 @@ void test_unlink_empty_dir_ok_nonempty_fails() {
     Inode* root = lookup_or_null(&tfs, "");
 
     // An empty directory can be removed (the sys_rmdir path).
-    TEST_ASSERT_NOT_NULL(mkdir_or_null(root, "empty", 5));
+    Inode* empty = mkdir_or_null(root, "empty", 5);
+    TEST_ASSERT_NOT_NULL(empty);
     TEST_ASSERT_EQ(unlink_rc(root, "empty", 5), 0);
     TEST_ASSERT_NULL(lookup_or_null(&tfs, "empty"));
+    inode_unref(empty);
 
     // A non-empty directory cannot.
     Inode* full = mkdir_or_null(root, "full", 4);
     TEST_ASSERT_NOT_NULL(full);
-    TEST_ASSERT_NOT_NULL(create_or_null(full, "child", 5));
+    Inode* child = create_or_null(full, "child", 5);
+    TEST_ASSERT_NOT_NULL(child);
     TEST_ASSERT_EQ(unlink_rc(root, "full", 4), -1);
     // Removing the child first makes the directory removable.
     TEST_ASSERT_EQ(unlink_rc(full, "child", 5), 0);
+    inode_unref(child);
     TEST_ASSERT_EQ(unlink_rc(root, "full", 4), 0);
+    inode_unref(full);
+    inode_unref(root);
 }
 
 // ---------- negative paths ----------
@@ -270,11 +324,14 @@ void test_negative_lookup_duplicate_and_descend_through_file() {
     TEST_ASSERT_NULL(lookup_or_null(&tfs, "nope"));  // missing entry
 
     // Duplicate create fails (AlreadyExists).
-    TEST_ASSERT_NOT_NULL(create_or_null(root, "x", 1));
+    Inode* x = create_or_null(root, "x", 1);
+    TEST_ASSERT_NOT_NULL(x);
     TEST_ASSERT_NULL(create_or_null(root, "x", 1));
 
     // Descending through a file is NotFound ("x" is a file, "x/anything" bad).
     TEST_ASSERT_NULL(lookup_or_null(&tfs, "x/anything"));
+    inode_unref(x);
+    inode_unref(root);
 }
 
 }  // namespace test_tmpfs
@@ -286,6 +343,7 @@ void test_negative_lookup_duplicate_and_descend_through_file() {
 extern "C" void run_tmpfs_tests() {
     TEST_SECTION("TmpFs (F6-M4)");
     RUN_TEST(test_tmpfs::test_mount_and_root);
+    RUN_TEST(test_tmpfs::test_create_mkdir_return_refs_and_dcache_is_disabled);
     RUN_TEST(test_tmpfs::test_create_write_read_roundtrip);
     RUN_TEST(test_tmpfs::test_append_and_offset_read);
     RUN_TEST(test_tmpfs::test_truncate_shrink_and_extend);
@@ -293,6 +351,7 @@ extern "C" void run_tmpfs_tests() {
     RUN_TEST(test_tmpfs::test_mkdir_readdir_and_nested_lookup);
     RUN_TEST(test_tmpfs::test_stat_file_and_dir);
     RUN_TEST(test_tmpfs::test_unlink_file_then_lookup_fails);
+    RUN_TEST(test_tmpfs::test_unlink_releases_namespace_only_node);
     RUN_TEST(test_tmpfs::test_unlink_empty_dir_ok_nonempty_fails);
     RUN_TEST(test_tmpfs::test_negative_lookup_duplicate_and_descend_through_file);
     TEST_SUMMARY();

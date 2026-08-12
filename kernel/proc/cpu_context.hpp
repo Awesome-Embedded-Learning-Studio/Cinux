@@ -1,10 +1,12 @@
 /**
  * @file kernel/proc/cpu_context.hpp
- * @brief Callee-saved register snapshot for context switching (CpuContext)
+ * @brief Callee-saved register snapshot (CpuContext) + context-switch asm entries
  *
  * Split from process.hpp to keep that file under the 500-line limit.  The
- * layout MUST match context_switch.S exactly; the static_asserts below guard
- * the asm/struct contract.
+ * CpuContext layout MUST match context_switch.S exactly; the static_asserts
+ * below guard the asm/struct contract.  The extern "C" context-switch entry
+ * points (context_switch, fork_child_trampoline, ret_from_fork) were moved
+ * here from process.hpp for the same reason.
  *
  * Namespace: cinux::proc
  */
@@ -58,5 +60,49 @@ static_assert(offsetof(CpuContext, rflags) == 64, "rflags at offset 64");
 static_assert(offsetof(CpuContext, kgs_base) == 72, "kgs_base at offset 72");
 static_assert(offsetof(CpuContext, fs_base) == 80, "fs_base at offset 80");
 static_assert(sizeof(CpuContext) == 96, "CpuContext must be 96 bytes (alignas(16) pads 88->96)");
+
+// ============================================================
+// Context-switch assembly entry points (C linkage)
+//
+// extern "C" symbols implemented in the arch asm (context_switch.S and the
+// fork trampolines).  Kept beside CpuContext -- the struct they operate on --
+// and split from process.hpp to keep that file under the 500-line limit.
+// ============================================================
+
+/**
+ * @brief Low-level context switch primitive
+ *
+ * Saves callee-saved registers of the current task into `from`,
+ * restores callee-saved registers from `to`, and jumps to the
+ * saved rip of `to`.
+ *
+ * @param from  Pointer to the outgoing task's CpuContext
+ * @param to    Pointer to the incoming task's CpuContext
+ */
+extern "C" void context_switch(CpuContext* from, CpuContext* to);
+
+/**
+ * @brief Fork child trampoline (assembly, sets rax=0 and returns)
+ *
+ * Called by the scheduler when the child task is first switched in.
+ * Sets rax to 0 so that the child sees fork() return 0, then
+ * returns to the fork() call site on the child's stack.  Used by the
+ * kernel-fork path (prepare_kernel_fork_context) where the child must
+ * resume a kernel caller mid-execution.
+ */
+extern "C" void fork_child_trampoline();
+
+/**
+ * @brief User fork/clone child first-run trampoline (assembly)
+ *
+ * The child's ctx.rip is set to this by prepare_user_fork_context();
+ * ctx.rsp points at a 128-byte pt_regs frame (the parent's syscall frame)
+ * copied to the top of the child's clean kernel stack.  ret_from_fork
+ * restores the user register state from that frame and SYSRETQs to Ring 3
+ * with rax=0 -- the Linux ret_from_fork style.  The child never runs on a
+ * copy of the parent's kernel stack, avoiding the gcc-13 -O2+ubsan
+ * frame-layout fragility of the old copied-stack RBP-chain approach.
+ */
+extern "C" void ret_from_fork();
 
 }  // namespace cinux::proc

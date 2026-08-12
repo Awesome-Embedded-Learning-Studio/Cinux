@@ -55,17 +55,18 @@ enum class ExecveResult : int {
 /**
  * @brief ELF-derived auxiliary values the loader needs to build the entry stack
  *
- * execve() fills this when @p aux_out is non-null so the caller (e.g.
- * launch_user_program) can emit the AT_PHDR/AT_PHNUM/AT_PHENT/AT_ENTRY auxv
+ * execve() fills this result so the caller (e.g. launch_user_program) can select
+ * the initial user RIP and emit the AT_PHDR/AT_PHNUM/AT_PHENT/AT_ENTRY auxv
  * entries that musl/glibc read at startup to find the program headers.
  */
 struct ElfAuxInfo {
-    uint64_t at_phdr;     ///< User VA where the program headers are mapped
-    uint64_t at_phnum;    ///< e_phnum (program header count)
-    uint64_t at_phent;    ///< sizeof(Elf64_Phdr) = 56
-    uint64_t at_entry;    ///< Main program entry (user VA); ldso jumps here after relocating
-    uint64_t at_base;     ///< Interpreter (ldso) load base; 0 for a static executable
-    bool     has_interp;  ///< True if a PT_INTERP was found and the interpreter loaded
+    uint64_t initial_rip;  ///< Initial user RIP (interpreter entry for dynamic executables)
+    uint64_t at_phdr;      ///< User VA where the program headers are mapped
+    uint64_t at_phnum;     ///< e_phnum (program header count)
+    uint64_t at_phent;     ///< sizeof(Elf64_Phdr) = 56
+    uint64_t at_entry;     ///< Main program entry (user VA); ldso jumps here after relocating
+    uint64_t at_base;      ///< Interpreter (ldso) load base; 0 for a static executable
+    bool     has_interp;   ///< True if a PT_INTERP was found and the interpreter loaded
     bool     stack_executable = false;  ///< F4-B0: PT_GNU_STACK requested an executable stack
                                         ///< (p_flags & X). Modern gcc-built ELFs carry
                                         ///< PT_GNU_STACK=RW so this stays false -> NX stack,
@@ -77,8 +78,9 @@ struct ElfAuxInfo {
  *
  * Reads the ELF binary from the VFS, validates the header, unmaps
  * existing user-space pages, loads PT_LOAD segments into the task's
- * address space, and sets the entry point.  The old process image is
- * destroyed but the PID, parent, and scheduler linkage are preserved.
+ * address space, and returns the entry point through @p aux_out.  The old
+ * process image is destroyed but the PID, parent, and scheduler linkage are
+ * preserved.
  *
  * After a successful execve(), the caller is responsible for jumping
  * to the new entry point (typically via jump_to_usermode).
@@ -86,10 +88,10 @@ struct ElfAuxInfo {
  * @param path     Null-terminated path to the ELF executable
  * @param argv     Array of argument strings (may be nullptr)
  * @param envp     Array of environment strings (may be nullptr)
- * @param aux_out  If non-null, filled with ELF-derived AT_* values on success
+ * @param aux_out  Filled with the initial user RIP and ELF-derived AT_* values on success
  * @return ExecveResult::Ok on success, or an error code
  */
 ExecveResult execve(const char* path, const char* const argv[], const char* const envp[],
-                    ElfAuxInfo* aux_out = nullptr);
+                    ElfAuxInfo& aux_out);
 
 }  // namespace cinux::proc

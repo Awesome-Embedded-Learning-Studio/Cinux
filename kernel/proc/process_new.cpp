@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/arch/x86_64/irq.hpp"
 #include "kernel/arch/x86_64/memory_layout.hpp"
 #include "kernel/arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/paging_config.hpp"
@@ -23,6 +24,7 @@
 #include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"  // Q4e-2: signal_unregister_task on reap
+#include "kernel/proc/sync.hpp"
 
 namespace cinux::proc {
 
@@ -47,6 +49,10 @@ uint64_t alloc_stack_vaddr(uint64_t pages) {
 namespace {
 
 using namespace cinux::arch;
+
+// Serialises waitpid's condition scan + Blocked publication with a child's
+// Zombie publication. Never hold this lock across schedule or task teardown.
+Spinlock g_child_exit_lock;
 
 void free_mapped_stack(uint64_t stack, uint64_t stack_top) {
     if (stack == 0 || stack_top <= stack) {
@@ -198,6 +204,88 @@ void free_kernel_stack(Task* task) {
 // waitpid implementation
 // ============================================================
 
+ChildWaitDecision prepare_child_wait(Task* parent, int pid, bool no_hang) {
+    auto g = g_child_exit_lock.irq_guard();
+
+    // A resumed waitpid loop no longer needs the previous sleep registration.
+    // Re-arm it below only when this scan finds no reapable child.
+    parent->waiting_for_child = false;
+
+    if (parent->children == nullptr) {
+        return {ChildWaitAction::kNoChildren, nullptr};
+    }
+
+    Task* target               = nullptr;
+    Task* target_prev          = nullptr;
+    Task* cur                  = parent->children;
+    Task* cur_prev             = nullptr;
+    bool  matching_child_found = false;
+    while (cur != nullptr) {
+        const bool matches = pid == -1 || cur->pid == pid;
+        matching_child_found |= matches;
+        if (matches && cur->state == TaskState::Zombie) {
+            target      = cur;
+            target_prev = cur_prev;
+            break;
+        }
+        cur_prev = cur;
+        cur      = cur->child_next;
+    }
+
+    if (target != nullptr) {
+        if (target_prev != nullptr) {
+            target_prev->child_next = target->child_next;
+        } else {
+            parent->children = target->child_next;
+        }
+        target->child_next = nullptr;
+        target->state      = TaskState::Dead;
+        target->parent     = nullptr;
+        return {ChildWaitAction::kReap, target};
+    }
+
+    if (pid != -1 && !matching_child_found) {
+        return {ChildWaitAction::kNotFound, nullptr};
+    }
+    if (no_hang) {
+        return {ChildWaitAction::kNotExited, nullptr};
+    }
+
+    Scheduler::prepare_to_wait(parent);
+    parent->waiting_for_child = true;
+    return {ChildWaitAction::kSleep, nullptr};
+}
+
+void publish_child_exit(Task* task, int encoded_status) {
+    // A current task becomes permanently non-runnable at the Zombie store, so
+    // it must reach the parent wake before an IRQ-exit scheduler can switch it
+    // away. This also makes the helper safe outside sys_exit's wider guard.
+    cinux::arch::IrqSaveGuard irq_guard;
+    Task*                     parent      = nullptr;
+    bool                      wake_parent = false;
+    {
+        auto g            = g_child_exit_lock.irq_guard();
+        task->exit_status = encoded_status;
+        task->state       = TaskState::Zombie;
+        parent            = task->parent;
+        if (parent != nullptr && parent->waiting_for_child) {
+            parent->waiting_for_child = false;
+            wake_parent               = true;
+        }
+    }
+
+    if (parent == nullptr) {
+        return;
+    }
+    // Synthetic tests may omit signal state; every production task has it.
+    if (parent->sig_actions != nullptr) {
+        signal_send(parent, Signal::kSigchld);
+    }
+    if (wake_parent) {
+        Scheduler::unblock(parent);
+    }
+}
+
 WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc, int* reaped_pid) {
     auto* parent = Scheduler::current();
     if (parent == nullptr) {
@@ -212,42 +300,17 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
 
     // Re-scan loop: after waking from a block, the exited child is now Zombie.
     for (;;) {
-        if (parent->children == nullptr) {
-            return WaitpidResult::NoChildren;
-        }
+        ChildWaitDecision decision = prepare_child_wait(parent, pid, (options & kWaitNoHang) != 0);
 
-        // Scan the children list for a Zombie matching the pid selector.
-        Task* target   = nullptr;
-        Task* prev     = nullptr;
-        Task* cur      = parent->children;
-        Task* cur_prev = nullptr;
-        while (cur != nullptr) {
-            if ((pid == -1 || cur->pid == pid) && cur->state == TaskState::Zombie) {
-                target = cur;
-                prev   = cur_prev;
-                break;
-            }
-            cur_prev = cur;
-            cur      = cur->child_next;
-        }
-
-        if (target != nullptr) {
-            // Reap: collect status, unlink, free pid, mark Dead.
-            int target_pid = target->pid;
+        if (decision.action == ChildWaitAction::kReap) {
+            Task* target     = decision.target;
+            int   target_pid = target->pid;
             if (status != nullptr) {
                 *status = target->exit_status;
             }
             if (reaped_pid != nullptr) {
                 *reaped_pid = target_pid;
             }
-            if (prev != nullptr) {
-                prev->child_next = target->child_next;
-            } else {
-                parent->children = target->child_next;
-            }
-            pid_alloc.free(target->pid);
-            target->state  = TaskState::Dead;
-            target->parent = nullptr;
             cinux::lib::kprintf("[WAITPID] reaped child pid=%d exit_status=%d by parent pid=%d\n",
                                 target_pid, target->exit_status, parent->pid);
             // SMP reap/free safety: the child exited (became Zombie) on its own
@@ -275,7 +338,7 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
                 // child is debuggable; a use-after-free is not.
                 cinux::lib::kprintf(
                     "[WAITPID] WARN: child pid=%d still on_cpu=%d after spin -- "
-                    "leaking struct (no free)\n",
+                    "leaking task and retaining PID\n",
                     target_pid, target->on_cpu);
                 return WaitpidResult::Ok;
             }
@@ -289,55 +352,27 @@ WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc
             signal_unregister_task(target);
             free_kernel_stack(target);
             delete target;
+            // Do not expose this numeric PID to a new task until the old Task
+            // has left every CPU, registry, stack, and lifetime owner.
+            pid_alloc.free(target_pid);
             return WaitpidResult::Ok;
         }
 
-        // No Zombie yet.  For a specific pid, distinguish "not a child"
-        // (NotFound) from "child exists but still running" (NotExited).
-        if (pid != -1) {
-            cur           = parent->children;
-            bool is_child = false;
-            while (cur != nullptr) {
-                if (cur->pid == pid) {
-                    is_child = true;
-                    break;
-                }
-                cur = cur->child_next;
-            }
-            if (!is_child) {
-                cinux::lib::kprintf("[WAITPID] pid=%d is not a child of pid=%d\n", pid,
-                                    parent->pid);
-                return WaitpidResult::NotFound;
-            }
+        if (decision.action == ChildWaitAction::kNoChildren) {
+            return WaitpidResult::NoChildren;
         }
-
-        // A matching child exists but has not exited.
-        if (options & kWaitNoHang) {
+        if (decision.action == ChildWaitAction::kNotFound) {
+            cinux::lib::kprintf("[WAITPID] pid=%d is not a child of pid=%d\n", pid, parent->pid);
+            return WaitpidResult::NotFound;
+        }
+        if (decision.action == ChildWaitAction::kNotExited) {
             return WaitpidResult::NotExited;
         }
 
-        // Block until a child exits.  sys_exit() unconditionally Scheduler::unblock()s
-        // us (F-QA Q4c-1 / DEBT-004: was gated on a non-atomic bool, now unconditional
-        // since unblock is idempotent).  F4-M4 prepare-to-wait: mark Blocked
-        // before switching so a concurrent sys_exit() racing through the window
-        // finds us Blocked and wakes us (unblock() is idempotent) -- closing the
-        // old single-core-only "check+block is atomic" assumption.
-        //
-        // F4-M5 analysis: the children list needs NO lock for SMP, despite the
-        // earlier "follow-up" note.  `Task::children` is per-task PRIVATE: fork
-        // and clone link a child into current()->children, and CLONE_THREAD is a
-        // sibling (NOT a child, clone.cpp), so a thread group does not share one
-        // list.  waitpid scans/reaps current()->children, and sys_exit() does NOT
-        // touch parent->children (it only reads task->parent to wake it) -- there
-        // is no reparenting.  So each list is touched only by its owning task,
-        // which runs on one CPU at a time: no cross-CPU list access.  The one
-        // cross-CPU datum is child->state (set Zombie by the child's exit on CPU
-        // A, read here on CPU B) -- atomic on x86, and a miss is covered by
-        // exit's unblock(parent) forcing a re-scan.  Hence no children lock.
-        //
-        // schedule_blocked() -> schedule() needs a real scheduler loop, so this
-        // path runs only on real hardware, not in run-kernel-test (kWaitNoHang).
-        Scheduler::prepare_to_wait(parent);
+        // prepare_child_wait() marked us Blocked while holding the same lock
+        // that a child needs to publish Zombie. The child therefore either ran
+        // first (and we would have reaped it) or must observe Blocked and wake
+        // us after publication.
         Scheduler::schedule_blocked();
         // loop back: the exited child is now Zombie and will be reaped above.
     }

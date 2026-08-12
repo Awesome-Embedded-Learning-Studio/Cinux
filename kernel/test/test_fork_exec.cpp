@@ -32,8 +32,10 @@
 #include "kernel/arch/x86_64/paging_config.hpp"
 #include "kernel/arch/x86_64/syscall.hpp"
 #include "kernel/proc/elf_types.hpp"
+#include "kernel/proc/percpu.hpp"
 #include "kernel/proc/pid.hpp"
 #include "kernel/proc/process.hpp"
+#include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"
 #include "kernel/proc/sync.hpp"
@@ -518,6 +520,20 @@ void test_sys_execve_distinct() {
 
 namespace test_execve_result {
 
+void test_entry_point_is_independent_from_scheduler_context() {
+    constexpr uint64_t kUserEntry = 0x401080;
+
+    cinux::proc::ElfAuxInfo aux{};
+    Task                    task{};
+    aux.initial_rip = kUserEntry;
+
+    // A preemption rewrites ctx.rip with context_switch's kernel continuation.
+    // The loaded user entry must live in separate storage until SYSRET.
+    task.ctx.rip = reinterpret_cast<uint64_t>(cinux::proc::context_switch);
+    TEST_ASSERT_EQ(aux.initial_rip, kUserEntry);
+    TEST_ASSERT_NE(aux.initial_rip, task.ctx.rip);
+}
+
 void test_ok_is_zero() {
     TEST_ASSERT_EQ(static_cast<int>(cinux::proc::ExecveResult::Ok), 0);
 }
@@ -939,15 +955,16 @@ void test_waitpid_zombie_child_reaped() {
     tmp.pid  = 20;
     tmp.ppid = 1;
 
-    Task child{};
-    child.pid         = 21;
-    child.ppid        = 20;
-    child.state       = TaskState::Zombie;
-    child.exit_status = 7;
+    auto* child        = new Task{};
+    child->pid         = 21;
+    child->ppid        = 20;
+    child->state       = TaskState::Zombie;
+    child->exit_status = 7;
+    child->on_cpu      = -1;
 
     // Link child into parent
-    child.child_next = tmp.children;
-    tmp.children     = &child;
+    child->child_next = tmp.children;
+    tmp.children      = child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -958,7 +975,6 @@ void test_waitpid_zombie_child_reaped() {
     TEST_ASSERT_EQ(static_cast<int>(result), static_cast<int>(cinux::proc::WaitpidResult::Ok));
     TEST_ASSERT_EQ(status, 7);
     TEST_ASSERT_NULL(tmp.children);
-    TEST_ASSERT_TRUE(child.state == TaskState::Dead);
 
     cinux::proc::Scheduler::set_current(prev);
 }
@@ -973,15 +989,16 @@ void test_waitpid_any_zombie() {
     child1.pid   = 31;
     child1.state = TaskState::Running;
 
-    Task child2{};
-    child2.pid         = 32;
-    child2.state       = TaskState::Zombie;
-    child2.exit_status = 99;
+    auto* child2        = new Task{};
+    child2->pid         = 32;
+    child2->state       = TaskState::Zombie;
+    child2->exit_status = 99;
+    child2->on_cpu      = -1;
 
     // children: child1 -> child2
-    child1.child_next = &child2;
-    child2.child_next = nullptr;
-    tmp.children      = &child1;
+    child1.child_next  = child2;
+    child2->child_next = nullptr;
+    tmp.children       = &child1;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -1076,7 +1093,105 @@ void test_waitpid_invalid_pid() {
 }  // namespace test_sys_waitpid_direct
 
 // ============================================================
-// Test 22: sys_waitpid via syscall dispatch
+// Test 22: child-exit / waitpid handshake
+// ============================================================
+
+namespace test_child_exit_handshake {
+
+void test_parent_prepare_then_child_exit_preserves_wake() {
+    cinux::proc::RoundRobin local_run_queue;
+    Task                    parent{};
+    Task                    child{};
+    parent.pid         = 100;
+    parent.state       = TaskState::Running;
+    parent.sched_class = &local_run_queue;
+    parent.children    = &child;
+    child.pid          = 101;
+    child.state        = TaskState::Running;
+    child.parent       = &parent;
+    child.child_next   = nullptr;
+
+    cinux::proc::Scheduler::NoRescheduleGuard no_reschedule;
+
+    auto decision = cinux::proc::prepare_child_wait(&parent, child.pid, false);
+    TEST_ASSERT_TRUE(decision.action == cinux::proc::ChildWaitAction::kSleep);
+    TEST_ASSERT_NULL(decision.target);
+    TEST_ASSERT_TRUE(parent.state == TaskState::Blocked);
+    TEST_ASSERT_TRUE(parent.waiting_for_child);
+
+    // Role-play the child exiting after the parent published Blocked but before
+    // schedule_blocked(). The wake must survive that handoff window.
+    constexpr int kEncodedStatus = 7 << 8;
+    cinux::proc::publish_child_exit(&child, kEncodedStatus);
+    cinux::proc::clear_reschedule();
+    TEST_ASSERT_TRUE(child.state == TaskState::Zombie);
+    TEST_ASSERT_EQ(child.exit_status, kEncodedStatus);
+    TEST_ASSERT_TRUE(parent.state == TaskState::Ready);
+    TEST_ASSERT_FALSE(parent.waiting_for_child);
+
+    TEST_ASSERT_FALSE(cinux::proc::Scheduler::schedule_blocked());
+    TEST_ASSERT_TRUE(parent.state == TaskState::Ready);
+
+    local_run_queue.dequeue(&parent);
+    parent.state       = TaskState::Running;
+    parent.sched_class = nullptr;
+}
+
+void test_child_exit_between_scan_and_prepare_never_sleeps() {
+    Task parent{};
+    Task child{};
+    parent.pid       = 110;
+    parent.state     = TaskState::Running;
+    parent.children  = &child;
+    child.pid        = 111;
+    child.state      = TaskState::Running;
+    child.parent     = &parent;
+    child.child_next = nullptr;
+
+    // This is the stale observation made by the old waitpid path. The child
+    // exits before its later prepare_to_wait(), while the parent is Running, so
+    // the immediate unblock is intentionally a no-op.
+    TEST_ASSERT_TRUE(child.state != TaskState::Zombie);
+    constexpr int kEncodedStatus = 9 << 8;
+    cinux::proc::publish_child_exit(&child, kEncodedStatus);
+    TEST_ASSERT_TRUE(parent.state == TaskState::Running);
+    TEST_ASSERT_FALSE(parent.waiting_for_child);
+    TEST_ASSERT_TRUE(child.state == TaskState::Zombie);
+
+    // The real handshake must re-scan under the publication lock. It may reap
+    // the already-published child, but must never publish parent as Blocked.
+    auto decision = cinux::proc::prepare_child_wait(&parent, child.pid, false);
+    TEST_ASSERT_TRUE(decision.action == cinux::proc::ChildWaitAction::kReap);
+    TEST_ASSERT_EQ(decision.target, &child);
+    TEST_ASSERT_TRUE(parent.state == TaskState::Running);
+    TEST_ASSERT_NULL(parent.children);
+    TEST_ASSERT_TRUE(child.state == TaskState::Dead);
+    TEST_ASSERT_NULL(child.parent);
+    TEST_ASSERT_EQ(child.exit_status, kEncodedStatus);
+}
+
+void test_child_exit_does_not_wake_unrelated_block() {
+    Task parent{};
+    Task child{};
+    parent.pid               = 120;
+    parent.state             = TaskState::Blocked;
+    parent.waiting_for_child = false;
+    child.pid                = 121;
+    child.state              = TaskState::Running;
+    child.parent             = &parent;
+
+    // Model a parent parked in futex/vfork/IO rather than waitpid. Child exit
+    // still publishes SIGCHLD, but it must not grant that unrelated wait.
+    cinux::proc::publish_child_exit(&child, 0);
+    TEST_ASSERT_TRUE(parent.state == TaskState::Blocked);
+    TEST_ASSERT_FALSE(parent.waiting_for_child);
+    TEST_ASSERT_TRUE(child.state == TaskState::Zombie);
+}
+
+}  // namespace test_child_exit_handshake
+
+// ============================================================
+// Test 23: sys_waitpid via syscall dispatch
 // ============================================================
 
 namespace test_sys_waitpid_dispatch {
@@ -1114,7 +1229,7 @@ void test_dispatch_sys_waitpid_via_table() {
 }  // namespace test_sys_waitpid_dispatch
 
 // ============================================================
-// Test 23: waitpid reap frees PID
+// Test 24: waitpid reap frees PID
 // ============================================================
 
 namespace test_waitpid_pid_reuse {
@@ -1129,13 +1244,14 @@ void test_reaped_pid_is_freed() {
     int child_pid = local_alloc.alloc();  // 1
     TEST_ASSERT_TRUE(local_alloc.is_allocated(child_pid));
 
-    Task child{};
-    child.pid         = child_pid;
-    child.ppid        = 80;
-    child.state       = TaskState::Zombie;
-    child.exit_status = 0;
-    child.child_next  = nullptr;
-    tmp.children      = &child;
+    auto* child        = new Task{};
+    child->pid         = child_pid;
+    child->ppid        = 80;
+    child->state       = TaskState::Zombie;
+    child->exit_status = 0;
+    child->child_next  = nullptr;
+    child->on_cpu      = -1;
+    tmp.children       = child;
 
     Task* prev = cinux::proc::Scheduler::current();
     cinux::proc::Scheduler::set_current(&tmp);
@@ -1204,6 +1320,7 @@ extern "C" void run_fork_exec_tests() {
     RUN_TEST(test_sys_execve_constant::test_sys_execve_distinct);
 
     RUN_TEST(test_execve_result::test_ok_is_zero);
+    RUN_TEST(test_execve_result::test_entry_point_is_independent_from_scheduler_context);
     RUN_TEST(test_execve_result::test_error_values_negative);
     RUN_TEST(test_execve_result::test_error_values_distinct);
     RUN_TEST(test_execve_result::test_error_values_match_errno);
@@ -1252,6 +1369,10 @@ extern "C" void run_fork_exec_tests() {
     RUN_TEST(test_sys_waitpid_direct::test_waitpid_not_exited);
     RUN_TEST(test_sys_waitpid_direct::test_waitpid_not_found);
     RUN_TEST(test_sys_waitpid_direct::test_waitpid_invalid_pid);
+
+    RUN_TEST(test_child_exit_handshake::test_parent_prepare_then_child_exit_preserves_wake);
+    RUN_TEST(test_child_exit_handshake::test_child_exit_between_scan_and_prepare_never_sleeps);
+    RUN_TEST(test_child_exit_handshake::test_child_exit_does_not_wake_unrelated_block);
 
     RUN_TEST(test_sys_waitpid_dispatch::test_dispatch_sys_waitpid);
     RUN_TEST(test_sys_waitpid_dispatch::test_dispatch_sys_waitpid_via_table);
