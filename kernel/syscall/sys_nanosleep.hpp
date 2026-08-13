@@ -3,11 +3,8 @@
  * @brief sys_nanosleep handler declaration (F-ECO batch 3)
  *
  * Sleep for a timespec duration.  Backed by the HPET monotonic counter (PIT
- * fallback): the sleep poll+yields until the deadline.  Two deliberate,
- * documented hobby-OS simplifications:
- *   - NO sti/hlt: yield() context-switches via Task::ctx (the #DF-safe path,
- *     same as ping's pump_yield).  sti inside a syscall re-enables the LAPIC
- *     timer IRQ and corrupts the syscall trap frame -> #DF.
+ * fallback): the sleep poll+yields until the deadline.  One deliberate,
+ * documented hobby-OS simplification:
  *   - NO IRQ wake: a timer-interrupt-driven wake (HPET 周期中断) is the F5-M4
  *     follow-up.  Until then the loop busy-polls the counter with yield() giving
  *     other tasks the CPU -- correct, just not efficient.

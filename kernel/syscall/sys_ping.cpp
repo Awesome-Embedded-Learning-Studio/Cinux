@@ -2,8 +2,8 @@
  * @file kernel/syscall/sys_ping.cpp
  * @brief sys_ping handler -- delegate to cinux::net::ping().
  *
- * Unpacks the destination IPv4, calls the production ping (which sends the echo
- * + drives the sti/hlt+poll loop), and translates the result to 0 / -errno.
+ * Unpacks the destination IPv4, calls the production ping, and translates the
+ * result to 0 / -errno.
  */
 
 #include "kernel/syscall/sys_ping.hpp"

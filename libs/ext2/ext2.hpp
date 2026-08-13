@@ -20,14 +20,14 @@
 #include <stdint.h>
 
 #include "ext2_common.hpp"
+#include "ext2_mutex.hpp"
 #include "ext2_types.hpp"
 #include "fs/vfs_filesystem.hpp"
 #include "kernel/drivers/block_device.hpp"
-#include "kernel/proc/sync.hpp"  // Spinlock (inode_cache_lock_)
 
 namespace cinux::fs {
 
-uint64_t ext2_read_count();   ///< cumulative ext2 read I/O (B2.5 dump_memory_stats)
+uint64_t ext2_read_count();  ///< cumulative ext2 read I/O (B2.5 dump_memory_stats)
 uint64_t ext2_read_bytes();
 uint64_t ext2_read_ns();
 
@@ -118,9 +118,9 @@ public:
     uint32_t blocks_count() const { return sb_.s_blocks_count; }
 
     /// Read into block_buf_ (NOT SMP-safe; see dst overload).  @return true on success.
-    bool read_block(uint32_t block_num);
+    bool                      read_block(uint32_t block_num);
     /// SMP-safe: read straight into @p dst (caller-provided).
-    bool read_block(uint32_t block_num, void* dst);
+    bool                      read_block(uint32_t block_num, void* dst);
     /// B3a: read @p block_count contiguous on-disk blocks straight into @p buf (one DMA,
     /// skipping block_buf_). Callers guarantee contiguity + block_count ≤ dma_buf (4 blk).
     cinux::lib::ErrorOr<void> read_disk_range(uint32_t start_disk_block, uint64_t block_count,
@@ -345,15 +345,14 @@ public:
                           uint32_t name_len, uint32_t& out_entry_ino);
 
 private:
+    friend class Ext2FileOps;
     /// Located inode (block + byte offset within it); filled by locate_inode_block.
     struct InodeLoc {
         uint32_t target_block;
         uint32_t within_block_offset;
     };
 
-    /// Locate @p ino's containing block + offset, read_block() it, bounds-check.
-    /// Shared by read_disk_inode / write_disk_inode (the inode-location math is
-    /// identical).  On success block_buf_ holds ino's block; @return true.
+    /// Locate an inode-table block and validate that its slot does not cross the block.
     bool locate_inode_block(uint32_t ino, InodeLoc& out);
 
     // ============================================================
@@ -385,17 +384,10 @@ private:
     // Inode cache management
     // ============================================================
 
-    /**
-     * @brief Find or allocate a cache slot for the given inode number
-     *
-     * If the inode is already cached, returns its slot.  Otherwise
-     * finds a free slot, reads the inode from disk, and populates
-     * both the disk_inode and vfs_inode fields.
-     *
-     * @param ino  Inode number (1-based)
-     * @return Pointer to the VFS Inode, or nullptr on failure
-     */
+    /// Lookup/cache an inode while acquiring the outer mutation lock.
     Inode* get_cached_inode(uint32_t ino);
+    /// Same cache operation; the caller must already hold mutation_lock_.
+    Inode* get_cached_inode_locked(uint32_t ino);
 
     /**
      * @brief Build a VFS Inode from an on-disk ext2 inode
@@ -406,6 +398,7 @@ private:
      * @param cached  Cache entry to populate
      */
     void populate_vfs_inode(Ext2CachedInode& cached);
+    void refresh_vfs_metadata(Ext2CachedInode& cached);
 
     /// Drop the cached entry for @p ino (if present) so the next lookup re-reads
     /// disk. Call after a metadata write (chmod/chown/utimensat/link): stat()
@@ -491,9 +484,11 @@ private:
     Ext2CachedInode* inode_cache_[EXT2_INODE_CACHE_SIZE]{};
 
     /// Live object count; capped at EXT2_INODE_CACHE_MAX (evict refcount==0).
-    uint32_t inode_cache_count_{0};
-    mutable cinux::proc::Spinlock inode_cache_lock_;  ///< SMP: serialize cache walks/evicts
-    mutable cinux::proc::Spinlock block_alloc_lock_;  ///< SMP: serialize block+inode bitmap alloc/free
+    uint32_t          inode_cache_count_{0};
+    /// Sleepable outer transaction lock; order: mutation -> block allocator / inode cache.
+    mutable Ext2Mutex mutation_lock_;
+    mutable Ext2Mutex inode_cache_lock_;  ///< Sleepable: cache miss may issue block I/O
+    mutable Ext2Mutex block_alloc_lock_;  ///< Sleepable: bitmap RMW issues block I/O
 };
 
 }  // namespace cinux::fs

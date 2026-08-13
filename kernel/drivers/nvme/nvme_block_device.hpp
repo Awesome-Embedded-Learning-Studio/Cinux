@@ -73,10 +73,12 @@ private:
     uint64_t                       lba_size_;
     cinux::drivers::dma::DmaBuffer dma_buf_;
     // Serialises read_blocks/write_blocks across SMP CPUs: the single dma_buf_
-    // + io_submit polling path must not overlap (production -smp 2 + gcc fork
-    // chain exposed DmaBuffer corruption -> garbage ext2 block numbers -> NVMe
-    // CAP_EXCEEDED on a wild slba).
-    cinux::proc::Spinlock          lock_;
+    // must not overlap (production -smp 2 + gcc fork chain once exposed
+    // DmaBuffer corruption -> garbage ext2 block numbers).  A Mutex (not
+    // Spinlock) so io_submit may block on the completion IRQ under it (NVMe
+    // async IO B2); Mutex is not tracked by lockdep's held-stack, so sleeping
+    // while holding it does not trip the "spinlock held across schedule" assert.
+    cinux::proc::Mutex             lock_;
 };
 
 /**

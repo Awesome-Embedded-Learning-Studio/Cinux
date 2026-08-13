@@ -62,7 +62,7 @@ private:
  *
  * read() blocks on the console TTY's cooked line (a KERNEL buffer -- sys_read
  * hands InodeOps::read a kernel staging buffer, never the user pointer, so the
- * block is AC=0 safe with no sti/hlt in the syscall).  ioctl() delegates to the
+ * block is AC=0 safe). ioctl() delegates to the
  * shared console_tty_ioctl (TCGETS/TCSETS/TIOCGWINSZ/TIOCGPGRP/TIOCSPGRP/
  * TIOCSCTTY) -- the same handler sys_ioctl's fd 0/1/2 fallback uses.
  */

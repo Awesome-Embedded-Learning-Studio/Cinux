@@ -15,7 +15,7 @@
  *   Offset 40: rbx
  *   Offset 48: rsp
  *   Offset 56: rip
- *   Offset 64: gs_base      (RESERVED — GS is per-CPU since F4-M3 P1-2)
+ *   Offset 64: rflags       (IF state; other arithmetic flags are caller-clobbered)
  *   Offset 72: kgs_base     (RESERVED — KERNEL_GS_BASE is per-CPU)
  *   Offset 80: fs_base      (MSR_FS_BASE, per-thread TLS)
  *
@@ -58,6 +58,13 @@ context_switch:
     leaq .restore(%rip), %rax        # .restore address→%rax: compute return point
     movq %rax, 56(%rdi)              # %rax→from+56: save resume RIP
 
+    /* Save IF state.  A task preempted at IRQ exit must resume with IF=0 until
+       its suspended IRQ frame reaches IRETQ; an ordinary task normally saves
+       IF=1.  Arithmetic flags need not survive a C call boundary. */
+    pushfq                             # RFLAGS→stack
+    popq %rax                          # stack→%rax: saved flags
+    movq %rax, 64(%rdi)               # %rax→from+64: save IF carrier
+
     /* F4-M3 P1-2: GS base is PER-CPU, not per-task.  The swapgs discipline
        keeps MSR_GS_BASE == this CPU's PerCpu block for the whole of kernel
        mode, so it must NOT be saved/restored across context switches (only
@@ -97,10 +104,15 @@ context_switch:
     movq $0xC0000100, %rcx           # MSR_FS_BASE→%rcx
     wrmsr                             # write MSR_FS_BASE
 
-    /* Re-enable interrupts -- we may have entered from ISR context (IF=0).
-       New tasks must start with interrupts on; resumed tasks will restore
-       their original RFLAGS via IRETQ unwinding regardless. */
-    sti
+    /* Restore the incoming task's IF state.  STI defers recognition until after
+       the following JMP, so no IRQ can land with the old task's stack active
+       and the new task's context only half-installed. */
+    testq $0x200, 64(%rsi)            # incoming RFLAGS.IF set?
+    jz 1f                             # no -> keep interrupts disabled
+    sti                               # yes -> enable after the following instruction
+    jmp *56(%rsi)                     # resume incoming task under STI shadow
+1:
+    cli                               # explicit for contexts first built with IF=0
 
     /* Jump to the new task's saved instruction pointer */
     jmp *56(%rsi)                    # to+56→RIP: resume execution

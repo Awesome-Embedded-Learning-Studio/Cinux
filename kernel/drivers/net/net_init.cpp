@@ -8,15 +8,9 @@
  * them, and spawns a resident net_poll kthread.
  *
  * ping() drives RX through an INJECTABLE pump (the "driven method"):
- *   - production default = pump_yield: YIELD (no sti/hlt inside the syscall -- a
- *     resident net_poll kthread owns sti/hlt + NetStack::poll() and drains the
- *     reply).  sti inside sys_ping re-enables the LAPIC-timer IRQ, which fires
- *     schedule() with the syscall trap frame live on the per-CPU stack and
- *     corrupts the saved user RIP/RSP -> #DF on sysretq (the F7 shell-ping
- *     crash).  yield() switches via Task::ctx, the same safe path the TTY
- *     blocking read uses.
- *   - tests inject rx_pump_sti_hlt (the legacy inline sti/hlt+poll) or a mock;
- *     the test kernel's timer handler does not tick, so sti there is safe.
+ *   - production default = pump_yield; a resident net_poll kthread owns
+ *     sti/hlt + NetStack::poll() and drains the reply.
+ *   - tests inject rx_pump_sti_hlt (the legacy inline sti/hlt+poll) or a mock.
  *
  * Lives in drivers/net/ (NOT kernel/net/) because it names E1000Controller; the
  * public API is declared in kernel/net/net_init.hpp, which stays decoupled.
@@ -70,11 +64,9 @@ cinux::net::NetDevice* g_virtio_adapter =
     nullptr;  ///< F5-M2 task 2: virtio-net, preferred NIC for ping
 bool g_ready = false;
 
-// Background net RX poll driver kthread body.  Drains the e1000 ring via
+// Background net RX poll driver kthread body. Drains the e1000 ring via
 // NetStack::poll() and sti/hlt's to keep QEMU's main loop running so SLIRP
-// injects ARP/ICMP replies.  This is a kernel THREAD, not a syscall: it owns
-// the sti/hlt wait that ping() must never do.  It yields cooperatively after
-// each poll/sleep round because timer IRQs do not context-switch inline.
+// injects ARP/ICMP replies. It yields after each poll/sleep round.
 // Spawned once by start_poll_driver() at low priority.
 void net_poll_entry() {
     while (true) {
@@ -86,10 +78,8 @@ void net_poll_entry() {
     }
 }
 
-// Production default RX pump: yield (let the net_poll kthread drain + advance
-// QEMU) then report whether the ICMP reply has landed.  NO sti/hlt here -- this
-// runs inside sys_ping; sti would re-enable the LAPIC-timer IRQ and corrupt the
-// syscall trap frame (#DF).  yield() context-switches via Task::ctx.
+// Production default RX pump: yield to the resident net_poll kthread, then
+// report whether the ICMP reply has landed.
 bool pump_yield() {
     cinux::proc::Scheduler::yield();
     return g_icmp.reply_count() > 0;
@@ -203,12 +193,8 @@ cinux::lib::ErrorOr<PingResult> ping(Ipv4Addr dst, uint16_t id, uint16_t seq, Rx
 }
 
 bool rx_pump_sti_hlt() {
-    // Legacy inline RX pump (poll + sti/hlt): the proven test-kernel RX driver.
-    // Exposed so tests exercising REAL SLIRP delivery can drive ping() without
-    // the production yield pump + kthread.  The test kernel's LAPIC-timer
-    // handler deliberately does NOT call Scheduler::tick(), so sti here cannot
-    // preempt -- safe in tests, but NEVER use this from a syscall in production
-    // (that is the #DF hazard pump_yield exists to avoid).
+    // Legacy inline RX pump (poll + sti/hlt) lets tests drive real SLIRP
+    // delivery without spawning the production poll-driver kthread.
     g_stack.poll();
     if (g_icmp.reply_count() > 0) {
         return true;

@@ -44,10 +44,11 @@ void launch_user_program(const char* path, const char* const argv[], const char*
  * The "last mile" shared by launch_user_program() (fresh task) and the
  * sys_execve syscall handler (replace-current-image).  Assumes execve() has
  * already mapped the program's PT_LOAD segments into the current task's address
- * space and set ctx.rip = entry; @p aux carries the AT_PHDR/PHNUM/PHENT/ENTRY
- * gathered during load.  Pre-maps the stack pages, records the demand-growth
- * Stack VMA, builds argc/argv/envp/auxv into the top stack page, activates the
- * address space, and jumps to user mode.  Never returns.
+ * space; @p aux carries both the initial user RIP and the
+ * AT_PHDR/PHNUM/PHENT/ENTRY values gathered during load.  Pre-maps the stack
+ * pages, records the demand-growth Stack VMA, builds argc/argv/envp/auxv into
+ * the top stack page, activates the address space, and jumps to user mode.
+ * Never returns.
  *
  * @param path  program path (also AT_EXECFN / argv[0])
  * @param argv  argument vector (nullptr-terminated)

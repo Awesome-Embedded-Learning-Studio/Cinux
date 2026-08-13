@@ -28,6 +28,7 @@
 #include "kernel/drivers/usb/xhci_irq.hpp"
 #include "kernel/drivers/virtio/virtio.hpp"  // F5-M2 batch 3: kVirtioBlkIrqVector
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "pic.hpp"
 #include "smp.hpp"
 
@@ -138,6 +139,7 @@ void irq_default_handler(InterruptFrame* /*frame*/) {
  */
 void net_timer_handler(InterruptFrame* /*frame*/) {
     cinux::drivers::apic::g_lapic.eoi();
+    cinux::proc::irq_exit();
 }
 
 }  // extern "C"
@@ -163,9 +165,9 @@ extern "C" void irq_init() {
     }
 
     // Reschedule IPI (F4-M4 M4-2, vector 0xE0).  Registered into the shared IDT
-    // so any CPU can take it; the handler is a LAPIC EOI no-op and the waking
-    // AP's idle loop does the actual reschedule.  Dormant on a single-core
-    // system (wake_idle_ap never sends it).
+    // so any CPU can take it; the handler publishes need_resched and the common
+    // IRQ epilogue switches after LAPIC EOI.  Dormant on a single-core system
+    // (wake_idle_ap never sends it).
     g_idt.set_handler(static_cast<ExceptionVector>(cinux::arch::kRescheduleIpiVector),
                       reschedule_ipi_stub, GDT_KERNEL_CODE, kIRQAttr, 2);
 

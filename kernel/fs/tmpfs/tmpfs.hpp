@@ -74,6 +74,9 @@ struct TmpNode;  // defined in tmpfs.cpp; TmpFs holds it opaquely
 class TmpFs : public FileSystem {
 public:
     TmpFs();
+
+    /// Destroy the complete namespace tree. The filesystem must first be
+    /// detached from VFS and have no outstanding lookup/create/fd references.
     ~TmpFs() override;
 
     cinux::lib::ErrorOr<void>   mount() override;
@@ -82,9 +85,12 @@ public:
     /// F-USABILITY batch 1a: single-component lookup for the vfs_lookup layer.
     /// Resolves one name within parent via find_child (the same primitive
     /// lookup() walks with). Implementation in tmpfs.cpp (uses TmpNode).
-    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent,
-                                             const char* name,
+    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
                                              uint32_t namelen) override;
+
+    /// TmpFs nodes can disappear immediately after unlink, so VFS-wide dentry
+    /// entries must not retain namespace aliases for them.
+    bool dcache_enabled() const override { return false; }
 
     /// Allocate the next inode number.  Called by the create / mkdir ops.
     uint64_t alloc_ino() { return next_ino_++; }

@@ -971,6 +971,16 @@ static bool ap_test_selfcheck(uint32_t cpu_id) {
 // engages under -smp 2, where M3-1's acpi::init detected >1 CPU.  This is what
 // turns run-kernel-test-smp from a BSP-only no-op into a real AP-wake gate.
 static bool run_smp_ap_wake_test() {
+#if defined(CINUX_MUSL_HELLO_SMOKE) || defined(CINUX_MUSL_DYN_SMOKE) ||                            \
+    defined(CINUX_BUSYBOX_SMOKE) || defined(CINUX_GCC_TOOLCHAIN) ||                                \
+    defined(CINUX_FB_MMAP_SMOKE) || defined(CINUX_INPUT_SMOKE) || defined(CINUX_GUI_HOST_SMOKE)
+    // The suites reinitialise the scheduler while role-playing tasks, leaving
+    // initialized_ true. Complete the smoke's final reset before booting APs:
+    // resetting the run queue and idle table after an AP starts scheduling can
+    // race setup_ap_idle() and invalidate the AP's freshly built idle task.
+    cinux::proc::Scheduler::init();
+#endif
+
     const auto&    info     = cinux::drivers::acpi::g_acpi_info;
     const uint32_t ap_count = info.cpu_count > 0 ? info.cpu_count - 1 : 0;
     if (ap_count == 0) {
@@ -1376,7 +1386,6 @@ extern "C" void kernel_main() {
     // does not return here.  CI builds without the flag take the normal path.
     cinux::lib::kprintf("\n[F10-M1] entering scheduler for musl hello ring-3 smoke\n");
     g_unit_test_failures = test::get_total_failed();
-    cinux::proc::Scheduler::init();  // pristine run queue for the smoke (tests re-init it)
     auto* hello_worker = cinux::proc::TaskBuilder()
                              .set_entry(musl_hello_smoke_entry)
                              .set_name("hello_smoke")

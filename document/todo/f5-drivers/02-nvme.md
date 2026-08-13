@@ -3,6 +3,22 @@
 > 现代 SSD 协议。PCIe 设备，Admin Queue + I/O Queue。
 > 高性能存储接口，实现 IBlockDevice。
 
+## ✅ Follow-up：NVMe IO 异步化（2026-07-16→08-12，分支 `feat/nvme-async-io`）
+
+> M3 收官后 NVMe IO 是同步 poll（`io_submit` 轮询 CQ 占满 CPU），gcc 编译时饿死别的 shell（[note](../../notes/2026-07-11-nvme-io-submit-yield-revert.md) 留的 v1.1+ 债）。本 follow-up 改 IRQ-driven blocking。
+
+**范围栅栏**：单 IO in-flight 不变（不追吞吐，只治饿死）；不改 `IBlockDevice` 接口（调用方透明）；不做多 IO in-flight / 多 dma buffer / SQ 多 slot（远期）；不碰 NVMe `0x4080` 取证（独立弧）。
+
+**最终设计**：controller 的 sleepable submit Mutex 覆盖 SQ 发布到精确 CID completion，`io_lock_` 只护短队列状态；IRQ handler 以 active/ready/completed CID 发布并 post。Ext2 cache/allocator 与 File offset 的跨 IO 临界区均用 sleepable Mutex；所有可抢占 `current` 读取改为单条 GS-relative access，避免迁移后解引用旧 CPU 的 PerCpu。
+
+**批表**：B0 立项 docs / B1 锁基建 / B2 IRQ blocking 核心 / B3 production SMP 取证与并发根修均完成。fresh SMP 双 exec 3/3 通过；两腿 942/942、host 66/66、Ext2 TSAN 绿。详见 [PLAN](../../ai/PLAN.md) 与 [收官 note](../../notes/2026-08-12-nvme-preempt-stall-root-fix.md)。
+
+**GOTCHA / 留续**：
+- 不要用“无 IRQ 日志”推断 MSI-X 丢失；热路径 `kprintf` 会争全局打印锁。先以 QEMU trace + LAPIC IRR/ISR/PBA + CQ phase 分层证伪。
+- `percpu()` 返回的 CPU-local 指针不可跨可抢占窗口；字段访问必须用 `%gs:offset` accessor，或先关闭抢占。
+- Mutex/Semaphore 的通用 scheduler wake 是虚假唤醒，只有对应 unlock/post 的 handoff/grant 才能让 wait 返回。
+- async wait 尚无设备超时；16-bit CID 回绕和多 in-flight 需要 generation/CID→waiter 表，留后续。
+
 ## 立项（2026-07-05，分支 `feat/f5-nvme-virtio`，从干净 main `bef86b0`）
 
 **接入策略 = 并存验证**：NVMe 作独立第二盘，生产 rootfs 仍走 AHCI；perf 批把 gcc rootfs 放 NVMe 盘对比 I/O。**接入缝（零改 ext2）**：`Ext2` 持裸 `IBlockDevice*`（`explicit Ext2(IBlockDevice* dev)`），NVMe 造 `NvmeBlockDevice` 传给 Ext2，ext2/PageCache 零改。**MMIO 槽位（KMEM_MMIO 2MB 窗）**：NVMe BAR0 @+0x70000、MSI-X Table @+0x74000 / PBA @+0x75000（避碰 xHCI +0x40000）。

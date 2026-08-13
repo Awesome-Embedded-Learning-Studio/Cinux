@@ -16,6 +16,7 @@
 
 #include "big_kernel_test.h"
 #include "kernel/lib/aslr.hpp"
+#include "kernel/lib/string.hpp"
 
 using cinux::lib::aslr_brk_offset;
 using cinux::lib::aslr_mmap_offset;
@@ -82,6 +83,21 @@ void test_aslr_offsets_vary() {
     TEST_ASSERT_FALSE(all_same(b, 16));
 }
 
+void test_krandom_fill_and_scalar_paths_share_stream_safely() {
+    cinux::lib::KRandom random;
+    uint8_t             first[33]{};
+    uint8_t             second[33]{};
+
+    // fill() holds the PRNG lock once and advances through its private locked
+    // primitive; this call would deadlock if it recursively entered next64().
+    random.fill(first, sizeof(first));
+    static_cast<void>(random.next32());
+    static_cast<void>(random.next64());
+    random.fill(second, sizeof(second));
+
+    TEST_ASSERT_NE(memcmp(first, second, sizeof(first)), 0);
+}
+
 }  // namespace test_aslr
 
 // ============================================================
@@ -95,6 +111,7 @@ extern "C" void run_aslr_tests() {
     RUN_TEST(test_aslr::test_aslr_mmap_offset_range);
     RUN_TEST(test_aslr::test_aslr_brk_offset_range);
     RUN_TEST(test_aslr::test_aslr_offsets_vary);
+    RUN_TEST(test_aslr::test_krandom_fill_and_scalar_paths_share_stream_safely);
 
     TEST_SUMMARY();
 }

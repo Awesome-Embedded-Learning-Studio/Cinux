@@ -34,5 +34,6 @@ target_sources(big_kernel_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/procfs/procfs_init.cpp
     # --- tmpfs (F6-M4) ---
     ${CMAKE_CURRENT_SOURCE_DIR}/tmpfs/tmpfs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tmpfs/tmpfs_ops.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tmpfs/tmpfs_init.cpp
 )

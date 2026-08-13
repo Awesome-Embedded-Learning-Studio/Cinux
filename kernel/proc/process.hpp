@@ -136,19 +136,9 @@ struct Task {
      *  Refilled by SchedulingClass::pick_next / task_fork / TaskBuilder::build. */
     int32_t  quantum_remaining;
 
-    /** Base of the kernel stack allocation (for freeing). */
-    uint64_t kernel_stack;
-
-    /** Top of the kernel stack (initial rsp). */
-    uint64_t kernel_stack_top;
-
-    /**
-     * Virtual address of the guard page below the kernel stack.
-     * This page is intentionally left unmapped; a fault here
-     * indicates a kernel stack overflow.
-     * Zero means no guard page (e.g. the boot task).
-     */
-    uint64_t kernel_stack_guard_page;
+    uint64_t kernel_stack;             ///< Mapped stack base (for freeing)
+    uint64_t kernel_stack_top;         ///< Initial RSP
+    uint64_t kernel_stack_guard_page;  ///< Unmapped guard below the stack; 0 for boot task
 
     /** Per-process page tables (nullptr for kernel-only threads). */
     cinux::mm::AddressSpace* addr_space;
@@ -249,6 +239,9 @@ struct Task {
     /** Singly-linked list of child tasks (head pointer). */
     Task* children;
 
+    /** Intrusive sibling link used only by the parent's children list. */
+    Task* child_next;
+
     /** Pointer to the parent task (nullptr for the kernel init task). */
     Task* parent;
 
@@ -258,11 +251,17 @@ struct Task {
     /** Intrusive link for wait-queue linked lists (Mutex / Semaphore). */
     Task* wait_next;
 
-    /** Generic per-task private data (set before first schedule). */
-    void* private_data;
-
     /** FPU/SSE state (512 bytes, 16-byte aligned for fxsave/fxrstor). */
     alignas(16) uint8_t fpu_state[512];
+
+    // Task-owned IST2 stack: a suspended IRQ frame cannot be overwritten by a
+    // later IRQ.  Kept here because assembly pins fpu_state at Task+384.
+    uint64_t irq_stack;
+    uint64_t irq_stack_top;
+    uint64_t irq_stack_guard_page;
+
+    /** Generic per-task private data (set before first schedule). */
+    void* private_data;
 
     // F-ECO batch 8: supplementary groups (getgroups/setgroups -- `id`/`newgrp`).
     // Placed AFTER fpu_state so the fpu_state offset (pinned by the static_assert
@@ -294,6 +293,9 @@ struct Task {
 
     /** Parent blocked by CLONE_VFORK until this task execs or exits. */
     Task* vfork_parent{nullptr};
+
+    /** True only while this task is parked by waitpid's child-exit handshake. */
+    bool waiting_for_child{false};
 
     // ---- EINTR / interruptible sleep (signal breaks blocking IO) ----
     // A task parked in a blocking syscall (pipe R/W, socket recv/accept, poll)
@@ -457,44 +459,9 @@ constexpr int kWaitNoHang = 1;
 WaitpidResult waitpid(int pid, int* status, int options, PidAllocator& pid_alloc,
                       int* reaped_pid = nullptr);
 
-// ============================================================
-// Assembly entry point (C linkage)
-// ============================================================
-
-/**
- * @brief Low-level context switch primitive
- *
- * Saves callee-saved registers of the current task into `from`,
- * restores callee-saved registers from `to`, and jumps to the
- * saved rip of `to`.
- *
- * @param from  Pointer to the outgoing task's CpuContext
- * @param to    Pointer to the incoming task's CpuContext
- */
-extern "C" void context_switch(CpuContext* from, CpuContext* to);
-
-/**
- * @brief Fork child trampoline (assembly, sets rax=0 and returns)
- *
- * Called by the scheduler when the child task is first switched in.
- * Sets rax to 0 so that the child sees fork() return 0, then
- * returns to the fork() call site on the child's stack.  Used by the
- * kernel-fork path (prepare_kernel_fork_context) where the child must
- * resume a kernel caller mid-execution.
- */
-extern "C" void fork_child_trampoline();
-
-/**
- * @brief User fork/clone child first-run trampoline (assembly)
- *
- * The child's ctx.rip is set to this by prepare_user_fork_context();
- * ctx.rsp points at a 128-byte pt_regs frame (the parent's syscall frame)
- * copied to the top of the child's clean kernel stack.  ret_from_fork
- * restores the user register state from that frame and SYSRETQs to Ring 3
- * with rax=0 -- the Linux ret_from_fork style.  The child never runs on a
- * copy of the parent's kernel stack, avoiding the gcc-13 -O2+ubsan
- * frame-layout fragility of the old copied-stack RBP-chain approach.
- */
-extern "C" void ret_from_fork();
+// Context-switch assembly entry points (context_switch, fork_child_trampoline,
+// ret_from_fork) live in kernel/proc/cpu_context.hpp -- beside the CpuContext
+// definition they operate on and included above -- split out to keep this file
+// under the 500-line limit.
 
 }  // namespace cinux::proc

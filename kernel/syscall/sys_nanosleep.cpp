@@ -48,8 +48,7 @@ int64_t do_nanosleep_kernel(const ktimespec* req, ktimespec* rem) {
     const uint64_t deadline = monotonic_ns() + target_ns;
 
     // Poll the monotonic counter until the deadline, yielding between checks.
-    // NOT sti/hlt (the #DF hazard), NOT an IRQ wake (the F5-M4 follow-up); the
-    // yield gives other tasks the CPU so this is not a hard spin.
+    // There is no dedicated timer wake yet; yielding avoids a hard spin.
     while (monotonic_ns() < deadline) {
         cinux::proc::Scheduler::yield();
     }
@@ -78,7 +77,7 @@ int64_t sys_nanosleep(uint64_t req_virt, uint64_t rem_virt, uint64_t, uint64_t, 
     if (rem_virt != 0) {
         // Best-effort: a NULL rem is allowed (caller does not care about remaining).
         static_cast<void>(cinux::user::copy_to_user(reinterpret_cast<void*>(rem_virt), &rem_local,
-                                        sizeof(rem_local)));
+                                                    sizeof(rem_local)));
     }
     return 0;
 }

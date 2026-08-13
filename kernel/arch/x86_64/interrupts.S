@@ -72,9 +72,9 @@
     testb $3, %al                     # CPL bits (low 2 bits of CS)
     jz 1f                             # kernel mode (CPL=0) -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */
@@ -188,9 +188,9 @@
     testb $3, %al                     # CPL bits (low 2 bits of CS)
     jz 1f                             # kernel mode (CPL=0) -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */
@@ -304,9 +304,9 @@
     testb $3, %al                     # CPL bits
     jz 1f                             # kernel mode -> skip swapgs
     swapgs                            # user mode -> activate kernel GS
-    # stac  (P3: global STAC removed -- SMAP real; user mem only via accessor stac)
 1:
-
+    cld                               # kernel C ABI requires DF=0
+    clac                              # never leak an interrupted uaccess window
     /* Preserve interrupted FPU/SSE state across kernel C/C++ handlers.  If the
        interrupt came from user mode, also refresh Task::fpu_state so a timer
        preemption switch has the current user SIMD image. */
@@ -335,6 +335,9 @@
        therefore non-reentrant.) */
     mov $\irq, %edi                   # ISA IRQ for PIC EOI
     call irq_eoi_isr                  # EOI via the active back-end
+
+    /* EOI is complete; the full frame remains on current()->irq_stack. */
+    call irq_exit
 
     /* deliver one pending signal before returning to user mode */
     leaq 520(%rsp), %rdi              # FXSAVE + padding -> InterruptFrame
@@ -443,10 +446,7 @@ ISR_IRQ irq15_stub, irq_default_handler, 15  /* IRQ15(0x2F): Secondary ATA */
 # ============================================================
 # Reschedule IPI (F4-M4 M4-2)
 # ============================================================
-# Vector 0xE0, sent by the BSP (wake_idle_ap) to pull an idle AP out of hlt
-# so it re-checks the shared run queue.  The handler body is now empty (the
-# ISR_IRQ stub EOIs); the AP's idle loop does the actual reschedule after the
-# stub returns.  \irq=0 is unused (IPIs are APIC-only).
+# Wake or preempt an AP: publish need_resched, EOI, then switch at irq_exit.
 # ============================================================
 ISR_IRQ reschedule_ipi_stub, reschedule_ipi_handler, 0
 

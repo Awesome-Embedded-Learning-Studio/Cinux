@@ -20,10 +20,10 @@ namespace cinux::drivers::virtio {
 
 namespace {
 constexpr uint64_t kDmaBufferSize = 4096;
-constexpr uint64_t kHeaderBytes   = 16;   // virtio_blk_req header (type+reserved+sector)
+constexpr uint64_t kHeaderBytes   = 16;  // virtio_blk_req header (type+reserved+sector)
 constexpr uint64_t kStatusBytes   = 1;
-constexpr uint16_t kMaxCount = 7;          // (4096 - 17) / 512
-constexpr uint16_t kQueueSize = 64;
+constexpr uint16_t kMaxCount      = 7;  // (4096 - 17) / 512
+constexpr uint16_t kQueueSize     = 64;
 
 // virtio_blk_req header (16 bytes): type(4) + reserved(4) + sector(8).
 struct BlkReqHeader {
@@ -34,22 +34,20 @@ struct BlkReqHeader {
 static_assert(sizeof(BlkReqHeader) == kHeaderBytes, "BlkReqHeader must be 16 bytes");
 }  // namespace
 
-cinux::lib::ErrorOr<VirtIOBlock> VirtIOBlock::create(VirtIODevice& dev,
-                                                     uint64_t capacity_sectors) {
+cinux::lib::ErrorOr<VirtIOBlock> VirtIOBlock::create(VirtIODevice& dev, uint64_t capacity_sectors) {
     auto buf = dma::g_dma_pool.alloc(kDmaBufferSize);
     if (!buf.ok()) {
         return buf.error();
     }
     VirtQueue q;
-    auto qr = q.init(&dev, 0, kQueueSize);
+    auto      qr = q.init(&dev, 0, kQueueSize);
     if (!qr.ok()) {
         return qr.error();
     }
     return VirtIOBlock(&dev, capacity_sectors, std::move(buf.value()), std::move(q));
 }
 
-VirtIOBlock::VirtIOBlock(VirtIODevice* dev, uint64_t capacity, dma::DmaBuffer&& buf,
-                         VirtQueue&& q)
+VirtIOBlock::VirtIOBlock(VirtIODevice* dev, uint64_t capacity, dma::DmaBuffer&& buf, VirtQueue&& q)
     : dev_(dev),
       capacity_sectors_(capacity),
       dma_buf_(std::move(buf)),
@@ -61,21 +59,21 @@ cinux::lib::ErrorOr<void> VirtIOBlock::do_io(uint32_t type, uint64_t sector, uin
     const uint64_t status_off = kHeaderBytes + data_bytes;
 
     // Build the request header at dma_buf_ offset 0.
-    auto* hdr          = static_cast<volatile BlkReqHeader*>(dma_buf_.virt());
-    hdr->type          = type;
-    hdr->reserved      = 0;
-    hdr->sector        = sector;
+    auto* hdr     = static_cast<volatile BlkReqHeader*>(dma_buf_.virt());
+    hdr->type     = type;
+    hdr->reserved = 0;
+    hdr->sector   = sector;
     // Status byte (device-written): poison before submit so a no-op completion
     // is detectable.
-    auto* status       = static_cast<volatile uint8_t*>(dma_buf_.virt()) + status_off;
-    *status            = 0xff;
+    auto* status  = static_cast<volatile uint8_t*>(dma_buf_.virt()) + status_off;
+    *status       = 0xff;
 
     const uint64_t base = dma_buf_.phys();
     // out (device-read): header (+ data if write).  in (device-written):
     // (+ data if read) + status.
-    SgEntry out[2];
-    size_t  n_out = 1;
-    out[0] = {base, static_cast<uint32_t>(kHeaderBytes)};
+    SgEntry        out[2];
+    size_t         n_out = 1;
+    out[0]               = {base, static_cast<uint32_t>(kHeaderBytes)};
     if (type == blk::T_OUT) {
         out[1] = {base + data_off, static_cast<uint32_t>(data_bytes)};
         n_out  = 2;
@@ -101,8 +99,8 @@ cinux::lib::ErrorOr<void> VirtIOBlock::do_io(uint32_t type, uint64_t sector, uin
         return wr.error();
     }
     if (*status != blk::S_OK) {
-        cinux::lib::kprintf("[VirtIO-blk] io status=0x%x (type=%u sector=%llu count=%u)\n",
-                            *status, type, static_cast<unsigned long long>(sector), count);
+        cinux::lib::kprintf("[VirtIO-blk] io status=0x%x (type=%u sector=%llu count=%u)\n", *status,
+                            type, static_cast<unsigned long long>(sector), count);
         return cinux::lib::Error::IOError;
     }
     return {};
@@ -145,8 +143,12 @@ namespace {
 VirtIOBlock* g_virtio_blk = nullptr;
 }  // namespace
 
-VirtIOBlock* virtio_block_device() { return g_virtio_blk; }
-void         set_virtio_block_device(VirtIOBlock* bd) { g_virtio_blk = bd; }
+VirtIOBlock* virtio_block_device() {
+    return g_virtio_blk;
+}
+void set_virtio_block_device(VirtIOBlock* bd) {
+    g_virtio_blk = bd;
+}
 
 }  // namespace cinux::drivers::virtio
 
@@ -157,13 +159,12 @@ void         set_virtio_block_device(VirtIOBlock* bd) { g_virtio_blk = bd; }
 // only; the polling path in wait_completion independently observes used->idx,
 // so this handler does NOT need to wake a wait-queue (production can swap the
 // spin for prepare_to_wait/schedule_blocked here -- the ISR is the wake seam).
-// NO schedule() in ISR -- sti-in-syscall #DF (see sys-ping-df).  EOI by the
-// ISR_IRQ asm stub.
+// The ISR only records completion; ISR_IRQ EOIs and owns the irq_exit switch.
 namespace cinux::arch {
 struct InterruptFrame;  // fwd decl for the C handler signature
 }
 
 volatile uint64_t g_virtio_blk_irq_count = 0;
-extern "C" void virtio_blk_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
+extern "C" void   virtio_blk_irq_handler(cinux::arch::InterruptFrame* /*frame*/) {
     g_virtio_blk_irq_count = g_virtio_blk_irq_count + 1;
 }

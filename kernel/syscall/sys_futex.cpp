@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/user_access.hpp"  // get_user for futex words
-#include "kernel/errno.hpp"                     // kEagain/kEfault/kEinval/kEnosys (canonical int errno)
+#include "kernel/errno.hpp"  // kEagain/kEfault/kEinval/kEnosys (canonical int errno)
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -76,7 +76,7 @@ void enqueue_waiter(FutexBucket& b, Task* task) {
  * unblocking, so on resume the task is already off the queue.
  */
 int64_t futex_wait(uint64_t uaddr, uint32_t val, uint32_t bitset) {
-    Task* self = cinux::proc::percpu()->current;
+    Task* self = cinux::proc::current_task();
     if (self == nullptr) {
         return kEinval;
     }
@@ -87,7 +87,7 @@ int64_t futex_wait(uint64_t uaddr, uint32_t val, uint32_t bitset) {
         // IRQ-safe (F4-M4 prepare-to-wait): the Blocked flip + enqueue must be
         // atomic vs a concurrent FUTEX_WAKE on another CPU, and no local tick may
         // preempt us while we hold the bucket lock.  The guard drops before switch.
-        auto g = b.lock.irq_guard();
+        auto     g   = b.lock.irq_guard();
         uint32_t cur = 0;
         if (!cinux::user::get_user(&cur, reinterpret_cast<const uint32_t*>(uaddr))) {
             return -kEfault;

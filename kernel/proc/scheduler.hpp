@@ -173,6 +173,9 @@ public:
     };
 
     static void tick();
+    /// Consume a deferred reschedule request at the outermost hardware-IRQ
+    /// return point.  Called with IF=0 after the controller EOI.
+    static void preempt_from_irq();
     static void schedule();
     static void block(lib::NotNull<Task*> task, const char* reason);
     static void unblock(lib::NotNull<Task*> task);
@@ -203,8 +206,10 @@ public:
 
     /// Switch away from the current task unless a NoRescheduleGuard is active.
     /// The wait-path partner of prepare_to_wait(); production (depth == 0) always
-    /// switches.  Equivalent to block()'s tail for the prepare-to-wait pattern.
-    static void schedule_blocked();
+    /// switches. Returns false only when the in-kernel test harness suppresses
+    /// dispatch, allowing blocking primitives to expose their queued state
+    /// without spinning inside a single-threaded test.
+    static bool schedule_blocked();
 
     // Ask each class in `classes` (precedence = array order, index 0 first) for
     // its next runnable task; return the first non-null, or nullptr if every
@@ -221,13 +226,18 @@ private:
     /// check (no dequeue).  Used by ap_idle_entry's lost-wakeup recheck under cli.
     static bool has_runnable_task();
 
-    static SchedulingClass* classes_[MAX_CLASSES];
-    static int              class_count_;
-    static RoundRobin       default_rr_;
-    static Task*            idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
-    static bool             initialized_;
-    static lib::Atomic<int> tick_count_;
-    static int              no_reschedule_depth_;  ///< >0 only inside the test harness
+    static SchedulingClass*  classes_[MAX_CLASSES];
+    static int               class_count_;
+    static RoundRobin        default_rr_;
+    static Task*             idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
+    // Release-published after init() finishes rebuilding the class/runqueue/idle
+    // state; AP boot reads it with acquire before touching that shared state.
+    static lib::Atomic<bool> initialized_;
+    static lib::Atomic<int>  tick_count_;
+    static int               no_reschedule_depth_;  ///< >0 only inside the test harness
 };
+
+/// Assembly/C IRQ-epilogue bridge.
+extern "C" void irq_exit();
 
 }  // namespace cinux::proc

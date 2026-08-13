@@ -2,17 +2,18 @@
  * @file kernel/syscall/sys_exit.cpp
  * @brief sys_exit handler implementation
  *
- * Marks the current task as Dead and yields to the scheduler.
+ * Publishes the current task as a reapable Zombie and yields to the scheduler.
  */
 
 #include "kernel/syscall/sys_exit.hpp"
 
 #include <stdint.h>
 
+#include "kernel/arch/x86_64/irq.hpp"
 #include "kernel/arch/x86_64/user_access.hpp"  // put_user for cleartid
 #include "kernel/lib/kprintf.hpp"
+#include "kernel/proc/process_internal.hpp"
 #include "kernel/proc/scheduler.hpp"
-#include "kernel/proc/signal.hpp"
 #include "kernel/syscall/sys_futex.hpp"
 
 namespace cinux::proc {
@@ -47,36 +48,28 @@ namespace cinux::syscall {
 // encode differently; before, both stored the raw value and glibc misread
 // exit(1) as WIFSIGNALED/SIGHUP.)
 void exit_and_reap_current(int encoded_status) {
-    auto* task = cinux::proc::Scheduler::current();
+    // Once the current task publishes a non-runnable state, an IRQ-exit
+    // preemption would switch it out permanently before it wakes its parent.
+    // Preserve the caller's IF without touching per-CPU preempt_count; this
+    // guard may span the final context switch because this task never resumes.
+    cinux::arch::IrqSaveGuard exit_guard;
+    auto*                     task = cinux::proc::Scheduler::current();
     if (task != nullptr) {
-        task->exit_status = encoded_status;
         // F3-M2: CLONE_CHILD_CLEARTID -- zero child_tid + wake joiner before
         // the task goes away.
         cinux::proc::task_exit_cleartid(task);
-        // F3-M1: notify the parent of our exit.  SIGCHLD's default disposition
-        // is Ignore, but a parent with a handler or one polling waitpid uses it.
-        if (task->parent != nullptr) {
-            cinux::proc::signal_send(task->parent, cinux::proc::Signal::kSigchld);
-        }
         // F3-M3 batch 4a: become a Zombie (not Dead) so a wait()ing parent can
         // reap us via the children list.  Dequeue from the run queue (mirroring
         // exit_current) -- RoundRobin::pick_next() does not check state, so a
         // task left in the queue would be picked, force-set Running, and run
         // dead.  waitpid() later flips a reaped Zombie to Dead.
-        task->state = cinux::proc::TaskState::Zombie;
         if (task->sched_class != nullptr) {
             task->sched_class->dequeue(task);
         }
-        // F3-M3 batch 4b: wake a parent blocked in waitpid() so it re-scans
-        // and reaps us (we are now Zombie).  F-QA Q4c-1 (DEBT-004): unblock
-        // unconditionally -- unblock() is idempotent (no-op unless the parent
-        // is actually Blocked), so this is safe even if the parent is not
-        // waiting.  The old waiting_for_child gate was a plain bool read
-        // cross-CPU with no barrier -> a stale read skipped the wake and
-        // leaked the parent into a permanent sleep (a top flaky-hang suspect).
-        if (task->parent != nullptr) {
-            cinux::proc::Scheduler::unblock(task->parent);
-        }
+        // Publish Zombie under waitpid's condition lock, then send SIGCHLD and
+        // wake the parent. This closes both the cross-CPU check/sleep race and
+        // the local preemption gap between publication and notification.
+        cinux::proc::publish_child_exit(task, encoded_status);
         // CLONE_VFORK: the parent was blocked in clone() until we exec or exit.
         // execve released it early; on exit we release it here and clear the
         // back-pointer so the soon-to-be-reaped Task does not dangle.  unblock()

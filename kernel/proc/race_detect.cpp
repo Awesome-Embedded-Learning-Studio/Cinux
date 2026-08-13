@@ -15,21 +15,20 @@
 namespace cinux::proc {
 
 bool race_check_access_probe(RaceWatchpoint& w) {
-    const uint32_t cpu  = percpu()->cpu_id;
+    const uint32_t cpu  = current_cpu_id();
     const uint32_t prev = __atomic_exchange_n(&w.last_cpu, cpu, __ATOMIC_ACQ_REL);
     return (prev != kRaceCpuNone && prev != cpu);
 }
 
 void race_check_access(RaceWatchpoint& w) {
-    const uint32_t cpu  = percpu()->cpu_id;
+    const uint32_t cpu  = current_cpu_id();
     const uint32_t prev = __atomic_exchange_n(&w.last_cpu, cpu, __ATOMIC_ACQ_REL);
     if (prev != kRaceCpuNone && prev != cpu) {
         // Offender stack: backtrace() walks from THIS frame's caller, i.e. the
         // RACE_TOUCH site -- the very access that raced.
         cinux::arch::backtrace();
-        cinux::lib::kpanic("[SMP-RACE] %s: cpu%u touched after cpu%u without lock",
-                           w.name, static_cast<unsigned>(cpu),
-                           static_cast<unsigned>(prev));
+        cinux::lib::kpanic("[SMP-RACE] %s: cpu%u touched after cpu%u without lock", w.name,
+                           static_cast<unsigned>(cpu), static_cast<unsigned>(prev));
     }
 }
 

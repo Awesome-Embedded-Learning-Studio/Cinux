@@ -1,6 +1,7 @@
 #include "kernel/proc/scheduler.hpp"
 
 #include "kernel/arch/x86_64/gdt.hpp"
+#include "kernel/arch/x86_64/irq.hpp"
 #include "kernel/arch/x86_64/paging.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/lib/kprintf.hpp"
@@ -33,23 +34,15 @@ void switch_addr_space(Task* prev, Task* next) {
     }
 }
 
-// F-QA Q4e-3 (DEBT-002): deferred-free list. A task exiting via exit_current()
-// cannot free its own kernel stack (it runs on it); it is enqueued here and
-// freed by the next task's schedule() entry (reap_deferred).
-//
-// PER-CPU lists (SMP correctness): exit_current() puts prev on THIS CPU's list
-// and then keeps using prev (fxsave/context_switch) until the switch completes.
-// With a single global list, another CPU's schedule()->reap_deferred() could
-// free prev mid-switch (use-after-free -> #GP at kernel_init exit, rare race).
-// Indexing by cpu_id means each CPU reaps only what it deferred -- and a CPU
-// only reaps in its own schedule(), which runs AFTER that CPU's exit_current
-// switch is done, so prev is never freed while still in use.
+// exit_current() cannot free its live stack. Per-CPU deferred lists prevent a
+// remote scheduler from freeing prev before this CPU finishes context_switch;
+// a later local schedule() reaps it after on_cpu becomes -1.
 Spinlock g_deferred_lock;  // irq_guard: local IRQ safety (lists are per-CPU, uncontended cross-CPU)
 Task*    g_deferred_heads[kMaxCpus] = {};
 
 void enqueue_deferred(Task* t) {
     auto           g    = g_deferred_lock.irq_guard();
-    const uint32_t c    = percpu()->cpu_id;
+    const uint32_t c    = current_cpu_id();
     t->deferred_next    = g_deferred_heads[c];
     g_deferred_heads[c] = t;
 }
@@ -60,13 +53,13 @@ void enqueue_deferred(Task* t) {
 // Scheduler static state
 // ============================================================
 
-SchedulingClass* Scheduler::classes_[Scheduler::MAX_CLASSES];
-int              Scheduler::class_count_ = 0;
-RoundRobin       Scheduler::default_rr_;
-Task*            Scheduler::idle_tasks_[kMaxCpus] = {};  // per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
-bool             Scheduler::initialized_          = false;
-lib::Atomic<int> Scheduler::tick_count_{0};
-int              Scheduler::no_reschedule_depth_ = 0;
+SchedulingClass*  Scheduler::classes_[Scheduler::MAX_CLASSES];
+int               Scheduler::class_count_ = 0;
+RoundRobin        Scheduler::default_rr_;
+Task*             Scheduler::idle_tasks_[kMaxCpus] = {};  // per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
+lib::Atomic<bool> Scheduler::initialized_{false};
+lib::Atomic<int>  Scheduler::tick_count_{0};
+int               Scheduler::no_reschedule_depth_ = 0;
 
 // ============================================================
 // NoRescheduleGuard (test-harness role-play)
@@ -85,13 +78,18 @@ Scheduler::NoRescheduleGuard::~NoRescheduleGuard() {
 // ============================================================
 
 void Scheduler::idle_entry() {
+    // Re-check after each IRQ wake so BSP-runnable work cannot stay stranded.
     while (true) {
-        __asm__ volatile("hlt");
+        if (has_runnable_task()) {
+            schedule();
+        }
+        __asm__ volatile("sti; hlt");
+        __asm__ volatile("cli");
     }
 }
 
 Task* Scheduler::idle() {
-    uint32_t cpu = percpu()->cpu_id;
+    uint32_t cpu = current_cpu_id();
     if (cpu >= kMaxCpus) {
         cpu = 0;  // defensive: GS is anchored before any schedule() runs
     }
@@ -155,8 +153,11 @@ void Scheduler::ap_idle_entry() {
 }
 
 void Scheduler::init() {
-    class_count_      = 0;
-    percpu()->current = nullptr;  // current() reads per-CPU (GS is anchored before init)
+    // Reinitialisation is safe only before APs enter the scheduler.
+    initialized_.store(false, lib::MemoryOrder::Release);
+    class_count_ = 0;
+    set_current_task(nullptr);
+    clear_reschedule();
     for (uint32_t i = 0; i < kMaxCpus; i++) {
         idle_tasks_[i] = nullptr;  // pristine per-CPU idle table (re-init isolation)
     }
@@ -173,21 +174,14 @@ void Scheduler::init() {
         cinux::lib::kprintf("[SCHED] BSP idle task created tid=%lu\n", idle_tasks_[0]->tid);
     }
 
-    // SMP: rebuild each online AP's idle task. The wipe above (test isolation)
-    // nulls the whole table, but on -smp2 an AP left without an idle task has
-    // idle()==nullptr. A task exiting on that AP then cannot be switched out:
-    // schedule() finds an empty run queue and no idle to fall back to, so it
-    // returns WITHOUT context-switching and the Zombie loops forever re-entering
-    // its exit path -- the -smp2 exit/reap "resurrection" bug. setup_ap_idle() is
-    // idempotent and rebuilds lazily, exactly as normal AP bringup does. (During
-    // the single-core unit-test suites the APs are not online yet, so this is a
-    // no-op there; it only matters for the -smp2 ring-3 smoke's re-init.)
+    // Production APs are online but still waiting here; prebuild their idle fallbacks.
     const uint32_t online_aps = cinux::arch::online_ap_count();
     for (uint32_t c = 1; c <= online_aps && c < kMaxCpus; ++c) {
         setup_ap_idle(c);
     }
 
-    initialized_ = true;
+    // Publish the rebuilt state before an AP leaves is_initialized().
+    initialized_.store(true, lib::MemoryOrder::Release);
     cinux::lib::kprintf("[SCHED] Scheduler initialised with %s class\n", default_rr_.name());
 }
 
@@ -245,7 +239,7 @@ void Scheduler::remove_task(lib::NotNull<Task*> task) {
 // away from it), so freeing its stack + deleting it is safe from any caller's
 // context. Snapshot under the lock, free outside it (heavy path).
 void Scheduler::reap_deferred() {
-    const uint32_t c    = percpu()->cpu_id;
+    const uint32_t c    = current_cpu_id();
     Task*          head = nullptr;
     {
         auto g              = g_deferred_lock.irq_guard();
@@ -296,8 +290,12 @@ void Scheduler::yield() {
 }
 
 void Scheduler::exit_current() {
-    Task* const my_idle = idle();
-    Task*       prev    = current();
+    cinux::arch::IrqSaveGuard irq_guard;
+    Task* const               my_idle = idle();
+    Task*                     prev    = current();
+    if (int count = local_preempt_count(); count != 0) {
+        cinux::lib::kpanic("scheduler: exit with preempt_count=%d", count);
+    }
     if (prev != nullptr) {
         prev->state = TaskState::Dead;
         prev->sched_class->dequeue(prev);
@@ -319,9 +317,10 @@ void Scheduler::exit_current() {
         }
     }
 
-    percpu()->current = next;
+    set_current_task(next);
     // F4-followup (SMP migration race): claim next for this CPU (see schedule()).
-    __atomic_store_n(&next->on_cpu, static_cast<int>(percpu()->cpu_id), __ATOMIC_RELEASE);
+    __atomic_store_n(&next->on_cpu, static_cast<int>(current_cpu_id()), __ATOMIC_RELEASE);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
     if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
         update_syscall_stack(next->kernel_stack_top);
@@ -333,18 +332,23 @@ void Scheduler::exit_current() {
 }
 
 void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
-    percpu()->current = boot_task;
+    cinux::arch::IrqSaveGuard irq_guard;
+    set_current_task(boot_task);
     boot_task->on_cpu = 0;  // F4-followup: runs on BSP, never went through ctx save
     cinux::arch::GDT::tss_set_rsp0(boot_task->kernel_stack_top);
+    if (boot_task->irq_stack_top != 0) {
+        cinux::arch::GDT::tss_set_ist2(boot_task->irq_stack_top);
+    }
 
     Task* next = pick_next_task();
     if (next == nullptr) {
         return;
     }
 
-    percpu()->current = next;
-    next->on_cpu      = 0;  // F4-followup: claim next for the BSP before context_switch
+    set_current_task(next);
+    next->on_cpu = 0;  // F4-followup: claim next for the BSP before context_switch
     cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
     update_syscall_stack(next->kernel_stack_top);
     __asm__ volatile("fxsave %0" : : "m"(boot_task->fpu_state));
     switch_addr_space(boot_task, next);
@@ -353,20 +357,23 @@ void Scheduler::run_first(lib::NotNull<Task*> boot_task) {
 }
 
 Task* Scheduler::current() {
-    return percpu()->current;
+    return current_task();
 }
 
 void Scheduler::set_current(Task* task) {
-    percpu()->current = task;
+    set_current_task(task);
 }
 
 bool Scheduler::is_initialized() {
-    return initialized_;
+    return initialized_.load(lib::MemoryOrder::Acquire);
 }
 
 void Scheduler::tick() {
+    if (!initialized_.load(lib::MemoryOrder::Acquire)) {
+        return;
+    }
     Task* cur = current();
-    if (!initialized_ || cur == nullptr) {
+    if (cur == nullptr) {
         return;
     }
 
@@ -378,19 +385,29 @@ void Scheduler::tick() {
     // for the pick below.
     timer_queue_tick();
 
-    // Account the running task's quantum, but do not context-switch inline from
-    // the timer IRQ.  context_switch.S enables IF before jumping to the next
-    // task; doing that while the old irq0 frame is still live lets the PIT
-    // re-enter recursively.  Real preemption needs a return-from-IRQ resched
-    // point; until then tasks switch via yield/block/exit only.
+    // Account the running task's quantum, but do not context-switch inside the
+    // timer handler.  irq_exit() runs after controller EOI while the complete
+    // interrupt continuation remains parked on this task's private IRQ stack.
     if (cur->sched_class != nullptr) {
-        (void)cur->sched_class->task_tick(cur);
+        // task_tick returns true when the quantum is exhausted -- request a
+        // preempt at the next IRQ-return point.  tick() only publishes the
+        // request; the common IRQ epilogue consumes it.
+        if (cur->sched_class->task_tick(cur)) {
+            request_reschedule();
+        }
     }
 }
 
 void Scheduler::schedule() {
+    cinux::arch::IrqSaveGuard irq_guard;
     if (current() == nullptr) {
         return;
+    }
+
+    // Switching with a Spinlock held leaks preempt_count across CPUs. Keep this
+    // invariant always-on even when the richer lock-order graph is compiled out.
+    if (int count = local_preempt_count(); count != 0) {
+        cinux::lib::kpanic("scheduler: schedule with preempt_count=%d", count);
     }
 
 #ifdef CINUX_LOCKDEP
@@ -460,11 +477,12 @@ void Scheduler::schedule() {
         }
     }
 
-    percpu()->current = next;
+    set_current_task(next);
 
     // F4-followup: claim next for this CPU before context_switch loads its ctx
     // (see Task::on_cpu).  pick_next() only returns on_cpu == -1 tasks.
-    __atomic_store_n(&next->on_cpu, static_cast<int>(percpu()->cpu_id), __ATOMIC_RELEASE);
+    __atomic_store_n(&next->on_cpu, static_cast<int>(current_cpu_id()), __ATOMIC_RELEASE);
+    cinux::arch::GDT::tss_set_ist2(next->irq_stack_top);
 
     if (next != my_idle) {
         cinux::arch::GDT::tss_set_rsp0(next->kernel_stack_top);
@@ -477,7 +495,6 @@ void Scheduler::schedule() {
     __asm__ volatile("fxrstor %0" : : "m"(current()->fpu_state));
 }
 
-// block()/unblock()/prepare_to_wait()/schedule_blocked() moved to
-// scheduler_block.cpp (keep this file under the 500-line cap).
+// Blocking and prepare-to-wait machinery lives in scheduler_block.cpp.
 
 }  // namespace cinux::proc

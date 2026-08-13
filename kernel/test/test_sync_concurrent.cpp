@@ -1,12 +1,13 @@
 /**
  * @file kernel/test/test_sync_concurrent.cpp
- * @brief QEMU in-kernel tests for InterruptGuard and IrqSpinlockGuard (028d)
+ * @brief QEMU in-kernel tests for scheduler-aware synchronization primitives (028d)
  *
  * Runs inside QEMU as part of the big kernel test suite.  Exercises the
  * new RAII wrappers:
  *   - InterruptGuard: pushfq/cli/popfq save/restore, nesting
  *   - Spinlock::IrqGuard: spinlock + interrupt disable combined RAII
  *   - Spinlock::irq_guard: factory method for IrqGuard
+ *   - Mutex/Semaphore: unrelated scheduler wakes do not satisfy a wait
  *
  * Preconditions (set up by main_test.cpp before this runs):
  *   - Serial port initialised (kprintf works)
@@ -22,19 +23,21 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
+#include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/proc/percpu.hpp"
 #include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/sync.hpp"
 
-using cinux::proc::Spinlock;
-using cinux::proc::Mutex;
 using cinux::proc::InterruptGuard;
+using cinux::proc::Mutex;
+using cinux::proc::RoundRobin;
+using cinux::proc::Scheduler;
+using cinux::proc::Semaphore;
+using cinux::proc::Spinlock;
 using cinux::proc::Task;
 using cinux::proc::TaskBuilder;
 using cinux::proc::TaskState;
-using cinux::proc::Scheduler;
-using cinux::proc::percpu;
 
 // ============================================================
 // Test 1: InterruptGuard basic save/restore
@@ -203,7 +206,7 @@ void test_three_tasks_mutual_exclusion() {
     TEST_ASSERT_NOT_NULL(t3);
 
     // Task 1: increment 10 times
-    percpu()->current = t1;
+    Scheduler::set_current(t1);
     for (int i = 0; i < 10; i++) {
         auto g = test_lock.guard();
         (void)g;
@@ -211,7 +214,7 @@ void test_three_tasks_mutual_exclusion() {
     }
 
     // Task 2: increment 10 times
-    percpu()->current = t2;
+    Scheduler::set_current(t2);
     for (int i = 0; i < 10; i++) {
         auto g = test_lock.guard();
         (void)g;
@@ -219,7 +222,7 @@ void test_three_tasks_mutual_exclusion() {
     }
 
     // Task 3: increment 10 times
-    percpu()->current = t3;
+    Scheduler::set_current(t3);
     for (int i = 0; i < 10; i++) {
         auto g = test_lock.guard();
         (void)g;
@@ -241,7 +244,7 @@ void test_irq_guard_three_tasks() {
     TEST_ASSERT_NOT_NULL(t2);
 
     // Task 1: increment with irq_guard
-    percpu()->current = t1;
+    Scheduler::set_current(t1);
     for (int i = 0; i < 15; i++) {
         auto g = test_lock.irq_guard();
         (void)g;
@@ -249,7 +252,7 @@ void test_irq_guard_three_tasks() {
     }
 
     // Task 2: increment with irq_guard
-    percpu()->current = t2;
+    Scheduler::set_current(t2);
     for (int i = 0; i < 15; i++) {
         auto g = test_lock.irq_guard();
         (void)g;
@@ -387,6 +390,177 @@ void test_unblock_idempotent_on_runnable() {
 }  // namespace test_scheduler_concurrent
 
 // ============================================================
+// Test 5: condition-specific wakes on real scheduler dispatch
+// ============================================================
+
+namespace test_condition_wake {
+
+using WorkerEntry = void (*)();
+
+static Task* waiter_task = nullptr;
+
+static Mutex         mutex;
+static volatile bool mutex_owner_locked          = false;
+static volatile bool mutex_spurious_wake_sent    = false;
+static volatile bool mutex_spurious_wake_checked = false;
+static volatile bool mutex_waiter_reblocked      = false;
+static volatile bool mutex_waiter_entered        = false;
+static volatile bool mutex_waiter_entered_early  = false;
+static volatile bool mutex_unlocked              = false;
+
+static Semaphore     semaphore(0);
+static volatile bool semaphore_spurious_wake_sent  = false;
+static volatile bool semaphore_waiter_reblocked    = false;
+static volatile bool semaphore_wait_returned       = false;
+static volatile bool semaphore_wait_returned_early = false;
+static volatile bool semaphore_posted              = false;
+
+void mutex_owner_worker() {
+    mutex.lock();
+    mutex_owner_locked = true;
+    Scheduler::yield();
+
+    while (!mutex_spurious_wake_checked) {
+        Scheduler::yield();
+    }
+    mutex_waiter_entered_early = mutex_waiter_entered;
+    mutex.unlock();
+    mutex_unlocked = true;
+}
+
+void mutex_waiter_worker() {
+    while (!mutex_owner_locked) {
+        Scheduler::yield();
+    }
+    mutex.lock();
+    mutex_waiter_entered = true;
+    mutex.unlock();
+}
+
+void mutex_waker_worker() {
+    while (waiter_task->state != TaskState::Blocked) {
+        Scheduler::yield();
+    }
+    Scheduler::unblock(waiter_task);
+    mutex_spurious_wake_sent = true;
+    Scheduler::yield();
+    mutex_waiter_reblocked      = waiter_task->state == TaskState::Blocked;
+    mutex_spurious_wake_checked = true;
+}
+
+void semaphore_waiter_worker() {
+    semaphore.wait();
+    semaphore_wait_returned = true;
+}
+
+void semaphore_waker_worker() {
+    while (waiter_task->state != TaskState::Blocked) {
+        Scheduler::yield();
+    }
+    Scheduler::unblock(waiter_task);
+    semaphore_spurious_wake_sent = true;
+    Scheduler::yield();
+
+    semaphore_wait_returned_early = semaphore_wait_returned;
+    semaphore_waiter_reblocked    = waiter_task->state == TaskState::Blocked;
+    semaphore.post();
+    semaphore_posted = true;
+}
+
+void run_workers(WorkerEntry first_entry, WorkerEntry waiter_entry, WorkerEntry waker_entry) {
+    Scheduler::init();
+    static RoundRobin rr;
+    rr.clear();
+    Scheduler::register_class(&rr);
+
+    Task* boot  = TaskBuilder()
+                      .set_entry(test_interrupt_guard::dummy_entry)
+                      .set_name("condition_boot")
+                      .set_priority(255)
+                      .set_sched_class(&rr)
+                      .build();
+    Task* first = nullptr;
+    if (first_entry != nullptr) {
+        first = TaskBuilder()
+                    .set_entry(first_entry)
+                    .set_name("condition_first")
+                    .set_priority(1)
+                    .set_sched_class(&rr)
+                    .build();
+    }
+    waiter_task = TaskBuilder()
+                      .set_entry(waiter_entry)
+                      .set_name("condition_waiter")
+                      .set_priority(1)
+                      .set_sched_class(&rr)
+                      .build();
+    Task* waker = TaskBuilder()
+                      .set_entry(waker_entry)
+                      .set_name("condition_waker")
+                      .set_priority(1)
+                      .set_sched_class(&rr)
+                      .build();
+    TEST_ASSERT_NOT_NULL(boot);
+    if (first_entry != nullptr) {
+        TEST_ASSERT_NOT_NULL(first);
+    }
+    TEST_ASSERT_NOT_NULL(waiter_task);
+    TEST_ASSERT_NOT_NULL(waker);
+
+    boot->state  = TaskState::Running;
+    boot->on_cpu = 0;
+    Scheduler::set_current(boot);
+    cinux::arch::GDT::tss_set_ist2(boot->irq_stack_top);
+    if (first != nullptr) {
+        Scheduler::add_task(first, false);
+    }
+    Scheduler::add_task(waiter_task, false);
+    Scheduler::add_task(waker, false);
+
+    Scheduler::schedule();
+    Scheduler::reap_deferred();
+    Scheduler::set_current(nullptr);
+    waiter_task = nullptr;
+}
+
+void test_mutex_ignores_spurious_unblock() {
+    mutex_owner_locked          = false;
+    mutex_spurious_wake_sent    = false;
+    mutex_spurious_wake_checked = false;
+    mutex_waiter_reblocked      = false;
+    mutex_waiter_entered        = false;
+    mutex_waiter_entered_early  = false;
+    mutex_unlocked              = false;
+
+    run_workers(mutex_owner_worker, mutex_waiter_worker, mutex_waker_worker);
+
+    TEST_ASSERT_TRUE(mutex_spurious_wake_sent);
+    TEST_ASSERT_TRUE(mutex_spurious_wake_checked);
+    TEST_ASSERT_TRUE(mutex_waiter_reblocked);
+    TEST_ASSERT_FALSE(mutex_waiter_entered_early);
+    TEST_ASSERT_TRUE(mutex_unlocked);
+    TEST_ASSERT_TRUE(mutex_waiter_entered);
+}
+
+void test_semaphore_ignores_spurious_unblock() {
+    semaphore_spurious_wake_sent  = false;
+    semaphore_waiter_reblocked    = false;
+    semaphore_wait_returned       = false;
+    semaphore_wait_returned_early = false;
+    semaphore_posted              = false;
+
+    run_workers(nullptr, semaphore_waiter_worker, semaphore_waker_worker);
+
+    TEST_ASSERT_TRUE(semaphore_spurious_wake_sent);
+    TEST_ASSERT_TRUE(semaphore_waiter_reblocked);
+    TEST_ASSERT_FALSE(semaphore_wait_returned_early);
+    TEST_ASSERT_TRUE(semaphore_posted);
+    TEST_ASSERT_TRUE(semaphore_wait_returned);
+}
+
+}  // namespace test_condition_wake
+
+// ============================================================
 // Entry point
 // ============================================================
 
@@ -407,6 +581,9 @@ extern "C" void run_sync_concurrent_tests() {
     RUN_TEST(test_scheduler_concurrent::test_concurrent_block_unblock);
     RUN_TEST(test_scheduler_concurrent::test_prepare_to_wait_survives_race_window);
     RUN_TEST(test_scheduler_concurrent::test_unblock_idempotent_on_runnable);
+
+    RUN_TEST(test_condition_wake::test_mutex_ignores_spurious_unblock);
+    RUN_TEST(test_condition_wake::test_semaphore_ignores_spurious_unblock);
 
     TEST_SUMMARY();
 }

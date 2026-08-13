@@ -101,8 +101,7 @@ void cow_clone_address_space(Task* parent, Task* child) {
         }
         child_pml4_table[i].raw = new_page | FLAG_PRESENT | FLAG_WRITABLE | FLAG_USER;
         copy_page_table_level(parent_pml4_table[i].phys_addr(), new_page, 3,
-                              static_cast<uint64_t>(i) << 39,
-                              parent->addr_space->vmas());
+                              static_cast<uint64_t>(i) << 39, parent->addr_space->vmas());
     }
 
     // F10 SMP fix: copy_page_table_level() CoW-marked the PARENT's live PTEs
@@ -156,6 +155,14 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
         return -12;
     }
     std::memcpy(child, parent, sizeof(Task));
+    // Private stacks are allocated below.  Clear the parent's addresses copied
+    // into the new TCB before any child-only error path can observe them.
+    child->kernel_stack            = 0;
+    child->kernel_stack_top        = 0;
+    child->kernel_stack_guard_page = 0;
+    child->irq_stack               = 0;
+    child->irq_stack_top           = 0;
+    child->irq_stack_guard_page    = 0;
 
     // ---- Shared resources: share (acquire) or copy, per flags ----
     // Detach the pointers inherited from the memcpy FIRST; any error-path
@@ -201,18 +208,21 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
         child->ppid         = parent->pid;
         child->parent       = parent;
     }
-    child->state        = TaskState::Ready;
+    child->state             = TaskState::Ready;
     // F10 SMP-race: reset the stale on_cpu inherited from the parent's memcpy
     // (see fork.cpp).  A fresh child has never run; its ctx is set up below, so
     // pick_next() must see "not running / ctx saved" (-1), not the parent's CPU.
-    child->on_cpu       = -1;
-    child->vfork_parent = nullptr;
-    child->children     = nullptr;
-    child->exit_status  = 0;
+    child->on_cpu            = -1;
+    child->vfork_parent      = nullptr;
+    child->waiting_for_child = false;
+    child->children          = nullptr;
+    child->child_next        = nullptr;
+    child->wait_next         = nullptr;
+    child->exit_status       = 0;
     // The child is brand-new -- never on a wait queue.  Clear any inherited
     // wait_queue_head from the memcpy so a later signal_send does not wake a
     // phantom queue.  (EINTR support.)
-    child->wait_queue_head = nullptr;
+    child->wait_queue_head   = nullptr;
 
     // F3-M3 batch 1: derive process-group / session membership (threads and
     // forked processes alike stay in the caller's group/session; a root fork
@@ -247,6 +257,13 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
     child->kernel_stack            = child_stack_virt;
     child->kernel_stack_top        = child_stack_virt + stack_size;
     child->kernel_stack_guard_page = child_guard_virt;
+    if (!alloc_irq_stack(child)) {
+        cinux::lib::kprintf("[PROC] clone: child IRQ stack allocation failed\n");
+        free_kernel_stack(child);
+        delete child;
+        cinux::proc::g_pid_alloc.free(child_pid);
+        return -12;
+    }
 
     // ---- Child resume context (Linux-style fork child; same A/B split as
     // fork()).  Path A (caller has a user address space -- the normal sys_clone
@@ -350,8 +367,8 @@ __attribute__((noinline)) int clone(uint64_t flags, uint64_t stack, uint64_t par
 
     // ---- Linkage: CLONE_THREAD is a sibling, NOT a child of the caller ----
     if (!(flags & kCloneThread)) {
-        child->wait_next = parent->children;
-        parent->children = child;
+        child->child_next = parent->children;
+        parent->children  = child;
     }
 
     if (flags & kCloneVfork) {

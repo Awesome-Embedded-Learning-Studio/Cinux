@@ -11,6 +11,7 @@
 namespace cinux::fs {
 
 bool Ext2::chmod(uint32_t ino, uint32_t mode) {
+    auto      mutation_guard = mutation_lock_.guard();
     Ext2Inode d;
     if (!read_disk_inode(ino, d)) {
         return false;
@@ -25,6 +26,7 @@ bool Ext2::chmod(uint32_t ino, uint32_t mode) {
 }
 
 bool Ext2::chown(uint32_t ino, uint32_t uid, uint32_t gid) {
+    auto      mutation_guard = mutation_lock_.guard();
     Ext2Inode d;
     if (!read_disk_inode(ino, d)) {
         return false;
@@ -46,6 +48,7 @@ bool Ext2::chown(uint32_t ino, uint32_t uid, uint32_t gid) {
 
 bool Ext2::utimensat(uint32_t ino, uint64_t atime_sec, uint32_t /*atime_nsec*/, uint64_t mtime_sec,
                      uint32_t /*mtime_nsec*/) {
+    auto      mutation_guard = mutation_lock_.guard();
     Ext2Inode d;
     if (!read_disk_inode(ino, d)) {
         return false;
@@ -68,6 +71,7 @@ void Ext2::invalidate_cached_inode(uint32_t ino) {
     // holds a reference (refcount > 0) we must keep the object (address-stability
     // invariant), so mark it stale: the next get_cached_inode() hit refreshes
     // the disk copy in place at the SAME address.
+    auto           g      = inode_cache_lock_.guard();
     const uint32_t bucket = ino % EXT2_INODE_CACHE_SIZE;
     for (Ext2CachedInode** pp = &inode_cache_[bucket]; *pp != nullptr; pp = &(*pp)->hash_next) {
         Ext2CachedInode* entry = *pp;
@@ -129,8 +133,6 @@ void Ext2::populate_vfs_inode(Ext2CachedInode& cached) {
 
     cached.vfs_inode.ino = cached.ino;
 
-    cached.vfs_inode.size = disk.i_size;
-
     uint16_t mode_type = disk.i_mode & EXT2_S_IFMT;
     switch (mode_type) {
     case EXT2_S_IFDIR:
@@ -158,6 +160,13 @@ void Ext2::populate_vfs_inode(Ext2CachedInode& cached) {
 
     cached.vfs_inode.fs_private = &cached;
 
+    refresh_vfs_metadata(cached);
+}
+
+void Ext2::refresh_vfs_metadata(Ext2CachedInode& cached) {
+    const Ext2Inode& disk = cached.disk_inode;
+
+    cached.vfs_inode.size   = disk.i_size;
     cached.vfs_inode.mode   = disk.i_mode;
     cached.vfs_inode.uid    = disk.i_uid;
     cached.vfs_inode.gid    = disk.i_gid;

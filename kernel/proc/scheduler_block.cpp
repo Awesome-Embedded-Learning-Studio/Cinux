@@ -10,6 +10,7 @@
  */
 
 #include "kernel/arch/x86_64/smp.hpp"  // arch::wake_idle_ap (unblock)
+#include "kernel/proc/percpu.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signal.hpp"  // signal_deliverable_pending (TASK_INTERRUPTIBLE)
 
@@ -63,10 +64,33 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
         task->sched_class = &default_rr_;
     }
     task->sched_class->enqueue(task);
+    // Flag a preempt so this CPU reschedules at the next IRQ-return point.  If the
+    // woken task should run on another CPU, wake_idle_ap()'s IPI sets need_resched
+    // there instead.
+    request_reschedule();
 
     // Wake an idle AP so it can pick up this freshly runnable task (F4-M4 M4-2).
     // No-op on a single-core system.
     arch::wake_idle_ap();
+}
+
+void Scheduler::preempt_from_irq() {
+    if (!initialized_.load(lib::MemoryOrder::Acquire) || current_task() == nullptr ||
+        no_reschedule_depth_ > 0 || local_preempt_count() != 0) {
+        return;
+    }
+    if (!consume_reschedule()) {
+        return;
+    }
+
+    // The IRQ stub has already EOI'd its controller and still owns a complete
+    // frame on current()->irq_stack.  context_switch saves IF=0 for this
+    // continuation; the incoming task restores its own IF state.
+    schedule();
+}
+
+extern "C" void irq_exit() {
+    Scheduler::preempt_from_irq();
 }
 
 void Scheduler::prepare_to_wait(lib::NotNull<Task*> task) {
@@ -80,7 +104,7 @@ void Scheduler::prepare_to_wait(lib::NotNull<Task*> task) {
     task->state = TaskState::Blocked;
 }
 
-void Scheduler::schedule_blocked() {
+bool Scheduler::schedule_blocked() {
     // TASK_INTERRUPTIBLE for user-facing blocking IO: a task that recorded a
     // wait-queue head (pipe/socket/poll -- set via net::wait_enqueue / pipe's
     // enqueue) AND has a deliverable signal pending must NOT sleep.  prepare_to_wait()
@@ -99,14 +123,16 @@ void Scheduler::schedule_blocked() {
     if (self != nullptr && no_reschedule_depth_ == 0 && self->wait_queue_head != nullptr &&
         signal_deliverable_pending(self)) {
         self->state = TaskState::Running;  // undo prepare_to_wait()'s Blocked flip
-        return;
+        return true;
     }
     // Wait-path partner of prepare_to_wait(): switch out unless the in-kernel
     // test harness is role-playing (NoRescheduleGuard).  Production (depth == 0)
     // always switches.
     if (no_reschedule_depth_ == 0) {
         schedule();
+        return true;
     }
+    return false;
 }
 
 }  // namespace cinux::proc

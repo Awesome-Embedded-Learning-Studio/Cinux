@@ -164,9 +164,8 @@ void set_virtio_net_device(VirtIONetDevice* dev) {
 // ============================================================
 // MSI-X interrupt handler (F5-M2 batch 5, vector 0x43 kVirtioNetIrqVector)
 // ============================================================
-// Single-vector mode: RX/TX completions both raise entry 0 -> 0x43.  Counts
-// only (the polling path in poll_rx/send_l3 independently observes the rings).
-// NO schedule() in ISR (sti-in-syscall #DF).  EOI by the ISR_IRQ asm stub.
+// Single-vector mode: RX/TX completions both raise entry 0 -> 0x43. Counts only
+// (poll_rx/send_l3 observes rings); ISR_IRQ EOIs and owns the irq_exit switch.
 // Production only (test kernel has no switch_to_apic -- see virtio_blk handler).
 namespace cinux::arch {
 struct InterruptFrame;

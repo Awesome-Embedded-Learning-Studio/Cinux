@@ -5,9 +5,9 @@
  * F8-M1: the old sti/hlt spin loop is gone.  Blocking now uses the scheduler's
  * prepare_to_wait()/schedule_blocked()/unblock() triplet (the same pattern as
  * Mutex::lock and the console TTY): a full/empty buffer parks the caller on a
- * wait queue, and the peer wakes it after draining/enqueuing or on close.
- * This is #DF-safe (no sti inside the syscall path).  The host unit-test build
- * has no scheduler, so CINUX_HOST_TEST compiles the blocking path out and
+ * wait queue, and the peer wakes it after draining/enqueuing or on close. The
+ * host unit-test build has no scheduler, so CINUX_HOST_TEST compiles the
+ * blocking path out and
  * reads/writes return what fits -- synchronous tests never hit full/empty.
  */
 
@@ -19,7 +19,7 @@
 #include "kernel/errno.hpp"  // kEintr
 
 #ifndef CINUX_HOST_TEST
-#    include "kernel/proc/process.hpp"  // Task + signal_deliverable_pending
+#    include "kernel/proc/process.hpp"    // Task + signal_deliverable_pending
 #    include "kernel/proc/scheduler.hpp"  // prepare_to_wait/schedule_blocked/unblock
 #endif
 
@@ -34,7 +34,7 @@ using cinux::proc::Task;
 /// Records the head address in t->wait_queue_head so signal_send() can wake
 /// @p t for EINTR (see Task::wait_queue_head).
 void wait_enqueue(Task*& head, Task* t) {
-    t->wait_next = nullptr;
+    t->wait_next       = nullptr;
     t->wait_queue_head = &head;
     if (head == nullptr) {
         head = t;
@@ -176,8 +176,7 @@ int64_t Pipe::write(const char* data, uint64_t count, bool nonblock) {
         // far (partial writes are valid POSIX), or -EINTR if nothing was pushed
         // yet.  The woken task must unlink itself from the write queue -- do it
         // under lock_ so a concurrent producer does not see a stale link.
-        if (Scheduler::current() != nullptr &&
-            signal_deliverable_pending(Scheduler::current())) {
+        if (Scheduler::current() != nullptr && signal_deliverable_pending(Scheduler::current())) {
             auto g = lock_.irq_guard();
             wait_remove(write_waiters_, Scheduler::current());
             return written > 0 ? static_cast<int64_t>(written) : -cinux::kEintr;
@@ -256,8 +255,7 @@ int64_t Pipe::read(char* buf, uint64_t count, bool nonblock) {
         // EINTR: a signal landed while we were parked.  Return what we have so
         // far (partial reads are valid POSIX), or -EINTR if nothing was read.
         // Unlink ourselves under lock_ so a producer does not wake a stale link.
-        if (Scheduler::current() != nullptr &&
-            signal_deliverable_pending(Scheduler::current())) {
+        if (Scheduler::current() != nullptr && signal_deliverable_pending(Scheduler::current())) {
             auto g = lock_.irq_guard();
             wait_remove(read_waiters_, Scheduler::current());
             return total_read > 0 ? static_cast<int64_t>(total_read) : -cinux::kEintr;

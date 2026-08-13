@@ -74,9 +74,14 @@ public:
 
     /// Set RSP0 in THIS CPU's TSS (F4-M3 P1-3).  Each CPU has its own GDT/TSS
     /// in `gdt_blocks[]`; this targets the running CPU's block (looked up via
-    /// `percpu()->cpu_id`), so concurrent context switches on different CPUs no
+    /// a GS-relative CPU-id read), so concurrent context switches on different CPUs no
     /// longer clobber a shared RSP0.
     static void tss_set_rsp0(uint64_t rsp0);
+
+    /// Point THIS CPU's hardware-IRQ IST entry at the running task's private
+    /// IRQ stack.  The task may then be preempted at IRQ exit without leaving
+    /// a suspended frame on shared per-CPU storage.
+    static void tss_set_ist2(uint64_t stack_top);
 
 private:
     struct [[gnu::packed]] Entry {
@@ -112,10 +117,8 @@ private:
 
     alignas(16) uint8_t df_stack_[DF_STACK_PAGES * 4096]{};
 
-    /// 4 KB stack for IST2 (hardware IRQ). fxsave + ISR push frame land here,
-    /// NOT on the interrupted task's stack -- fixes F13-B Bug ② where an IRQ
-    /// striking mid-render stomped render_frame's stack objects (Surface s,
-    /// Compositor font ref, ...) via the 512 B fxsave area.
+    /// Bootstrap stack for IST2 (hardware IRQ).  Scheduler context switches
+    /// replace this with the running task's private IRQ stack.
     static constexpr uint64_t IRQ_STACK_PAGES = 1;
     alignas(16) uint8_t irq_stack_[IRQ_STACK_PAGES * 4096]{};
 

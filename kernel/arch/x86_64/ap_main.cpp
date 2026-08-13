@@ -196,11 +196,11 @@ extern "C" void ap_main(uint64_t cpu_id) {
         // else: fall through to the production scheduler spin + idle below.
     }
 
-    // 5. (F4-M4 M4-2-2) This AP now participates in scheduling.  boot_aps()
-    //    runs on the BSP BEFORE Scheduler::init() (main.cpp boot_aps ~:205 vs
-    //    Scheduler::init ~:249), so the scheduler is not ready yet.  Spin until
-    //    it is -- cli;pause, NOT sti;hlt: init() sends no IPI, so hlt would
-    //    sleep forever.  init() finishes in microseconds, so the spin is brief.
+    // 5. (F4-M4 M4-2-2) This AP now participates in scheduling. Production
+    //    boots APs before Scheduler::init(), while the smoke harness performs
+    //    its final reset first. Wait for either ordering to publish completion
+    //    -- cli;pause, NOT sti;hlt: init() sends no IPI, so hlt could sleep
+    //    forever. init() finishes in microseconds, so the spin is brief.
     __asm__ volatile("cli");
     while (!proc::Scheduler::is_initialized()) {
         __asm__ volatile("pause");
@@ -212,6 +212,7 @@ extern "C" void ap_main(uint64_t cpu_id) {
     //    resolves to idle.  setup_ap_idle() is idempotent.
     proc::Task* ap_idle = proc::Scheduler::setup_ap_idle(static_cast<uint32_t>(cpu_id));
     pcpu->current       = ap_idle;
+    cinux::arch::GDT::tss_set_ist2(ap_idle->irq_stack_top);
 
     // 7. First context switch into ap_idle_entry.  `dummy` is write-only
     //    (context_switch saves callee-saved regs + .restore rip + fs_base into
@@ -301,16 +302,13 @@ void boot_aps() {
 }
 
 // ============================================================
-// Reschedule IPI (F4-M4 M4-2): wake an idle AP so it re-checks the shared
-// run queue.  Once M4-2-2 switches the AP idle loop to sti;hlt, an IPI here
-// pulls the AP out of hlt and its loop runs schedule() again.
+// Reschedule IPI (F4-M4 M4-2): wake an idle AP and request a switch at the
+// common IRQ-exit preemption point.
 // ============================================================
 
-// The handler body is empty: the ISR_IRQ stub sends the EOI.  The actual
-// reschedule happens in the AP's idle loop after this stub returns control to
-// the hlt instruction.
 extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
-    // EOI is sent by the ISR_IRQ stub.
+    // The ISR_IRQ epilogue EOIs, then irq_exit() consumes this request.
+    cinux::proc::request_reschedule();
 }
 
 // ============================================================
@@ -323,6 +321,7 @@ extern "C" void reschedule_ipi_handler(InterruptFrame* /*frame*/) {
 extern "C" void lapic_timer_handler(InterruptFrame* /*frame*/) {
     cinux::proc::Scheduler::tick();
     cinux::arch::irq_eoi(0);
+    cinux::proc::irq_exit();
 }
 
 uint32_t online_ap_count() {
@@ -330,20 +329,13 @@ uint32_t online_ap_count() {
 }
 
 void wake_idle_ap() {
-    // Best-effort wake: IPI every AP that has signalled online.  A redundant
-    // IPI to an AP that is already busy is harmless -- its idle loop re-checks
-    // the run queue and halts again if empty.  This trades a few spurious
-    // wakeups for not needing a precisely-tracked per-CPU idle flag (whose
-    // reader-on-BSP / writer-on-AP race would need its own care).  Single-core
-    // systems have g_aps_online == 0, so the loop never runs -> no-op.
+    // Best-effort wake: notify every OTHER online CPU. This is deliberately
+    // symmetric: an AP completing I/O may need to preempt or wake the BSP, just
+    // as the BSP commonly wakes an AP. A redundant IPI to a busy CPU is harmless.
+    // Single-core systems have no other destination, so skip the broadcast.
     uint32_t online = __atomic_load_n(&g_aps_online, __ATOMIC_SEQ_CST);
-    for (uint32_t cpu = 1; cpu <= online && cpu < proc::kMaxCpus; cpu++) {
-        // percpu_blocks[cpu].apic_id was stored by that AP *before* it incremented
-        // g_aps_online (acquire/release via SEQ_CST), so it is visible once we
-        // observe online >= cpu.  id() returns a plain APIC id; send_ipi shifts
-        // it into ICR[bits 24-31], matching.
-        uint8_t apic_id = static_cast<uint8_t>(proc::percpu_blocks[cpu].apic_id);
-        drivers::apic::g_lapic.send_ipi(apic_id, kRescheduleIpiVector);
+    if (online > 0) {
+        drivers::apic::g_lapic.send_ipi_all_others(kRescheduleIpiVector);
     }
 }
 

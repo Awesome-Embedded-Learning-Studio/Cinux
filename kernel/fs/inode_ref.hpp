@@ -2,9 +2,9 @@
  * @file kernel/fs/inode_ref.hpp
  * @brief InodeRef: RAII handle for a ref'd Inode* from lookup / create
  *
- * FileSystem::lookup(), lookup_child(), and InodeOps::create() return an Inode*
- * with ONE reference already taken -- the Linux inode model: the caller owns
- * that ref and must inode_unref() when done.  InodeRef owns that ref for a
+ * FileSystem::lookup(), lookup_child(), and InodeOps::create()/mkdir() return an
+ * Inode* with ONE reference already taken -- the Linux inode model: the caller
+ * owns that ref and must inode_unref() when done.  InodeRef owns that ref for a
  * scope: construction adopts the ref, destruction drops it, move transfers it.
  *
  * Use it for the short-lived, cross-function ownership pattern at every

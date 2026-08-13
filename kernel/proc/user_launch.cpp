@@ -43,7 +43,7 @@ void enter_loaded_program(const char* path, const char* const argv[], const char
     // User stack: pre-map the top USER_STACK_PAGES, then record the full
     // demand-growth Stack VMA under the F2-M5 hard gate. Accesses below
     // [USER_STACK_TOP - USER_STACK_GROWTH) hit no VMA -> segfault (guard).
-    uint64_t entry = task->ctx.rip;
+    const uint64_t entry = elf_aux.initial_rip;
 
     // F9 batch 8 (ASLR): randomize the user stack top (page-aligned, bounded by
     // the 1 MiB demand-growth region). One value feeds pre-map, VMA, and the
@@ -145,7 +145,7 @@ void enter_loaded_program(const char* path, const char* const argv[], const char
 
 void launch_user_program(const char* path, const char* const argv[], const char* const envp[]) {
     ElfAuxInfo elf_aux{};
-    auto       result = execve(path, argv, envp, &elf_aux);
+    auto       result = execve(path, argv, envp, elf_aux);
     if (result != ExecveResult::Ok) {
         cinux::lib::kprintf("[PROC] execve(%s) failed: %d\n", path, static_cast<int>(result));
         Scheduler::exit_current();

@@ -294,11 +294,9 @@ void test_killpg_empty_group_returns_zero() {
 namespace test_pgrp_syscall {
 
 // The scheduler loop does not run during the suite, so each test installs its
-// task as current via Scheduler::set_current() -- which sets BOTH the static
-// current_ (what Scheduler::current() actually reads) AND percpu()->current.
-// Setting only percpu()->current leaves current_ null and makes the handlers
-// see no caller (ESRCH).  Cleared BEFORE asserting (TEST_ASSERT early-returns,
-// GOTCHA#19 family).
+// task as current via Scheduler::set_current(), which updates the GS-relative
+// per-CPU current pointer read by Scheduler::current(). Cleared BEFORE asserting
+// (TEST_ASSERT early-returns, GOTCHA#19 family).
 
 void test_sys_setpgid_and_getpgid() {
     Task t{};

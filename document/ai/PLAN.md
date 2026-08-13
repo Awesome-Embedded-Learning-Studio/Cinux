@@ -34,6 +34,44 @@
 
 > **收官状态**：两 leg run-kernel-test-all 1946/0 绿；桌面 GUI + gcc/g++ + 用户态 ping 真跑通；rc1 tag 已发，正式 v1.0.0 tag 待打（用户外发）。本弧工作记录见 [notes 2026-07-*](../notes/)。NVMe `status=0x4080` 取证仍 🔄（见下段）。
 
+## ✅ NVMe 异步 IO（io_submit poll→IRQ-driven blocking）— 收官 2026-08-12
+
+> 治 NVMe 同步 poll 饿死（gcc 编译时 `io_submit` 占满 CPU，别的 shell 卡；[note](../notes/2026-07-11-nvme-io-submit-yield-revert.md) 留的 v1.1+ 债）。单 IO in-flight 不变（不追吞吐，只治饿死）。分支 `feat/nvme-async-io`，从 main `62e96c6`。
+
+> **收官设计**：controller 内部以 sleepable submit Mutex 保持单 IO in-flight，从 SQ 发布覆盖到精确 CID completion；IRQ handler 以 active/ready/completed CID 发布结果并唤醒 Semaphore。所有可能跨 Ext2/PageCache/NVMe wait 的锁均为 sleepable Mutex；GS-relative `current_task()` 消除迁移时旧 PerCpu 指针窗口。根因与取证见 [收官 note](../notes/2026-08-12-nvme-preempt-stall-root-fix.md)。
+
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| B0 | 立项 docs（本段 + ROADMAP F5 follow-up + todo 02-nvme 范围栅栏） | ✅ `4c03874` | docs-only |
+| B1 | 锁基建：`NvmeBlockDevice::lock_`→Mutex + 抽 `poll_one_completion`（io_submit 仍 poll，行为不变） | ✅ `9a96218` | 两 leg 934/0 + NVMe round-trip 绿（行为不变）|
+| B2 | 核心：`nvme_irq_handler` 填实 + `enable_async_irq`（unmask）+ `io_submit` 双模式（prod sema.wait / test poll）+ main 接线 | ✅ `7d63c13`（test poll 绿）| 两 leg 934/0；**production IRQ 路径待 boot 验证** |
+| B3 | production SMP 双 exec/#PF 卡死取证并根修：GS current accessor、条件唤醒、sleepable FS/File 锁、精确 CID completion、调度 IRQ 关窗、children/wait link 分离 + 收官 note | ✅ 本次 | fresh SMP production 3/3 `NVME_REPRO_OK`、零 CID mismatch/panic；两 leg 942/942；host 66/66；Ext2 TSAN 绿 |
+| B4 | GUI 双 GCC follow-up：ELF 初始 RIP 脱离 scheduler context；waitpid/child-exit 原子握手；Ext2 mutation transaction；TmpFs open-unlink lifetime、`O_EXCL` 与 PRNG 并发收敛 | ✅ 本次 | 独立单核 + SMP 各 953/953；core 950/950；AP wake/shootdown PASS；Ext2 TSAN 4/4（连续 20 轮零 race） |
+
+> **留续**：async wait 的设备超时、CID generation/多 in-flight request table、parent raw-pointer 生命周期单独处理。范围栅栏仍不做多 dma buffer / SQ 多 slot。详见 [todo 02-nvme follow-up](../todo/f5-drivers/02-nvme.md)。
+> B4 的固定地址 SIGSEGV、waitpid 静默挂起与并发文件系统边界详见
+> [可抢占 exec + GUI 双 GCC 收敛 note](../notes/2026-08-12-preemptible-exec-concurrent-gcc.md)。
+
+## ✅ 调度器任意内核态抢占 — 收官 2026-08-12
+
+> 接管 NVMe 异步 IO 后审查发现，原 `need_resched` 草案仍是合作式调度，且直接在共享 IST2
+> IRQ 栈上 `schedule()` 会让后续 IRQ 覆盖被挂起的返回帧；`context_switch` 无条件 `sti` 还会在旧
+> IRQ 未 IRET 时打开重入窗口。用户确认目标为真正的任意内核态抢占，按“任务自有 IRQ
+> 栈 → IRQ-exit 抢占 → syscall 内核段可中断/可抢占 → production 压测”分批落地。
+
+| 批 | 范围 | 状态 | 验证 |
+|----|------|------|------|
+| B0 | 安全切换底座：`CpuContext` 保存 IF；每任务 8 KiB guarded IRQ 栈，调度切换 IST2；spin/IRQ guard 接 `preempt_count`，Mutex 不污染 per-CPU 计数；fork/clone/回收全生命周期接线 | ✅ 本次 | `run-kernel-test-all` 两 leg 937/937；AP wake + shootdown PASS |
+| B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ✅ 本次 | `run-kernel-test-all` 两 leg 938/938；timer 强制切换机制测 + AP wake/shootdown PASS |
+| B2 | syscall 内核段抢占：完整 syscall frame 后开 IRQ，返回尾 `cli`；IRQ/exception 入口清 DF/AC，IRET 恢复被中断标志；内核临界区审计与抢占压力测 | ✅ 本次 | 两 leg 939/939；长 syscall 被 timer 强制抢占 + AC/DF 隔离/恢复 PASS；ring3 musl hello 20/20 |
+| B3 | production 收官：NVMe IRQ blocking 卡死取证；schedule/exit/run_first IRQ 关窗；GS-relative current；Mutex/Semaphore 条件唤醒；AP↔BSP wake 对称化 | ✅ 本次 | fresh SMP production 3/3；两 leg 942/942；host 66/66；详见 [收官 note](../notes/2026-08-12-nvme-preempt-stall-root-fix.md) |
+| B4 | PR #82 CI 收敛：smoke 最终 scheduler reset 前移到 AP boot 前；`initialized_` release/acquire 发布，消除 AP idle 重建竞态 | ✅ 本次 | 默认 gate 953/953；Release/lockdep 两 leg 1/1 + SMP 额外 3/3：core 950/950、AP wake + hello PASS、AP1 idle 每轮仅 1 个；详见 [CI 根修 note](../notes/2026-08-13-pr82-scheduler-init-race.md) |
+
+> B0 设计与 ABI 约束详见 [B0 note](../notes/2026-07-30-scheduler-preempt-b0-context.md)；
+> B1 IRQ-exit 切换协议与机制证据详见
+> [B1 note](../notes/2026-07-30-scheduler-preempt-b1-irq-exit.md)；B2 syscall 开中断窗口与
+> RFLAGS 隔离详见 [B2 note](../notes/2026-07-30-scheduler-preempt-b2-syscall.md)。
+
 ## 🔄 NVMe status=0x4080 协议取证 — 2026-07-10
 
 > FC29000 上游调查。旧结论「`0x4080` 非法、必为 WSL2 CQ cache garbage」已否定：驱动打印的是 Completion Status 去掉 phase 后的完整值，`0x4080 = DNR | LBA_RANGE`。QEMU 源码只在它从 SQE 解出的 `slba + nlb > nsze` 时返回该值，再把完整 16-byte CQE DMA 写回。当前 WSL2 无 `/dev/kvm`、实际跑 TCG，也与 nested-KVM cache 假说矛盾。

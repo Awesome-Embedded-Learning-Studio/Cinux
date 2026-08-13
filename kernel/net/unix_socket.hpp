@@ -17,8 +17,8 @@
  *     marks it listening; accept() dequeues a connected child.
  *   - Connected (client after connect_path(), or an accepted child): holds a
  *     peer pointer; send() copies bytes into the PEER's RX ring, recv() drains
- *     its OWN.  Blocking mirrors TcpSocket/pipe (prepare_to_wait +
- *     schedule_blocked; NO sti/hlt -- the sti-in-syscall #DF hazard).
+ *     its OWN. Blocking mirrors TcpSocket/pipe via prepare_to_wait and
+ *     schedule_blocked.
  *
  * connect_path() creates a child socket C, wires client<->C as peers, and
  * enqueues C onto the server's accept queue.  The connection is established

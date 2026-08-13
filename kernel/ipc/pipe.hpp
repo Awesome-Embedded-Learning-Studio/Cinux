@@ -9,11 +9,9 @@
  * Blocking semantics (F8-M1): when the buffer is full (write) or empty
  * (read), the caller truly blocks on a scheduler wait queue -- it is woken
  * when the peer makes progress (reader drains / writer enqueues) or when the
- * peer end closes.  This replaces the old sti/hlt spin loop, which was a
- * #DF hazard inside the syscall path (sti-in-syscall -> LAPIC tick traps the
- * kernel stack -> sysretq corrupts).  The blocking path mirrors the proven
+ * peer end closes. This replaces the old sti/hlt spin loop with the proven
  * prepare_to_wait()/schedule_blocked()/unblock() pattern used by Mutex and the
- * console TTY.  In the host unit-test build there is no scheduler, so the
+ * console TTY. In the host unit-test build there is no scheduler, so the
  * blocking path is compiled out (CINUX_HOST_TEST) and reads/writes simply
  * return what fits -- host tests are synchronous and never hit a full/empty
  * condition.  O_NONBLOCK callers pass nonblock=true and receive kWouldBlock

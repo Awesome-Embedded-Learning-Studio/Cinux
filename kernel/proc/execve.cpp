@@ -152,7 +152,7 @@ void clear_user_mappings(cinux::mm::AddressSpace& space) {
 // ============================================================
 
 ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
-                    [[maybe_unused]] const char* const envp[], ElfAuxInfo* aux_out) {
+                    [[maybe_unused]] const char* const envp[], ElfAuxInfo& aux_out) {
     using namespace cinux::arch;
 
 
@@ -367,8 +367,6 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
             return ir;
         }
     }
-    task->ctx.rip = entry_va;
-
     // F9 batch 1: map the fixed sigreturn trampoline page.  The handler return
     // address (set in signal_setup_frame) lands here, keeping the int $0x80
     // sigreturn stub off the user stack so the stack can be NX (F9 batch 2).
@@ -395,18 +393,21 @@ ExecveResult execve(const char* path, [[maybe_unused]] const char* const argv[],
         cinux::mm::g_pmm.pte_count_inc(sigret_phys);  // batch 3: account for the installed PTE
     }
 
-    if (aux_out != nullptr) {
-        aux_out->at_phdr          = main_img.phdr_va;
-        aux_out->at_phnum         = ehdr->e_phnum;
-        aux_out->at_phent         = sizeof(elf::Elf64_Phdr);
-        // AT_ENTRY is the main program's real entry VA. ET_DYN entries are
-        // base-relative, so add main_base; for ET_EXEC main_base is 0 (no-op).
-        // The ldso relocates the main image then jumps here.
-        aux_out->at_entry         = main_base + ehdr->e_entry;
-        aux_out->at_base          = interp_base;  // interpreter load base (0 if static)
-        aux_out->has_interp       = has_interp;
-        aux_out->stack_executable = stack_executable;  // F4-B0: PT_GNU_STACK PF_X
-    }
+    // The scheduler owns Task::ctx.rip and overwrites it with the kernel
+    // continuation on every context switch. Keep the loaded user entry in the
+    // exec result so a preemption during exec cannot replace it with
+    // context_switch's .restore address.
+    aux_out.initial_rip      = entry_va;
+    aux_out.at_phdr          = main_img.phdr_va;
+    aux_out.at_phnum         = ehdr->e_phnum;
+    aux_out.at_phent         = sizeof(elf::Elf64_Phdr);
+    // AT_ENTRY is the main program's real entry VA. ET_DYN entries are
+    // base-relative, so add main_base; for ET_EXEC main_base is 0 (no-op).
+    // The ldso relocates the main image then jumps here.
+    aux_out.at_entry         = main_base + ehdr->e_entry;
+    aux_out.at_base          = interp_base;  // interpreter load base (0 if static)
+    aux_out.has_interp       = has_interp;
+    aux_out.stack_executable = stack_executable;  // F4-B0: PT_GNU_STACK PF_X
 
     if (task->vfork_parent != nullptr) {
         Scheduler::unblock(task->vfork_parent);

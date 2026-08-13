@@ -10,8 +10,9 @@
  * Swapgs discipline (P1-2): in kernel mode `MSR_GS_BASE` = this CPU's PerCpu
  * block and `MSR_KERNEL_GS_BASE` = the user GS base; `swapgs` on every
  * user<->kernel transition (syscall entry/exit, ISR entry/exit when entered
- * from user mode, and jump_to_usermode) keeps the invariant, so any kernel C
- * code can call `percpu()` safely.
+ * from user mode, and jump_to_usermode) keeps the invariant. Preemptible code
+ * uses the GS-relative accessors below so migration cannot split CPU lookup
+ * from field access.
  */
 
 #pragma once
@@ -35,31 +36,50 @@ constexpr uint32_t kMaxCpus = 8;
 /// below lock these offsets so future field edits cannot silently break
 /// syscall.
 struct PerCpu {
-    uint64_t kernel_stack;  ///< @0  syscall %gs:0  — current task kernel stack top
-    uint64_t scratch1;      ///< @8  syscall %gs:8  — user RSP scratch
-    uint64_t scratch2;      ///< @16 syscall %gs:16 — syscall return value scratch
-    Task*    current;       ///< @24 task currently running on this CPU
-    uint32_t cpu_id;        ///< @32 logical CPU index (BSP = 0)
-    uint32_t apic_id;       ///< @36 Local APIC id
+    uint64_t kernel_stack;   ///< @0  syscall %gs:0  — current task kernel stack top
+    uint64_t scratch1;       ///< @8  syscall %gs:8  — user RSP scratch
+    uint64_t scratch2;       ///< @16 syscall %gs:16 — syscall return value scratch
+    Task*    current;        ///< @24 task currently running on this CPU
+    uint32_t cpu_id;         ///< @32 logical CPU index (BSP = 0)
+    uint32_t apic_id;        ///< @36 Local APIC id
+    bool     need_resched;   ///< deferred preempt request set by reschedule IPI / tick
+    int      preempt_count;  ///< >0 inside a lock / IRQ-disabled critical section:
+                             ///< involuntary preempt is forbidden until it hits 0.
 };
 
 static_assert(offsetof(PerCpu, kernel_stack) == 0, "kernel_stack MUST be @0 (syscall %gs:0)");
 static_assert(offsetof(PerCpu, scratch1) == 8, "scratch1 @8 (syscall %gs:8)");
 static_assert(offsetof(PerCpu, scratch2) == 16, "scratch2 @16 (syscall %gs:16)");
 static_assert(offsetof(PerCpu, current) == 24, "current @24");
+static_assert(offsetof(PerCpu, cpu_id) == 32, "cpu_id @32");
+static_assert(offsetof(PerCpu, need_resched) == 40, "need_resched @40");
+static_assert(offsetof(PerCpu, preempt_count) == 44, "preempt_count @44");
 
 /// One control block per CPU, 4 KiB aligned.  Each CPU's GS base points at its
 /// own block; P1-2 only uses `[0]` (BSP).
 alignas(4096) extern PerCpu percpu_blocks[kMaxCpus];
 
-/// Pointer to THIS CPU's control block, read from `MSR_GS_BASE`.  Valid in any
-/// kernel-mode context (the swapgs discipline keeps GS_BASE = this CPU's block
-/// throughout kernel mode).
+/// Pointer to THIS CPU's control block, read from `MSR_GS_BASE`.
+///
+/// A returned pointer must not survive an IRQ-enabled region: an involuntary
+/// context switch may migrate the task before its next dereference. Prefer the
+/// single-instruction accessors below, or hold preemption disabled.
 PerCpu* percpu();
 
-/// Record the current task's kernel stack top into this CPU's PerCpu block
-/// (i.e. what syscall_entry reads via `%gs:0`).  Called by the scheduler on
-/// each context switch and by the user-mode jump-in paths.
+/// Migration-safe, single-instruction GS-relative accessors.
+Task*    current_task();
+void     set_current_task(Task* task);
+uint32_t current_cpu_id();
+
+void request_reschedule();
+void clear_reschedule();
+bool consume_reschedule();
+
+int  local_preempt_count();
+void preempt_disable();
+void preempt_enable();
+
+/// Record the current task's kernel stack top into this CPU's PerCpu block.
 void update_syscall_stack(uint64_t stack_top);
 
 }  // namespace cinux::proc

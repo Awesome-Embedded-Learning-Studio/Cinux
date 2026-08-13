@@ -32,6 +32,7 @@
 #include <stdint.h>
 
 #include "big_kernel_test.h"
+#include "kernel/errno.hpp"
 #include "kernel/fs/file.hpp"
 #include "kernel/fs/ramdisk/ramdisk.hpp"
 #include "kernel/fs/stat.hpp"
@@ -42,6 +43,7 @@
 #include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_read.hpp"
+#include "kernel/syscall/sys_unlink.hpp"
 #include "kernel/syscall/sys_write.hpp"
 
 using cinux::fs::Ramdisk;
@@ -93,6 +95,92 @@ cinux::fs::TmpFs* setup_tmpfs_at_tmp() {
 void teardown_tmpfs_at_tmp(cinux::fs::TmpFs* tfs) {
     cinux::fs::vfs_mount_remove("/tmp");
     delete tfs;
+}
+
+class LostCreateFs;
+
+/// create() shim that deterministically models another CPU winning after the
+/// caller's negative lookup but before its create attempt.
+class LostCreateDirOps final : public cinux::fs::InodeOps {
+public:
+    explicit LostCreateDirOps(LostCreateFs* fs) : fs_(fs) {}
+
+    cinux::lib::ErrorOr<cinux::fs::Inode*> create(cinux::fs::Inode* dir, const char* name,
+                                                  uint32_t namelen) override;
+
+private:
+    LostCreateFs* fs_;
+};
+
+class LostCreateFs final : public cinux::fs::FileSystem {
+public:
+    LostCreateFs() : dir_ops_(this) {}
+
+    cinux::lib::ErrorOr<void> mount() override {
+        root_.ino   = 1;
+        root_.type  = cinux::fs::InodeType::Directory;
+        root_.ops   = &dir_ops_;
+        root_.mode  = cinux::fs::kTmpfsSIfDir | 0755;
+        root_.nlink = 2;
+
+        file_.ino   = 2;
+        file_.type  = cinux::fs::InodeType::Regular;
+        file_.ops   = &file_ops_;
+        file_.mode  = cinux::fs::kTmpfsSIfReg | 0644;
+        file_.nlink = 1;
+        return {};
+    }
+
+    cinux::lib::ErrorOr<cinux::fs::Inode*> lookup(const char* path) override {
+        if (path == nullptr) {
+            return cinux::lib::Error::InvalidArgument;
+        }
+        if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
+            cinux::fs::inode_ref(&root_);
+            return &root_;
+        }
+        return cinux::lib::Error::NotFound;
+    }
+
+    cinux::lib::ErrorOr<cinux::fs::Inode*> lookup_child(const cinux::fs::Inode* parent,
+                                                        const char*             name,
+                                                        uint32_t                namelen) override {
+        if (parent != &root_ || name == nullptr || namelen != 6 || memcmp(name, "winner", 6) != 0 ||
+            !visible_) {
+            return cinux::lib::Error::NotFound;
+        }
+        cinux::fs::inode_ref(&file_);
+        return &file_;
+    }
+
+    bool dcache_enabled() const override { return false; }
+
+    cinux::lib::ErrorOr<cinux::fs::Inode*> publish_competing_create(cinux::fs::Inode* dir,
+                                                                    const char*       name,
+                                                                    uint32_t          namelen) {
+        if (dir != &root_ || name == nullptr || namelen != 6 || memcmp(name, "winner", 6) != 0) {
+            return cinux::lib::Error::InvalidArgument;
+        }
+        ++create_calls_;
+        visible_ = true;
+        return cinux::lib::Error::AlreadyExists;
+    }
+
+    uint32_t create_calls() const { return create_calls_; }
+
+private:
+    cinux::fs::Inode    root_{};
+    cinux::fs::Inode    file_{};
+    cinux::fs::InodeOps file_ops_{};
+    LostCreateDirOps    dir_ops_;
+    bool                visible_{false};
+    uint32_t            create_calls_{0};
+};
+
+cinux::lib::ErrorOr<cinux::fs::Inode*> LostCreateDirOps::create(cinux::fs::Inode* dir,
+                                                                const char*       name,
+                                                                uint32_t          namelen) {
+    return fs_->publish_competing_create(dir, name, namelen);
 }
 
 }  // anonymous namespace
@@ -240,6 +328,83 @@ void test_sys_open_creates_tmpfs_file_with_o_creat() {
     cinux::fs::stat st;
     TEST_ASSERT_TRUE(inode->ops->stat(inode, &st).ok());
     TEST_ASSERT_EQ(st.st_mode, static_cast<uint32_t>(cinux::fs::kTmpfsSIfReg | 0755));
+
+    teardown_tmpfs_at_tmp(tfs);
+}
+
+void test_openat_o_excl_rejects_existing_target() {
+    cinux::fs::TmpFs* tfs = setup_tmpfs_at_tmp();
+    TEST_ASSERT_NOT_NULL(tfs);
+
+    constexpr uint64_t kOWronly = 0x1;
+    constexpr uint64_t kOCreat  = 0x40;
+    constexpr uint64_t kOExcl   = 0x80;
+    const char*        path     = "/tmp/exclusive";
+
+    int64_t fd = cinux::syscall::do_openat_kernel(path, kOWronly | kOCreat, 0644);
+    TEST_ASSERT_GE(fd, 0);
+    TEST_ASSERT_EQ(cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0), 0);
+    TEST_ASSERT_EQ(cinux::syscall::do_openat_kernel(path, kOWronly | kOCreat | kOExcl, 0644),
+                   -cinux::kEexist);
+
+    teardown_tmpfs_at_tmp(tfs);
+}
+
+void test_openat_retries_after_lost_nonexclusive_create() {
+    cinux::fs::vfs_mount_init();
+    LostCreateFs fs;
+    TEST_ASSERT_TRUE(fs.mount().ok());
+    TEST_ASSERT_TRUE(cinux::fs::vfs_mount_add("/open_race", &fs));
+
+    constexpr uint64_t kOWronly = 0x1;
+    constexpr uint64_t kOCreat  = 0x40;
+    int64_t fd = cinux::syscall::do_openat_kernel("/open_race/winner", kOWronly | kOCreat, 0644);
+    TEST_ASSERT_GE(fd, 0);
+    TEST_ASSERT_EQ(fs.create_calls(), 1u);
+    TEST_ASSERT_EQ(cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0), 0);
+
+    cinux::fs::vfs_mount_remove("/open_race");
+}
+
+void test_openat_o_excl_reports_lost_create_race() {
+    cinux::fs::vfs_mount_init();
+    LostCreateFs fs;
+    TEST_ASSERT_TRUE(fs.mount().ok());
+    TEST_ASSERT_TRUE(cinux::fs::vfs_mount_add("/open_race", &fs));
+
+    constexpr uint64_t kOWronly = 0x1;
+    constexpr uint64_t kOCreat  = 0x40;
+    constexpr uint64_t kOExcl   = 0x80;
+    TEST_ASSERT_EQ(
+        cinux::syscall::do_openat_kernel("/open_race/winner", kOWronly | kOCreat | kOExcl, 0644),
+        -cinux::kEexist);
+    TEST_ASSERT_EQ(fs.create_calls(), 1u);
+
+    cinux::fs::vfs_mount_remove("/open_race");
+}
+
+void test_tmpfs_open_fd_survives_unlink() {
+    cinux::fs::TmpFs* tfs = setup_tmpfs_at_tmp();
+    TEST_ASSERT_NOT_NULL(tfs);
+
+    constexpr uint64_t kORdwr  = 0x2;
+    constexpr uint64_t kOCreat = 0x40;
+    const char*        path    = "/tmp/open-unlinked";
+    int64_t            fd      = cinux::syscall::do_openat_kernel(path, kORdwr | kOCreat, 0644);
+    TEST_ASSERT_GE(fd, 0);
+    TEST_ASSERT_EQ(cinux::syscall::do_write_kernel(static_cast<int>(fd), "before", 6), 6);
+    TEST_ASSERT_EQ(cinux::syscall::do_unlink_kernel(path), 0);
+    TEST_ASSERT_NULL(lookup_or_null(tfs, "open-unlinked"));
+
+    cinux::fs::File* open_file = cinux::fs::current_fd_table().get(static_cast<int>(fd));
+    TEST_ASSERT_NOT_NULL(open_file);
+    TEST_ASSERT_EQ(open_file->inode->nlink, 0u);
+    TEST_ASSERT_EQ(cinux::syscall::do_write_kernel(static_cast<int>(fd), "-after", 6), 6);
+
+    char buf[16]{};
+    TEST_ASSERT_EQ(read_or_neg1(open_file->inode, 0, buf, sizeof(buf)), 12);
+    TEST_ASSERT_EQ(memcmp(buf, "before-after", 12), 0);
+    TEST_ASSERT_EQ(cinux::syscall::sys_close(static_cast<uint64_t>(fd), 0, 0, 0, 0, 0), 0);
 
     teardown_tmpfs_at_tmp(tfs);
 }
@@ -637,6 +802,10 @@ extern "C" void run_vfs_syscall_tests() {
     RUN_TEST(test_sys_open::test_open_invalid_addr_returns_error);
     RUN_TEST(test_sys_open::test_open_no_mount_returns_error);
     RUN_TEST(test_sys_open::test_sys_open_creates_tmpfs_file_with_o_creat);
+    RUN_TEST(test_sys_open::test_openat_o_excl_rejects_existing_target);
+    RUN_TEST(test_sys_open::test_openat_retries_after_lost_nonexclusive_create);
+    RUN_TEST(test_sys_open::test_openat_o_excl_reports_lost_create_race);
+    RUN_TEST(test_sys_open::test_tmpfs_open_fd_survives_unlink);
 
     // sys_read
     RUN_TEST(test_sys_read::test_read_returns_correct_data);

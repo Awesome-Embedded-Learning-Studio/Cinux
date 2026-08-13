@@ -23,8 +23,8 @@ uint32_t Ext2::alloc_block() {
     // not atomic -- two CPUs alloc concurrently can both see a bit free, both
     // mark+write, and return the SAME block to two files (one overwrites the
     // other's data, e.g. cc1's indirect block clobbered by a .o write).
-    // Serialize under block_alloc_lock_.  Held across disk I/O (alloc is rare
-    // relative to data read/write; cache miss is acceptable).
+    // Serialize under a sleepable mutex: the bitmap transaction spans block
+    // I/O and must not leave another CPU spinning with interrupts disabled.
     auto g = block_alloc_lock_.guard();
     if (!mounted_) {
         return 0;
@@ -102,7 +102,7 @@ uint32_t Ext2::alloc_block() {
 }
 
 bool Ext2::free_block(uint32_t block_num) {
-    // SMP: serialize bitmap read-modify-write vs alloc_block (see above).
+    // Serialize bitmap read-modify-write vs alloc_block (see above).
     auto g = block_alloc_lock_.guard();
     if (block_num == 0 || !mounted_) {
         return false;

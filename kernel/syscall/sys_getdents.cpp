@@ -24,7 +24,10 @@ int64_t do_getdents_kernel(int fd, char* kname, uint64_t count) {
     if (file == nullptr || file->inode == nullptr || file->inode->ops == nullptr) {
         return -cinux::kEbadf;
     }
-    auto g = file->offset_lock_.guard();
+    // Directory reads may issue asynchronous filesystem I/O. File's offset
+    // mutex is sleepable, so the readdir + position update stay atomic without
+    // pinning a per-CPU preemption count across the wait.
+    auto g          = file->offset_lock_.guard();
     auto dir_result = file->inode->ops->readdir(file->inode, file->offset, kname, count);
     if (!dir_result.ok()) {
         return -cinux::to_errno(dir_result.error());

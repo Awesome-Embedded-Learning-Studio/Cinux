@@ -59,6 +59,11 @@ uint64_t rdtsc() {
 }  // namespace
 
 void KRandom::init() {
+    auto g = lock_.irq_guard();
+    init_locked();
+}
+
+void KRandom::init_locked() {
     // Mix entropy sources: TSC (cycle count), PIT ticks (boot timing), the
     // kernel image's own address (KASLR-ish), and rdrand if the CPU has it.
     uint64_t seed = rdtsc();
@@ -87,26 +92,36 @@ void KRandom::init() {
 }
 
 uint32_t KRandom::next32() {
+    auto g = lock_.irq_guard();
     if (!initialized_) {
-        init();
+        init_locked();
     }
-    return static_cast<uint32_t>(xoshiro256starstar(state_) >> 32);
+    return static_cast<uint32_t>(next64_locked() >> 32);
 }
 
 uint64_t KRandom::next64() {
+    auto g = lock_.irq_guard();
     if (!initialized_) {
-        init();
+        init_locked();
     }
+    return next64_locked();
+}
+
+uint64_t KRandom::next64_locked() {
     return xoshiro256starstar(state_);
 }
 
 void KRandom::fill(void* buf, size_t len) {
+    auto g = lock_.irq_guard();
+    if (!initialized_) {
+        init_locked();
+    }
     auto* p = static_cast<uint8_t*>(buf);
     while (len >= 8) {
         // Byte-wise store: @p may be unaligned, so a reinterpret_cast<uint64_t*>
         // store would be strict-aliasing/alignment UB (fine on x86 today, but
         // not portable and the compiler may exploit it).  Stage + scatter.
-        const uint64_t v = next64();
+        const uint64_t v = next64_locked();
         for (size_t i = 0; i < 8; ++i) {
             p[i] = static_cast<uint8_t>(v >> (i * 8));
         }
@@ -114,7 +129,7 @@ void KRandom::fill(void* buf, size_t len) {
         len -= 8;
     }
     if (len > 0) {
-        const uint64_t v = next64();
+        const uint64_t v = next64_locked();
         for (size_t i = 0; i < len; ++i) {
             p[i] = static_cast<uint8_t>(v >> (i * 8));
         }

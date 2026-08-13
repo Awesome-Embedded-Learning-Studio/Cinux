@@ -28,6 +28,18 @@ inline bool irq_enabled() {
     return true;
 }
 
+class IrqSaveGuard {
+public:
+    IrqSaveGuard() : flags_(irq_save()) {}
+    ~IrqSaveGuard() { irq_restore(flags_); }
+
+    IrqSaveGuard(const IrqSaveGuard&)            = delete;
+    IrqSaveGuard& operator=(const IrqSaveGuard&) = delete;
+
+private:
+    uint64_t flags_;
+};
+
 }  // namespace cinux::arch
 
 #else
@@ -56,14 +68,14 @@ inline void irq_enable() {
 /// Pass the returned value to irq_restore() later.
 inline uint64_t irq_save() {
     uint64_t flags;
-    __asm__ volatile("pushfq; popq %0; cli" : "=rm"(flags)::"memory");
+    __asm__ volatile("pushfq; popq %0; cli" : "=rm"(flags)::"memory", "cc");
     return flags;
 }
 
 /// Restore RFLAGS (including the interrupt flag) previously
 /// saved by irq_save().
 inline void irq_restore(uint64_t flags) {
-    __asm__ volatile("pushq %0; popfq" ::"rm"(flags) : "memory");
+    __asm__ volatile("pushq %0; popfq" ::"rm"(flags) : "memory", "cc");
 }
 
 /// Halt until the next interrupt (interrupts must be enabled
@@ -78,6 +90,23 @@ inline bool irq_enabled() {
     __asm__ volatile("pushfq; popq %0" : "=rm"(flags));
     return (flags & 0x200) != 0;
 }
+
+/// Preserve the caller's IF state while keeping the guarded scope IRQ-off.
+///
+/// Unlike proc::InterruptGuard, this does not touch preempt_count and may
+/// therefore span context_switch(): the incoming task restores its own IF,
+/// while the suspended caller resumes IRQ-off until this guard is destroyed.
+class IrqSaveGuard {
+public:
+    IrqSaveGuard() : flags_(irq_save()) {}
+    ~IrqSaveGuard() { irq_restore(flags_); }
+
+    IrqSaveGuard(const IrqSaveGuard&)            = delete;
+    IrqSaveGuard& operator=(const IrqSaveGuard&) = delete;
+
+private:
+    uint64_t flags_;
+};
 
 }  // namespace cinux::arch
 

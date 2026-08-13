@@ -9,9 +9,9 @@
  * with UdpModule; sendto() calls UdpModule::send on the route-resolved device.
  *
  * Blocking mirrors kernel/ipc/pipe: recv() on an empty ring parks on a wait
- * queue via prepare_to_wait/schedule_blocked; on_udp() wake_one()s it.  #DF-safe
- * (no sti in the syscall path).  Host unit tests compile the blocking path out
- * (CINUX_HOST_TEST) and use a non-block recv / poll-first flow.
+ * queue via prepare_to_wait/schedule_blocked; on_udp() wake_one()s it. Host
+ * unit tests compile the blocking path out (CINUX_HOST_TEST) and use a
+ * non-block recv / poll-first flow.
  *
  * The protocol module stays pure; per-fd state + buffering live here
  * (CODING-TASTE §13 -- the xHCI/HID antipattern averted).

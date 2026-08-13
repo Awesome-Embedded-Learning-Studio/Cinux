@@ -40,15 +40,14 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
     cinux::fs::FDTable& tbl  = cinux::fs::current_fd_table();
     cinux::fs::File*    file = tbl.get(fd);
     if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
-        // offset_lock_ guards file->offset (seek position).  Only disk-backed
-        // (page_cacheable) files use offset; their read path (PageCache +
-        // demand page + NVMe poll) does not block on schedule.  Pipes/pty are
-        // streams -- their read() calls schedule_blocked, so holding
-        // offset_lock_ across it would deadlock (LOCKDEP: schedule-while-held).
+        // offset_lock_ guards the seek-position transaction. Disk-backed reads
+        // may sleep on a page-cache miss, so File uses a sleepable Mutex.
+        // Pipes/pty remain unlocked here because stream offsets have no meaning
+        // and their blocking queues provide their own synchronization.
         if (file->inode->ops->is_page_cacheable()) {
-            auto g           = file->offset_lock_.guard();
-            auto read_result = cinux::mm::g_page_cache.read_bytes(file->inode, file->offset,
-                                                                  kbuf, count);
+            auto g = file->offset_lock_.guard();
+            auto read_result =
+                cinux::mm::g_page_cache.read_bytes(file->inode, file->offset, kbuf, count);
             if (!read_result.ok()) {
                 return -to_errno(read_result.error());
             }
@@ -57,10 +56,8 @@ int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
             }
             return read_result.value();
         }
-        // Non-page-cacheable (pipe/pty/ramdisk): direct read, may block --
-        // no offset_lock_ (would deadlock schedule_blocked).  Update offset
-        // unlocked (single-fd read is the common case; dup-shared racing
-        // reads are rare in this hobby kernel).
+        // Non-page-cacheable streams: direct read, may block on their own wait
+        // queue. Update the unused stream offset without serializing it.
         auto read_result = file->inode->ops->read(file->inode, file->offset, kbuf, count);
         if (!read_result.ok()) {
             return -to_errno(read_result.error());

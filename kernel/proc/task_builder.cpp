@@ -110,7 +110,8 @@ Task* TaskBuilder::build() {
     task->ctx.r12     = 0;
     task->ctx.rbp     = 0;
     task->ctx.rbx     = 0;
-    task->ctx.fs_base = 0;  // F3-M2: no TLS until clone(CLONE_SETTLS)
+    task->ctx.rflags  = 0x200;  // fresh kernel tasks start with maskable IRQs enabled
+    task->ctx.fs_base = 0;      // F3-M2: no TLS until clone(CLONE_SETTLS)
 
     __asm__ volatile("fninit");
     __asm__ volatile("fxsave %0" : : "m"(task->fpu_state));
@@ -126,9 +127,15 @@ Task* TaskBuilder::build() {
     task->kernel_stack      = stack_virt;
     task->kernel_stack_top  = stack_virt + stack_size;
     task->kernel_stack_guard_page = guard_virt;
-    task->addr_space              = addr_space_;
-    task->sched_class             = sched_class_;
-    task->name                    = name_;
+    if (!alloc_irq_stack(task)) {
+        cinux::lib::kprintf("[PROC] TaskBuilder::build: IRQ stack allocation failed\n");
+        free_kernel_stack(task);
+        delete task;
+        return nullptr;
+    }
+    task->addr_space  = addr_space_;
+    task->sched_class = sched_class_;
+    task->name        = name_;
 
     // F3-M2 batch 4: kernel threads are their own (trivial) thread group.
     task->pid             = 0;  // kernel threads have no PidAllocator id
@@ -144,6 +151,7 @@ Task* TaskBuilder::build() {
     task->cwd         = SharedCwd::create();
     if (task->sig_actions == nullptr || task->cwd == nullptr) {
         cinux::lib::kprintf("[PROC] TaskBuilder::build: shared-state alloc failed\n");
+        free_kernel_stack(task);
         delete task;
         return nullptr;
     }

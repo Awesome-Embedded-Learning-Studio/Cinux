@@ -66,7 +66,9 @@ struct File {
     OpenFlags flags;    ///< Access mode (RDONLY, WRONLY, RDWR)
     bool      cloexec;  ///< FD_CLOEXEC (F-ECO batch 4: fcntl F_GETFD/F_SETFD)
 
-    mutable cinux::proc::Spinlock offset_lock_;
+    // Shared open-file descriptions serialize seek-position transactions with
+    // a sleepable lock: a page-cache miss may wait for asynchronous disk I/O.
+    mutable cinux::proc::Mutex offset_lock_;
 
     /// Reference count: how many FileRef holders (fd slots) point at this File.
     /// __atomic_* ACQ_REL (a File is shared across FDTables after fork/clone).
@@ -124,18 +126,15 @@ private:
     File* f_{nullptr};
 };
 
-/// Bump an inode's open-description refcount (DEBT-023). Called when a File
-/// enters an FDTable (alloc / set / dup / dup2 -- fork/clone-copy go through
-/// set()).  Paired with inode_unref, which on the last close invokes
-/// InodeOps::release.  File itself stays a plain struct -- it does NOT touch
-/// inode on construction or destruction, so test fixtures may free an inode
-/// before its File without use-after-free.
+/// Bump the generic inode reference count.  Callers include VFS lookup/create,
+/// dentry/namespace owners, and File installation. Paired with inode_unref,
+/// which invokes InodeOps::release on the zero transition. File itself stays a
+/// plain struct -- it does NOT touch inode on construction or destruction.
 void inode_ref(Inode* inode);
 
-/// Drop one open-description refcount; on the last (refcount -> 0) invoke
-/// InodeOps::release (pipe end -> EOF/POLLHUP, socket -> FIN).  Called from
-/// FDTable::close / dup2-displace OUTSIDE the fd-table lock (release may do
-/// driver work).  Null-safe.
+/// Drop one generic inode reference; on refcount -> 0 invoke InodeOps::release.
+/// FDTable calls this outside its lock because release may do protocol work or
+/// reclaim a filesystem inode. Null-safe.
 void inode_unref(Inode* inode);
 
 // ============================================================

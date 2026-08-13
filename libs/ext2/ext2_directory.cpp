@@ -38,7 +38,7 @@ bool Ext2::add_dir_entry(uint32_t dir_ino, Ext2Inode& dir_disk, uint32_t entry_i
             continue;
         }
 
-        KmBuf   dir_buf(4096);
+        KmBuf dir_buf(4096);
         if (!dir_buf) {
             return false;
         }
@@ -98,12 +98,12 @@ bool Ext2::add_dir_entry(uint32_t dir_ino, Ext2Inode& dir_disk, uint32_t entry_i
         return false;
     }
 
-    KmBuf  new_blk_buf(4096);
+    KmBuf new_blk_buf(4096);
     if (!new_blk_buf) {
         free_block(new_blk);
         return false;
     }
-    auto*   dma = new_blk_buf.data();
+    auto* dma = new_blk_buf.data();
     for (uint32_t i = 0; i < bs; ++i) {
         dma[i] = 0;
     }
@@ -147,7 +147,7 @@ bool Ext2::remove_dir_entry(uint32_t /*dir_ino*/, const Ext2Inode& dir_disk, con
             continue;
         }
 
-        KmBuf   buf(4096);
+        KmBuf buf(4096);
         if (!buf) {
             return false;
         }
@@ -201,6 +201,7 @@ Inode* Ext2::create(uint32_t parent_ino, const char* name, uint32_t name_len) {
     if (name == nullptr || name_len == 0 || name_len > EXT2_NAME_MAX) {
         return nullptr;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     if (lookup_in_dir(parent_ino, name, name_len) != 0) {
         return nullptr;
@@ -248,13 +249,14 @@ Inode* Ext2::create(uint32_t parent_ino, const char* name, uint32_t name_len) {
         return nullptr;
     }
 
-    return get_cached_inode(new_ino);
+    return get_cached_inode_locked(new_ino);
 }
 
 Inode* Ext2::mkdir(uint32_t parent_ino, const char* name, uint32_t name_len) {
     if (name == nullptr || name_len == 0 || name_len > EXT2_NAME_MAX) {
         return nullptr;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     if (lookup_in_dir(parent_ino, name, name_len) != 0) {
         cinux::lib::kprintf("[EXT2] mkdir: '%s' already exists\n", name);
@@ -304,7 +306,7 @@ Inode* Ext2::mkdir(uint32_t parent_ino, const char* name, uint32_t name_len) {
     }
 
     // Initialise the data block with "." and ".." entries
-    KmBuf  buf(4096);
+    KmBuf buf(4096);
     if (!buf) {
         free_block(data_blk);
         free_inode(new_ino);
@@ -356,7 +358,7 @@ Inode* Ext2::mkdir(uint32_t parent_ino, const char* name, uint32_t name_len) {
         return nullptr;
     }
 
-    return get_cached_inode(new_ino);
+    return get_cached_inode_locked(new_ino);
 }
 
 // ============================================================
@@ -367,6 +369,7 @@ int Ext2::unlink(uint32_t parent_ino, const char* name, uint32_t name_len) {
     if (name == nullptr || name_len == 0) {
         return -1;
     }
+    auto mutation_guard = mutation_lock_.guard();
 
     Ext2Inode dir_disk;
     if (!read_disk_inode(parent_ino, dir_disk)) {
