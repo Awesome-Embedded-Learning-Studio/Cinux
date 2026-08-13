@@ -226,13 +226,15 @@ private:
     /// check (no dequeue).  Used by ap_idle_entry's lost-wakeup recheck under cli.
     static bool has_runnable_task();
 
-    static SchedulingClass* classes_[MAX_CLASSES];
-    static int              class_count_;
-    static RoundRobin       default_rr_;
-    static Task*            idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
-    static bool             initialized_;
-    static lib::Atomic<int> tick_count_;
-    static int              no_reschedule_depth_;  ///< >0 only inside the test harness
+    static SchedulingClass*  classes_[MAX_CLASSES];
+    static int               class_count_;
+    static RoundRobin        default_rr_;
+    static Task*             idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
+    // Release-published after init() finishes rebuilding the class/runqueue/idle
+    // state; AP boot reads it with acquire before touching that shared state.
+    static lib::Atomic<bool> initialized_;
+    static lib::Atomic<int>  tick_count_;
+    static int               no_reschedule_depth_;  ///< >0 only inside the test harness
 };
 
 /// Assembly/C IRQ-epilogue bridge.

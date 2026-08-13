@@ -65,6 +65,7 @@
 | B1 | IRQ-exit 抢占：统一 outermost IRQ return hook，消费 `need_resched`，`preempt_count==0` 才切换；idle/runqueue 边界与 IPI wake | ✅ 本次 | `run-kernel-test-all` 两 leg 938/938；timer 强制切换机制测 + AP wake/shootdown PASS |
 | B2 | syscall 内核段抢占：完整 syscall frame 后开 IRQ，返回尾 `cli`；IRQ/exception 入口清 DF/AC，IRET 恢复被中断标志；内核临界区审计与抢占压力测 | ✅ 本次 | 两 leg 939/939；长 syscall 被 timer 强制抢占 + AC/DF 隔离/恢复 PASS；ring3 musl hello 20/20 |
 | B3 | production 收官：NVMe IRQ blocking 卡死取证；schedule/exit/run_first IRQ 关窗；GS-relative current；Mutex/Semaphore 条件唤醒；AP↔BSP wake 对称化 | ✅ 本次 | fresh SMP production 3/3；两 leg 942/942；host 66/66；详见 [收官 note](../notes/2026-08-12-nvme-preempt-stall-root-fix.md) |
+| B4 | PR #82 CI 收敛：smoke 最终 scheduler reset 前移到 AP boot 前；`initialized_` release/acquire 发布，消除 AP idle 重建竞态 | ✅ 本次 | 默认 gate 953/953；Release/lockdep 两 leg 1/1 + SMP 额外 3/3：core 950/950、AP wake + hello PASS、AP1 idle 每轮仅 1 个；详见 [CI 根修 note](../notes/2026-08-13-pr82-scheduler-init-race.md) |
 
 > B0 设计与 ABI 约束详见 [B0 note](../notes/2026-07-30-scheduler-preempt-b0-context.md)；
 > B1 IRQ-exit 切换协议与机制证据详见

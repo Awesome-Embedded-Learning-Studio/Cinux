@@ -196,11 +196,11 @@ extern "C" void ap_main(uint64_t cpu_id) {
         // else: fall through to the production scheduler spin + idle below.
     }
 
-    // 5. (F4-M4 M4-2-2) This AP now participates in scheduling.  boot_aps()
-    //    runs on the BSP BEFORE Scheduler::init() (main.cpp boot_aps ~:205 vs
-    //    Scheduler::init ~:249), so the scheduler is not ready yet.  Spin until
-    //    it is -- cli;pause, NOT sti;hlt: init() sends no IPI, so hlt would
-    //    sleep forever.  init() finishes in microseconds, so the spin is brief.
+    // 5. (F4-M4 M4-2-2) This AP now participates in scheduling. Production
+    //    boots APs before Scheduler::init(), while the smoke harness performs
+    //    its final reset first. Wait for either ordering to publish completion
+    //    -- cli;pause, NOT sti;hlt: init() sends no IPI, so hlt could sleep
+    //    forever. init() finishes in microseconds, so the spin is brief.
     __asm__ volatile("cli");
     while (!proc::Scheduler::is_initialized()) {
         __asm__ volatile("pause");

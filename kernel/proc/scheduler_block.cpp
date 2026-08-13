@@ -75,8 +75,8 @@ void Scheduler::unblock(lib::NotNull<Task*> task) {
 }
 
 void Scheduler::preempt_from_irq() {
-    if (!initialized_ || current_task() == nullptr || no_reschedule_depth_ > 0 ||
-        local_preempt_count() != 0) {
+    if (!initialized_.load(lib::MemoryOrder::Acquire) || current_task() == nullptr ||
+        no_reschedule_depth_ > 0 || local_preempt_count() != 0) {
         return;
     }
     if (!consume_reschedule()) {

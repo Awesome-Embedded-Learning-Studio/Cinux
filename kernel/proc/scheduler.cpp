@@ -53,13 +53,13 @@ void enqueue_deferred(Task* t) {
 // Scheduler static state
 // ============================================================
 
-SchedulingClass* Scheduler::classes_[Scheduler::MAX_CLASSES];
-int              Scheduler::class_count_ = 0;
-RoundRobin       Scheduler::default_rr_;
-Task*            Scheduler::idle_tasks_[kMaxCpus] = {};  // per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
-bool             Scheduler::initialized_          = false;
-lib::Atomic<int> Scheduler::tick_count_{0};
-int              Scheduler::no_reschedule_depth_ = 0;
+SchedulingClass*  Scheduler::classes_[Scheduler::MAX_CLASSES];
+int               Scheduler::class_count_ = 0;
+RoundRobin        Scheduler::default_rr_;
+Task*             Scheduler::idle_tasks_[kMaxCpus] = {};  // per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
+lib::Atomic<bool> Scheduler::initialized_{false};
+lib::Atomic<int>  Scheduler::tick_count_{0};
+int               Scheduler::no_reschedule_depth_ = 0;
 
 // ============================================================
 // NoRescheduleGuard (test-harness role-play)
@@ -153,6 +153,8 @@ void Scheduler::ap_idle_entry() {
 }
 
 void Scheduler::init() {
+    // Reinitialisation is safe only before APs enter the scheduler.
+    initialized_.store(false, lib::MemoryOrder::Release);
     class_count_ = 0;
     set_current_task(nullptr);
     clear_reschedule();
@@ -172,14 +174,14 @@ void Scheduler::init() {
         cinux::lib::kprintf("[SCHED] BSP idle task created tid=%lu\n", idle_tasks_[0]->tid);
     }
 
-    // Test re-init clears the table, so rebuild online AP idles. Without this an
-    // AP exiting with an empty runqueue has no fallback and resurrects a Zombie.
+    // Production APs are online but still waiting here; prebuild their idle fallbacks.
     const uint32_t online_aps = cinux::arch::online_ap_count();
     for (uint32_t c = 1; c <= online_aps && c < kMaxCpus; ++c) {
         setup_ap_idle(c);
     }
 
-    initialized_ = true;
+    // Publish the rebuilt state before an AP leaves is_initialized().
+    initialized_.store(true, lib::MemoryOrder::Release);
     cinux::lib::kprintf("[SCHED] Scheduler initialised with %s class\n", default_rr_.name());
 }
 
@@ -363,12 +365,15 @@ void Scheduler::set_current(Task* task) {
 }
 
 bool Scheduler::is_initialized() {
-    return initialized_;
+    return initialized_.load(lib::MemoryOrder::Acquire);
 }
 
 void Scheduler::tick() {
+    if (!initialized_.load(lib::MemoryOrder::Acquire)) {
+        return;
+    }
     Task* cur = current();
-    if (!initialized_ || cur == nullptr) {
+    if (cur == nullptr) {
         return;
     }
 
