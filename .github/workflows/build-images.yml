@@ -28,7 +28,6 @@ jobs:
         variant: [console, desktop]
     steps:
       - uses: actions/checkout@v4
-        with:
       - uses: ./.github/actions/setup-cinux
         with:
           # Both variants build buildroot + assemble the GCC closure now, so both
