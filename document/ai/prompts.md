@@ -23,7 +23,7 @@
 读 ROADMAP.md 与 DIRECTIVES.md。为「<id,默认下一未启动里程碑>」propose:①目标范围 ②批分解(每批≈一commit+完成门) ③触及子系统/文件(grep) ④与架构不变量契合点 ⑤风险/依赖。草案停下等确认;确认后写入 PLAN 并在 ROADMAP 标🔄。不开改。
 
 ## /audit
-跑 git --no-pager diff --stat 与 git --no-pager diff。对照 DIRECTIVES 逐条查:命名/注释/无异常/ErrorOr用法/子模块边界/syscall翻译边界/提交格式(无Co-Auth)。列违规+定位+建议。只报告(除非要求改)。
+跑 git --no-pager diff --stat 与 git --no-pager diff。对照 DIRECTIVES 逐条查:命名/注释/无异常/ErrorOr用法/库边界/syscall翻译边界/提交格式(无Co-Auth)。列违规+定位+建议。只报告(除非要求改)。
 
 ## /preflight [目标]
 读 document/ai/PLAN.md、DIRECTIVES.md、QUALITY-GATES.md。针对「目标」做改前预审:①范围/非范围 ②触及文件与调用方(`rg`) ③风险等级(R0-R5) ④命中的风险域 ⑤必须守住的不变量 ⑥验证矩阵 ⑦需同步文档。若属新里程碑/跨子系统大改,停下等确认;否则给可执行批计划。

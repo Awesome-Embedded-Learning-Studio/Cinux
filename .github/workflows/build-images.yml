@@ -29,7 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
       - uses: ./.github/actions/setup-cinux
         with:
           # Both variants build buildroot + assemble the GCC closure now, so both

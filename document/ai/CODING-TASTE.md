@@ -29,7 +29,7 @@ C++17（**不用 C++20**，不用 concepts/ranges）。禁异常（→ `ErrorOr`
 - `enum class` 值 → `kPascalCase`：`kRunning`、`kReady`。
 - 宏（`#define`）→ `UPPER_SNAKE`：`MAX_TESTS`、`ROUND_UP(x, align)`。
 - **迁移状态**：现存大量 `UPPER_SNAKE` 常量（`PAGE_SIZE`、`PT_ENTRIES`）与纯 PascalCase 枚举值（`Running`、`Regular`）属 legacy。**新代码一律 k 前缀**；**大幅触碰某 legacy 常量/枚举时顺手迁移**；**不擅自批量重写**（守 DIRECTIVES L3）。
-- 例外：`cinux::lib::Error` 枚举（`OutOfMemory`、`NotFound`…）在 Cinux-Base **子模块**（另一仓库），保持纯 PascalCase，**不动**。
+- 例外：`cinux::lib::Error` 枚举（`OutOfMemory`、`NotFound`…）在 Cinux-Base（`third_party/`，2026-08-23 由子模块并回），保持纯 PascalCase，**不动**。
 
 ## 3. 注释（一律英文）
 - **文件头**：Doxygen `/** @file path @brief ... */`，说明模块职责。
