@@ -4,7 +4,7 @@
 
 ## ✅ 基建：Cinux-Base / Cinux-GUI 子模块并回主仓 — 2026-08-23（分支 `faet/migrate_back_third_party`，自 main `4f8f449`）
 
-> 两子模块无外部消费者，原位并回 `third_party/`（**内容零改动**：blob-SHA 比对 Base 80 / GUI 140 文件 mode+SHA 全等；CMake/`#include` 路径不变）。每子模块「导入 commit + `-s ours` graft merge」两步，树逐步完整 bisect 安全，子仓提交成 HEAD 祖先（对象自包含，上游归档后可考古）。5 commit：`ac69026`+`8b8be95`（Base）/ `89392a1`+`b4751e9`（GUI，pin `5727b64`）/ `7107ba0`（CI 去 6 处 `submodules: recursive` + 文档措辞 + notes）。验证：每次导入前全量 build + 双腿 run-kernel-test-all 953/0 + build-rl test_host 66/66 + 全新 file:// clone 自包含复验。遗留（用户）：push/PR、GUI 冒烟、上游两仓 archive、GUI store 陈旧分支独有提交 `c245aa9`（改 pump，未入 pin）去留——`.git/modules/third_party/Cinux-GUI` 保留待决策。详见 [note](../notes/2026-08-23-infra-submodule-dissolve.md)。
+> 两子模块无外部消费者，原位并回 `third_party/`（**内容零改动**：blob-SHA 比对 Base 80 / GUI 140 文件 mode+SHA 全等；CMake/`#include` 路径不变）。每子模块「导入 commit + `-s ours` graft merge」两步，树逐步完整 bisect 安全，子仓提交成 HEAD 祖先（对象自包含，上游归档后可考古）。5 commit：`ac69026`+`8b8be95`（Base）/ `89392a1`+`b4751e9`（GUI，pin `5727b64`）/ `7107ba0`（CI 去 6 处 `submodules: recursive` + 文档措辞 + notes）。验证：每次导入前全量 build + 双腿 run-kernel-test-all 953/0 + build-rl test_host 66/66 + 全新 file:// clone 自包含复验。遗留（用户）：push/PR、GUI 冒烟、上游两仓 archive。（`c245aa9` 独有提交已按用户决策丢弃，`.git/modules` 清除。）详见 [note](../notes/2026-08-23-infra-submodule-dissolve.md)。
 
 ## ✅ v1.0.0 发版门面 — 2026-07-11（分支 `release/v1.0.0`，从 origin/main `f1075f4`）
 

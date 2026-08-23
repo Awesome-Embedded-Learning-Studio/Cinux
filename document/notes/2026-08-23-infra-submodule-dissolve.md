@@ -56,9 +56,9 @@ README GUI 段注明已并回。kernel/test CMake 注释 3 处 submodule→libra
 ## 遗留 / 交接
 
 1. **GUI 陈旧分支独有提交 `c245aa9`**（"fix(core): 输入事件后立即刷新帧"，改 core/pump.{cpp,hpp}）：
-   在 `.git/modules/third_party/Cinux-GUI` 的陈旧本地 main 上，**不在 pin 5727b64 历史里**
-   （patch-id 比对确认未应用）。该 store 目录**保留未删**，待用户决策应用/丢弃；丢弃时可
-   `rm -rf .git/modules/third_party`。
+   曾在 `.git/modules/third_party/Cinux-GUI` 的陈旧本地 main 上，**不在 pin 5727b64 历史里**
+   （patch-id 比对确认未应用）。**已按用户决策丢弃**（2026-08-23 `rm -rf .git/modules`，
+   连同 store 一并清除；上游 GitHub 仓亦无此提交，该改动就此废弃）。
 2. 上游两仓（github.com/CinuxOS/Cinux-Base、Awesome-Embedded-Learning-Studio/Cinux-GUI）
    建议 archive 只读 + 末条 README 指向本仓路径（用户操作）。
 3. 机会性 follow-up（未做，遵守内容零改动）：GUI 22 文件 core 源清单三处合一；
