@@ -65,6 +65,19 @@ README GUI 段注明已并回。kernel/test CMake 注释 3 处 submodule→libra
    kernel 仍链接 cinux-gui 但 kernel/ 无文件 include core 头（疑死链，批0 疑点未展开）；
    两子项目自家测试（Base 22 Catch2 / GUI ~20 ctest）主仓 CI 仍不跑，可接进 test_host。
 
+## 后续批：搬迁到 libs/（同日）
+
+用户确认后执行 `third_party/` → `libs/`：`git mv` 两目录 + 编排 CMakeLists
+（`third_party/CMakeLists.txt` → `libs/CMakeLists.txt`，改 `CINUX_BASE_DIR` 语义注释），
+机械替换 ~30 处构建路径——根 CMakeLists（add_subdirectory + 注释）、kernel/CMakeLists:113
+（add_subdirectory → libs）、kernel/mini、kernel/gui 注释、test/CMakeLists 7 处、
+cmake/qemu.cmake 的 `CINUX_GUI_HOST_SRCS` 21 行、tools/musl/build-cinux-gui-host.sh 3 处、
+setup-cinux action ccache key、CLAUDE/AGENTS/README/DIRECTIVES/QUALITY-GATES/CODING-TASTE
+现行路径措辞。源码零改动（include 全路径无关）。`third_party/` 清空删除。
+沿用 libs/ext2（F6-M6）先例：libs/ = 本仓自有库的落点。
+验证：全量 build 绿 + 双腿 run-kernel-test-all **953/0** + test_host **66/66** +
+`cinux_gui_host` 目标绿（实证 build-cinux-gui-host.sh 新路径）。
+
 ## 教训
 
 - **blob-SHA 比对必须用精确 pin SHA**：GUI 子仓 store 的本地 `main` 停在陈旧 c245aa9

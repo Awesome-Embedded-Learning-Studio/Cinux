@@ -61,7 +61,7 @@ Claude Code 必须输出：
 | `syscall` 新增/改签名 | 用户指针、errno 翻译、ABI、VMA 权限 |
 | `drivers`、DMA、MMIO、APIC | cache 属性、物理地址、IRQ/EOI、错误恢复 |
 | `fs`、`vfs`、`ext2`、page cache | lifetime、引用计数、缓存一致性、host mock |
-| `third_party/Cinux-Base` | 子模块边界、header-only、无堆、≤400 行 |
+| `libs/Cinux-Base` | 子模块边界、header-only、无堆、≤400 行 |
 | CMake/CI/tooling | 本地/CI 对等、timeout、防挂死、产物路径 |
 
 ## 3. 提交前门禁

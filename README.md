@@ -92,7 +92,7 @@ ext2 读写 / ext4 只读 / tmpfs / ProcFS / DevFS;**NVMe + VirtIO-blk + AHCI** 
 <td>
 
 🖥️ **GUI 用户态桌面**
-[Cinux-GUI](https://github.com/Awesome-Embedded-Learning-Studio/Cinux-GUI) Compositor + Widget 树 + Terminal;**用户态进程**跑(`/dev/fb0` mmap + `/dev/input`),xHCI USB HID 键鼠(代码已并回本仓 `third_party/Cinux-GUI`,上游仓归档)
+[Cinux-GUI](https://github.com/Awesome-Embedded-Learning-Studio/Cinux-GUI) Compositor + Widget 树 + Terminal;**用户态进程**跑(`/dev/fb0` mmap + `/dev/input`),xHCI USB HID 键鼠(代码已并回本仓 `libs/Cinux-GUI`,上游仓归档)
 
 </td>
 <td>
