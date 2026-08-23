@@ -42,7 +42,16 @@ README GUI 段注明已并回。kernel/test CMake 注释 3 处 submodule→libra
 - 每次导入后（提交前）：`cmake --build build -j$(nproc)` 全量绿 +
   `timeout 120 ... run-kernel-test-all` 双腿 **953/0** +
   build-rl（CINUX_BUILD_TESTS=ON）`test_host` **66/66**。
-- 全新 clone 自包含验证（见下）。
+- **全新 clone 自包含验证**（`git clone file://` 强制真实对象传输，最接近 GitHub push 后形态）：
+  无 `.gitmodules`、零 gitlink、Base 80 + GUI 140 文件齐全、graft 的子仓提交（5a94bed/5727b64）
+  在克隆里可解析；CI 同款 configure（`Release + CINUX_BUILD_TESTS=ON`）冷构建两遍绿 +
+  `test_host` **66/66** + `run-kernel-test-all` 双腿 **950/0 + musl hello ring-3 smoke
+  20/20 PASS**（exit 0，零 FAIL）。
+  - 数量差异说明：主树 build/ 的 `CINUX_MUSL_HELLO_SMOKE=OFF`（历史配置）→ main_test 走
+    `run_virtio_tests()` 后自写 isa-debug-exit，计 953；克隆按默认 ON → smoke 任务跑完后在
+    main_test.cpp:900 自写 isa-debug-exit，QEMU 先出、virtio 不跑，计 950。两形态同内核同源，
+    CI 默认即后者（check_test_count baseline 875）。首次冷跑缺 `/hello` 报 ENOENT 是没跑 CI
+    前置 `tools/musl/build-musl.sh + build-hello.sh + build-forktest.sh`，补齐即绿，与迁移无关。
 
 ## 遗留 / 交接
 
