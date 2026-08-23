@@ -74,7 +74,7 @@ README GUI 段注明已并回。kernel/test CMake 注释 3 处 submodule→libra
 cmake/qemu.cmake 的 `CINUX_GUI_HOST_SRCS` 21 行、tools/musl/build-cinux-gui-host.sh 3 处、
 setup-cinux action ccache key、CLAUDE/AGENTS/README/DIRECTIVES/QUALITY-GATES/CODING-TASTE
 现行路径措辞。源码零改动（include 全路径无关）。`third_party/` 清空删除。
-沿用 libs/ext2（F6-M6）先例：libs/ = 本仓自有库的落点。
+沿用 libs/ext2（F6-M6）先例：libs/ = 本仓自有库的落点。随后追加定名批：`libs/Cinux-Base`→`libs/base`、`libs/Cinux-GUI`→`libs/gui`（用户拍板，gui 与 kernel/gui/、CINUX_GUI、cinux-gui 术语族一致；概念名 Cinux-Base 契约保留文档），同款验证全绿。
 验证：全量 build 绿 + 双腿 run-kernel-test-all **953/0** + test_host **66/66** +
 `cinux_gui_host` 目标绿（实证 build-cinux-gui-host.sh 新路径）。
 

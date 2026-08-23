@@ -5,7 +5,7 @@
 ## A. 架构不变量（跨切面，所有代码适用）
 - C++17，不用 C++20。禁异常（throw/try/catch）→ 错误经 `cinux::lib::ErrorOr<T>`。禁 RTTI（dynamic_cast/typeid）。
 - **Cinux-Base 契约**：header-only、全 `constexpr`、**无堆分配**（禁 new/malloc/::operator new）、命名空间 `cinux::lib`、单 `.hpp` ≤ 400 行、零外部依赖；允许头 `<cstddef> <cstdint> <cstdarg> <type_traits> <utility> <cstring>`，禁 `<vector> <string> <memory> <iostream> <algorithm>`。
-- **库边界**：`ErrorOr`/`Error`/`StringView`/`Span`/`Buffer` 在 `libs/Cinux-Base/include/cinux/*.hpp`；**勿在 `kernel/` 重写**。注：`Array<T,N>` 尚未由 Cinux-Base 提供。
+- **库边界**：`ErrorOr`/`Error`/`StringView`/`Span`/`Buffer` 在 `libs/base/include/cinux/*.hpp`；**勿在 `kernel/` 重写**。注：`Array<T,N>` 尚未由 Cinux-Base 提供。
 - **层化**：`kernel/<subsys>/` 消费 `cinux::lib`；不反向依赖。
 - **syscall 翻译边界**：内核内部一律 `ErrorOr`；仅 syscall trap 入口翻成用户态 `int`/errno（`NotFound→ENOENT`、`PermissionDenied→EACCES`、`OutOfMemory→ENOMEM`…）。`ErrorOr` 不泄漏到用户可见 ABI。
 - 子系统架构细节见 `document/design/`；里程碑静态规划见 `document/todo/`。

@@ -2,7 +2,7 @@
 
 > Codex 自动读本文件；看不到 CLAUDE.md 与 Claude 私有 memory，故本文件自洽。等价命令的粘贴式 prompt 见 `document/ai/prompts.md`。
 
-C++17 内核，13 Feature / ~60 Milestone。无异常（禁 throw/try/catch），错误经 `cinux::lib::ErrorOr<T>`（`libs/Cinux-Base/include/cinux/expected.hpp`，勿在 kernel/ 重写）。
+C++17 内核，13 Feature / ~60 Milestone。无异常（禁 throw/try/catch），错误经 `cinux::lib::ErrorOr<T>`（`libs/base/include/cinux/expected.hpp`，勿在 kernel/ 重写）。
 
 ## 文档分层（按需读）
 - `document/ai/DIRECTIVES.md` — 架构铁律 + 约定 + 操作模型
