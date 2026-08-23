@@ -2,6 +2,10 @@
 
 > Tier 3（批级，易变）。单一事实源（批级）。全树见 `ROADMAP.md`，铁律见 `DIRECTIVES.md`。
 
+## ✅ 基建：Cinux-Base / Cinux-GUI 子模块并回主仓 — 2026-08-23（分支 `faet/migrate_back_third_party`，自 main `4f8f449`）
+
+> 两子模块无外部消费者，并回主仓（**内容零改动**：blob-SHA 比对 Base 80 / GUI 140 文件 mode+SHA 全等）。每子模块「导入 commit + `-s ours` graft merge」两步，树逐步完整 bisect 安全，子仓提交成 HEAD 祖先（对象自包含，上游归档后可考古）。先原位导入 `third_party/`（CMake/`#include` 零改动），同日追加搬迁到 `libs/base` + `libs/gui`（`git mv`（R100 纯重命名）+ ~30 处构建路径替换，源码零改动；沿用 libs/ext2 小写短名先例，`third_party/` 清空删除）。commit：`ac69026`+`8b8be95`（Base 导入+graft）/ `89392a1`+`b4751e9`（GUI，pin `5727b64`）/ `7107ba0`+`7baefcb`+`cd96784`（CI 去 submodule checkout + 文档 + notes）+ 搬迁批。验证：每次变更后全量 build + 双腿 run-kernel-test-all 953/0 + test_host 66/66 + `cinux_gui_host` 目标绿 + 全新 file:// clone 自包含复验。遗留（用户）：push/PR、GUI 冒烟、上游两仓 archive。（`c245aa9` 独有提交已按用户决策丢弃，`.git/modules` 清除。）详见 [note](../notes/2026-08-23-infra-submodule-dissolve.md)。
+
 ## ✅ v1.0.0 发版门面 — 2026-07-11（分支 `release/v1.0.0`，从 origin/main `f1075f4`）
 
 > 13 Feature 主体完成（8 全 ✅ / F6·F8·F12 部分 / F11 推 v1.1），两 leg run-kernel-test-all 1946/0 绿，FC29000 panic 三层防御（2/3）已 merge。本批发版门面，6 commit：
@@ -1326,7 +1330,7 @@ dmesg 全链路闭环：`kprintf`/`klog_*` → KernelLog ring（IRQ 安全）→
 
 ## OPEN GOTCHAS（跨里程碑通用，活警告）
 1. **验证 target**：内核改动用 run-kernel-test（~694 项）；host 单测（`test/unit/`）不在其中，改被 mock 类后 push 前补全量编译（L5）。
-2. **Cinux-Base 是子模块**：`Logger`/`LogLevel`/`RingBuffer` 在 `third_party/Cinux-Base/include/cinux/*.hpp`，复用勿重写。
+2. **Cinux-Base 在 third_party/**（2026-08-23 由子模块并回主仓，`.gitmodules` 已移除）：`Logger`/`LogLevel`/`RingBuffer` 在 `libs/base/include/cinux/*.hpp`，复用勿重写。
 3. **里程碑区分「类型就绪」vs「内核消费」**（M0/M1/M2 同构）：Cinux-Base 类型常先就绪，待办是 kernel/ 增量消费。
 4. **klog_* 实时输出的 reentrancy guard**（批4a）：`g_klog_emit_depth` 让 klog sink 跳过 log 自身的 kprintf，避免同一行双重入队——是 kprintf→klog_* 迁移的前提（否则迁后丢 console）。定义须在 `log()` 前。
 5. **崩溃 ring 读不到**：fatal_halt/kpanic 死循环，ring 历史崩溃后读不到；非崩溃异常(#DB/#BP/#GP-user)/error 进 ring 可 dmesg 读。kpanic/dump 保留 kprintf（实时诊断/halt）。

@@ -46,6 +46,7 @@
 | 子系统 | 审计日期 | 维度 | 结论 | 报告 |
 |---|---|---|---|---|
 | xHCI/USB | 2026-06-25（F-CLN 批0）| D2+D3+D4 | D2/D4 清洁（零堆分配 + 全局静态 RAII）；**D3 fail → DEBT-021**（poll_events 无锁多上下文并发）| `reports/2026-06-25-xhci-usb-audit.md` |
+| LLM 全仓静态扫描 | 2026-08-14 | 七维度（A workaround / B 隐性 TODO / C 过度抽象 / D 并发 / E 资源 / F 错误处理 / G 风格），15 find + skeptic 逐条复核 + 2 补扫 | 62 confirmed + 18 补扫 → **DEBT-025~046**（22 条族归并）；**killpg 订正为活跃 UAF**（DEBT-002 前提已失效）；audit 未覆盖 scheduler preempt 弧 signal_check（战役批次 C 人工补查）| `reports/2026-08-14-llm-static-audit.md` |
 **修债进展**：**Q4✅ 收官（2026-06-21）** —— Q4a 类型先行（RefCount/UserPtr）+ Q4b-e 修 6 债（DEBT-001/002/003/004/005/006 全 ✅,见各条）。9 批 + 1 fix（feat/f-qa-q4）。验证 run-kernel-test 887/0 + -smp 2 + LOCKDEP + host-ASAN 全绿。详见 `document/notes/2026-06-21-f-qa-q4-debt-convergence.md`。
 
 **F-CLN✅ 收官（2026-06-25）** —— 批0 xHCI/USB 专项审（登记 DEBT-021 poll_events 并发,留 xHCI 重构）+ 批1-7 修 7 债（DEBT-015 栈帧/016 ASSERT_OK/018 kMaxCpus/008 signal VMA/009 huge/010 FDTable refcount/007 quantum per-task 全 ✅,见各条）。feat/f-cln-debt。验证 run-kernel-test 931/0 + -smp 2 + LOCKDEP + host ctest 54/0 全绿。残留 open:DEBT-019/013/020/012(留 F10 顺手)+011/014(低危)+021(xHCI 并发)。详见各批 notes `document/notes/2026-06-25-f-cln-b{0..8}-*.md`。
@@ -74,6 +75,17 @@
 - **根因**: F4 未触碰 signal.cpp 注册表；单核严格串行永不触发，多核 fork/exec/kill 交织 → 头插写与遍历读并发 → 读半链接指针 / 悬垂 `registry_next` → 跳飞或 UAF（Task 被 slab 复用后 signal_send 读别对象数据）。
 - **修复建议**: 给 `g_registry_head` 加全局 irq-safe `Spinlock`（add_task 可能 IF=0）。遍历持锁；`signal_send`→terminate 不能持锁，先收集 pid 列表再释锁发送。
 - **关联 GOTCHA**: 无（OPEN GOTCHAS 未记录注册表并发）
+
+---
+
+### DEBT-025 killpg 锁后用裸 `Task*` 发信号——**活跃 UAF**（DEBT-002 前提已失效）
+- **维度**: 生命周期/并发(D2/D3)　**优先级**: P0　**状态**: 🆕 登记待办（2026-08-14 LLM 审计,critical）　**核验**: ✅ skeptic 复核 + 登记时订正坐实
+- **位置**: `kernel/proc/signal.cpp:276-291`(killpg)
+- **现象**: killpg 在 `g_registry_lock` 下快照 ≤64 个 Task* 进栈数组，**释锁后**循环 `signal_send(targets[i])`。signal.cpp:276 注释自称安全前提 "tasks are never freed (DEBT-002 not yet fixed)"——**该前提已失效**：DEBT-002 于 2026-06-21 修复（`4bb6ca4`/`e6ce2f4`），task 现经 `exit_current→reap_deferred→delete` 真释放（同文件 :73 注释自证）。target 可在 unlock 与 send 之间 exit+delete → 跨 CPU UAF / 信号发给 slab 复用后的无关 task。
+- **根因**: 与已修 DEBT-022（ProcFS TOCTOU）完全同族的姐妹点——Q4e-3 修复让「永不释放」契约失效，DEBT-022 修了 /proc 却漏了 killpg。`itimer_real_tick` 的 `expired[]` 快照同模式（signal.cpp:310 区域）。
+- **修复建议**: signal_send 循环期间持 registry lock（queue_signal 不睡眠，持锁安全——DEBT-001 修时已论证过「terminate 需释锁」仅对 signal_send→exit_current 路径,故改为锁内 queue_signal+收集,锁外 terminate）;或 per-task refcount（acquire on lookup / release after send,对齐 Linux tasklist_lock+get_task_struct,亦可一并治 DEBT-024）。
+- **复现策略**: **stress**——-smp 2 下 fork 大量子进程进同 pgid + 并发 kill(-pgid) + 子进程自发 exit,配合 slab poison/RACE_DETECT;窗口窄,先修后压测防回归为主,同时手写确定性交错单测（mock 释锁点）验证不变量。
+- **关联**: DEBT-022 / DEBT-024（parent 裸指针,同生命周期根）;报告 B-critical 节。
 
 ---
 
@@ -149,6 +161,48 @@
 - **根因**: DEBT-002 让 Task 真释放后，原有 parent 指针的“父活得比子久”隐含契约失效；当前既没有 orphan reparent，也没有 parent Task refcount/PID lookup lifetime。
 - **修复建议**: 对齐 Unix 生命周期，在父退出锁定 children 链并把存活子任务 reparent 给 init/PID1；子退出只通过受生命周期保护的 parent 引用通知。备选是 Task refcount + registry lookup acquire/release，但不能只在 sys_exit 做空指针判断（悬垂值非 null）。补“父先退出→子后退出→init reap”真实 SMP 测试。
 - **范围说明**: 该债早于本次 NVMe hang；原冻结发生在任何 child exit 之前，不是 owner/head/CID mismatch 根因。单独排期，避免在抢占根修里 ad-hoc 改进程语义。
+
+### DEBT-026 sa_mask 与本信号 handler 期间不 block → 同号重入损坏 sigreturn
+- **维度**: 正确性/信号　**优先级**: P0　**状态**: 🆕 登记待办（2026-08-14 LLM 审计,high）　**核验**: ✅ skeptic 跨文件复核（sys_signal.cpp:57 正确存 / signal_frame.cpp:21 `[[maybe_unused]]` 丢弃,literal TODO 自承）
+- **位置**: `kernel/proc/signal_frame.cpp:21-22`（入口 `kernel/syscall/sys_signal.cpp:46,57,134`）
+- **现象**: `signal_setup_frame()` 接到 `act.sa_mask` 直接丢弃。handler 执行中同号（或 sa_mask 中）信号再到达 → 重入 setup_frame 在用户栈叠第二帧 → sigreturn 恢复垃圾寄存器/RIP。busybox/musl 普遍设 sa_mask,跨所有用自定义 handler 的里程碑。附带：SA_RESETHAND/SA_RESTART 同样存了从不应用（signal_frame.cpp:133）。
+- **修复建议**: SignalFrame 加 `sig_blocked_saved`,建帧时 `task->sig_blocked |= (sa_mask | mask(sig))`（SA_NODEFER 不加自身）,sigreturn 恢复;SA_RESETHAND 投递后翻回 kDefault。须配合 DEBT-040 的 sig 锁/原子。
+- **复现策略**: **deterministic**——用户态测试程序:装 handler(sa_mask 含 SIGUSR2),handler 内 raise 同号,断言不递归 + sigreturn 后寄存器完好(musl -O2 试金石对齐)。**首号复现靶**,红测试 → 修 → 绿。
+- **关联**: 报告 A-high / B-high 节;DEBT-040。
+
+### DEBT-027 AHCI 共享 DMA 缓冲 `dma_buf_` 全程无锁（NVMe/virtio 同课漏修）
+- **维度**: 并发/SMP(D3)　**优先级**: P0　**状态**: 🆕 登记待办（2026-08-14 LLM 审计,high）　**核验**: ✅ skeptic spot-check 坐实（ahci_block_device.hpp 无 `lock_` 成员 vs nvme_block_device.hpp:81 `Mutex lock_;`）
+- **位置**: `kernel/drivers/ahci/ahci_block_device.hpp:74`（read_blocks/write_blocks/flush）+ `kernel/drivers/ahci/ahci.cpp:217`（execute_command 硬编码 slot 0 无端口锁）
+- **现象**: read/write 都 memcpy 进 dma_buf_、把 phys 交 AHCI、memcpy 出,零互斥。NVMe hpp 明文记录为何要锁（"production -smp 2 + gcc fork chain once exposed DmaBuffer corruption"）,virtio_blk 同样有 Spinlock,**唯独 AHCI 漏了**。生产 -smp 两 CPU 并发块读重叠缓冲 → 静默 ext2 块损坏。init.cpp boot-disk 兜底仍走 AHCI,是活的。附带 execute_command 复用 slot 0,并发交错 cmd_tbl → Frankenstein FIS。
+- **修复建议**: 照 nvme_block_device.cpp:47 抄——`cinux::proc::Mutex lock_;` 包住 read/write/flush 体;AHCI 级再加 per-port Spinlock 跨 execute_command。
+- **复现策略**: **stress**——-smp 2 + AHCI 盘,两线程并发 read_blocks 校验已知 pattern（写后并发读比对）;test_ahci_write 已有 AHCI 测试环境可扩。数据校验型,不需 RACE_DETECT。
+- **关联**: DEBT-021（xHCI,同「多上下文无锁」模式）;报告 D-high 节。
+
+### DEBT-028 VMA 存储 `vma_lock_` 声明了却只 signal_frame 一处用,fault 与 mmap/munmap/mprotect 跨 CPU 无锁
+- **维度**: 并发/SMP(D3)　**优先级**: P0　**状态**: 🆕 登记待办（2026-08-14 LLM 审计,high）　**核验**: ✅ skeptic 复核（grep 全部 acquirer,唯一 signal_frame.cpp:44）
+- **位置**: `kernel/mm/address_space.hpp:147`（vma_lock_）+ `kernel/arch/x86_64/page_fault.cpp:187`（fault 读）+ `kernel/syscall/sys_mmap.cpp:156,167,184,189` / `sys_munmap.cpp:233` / `sys_mprotect.cpp:265,292,293,301`（并发改/遍历）
+- **现象**: page-fault 在 CPU0 IF=0 下读 `vmas().find(fault_addr)`,sys_mmap/munmap/mprotect 在 CPU1 splice/free 同一 intrusive 链表节点且无锁。IF=0 只屏蔽本 CPU 中断,不挡另一 CPU syscall。典型 torn-list/UAF 竞态——CinuxOS 历史最大 bug 源一类。基础设施已存在,只是没用。
+- **修复建议**: fault 路径（IF=0,irq_guard 幂等）与 syscall 路径全部 `vmas()` 访问取 `vma_lock_`;fork/execve 的地址空间拷贝同查。
+- **复现策略**: **deterministic-ish**——先给 vmas() 访问点铺 `lockdep_assert_held(vma_lock_)`,-smp 2 跑现有测试 + mmap/munmap churn 压测,LOCKDEP 直接报未持锁（F-DYN-COV 基建现成）;加锁后同压测防回归。
+- **关联**: DEBT-008（signal VMA 校验,当年 no-op 锁文档临界区）;报告 D-high 节。
+
+### DEBT-029 net 栈全无锁（TcpModule/UdpModule/IcmpModule/NetStack/LoopbackDevice/ephemeral port）
+- **维度**: 并发/SMP(D3)　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计,high×2）　**核验**: ✅ skeptic 复核（net/ grep Spinlock/guard 零命中）
+- **位置**: `kernel/drivers/net/net_init.cpp:71`（net_poll kthread vs socket syscall）+ `kernel/net/loopback_device.cpp:21`（storage_/state_/fifo_/head_/tail_）+ `kernel/net/tcp.hpp:244`（cons_/listens_）+ `kernel/net/icmp.cpp:76`（raw_sockets_）+ `kernel/net/tcp_socket.cpp:82`（function-local static eph++ 非原子）
+- **现象**: net_poll kthread 在一 CPU 扫 g_tcp/udp/icmp/arp/stack 表,app 线程在另一 CPU 改同一批表——close() 置 `ports_[i].l=nullptr` 窗口期 poll on_udp() deref → UAF/重复分发;loopback send_l3 vs poll_rx+recycle 破 ring 不变量;TCP ephemeral 端口两核 connect 撞同端口。AF_INET 127.0.0.1 主路径,-smp 开网络立刻 race。
+- **修复建议**: 各模块一把 Spinlock（表查找/修改持锁,FSM/TX 不进锁段——send_segment 回发不能持锁睡眠/DMA）;短期最低限度 net_poll_entry 与 socket syscall 用同一把 net 大锁串行化。ephemeral 端口对齐 UdpSocket 的持锁查重分配。
+- **复现策略**: **stress**——-smp 2 + loopback:并发 UDP/TCP socket open/close/send/recv churn + net_poll 同跑,断言无 UAF/无串台;LOCKDEP 铺桩（同 DEBT-028 法）先行。
+- **关联**: 报告 D-high×2 + D-low×3 节（tcp/icmp/ephemeral 并入本条）。
+
+### DEBT-030 输入路径 SMP 并发（ConsoleTty IRQ1 无锁 / pty_alloc TOCTOU / mouse 双生产者）
+- **维度**: 并发/SMP(D3)　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 补扫,**未经 skeptic 复核**）　**核验**: ⚠️ 补扫 agent 读码坐实,待人工/复核确认
+- **位置**: `kernel/drivers/tty/console_tty.cpp:90-131`（IRQ1 上下文改 tty_/reader_/foreground_pgid_,read/poll 只用本地 InterruptGuard——UP 掩盖）+ `kernel/drivers/tty/pty_device.cpp:442-451`（in_use check-and-claim 无锁,两 CPU 并发 open ptmx 抢同槽→共享同一 PTY 对）+ `kernel/drivers/mouse/mouse.cpp:184-207`（PS/2 IRQ12 与 xHCI inject 双生产者改同一组 statics,usb_primary_ 无 fence,破 SPSC）
+- **现象**: 三处同模式——单核设计假设 + InterruptGuard 只关本 CPU IRQ,-smp 下另一核并发即真数据竞争。pty_alloc 同槽双主是确定性的语义破坏。
+- **修复建议**: input() 用 Spinlock(irq_guard) 与 read/poll_events 共享（对齐 PtySlot slave_read 模式）;pty_alloc check-and-claim 前取锁;mouse 生产者串一把 Spinlock（InputEventDevice 已为同问题这么做）。
+- **复现策略**: pty_alloc **host-testable**（test_multi_terminal 环境并发 open 断言无同槽）;ConsoleTty/mouse 需 mock IRQ 线程或 -smp 真键鼠（难,靠修复+审查+LOCKDEP）。
+- **关联**: DEBT-021（同「多上下文无锁」模式）;报告补扫节。
+
+---
 
 ## 🟡 Medium
 
@@ -237,6 +291,98 @@
 - **✅ 已修（GCC 自举线，2026-07-01）**: 两层计数落地。外层 `Inode::refcount`（`inode.hpp`）+ `inode_ref/inode_unref` helper（`file.cpp`：File 进出 FDTable 时 bump/dec，到 0 调 release；**File 退回纯 struct 不碰 inode**——避 test use-after-free，由 fd 点 alloc/set/dup/dup2 + close/displace 管 refcount，锁外 release）。内层 `Pipe::read_refs_/write_refs_`（`pipe.hpp`）+ add/release（`pipe.cpp`：irq_guard 内联 close 逻辑避重入）+ `PipeReadOps/PipeWriteOps` 构造 add / release override（`pipe_ops.cpp`：每端一 inode，FIFO cloning 自动覆盖）。机制测 `test_sys_pipe_dup_last_close_eof`（dup 后首个 close 不 EOF，last 才 BrokenPipe）。`ls|grep` pipeline EOF 语义正确。
 - **关联 GOTCHA**: 详见 `document/notes/2026-07-01-f8-m5-real-poll.md` follow-up。
 
+### DEBT-031 符号链接 follow 一族（access/chmod/chown/utimensat 仍查/改链接而非目标）
+- **维度**: 正确性/VFS　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（对照已修 sys_stat/sys_open 用 vfs_lookup(Follow),四条遗漏同族）
+- **位置**: `kernel/syscall/sys_access.cpp:73` / `sys_chmod.cpp:34` / `sys_chown.cpp:33` / `sys_utimensat.cpp:56`（附带:flags `[[maybe_unused]]` 丢 AT_SYMLINK_NOFOLLOW;times==NULL 用 0 占位非当前时间,make 增量构建判断错乱）
+- **现象**: 四个 syscall 用 `fs->lookup(rel)` 不 follow 尾随 symlink。对 `/bin/sh`（→busybox 链接）access(X_OK) 查的是链接 mode;`touch file` 把 mtime 设 epoch 0。历史 sys-stat-follow-ls-denied 同族,当时只修了 stat。
+- **修复建议**: 统一改 `vfs_lookup(path, Follow)`;utimensat 按 flags 切 NoFollow,times==NULL 用 boot_epoch_ns()+mono（sys_clock_gettime.cpp:55-57 基础设施现成）。
+- **复现策略**: **deterministic**——建 symlink 指向已知 mode 文件,断言 access/chmod/chown 作用于目标;touch 后 stat 断言 mtime≈now。红→修→绿。
+- **关联**: GOTCHA sys-stat-follow;报告 A 节。
+
+### DEBT-032 unchecked-new OOM null-deref 一族（vma/clone/tmpfs/dentry/dedicated_caches/AddressSpace）
+- **维度**: 错误处理(F)　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（-fno-exceptions 下 operator new→kmalloc 耗尽返 nullptr,crt_stub.cpp:191 坐实）
+- **位置**: `kernel/mm/vma.cpp:46`（make_node,注释「Heap exhaustion traps via operator new」对本 build 事实错误）+ `kernel/proc/clone.cpp:338,342` 与 `fork.cpp:479-487`（new FDTable/File 无 guard）+ `kernel/fs/tmpfs/tmpfs_ops.cpp:71,114`（new uint8_t[newcap] 后直接 memcpy）+ `kernel/fs/dentry.cpp:86` + `kernel/mm/dedicated_caches.cpp:30`（create_cache null 静默留全局）+ `kernel/mm/address_space.cpp:64`（OOM 打 FATAL 返半初始化对象）
+- **现象**: 无异常内核 new 失败返 nullptr,六处直接 deref → OOM 时 #GP/#PF 而非 -ENOMEM propagate。违背「错误走 ErrorOr」铁律。vma.hpp 注释宣称的失败模型是错的,误导后来者。
+- **修复建议**: 逐处 null 检查 + propagate Error::OutOfMemory（make_node→insert 返 null 时 caller 返 OOM;tmpfs 对齐 ext2 的 kmalloc+检查范式;dedicated_caches 失败 boot kpanic 使 early OOM 立即可见）;订正 vma.hpp 误导注释。
+- **复现策略**: **stress/构造**——测试内压低 slab 余量（大量分配后）再走 mmap/fork/tmpfs write,断言返 -ENOMEM 不崩;或给 kmalloc 加 test-only fail 注入点。host 单测可 mock。
+- **关联**: 报告 F 节。
+
+### DEBT-033 interruptible sleep 未实现——SIGKILL 打不断 futex/waitpid/Mutex/Semaphore 阻塞
+- **维度**: 正确性/调度·信号　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计;**与 scheduler preempt 弧同根**）　**核验**: ✅ skeptic 复核（signal.cpp:217 / process.hpp:291 / scheduler_block.cpp:119 三处注释自承）
+- **现象**: 只有 `wait_queue_head != nullptr` 的用户 IO 等待可被信号唤醒 EINTR;futex(FUTEX_WAIT)/waitpid/Mutex/Semaphore 阻塞是纯不可中断的。SIGKILL/SIGSTOP 对 futex-waiter 无响应,只能等自然醒。跨里程碑 TODO 无时间线。
+- **修复建议**: 给 Mutex/Semaphore/futex/waitpid 的 prepare_to_wait 路径接 signal_deliverable_pending 检查（像 schedule_blocked IO 分支）,让致命信号能打断;与 preempt 弧的 voluntary preempt point（Mutex/Semaphore 退出点）天然同批。
+- **复现策略**: **deterministic**——线程 A FUTEX_WAIT,线程 B kill -9 A,断言 A 在期限内退出（当前红:不退出）。**先补查 preempt 弧 signal_check 内核态路径**（审计未覆盖,B1 #GP 现场）再动。
+- **关联**: scheduler preempt 弧（B0 done B1 卡）;报告 B-medium 节。
+
+### DEBT-034 getdents64 小缓冲静默丢失已推进 offset 的目录条目
+- **维度**: 正确性/VFS　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（offset 先推进后判满,line 66-68 注释自承 entry lost）
+- **位置**: `kernel/syscall/sys_getdents64.cpp:64-68`
+- **现象**: 循环先读条目（内部 offset++）再判 `off+reclen > count` 超限 break——刚读的条目因 offset 已越过永久丢失。Linux 保证不丢（放不下则不消费）。小缓冲遍历目录 → ls/find/cp -r 偶发漏文件不可恢复。
+- **修复建议**: 「读取」与「offset 推进」解耦——peek 不推进,放得下才消费（对齐 Linux readdir 模型）。
+- **复现策略**: **deterministic**——建 N 条目目录,用 1×reclen 大小缓冲循环 getdents64 拼回全量,断言条目数不丢。红→修→绿。
+- **关联**: 报告 B-medium 节。
+
+### DEBT-035 page_cache invalidate_range 丢 read 错误留全零页冒充文件内容
+- **维度**: 错误处理/内存(F+A)　**优先级**: P1　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（对照 get_page:118 正确 propagate,此处 `static_cast<void>` 丢弃）
+- **位置**: `kernel/mm/page_cache.cpp:185`（write 后重读同步缓存路径）
+- **现象**: `memset(v,0,ps)` 后把 `inode->ops->read()` 的 ErrorOr 整个丢弃。重读失败（NVMe/AHCI I/O 错、短读）→ 页面停留全零态,sys_read/mmap 把零页当文件真实内容。b3-ext2-agg-sigill 同族（I/O 失败静默掩盖→上层拿垃圾）。
+- **修复建议**: 对齐 get_page:118——检查 read 返回,失败标 CachedPage invalid（下次 get_page 重填）或移除并返错,绝不留静默零页。
+- **复现策略**: **host-testable**——test_page_cache 环境注入 fail-read 的 mock inode ops,断言 invalidate_range 后 get_page 返错误而非零页。
+- **关联**: [[b3-ext2-agg-sigill-handoff]] 同族;报告 A-medium 节。
+
+### DEBT-036 ext2 rename 正确性缺口（拒绝覆盖已存在目标 + 目录 rename 不调 nlink）
+- **维度**: 正确性/ext2　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（line 220-224/258-260 注释自承 follow-up）
+- **位置**: `libs/ext2/ext2_links.cpp:198-260`
+- **现象**: `mv a b`（b 已存在）失败,POSIX 要求原子替换,构建脚本/make 依赖;移动目录后父目录 nlink 不 ±1 → stat 报错、find 异常、rmdir 永不成功。
+- **修复建议**: 目标存在先 unlink 再 add;目录 rename 时 src 父 i_links_count--、dst 父 ++ 并 write_disk_inode。
+- **复现策略**: **deterministic**——mv 覆盖断言成功+内容正确;mv 目录后 stat 父 nlink 断言。ext2 库有 host ASAN/TSAN 测试环境（f6-m6 双端直编）,host 侧先红后绿。
+- **关联**: 报告 B-medium 节。
+
+### DEBT-037 AF_UNIX stream 阻塞 send() 无 flow control,peer RX 满返 EAGAIN
+- **维度**: 正确性/net-IPC　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（unix_socket.cpp:227-231 注释自承 for-now）
+- **位置**: `kernel/net/unix_socket.cpp:227`（recv/accept 已正确用 wait queue,唯 send 缺）
+- **现象**: 阻塞 socket 的 send() 在 peer 4KB ring 满时返 EAGAIN——正确阻塞的调用者死循环烧核,naive 调用者拿到 blocking socket 上的虚假 EAGAIN。
+- **修复建议**: 镜像 recv():peer 满时 prepare_to_wait 到 send_waiters_,recv pop_batch 腾空间后 wake_one;honor EINTR（连 DEBT-033）。
+- **复现策略**: **deterministic**——填满 peer ring 后阻塞 send,断言阻塞被唤醒（当前红:立即返 EAGAIN）。
+- **关联**: DEBT-033;报告 B-medium 节。
+
+### DEBT-038 驱动 init 吞错一族（AHCI void init / framebuffer 丢 map_2mb / e1000 EEPROM 哨兵+半复位继续）
+- **维度**: 错误处理(F)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计+补扫）　**核验**: ✅ 主三条 skeptic 复核;e1000 两条补扫未复核
+- **位置**: `kernel/drivers/ahci/ahci.cpp:290`（init 返 void,4 条失败路径静默 bail——production AHCI 空单例 #GP 历史）+ `kernel/drivers/video/framebuffer.cpp:35`（丢 map_2mb bool,失败后写未映射地址;对照 LAPIC/IOAPIC/HPET/MSI-X 都检查）+ `kernel/drivers/net/e1000.cpp:63`（read_eeprom 超时返 0xFFFF 被 read_mac 当有效广播 MAC+UPE,EEPROM 故障彻底掩盖）/ `:113`（reset 不自清仅警告继续）
+- **修复建议**: AHCI init 改 `ErrorOr<void>`（对齐 NVMe/VirtIO）;framebuffer 检查+回滚;e1000 read_eeprom 返 ErrorOr、reset 失败 fail-fast,net_init 干净禁 net。
+- **复现策略**: **QEMU 基本不可复现**（QEMU 硬件总正常）——代码修复+对照审查;AHCI init 可用「不存在的 BAR5」构造 fail 路径单测。
+- **关联**: [[production-kernel-init-test-blindspot]]（AHCI 空单例 #GP 同族）;报告 F-medium + 补扫节。
+
+### DEBT-039 IoPhys 缺页 map 失败静默 return——OOM 下无噪 #PF 死循环
+- **维度**: 错误处理(F)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（注释称会 panic 但分支内无 panic 调用）
+- **位置**: `kernel/arch/x86_64/page_fault.cpp:274`
+- **现象**: 设备 mmap（/dev/fb0）缺页 map_nolock 失败（OOM）→ handler return → 同指令再 #PF → 无噪死循环,看似挂死连 backtrace 都抓不到。同文件 anonymous 路径会 fall through SIGSEGV/panic,唯 IoPhys「假装解决」。
+- **修复建议**: 失败时用户态投 SIGBUS（对齐 :378 file-backed 读失败）,内核态 panic 带 "OOM-at-device-mmap" 诊断。
+- **复现策略**: stress/构造——OOM 压力下 mmap fb0 触发;或 test-only 让 map_nolock 可注入失败。复现价值中等（修法明确）。
+- **关联**: 报告 A-medium 节。
+
+### DEBT-040 信号路径共享状态非原子族（sig_pending RMW / setpgid / itimer / IOAPIC）
+- **维度**: 并发/SMP(D3)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（process.hpp:315 「aligned=atomic,TSO 下 benign」注释判错——read-decrement-write 非单条原子）
+- **位置**: `kernel/proc/signal.cpp:204-220`（queue_signal 对 sig_pending/state/sig_forced 无锁 RMW,与目标 CPU 投递并发→丢信号/幽灵信号——跨 CPU 信号投递核心路径）+ `kernel/proc/process_group.cpp:28`（setpgid 无锁写 pgid vs killpg 持锁读）+ `signal.cpp:310`（itimer_real_tick(PIT IRQ) vs sys_setitimer 非原子 RMW→新计时值丢失）+ `kernel/drivers/apic/io_apic.cpp:34`（IOREGSEL/IOWIN 两步 RMW 无锁——当前仅 BSP bring-up 调,为未来埋）
+- **修复建议**: Task 加 sig_lock(Spinlock) 或 sig_pending/sig_forced 改 atomic 位操作（对齐 Linux sighand->siglock）;itimer 用 per-task 锁或 CAS 减法;IOAPIC 加 Spinlock。
+- **复现策略**: **stress**——-smp 2 反复 kill 跨核进程断言信号必达（丢位即红）;setitimer+ping 压测断言 SIGALRM 间隔。RACE_DETECT 辅助。sig_pending 丢信号是最值得复现的（POSIX 不可接受行为）。
+- **关联**: DEBT-026（同批修,sa_mask 需要 sig 锁）;报告 D-medium/low 节。
+
+### DEBT-041 PCIDevice::bar[] uint32 截断 64-bit BAR
+- **维度**: 资源/契约(E)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核（pci.hpp:48 uint32_t[6],调用方按 64 位语义用,msix 注释自承限制）
+- **位置**: `kernel/drivers/pci/pci.cpp:103` + `pci.hpp:48`
+- **现象**: 64-bit BAR 高 32 位隐式截断;e1000/nvme/xhci/ahci/msix 全按 64 位读。QEMU BAR<4GB 不炸;真机大显存 NVMe/GPU 的 MMIO>4GB → 静默错地址。
+- **修复建议**: `bar[]` 改 `uint64_t[BAR_COUNT]`。
+- **复现策略**: **QEMU 不可复现**（BAR 总在 4GB 下）——类型修复+static_assert,审查。
+- **关联**: 报告 E-medium 节。
+
+### DEBT-042 过度抽象/死代码清理族（11 处,零消费者证据链齐全）
+- **维度**: 可维护性(C)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计+补扫切面）　**核验**: ✅ 每处 grep override/instantiation/caller 数坐实（报告含证据链）
+- **位置与清单**: ① `kernel/mm/vma.hpp:133` IVMAStore 单实现纯虚接口（AddressSpace 存具体类型,折叠）② `kernel/proc/scheduler.hpp:68` task_deadline 零调用零 override（含「测试断言死代码存在」循环论证）③ `scheduler.hpp:64` task_fork 生产 fork/clone 从不调（RoundRobin override 白写——或改真调,quantum 重置语义被静默跳过）④ `kernel/fs/vfs_lookup.hpp:36` LookupFlag::Create/Excl 全仓无调用 ⑤ `kernel/net/net_device.hpp:51,56,60` max_frame/supports_zerocopy/link_up 零决策调用（doc 还与实现不符）⑥ `kernel/lib/user_ptr.hpp:45` UserPtr 零生产消费者（DEBT-019 脚手架,头注释自承）⑦ `kernel/mm/phys_ref.hpp:93-98` AnonPhysRef/PageTablePhysRef 零实例化 ⑧ `kernel/gui/data/icon_data.hpp` 整文件 ~280 行死代码（零 include）⑨ `kernel/gui/event.hpp:110` EventQueue+Mouse::poll 死代码但 gui_init.cpp:38 keyboard listener 仍往死队列 enqueue（每键一次白拷贝）⑩ `kernel/drivers/canvas.hpp:177` draw_bitmap colorkey hack 无调用者 ⑪ scheduler.hpp:114 MAX_CLASSES=4 生产只注册 1 类（**建议保留**——可测试性收益真实,降 2+注释即可）
+- **修复建议**: ①-⑩ 删除（机械可逆,真需要时再加）;③ 二选一:fork/clone 真调或删钩子;⑪ 保留+MAX_CLASSES=2+退化注释。
+- **复现策略**: 无需复现——grep 证据链已闭环;删除后全量编译+两 leg 验证绿即闭环。
+- **关联**: [[xhci-hid-layering-antipattern]]（CODING-TASTE §13）;报告 C 节+补扫切面。
+
 ---
 
 ## 🟢 Low
@@ -287,6 +433,34 @@
 - **根因**: 生产只读共享无竞争；但语义是 SMP 反模式（全局调度抑制标志），未来误用即炸。
 - **修复建议**: 改 `percpu()->no_reschedule_depth`，与 current_ 迁移一致。
 - **关联 GOTCHA**: 无
+
+### DEBT-043 syscall flag/资源语义族（socketpair 泄漏 / O_CLOEXEC 未接 / SOCK_NONBLOCK 静默丢 / pipe inode 不释放 / master_write count / killpg 64 截断 / waitpid 超时谎言）
+- **维度**: 正确性/资源(E+B)　**优先级**: P2　**状态**: 🆕 登记待办（2026-08-14 LLM 审计+补扫）　**核验**: ✅ 主批 skeptic 复核;pty master_write 补扫未复核
+- **位置与清单**: ① `kernel/syscall/sys_socketpair.cpp:64,70` 第二 fd 安装失败显式泄漏 fd0（注释自承 for-now;EFAULT 路径泄漏两个）② `kernel/syscall/sys_open.cpp:244-247` O_CLOEXEC 接受但未接 FDTable（F_SETFD 能设,alloc 路径漏——execve 泄漏进子进程）③ `kernel/syscall/sys_socket.cpp:196` accept4 的 SOCK_NONBLOCK 被吞,静默给阻塞 fd（比返错更危险）④ `kernel/syscall/sys_pipe.cpp:32` pipe close 释放 File 不释放 inode/ops/Pipe（shell 管道密集→单调内存增长;InodeOps 缺 release hook 系统级债,socket 同注）⑤ `kernel/drivers/tty/pty.cpp:54-66` master_write 无条件返回 count 但 input_char 可能丢字节（write 契约破坏）⑥ `kernel/proc/signal.cpp:277` killpg/itimer 固定 64 目标静默截断,超出进程收不到信号（make -j64+ 漏 SIGTERM→父 hang）⑦ `kernel/proc/process_new.cpp:339` waitpid 50M 自旋超时后「leak task+占 PID+返回 Ok」——危险谎言,PID 耗尽+Task 泄漏
+- **修复建议**: ①②③ 补错路径 close/设 flag/返 EINVAL;④ InodeOps 加 release hook 一次解决 pipe+socket;⑤ 返回实际消费数;⑥ 动态分配或两遍扫描,超限 WARN;⑦ 超时 kpanic 或挂 orphan reap 链表后台重试。
+- **复现策略**: ①③⑤⑥ **deterministic**（EMFILE 构造/断言新 fd 非阻塞/小 ring 填满/65 进程 killpg）;② execve 后断言 fd 已关;⑦ 较难（需构造 on_cpu 卡死）,修复+审查。
+- **关联**: 报告 A/B 节+补扫;④ 连 DEBT-023 模式。
+
+### DEBT-044 stale 误导注释族（ext2 agg / pit.hpp mode3 / mouse center / mini idt DPL / capture_first_gp / draw_bitmap）
+- **维度**: 可维护性(G+B)　**优先级**: P3　**状态**: 🆕 登记待办（2026-08-14 LLM 审计+补扫）　**核验**: ✅ 逐处对照实现坐实
+- **位置与清单**: ① `libs/ext2/ext2_common.cpp:130-163` 注释自称「agg OFF(follow-up)」实际 agg>1 激活 + buffer 名写 block_buf_（实为 scratch）——调试时按注释查状态完全扑空,掩盖已修复的正确性 ② `kernel/drivers/pit/pit.hpp:66-102` 仍称 square-wave generator(mode 3)+描述不存在的 uptime 打印——有人据注释改回 mode 3 会**重新引入已修的历史 2x 时序 bug** ③ `kernel/drivers/mouse/mouse.cpp:152` 注释 "start at center" 代码置 0（左上角）④ `kernel/mini/arch/x86_64/idt.cpp:84-85` 「DPL=3 allows INT3」但 0x8F 实为 DPL=0 ⑤ `kernel/arch/x86_64/fault_diag.cpp:149` static bool 只抓开机第一个 #GP,真正致命 fault 的 debug 信息永远丢 ⑥ `kernel/drivers/canvas.hpp:187` colorkey hack 注释群（连 DEBT-042⑩ 删）
+- **修复建议**: ①②③④ 重写注释与实现对齐;⑤ capture 改 from_user==false/panic 时才触发;⑥ 随删除处理。
+- **复现策略**: 无需复现——文档债,修后 grep 断言旧文案零命中。
+- **关联**: [[pit-mode3-2x-timing-bug]]（②的历史根因）;报告 G/B 节。
+
+### DEBT-045 输入/串口边角族（mouse overflow 位 / tty 256 静默丢 / Mouse::poll 吞事件 / serial putc 无界 / e1000 tx slot DD / pipe underflow 静默）
+- **维度**: 正确性/契约(E)　**优先级**: P3　**状态**: 🆕 登记待办（2026-08-14 补扫,**未经 skeptic 复核**）　**核验**: ⚠️ 补扫 agent 读码坐实
+- **位置与清单**: ① `kernel/drivers/mouse/mouse.cpp:213` X/Y_OVERFLOW 位定义了从不检查（快速移动 delta>255 静默截错值）② `kernel/drivers/tty/tty.cpp:139-146` canonical 行缓冲 256 满后字节静默丢（不回显不报错,commit_line/cooked_push 同）③ `kernel/drivers/mouse/mouse.cpp:391` poll 遇非 mouse 事件 return false 吞掉该事件 ④ `kernel/drivers/serial/serial.cpp:58` putc 无界忙等无超时——**kprintf/panic 路径**,串口卡死时 panic 不可见 ⑤ `kernel/drivers/net/e1000.cpp:270` send_packet 不等前一描述符 DD 即复用槽,环形回绕踩 in-flight DMA ⑥ `kernel/ipc/pipe.cpp:319` release_*_ref 下溢保护静默 return,掩盖不平衡 ref bug（连 DEBT-023）
+- **修复建议**: ① 溢出位饱和 ±255 或删常量;② 溢出响铃 '\a'+文档化;③ continue 弹下一个;④ 有界重试+stuck flag 保 panic 输出;⑤ 复用槽前查 DD;⑥ 下溢 WARN（开发构建 panic）。
+- **复现策略**: ②⑤⑥ **可测**（host 单测/tty 测试环境）;①③ 需真硬件;④ QEMU 不可复现（审查）。
+- **关联**: 报告补扫节。
+
+### DEBT-046 mini 早期内核族（handle_pf 死循环 / ata dma 超时当成功 / ring0 注释）
+- **维度**: 错误处理(F)　**优先级**: P3　**状态**: 🆕 登记待办（2026-08-14 LLM 审计）　**核验**: ✅ skeptic 复核
+- **位置与清单**: ① `kernel/mini/arch/x86_64/exception_handlers.cpp:98` #PF 打印后 IRETQ 返回→真缺页必然 RIP 不变死循环刷爆串口,把「未实现」当「安全继续」 ② `kernel/mini/driver/ata.cpp:261` 5000 万次轮询超时无标志继续走成功路径,把没传完的缓冲当完整数据交 ELF loader ③ mini idt DPL 注释（并入 DEBT-044④）
+- **修复建议**: ① 无法修复的缺页 `cli;hlt` 停机+CR2/RIP/error code 诊断;② 超时 kprintf+return false+二次确认 ACTIVE 清零。
+- **复现策略**: ① 可构造（mini 加载漏映射即触发,但复现价值低——修法明确）;② 需磁盘故障注入（跳过）。**mini 是引导期内核,优先级最低,可与 DEBT-044 合批顺手清**。
+- **关联**: 报告 A-medium 节;FC29000 教训同源。
 
 ---
 
