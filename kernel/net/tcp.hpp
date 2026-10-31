@@ -1,255 +1,595 @@
 /**
- * @file kernel/net/tcp.hpp
- * @brief TCP wire layout + TcpModule (L4Handler, IP proto 6).
+ * @file    tcp.hpp
+ * @brief   The TCP module: connections, handshakes, and honest bytes.
  *
- * A connection-oriented L4 protocol layered on Ipv4Module exactly like
- * UdpModule: TcpModule is an L4Handler registered via
- * Ipv4Module::add_l4(kIpProtoTcp, ...).  Batch 1 delivers the wire format
- * (header parse/build + flag constants) and the inbound checksum gate: handle()
- * verifies the TCP pseudo-header checksum (proto 6) and records the segment for
- * diagnostics.  Unlike UDP a TCP checksum is MANDATORY -- 0 is a protocol
- * violation, not "no checksum" -- so the gate always verifies.  The connection
- * state machine (handshake / sequence-ACK / teardown) is layered on in
- * batches 2-3; the socket API rides on top in F7-M6.
+ * TCP earns its keep where UDP shrugged: the module owns one state
+ * machine per connection, a table of fixed seats, and the discipline
+ * that every byte is counted. Incoming segments are judged four times
+ * before any state moves — the word book parses the header, the data
+ * offset must sit inside the bytes that arrived, the checksum over the
+ * pseudo header plus the whole segment must fold to zero (TCP sends no
+ * zero-skip excuse), and the sequence space must agree with what the
+ * connection expects — and every refusal lands in its own counter.
+ * What survives drives the machine: handshake, in-order delivery into
+ * a per-connection inbox, acknowledgement of what was consumed, and
+ * the four-part farewell. News reaches the socket layer through the
+ * caller's three callbacks, and they never fire under the module's
+ * gate: the segment's work is done first, the callback after, so a
+ * callback that walks back in through receive() cannot deadlock the
+ * module it is calling.
  *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-24
+ * @version 0.1
+ * @since   0.7.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/ipv4.hpp"  // Ipv4Header, Ipv4Module, L4Handler, kIpProto*
-#include "kernel/net/net_types.hpp"
+#include "cinux/container/ring_queue.hpp"
+#include "cinux/result.hpp"
+#include "cinux/spin_mutex.hpp"
+#include "kernel/net/ipv4.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
+#include "kernel/time/timer_table.hpp"
 
 namespace cinux::net {
 
-/// TCP header length in 32-bit words (fixed 20-byte header, no options today).
-constexpr uint8_t kTcpHdrWords = 5;
-
-/// TCP flag bits (wire byte 13).  SYN/ACK/FIN/RST drive the FSM; PSH/URG are
-/// accepted but not semantically required at this layer.
-constexpr uint8_t kTcpFin = 0x01;
-constexpr uint8_t kTcpSyn = 0x02;
-constexpr uint8_t kTcpRst = 0x04;
-constexpr uint8_t kTcpPsh = 0x08;
-constexpr uint8_t kTcpAck = 0x10;
-constexpr uint8_t kTcpUrg = 0x20;
-
-/// @brief TCP header, HOST-order parsed view.  20 bytes (data offset = 5).
-struct TcpHeader {
-    uint16_t src_port;    ///< host order
-    uint16_t dst_port;    ///< host order
-    uint32_t seq;         ///< host order (sequence number)
-    uint32_t ack;         ///< host order (acknowledgment number)
-    uint8_t  data_off;    ///< header length in 32-bit words (raw 4-bit value)
-    uint8_t  flags;       ///< FIN..CWR (low 6 bits used: kTcp*)
-    uint16_t window;      ///< host order (receive window, bytes)
-    uint16_t checksum;    ///< host order (pseudo-header based; MANDATORY)
-    uint16_t urgent_ptr;  ///< host order
-};
-static_assert(sizeof(TcpHeader) == 20, "TCP fixed header is 20 bytes");
-
-/// @brief Parse 20 wire bytes into a TcpHeader (host order).  Options bytes
-///        (data_off > 5) are not parsed; callers skip them via tcp_header_bytes.
-inline void parse_tcp(const uint8_t* p, TcpHeader& out) {
-    out.src_port   = (static_cast<uint16_t>(p[0]) << 8) | p[1];
-    out.dst_port   = (static_cast<uint16_t>(p[2]) << 8) | p[3];
-    out.seq        = (static_cast<uint32_t>(p[4]) << 24) | (static_cast<uint32_t>(p[5]) << 16) |
-                     (static_cast<uint32_t>(p[6]) << 8) | p[7];
-    out.ack        = (static_cast<uint32_t>(p[8]) << 24) | (static_cast<uint32_t>(p[9]) << 16) |
-                     (static_cast<uint32_t>(p[10]) << 8) | p[11];
-    out.data_off   = static_cast<uint8_t>(p[12] >> 4);
-    out.flags      = p[13];
-    out.window     = (static_cast<uint16_t>(p[14]) << 8) | p[15];
-    out.checksum   = (static_cast<uint16_t>(p[16]) << 8) | p[17];
-    out.urgent_ptr = (static_cast<uint16_t>(p[18]) << 8) | p[19];
-}
-
-/// @brief Serialise a TcpHeader into 20 wire bytes (big-endian multi-byte; the
-///        data offset sits in the hi nibble of byte 12, flags in byte 13).
-inline void build_tcp_header(const TcpHeader& in, uint8_t* p) {
-    p[0]  = static_cast<uint8_t>(in.src_port >> 8);
-    p[1]  = static_cast<uint8_t>(in.src_port & 0xFF);
-    p[2]  = static_cast<uint8_t>(in.dst_port >> 8);
-    p[3]  = static_cast<uint8_t>(in.dst_port & 0xFF);
-    p[4]  = static_cast<uint8_t>(in.seq >> 24);
-    p[5]  = static_cast<uint8_t>(in.seq >> 16);
-    p[6]  = static_cast<uint8_t>(in.seq >> 8);
-    p[7]  = static_cast<uint8_t>(in.seq & 0xFF);
-    p[8]  = static_cast<uint8_t>(in.ack >> 24);
-    p[9]  = static_cast<uint8_t>(in.ack >> 16);
-    p[10] = static_cast<uint8_t>(in.ack >> 8);
-    p[11] = static_cast<uint8_t>(in.ack & 0xFF);
-    p[12] = static_cast<uint8_t>(in.data_off << 4);  // reserved lo nibble zero
-    p[13] = in.flags;
-    p[14] = static_cast<uint8_t>(in.window >> 8);
-    p[15] = static_cast<uint8_t>(in.window & 0xFF);
-    p[16] = static_cast<uint8_t>(in.checksum >> 8);
-    p[17] = static_cast<uint8_t>(in.checksum & 0xFF);
-    p[18] = static_cast<uint8_t>(in.urgent_ptr >> 8);
-    p[19] = static_cast<uint8_t>(in.urgent_ptr & 0xFF);
-}
-
-/// @brief Header length in bytes (data offset * 4).
-inline uint8_t tcp_header_bytes(const TcpHeader& h) {
-    return static_cast<uint8_t>(h.data_off * 4);
-}
-
-/// A connection endpoint: an address + port.  The FSM keys connections on the
-/// local/remote endpoint pair (the TCP 4-tuple, minus the local addr which the
-/// device's InDevice already pins).
-struct TcpEndpoint {
-    Ipv4Addr addr;
-    uint16_t port;
-};
-
-/// Connection states the FSM moves through.  Batch 2 covers the handshake half
-/// (Closed/SynSent/SynReceived/Established); batch 3 adds the teardown half
-/// (FinWait1/FinWait2/CloseWait/LastAck).  TIME_WAIT needs a timer (absent here)
-/// -- a closed peer's final ACK is trusted, no retransmit (follow-up).
+/**
+ * @brief   Where one connection stands in the protocol's own story.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
 enum class TcpState : uint8_t {
-    kClosed      = 0,
-    kSynSent     = 1,
-    kSynReceived = 2,
-    kEstablished = 3,
-    kFinWait1    = 4,
-    kFinWait2    = 5,
-    kCloseWait   = 6,
-    kLastAck     = 7,
+    /// The seat is free.
+    kClosed,
+    /// Active open: a SYN left, no answer yet.
+    kSynSent,
+    /// Passive open: the peer's SYN arrived, this side's SYN is away.
+    kSynReceived,
+    /// Both directions open, bytes may travel.
+    kEstablished,
+    /// This side said goodbye, the FIN is unacknowledged.
+    kFinWait1,
+    /// This side's FIN is acknowledged, the peer may still speak.
+    kFinWait2,
+    /// The peer said goodbye, this side may still speak.
+    kCloseWait,
+    /// Both FINs are away, neither acknowledged.
+    kClosing,
+    /// The passive closer's FIN is away, awaiting its acknowledgement.
+    kLastAck,
+    /// Both directions closed, lingering for stragglers.
+    kTimeWait,
 };
 
-/// @brief Inbound TCP observer -- the consumer of a connection's lifecycle.
-///
-/// Registered with TcpModule::listen.  Like all net-stack callbacks, @p data is
-/// BORROWED: valid only for the duration of the call -- copy to retain (the
-/// device recycles the buffer after dispatch).
-class TcpListener {
-public:
-    virtual ~TcpListener() = default;
-
-    /// @brief A passive open completed: a SYN to a listened port finished the
-    ///        handshake (the 3rd ACK landed).  @p local is the listened
-    ///        endpoint, @p remote the peer.
-    virtual void on_accept(const TcpEndpoint& local, const TcpEndpoint& remote) = 0;
-    /// @brief Inbound data on an established connection (batch 3).  Default:
-    ///        ignore.  @p data is borrowed.
-    virtual void on_data(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/,
-                         FrameView /*data*/) {}
-    /// @brief The connection ended -- peer FIN or RST (batch 3).  Default: ignore.
-    virtual void on_close(const TcpEndpoint& /*local*/, const TcpEndpoint& /*remote*/) {}
+/**
+ * @brief   Why a connection ended, as the socket layer needs to know it.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+enum class TcpFarewell : uint8_t {
+    /// Both sides finished the farewell dance.
+    kGraceful,
+    /// A reset killed the connection.
+    kReset,
+    /// The peer stopped answering and the stack gave up.
+    kUnreachable,
 };
 
-/// @brief TCP protocol layer.  Batch 1: wire + checksum gate.  Batch 2: the
-///        connection table + 3-way handshake.  Batch 3: data + 4-way teardown.
-class TcpModule : public L4Handler {
+/**
+ * @brief   What a socket wants to hear about, one pointer per news kind.
+ * @note    Every callback runs after the module's gate is released, so
+ *          a callback may call back into the module.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct TcpEvents {
+    /// Shared context handed back with every callback.
+    void* context                                         = nullptr;
+    /// Readable bytes arrived.
+    void (*data)(void* context)                           = nullptr;
+    /// A listener's handshake completed; the connection may be taken.
+    void (*accepted)(void* context)                       = nullptr;
+    /// The connection ended for good; the ticket is dead after this.
+    void (*farewell)(void* context, TcpFarewell farewell) = nullptr;
+};
+
+/**
+ * @brief   One connection's handle: a seat number and the seat's generation.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct TcpTicket {
+    /// Which seat in the connection table.
+    unsigned long slot  = 0;
+    /// The seat's generation when the ticket was minted.
+    unsigned long stamp = 0;
+};
+
+/**
+ * @brief   One listener's handle: its own table, its own generations.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct TcpListenTicket {
+    /// Which seat in the listener table.
+    unsigned long slot  = 0;
+    /// The seat's generation when the ticket was minted.
+    unsigned long stamp = 0;
+};
+
+/**
+ * @brief   The delivery, refusal, and teardown counters so far.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct TcpStats {
+    /// Segments this module built and handed to the sink.
+    unsigned long segments_sent          = 0;
+    /// Payload bytes appended to some connection's inbox.
+    unsigned long bytes_delivered        = 0;
+    /// Passively opened connections that reached established.
+    unsigned long accepted               = 0;
+    /// Segments the word book refused as too short.
+    unsigned long refused_short          = 0;
+    /// Segments whose data offset was dishonest for the bytes held.
+    unsigned long refused_offset         = 0;
+    /// Segments whose checksum did not fold to zero.
+    unsigned long refused_checksum       = 0;
+    /// Handshakes refused because no connection seat was free.
+    unsigned long refused_full           = 0;
+    /// Segments naming no connection and no listener, answered with RST.
+    unsigned long unclaimed              = 0;
+    /// Whole segments that arrived below the read cursor, re-answered.
+    unsigned long stale_dropped          = 0;
+    /// Segments that arrived ahead of a gap, re-answered for batch three.
+    unsigned long out_of_order_dropped   = 0;
+    /// Acknowledgements naming bytes the connection never sent.
+    unsigned long ack_beyond_dropped     = 0;
+    /// Reset segments this module sent.
+    unsigned long resets_sent            = 0;
+    /// Reset segments that killed a connection of this stack.
+    unsigned long resets_received        = 0;
+    /// Segments re-sent because the wait for their acknowledgement ran out.
+    unsigned long retransmits_sent       = 0;
+    /// Times a retransmission wait expired on some connection.
+    unsigned long rto_timeouts           = 0;
+    /// Connections given up after spending every retransmission.
+    unsigned long giveups                = 0;
+    /// Oldest segments re-sent on three duplicate acknowledgements.
+    unsigned long fast_retransmits       = 0;
+    /// Out-of-order segments taken into the repair seats.
+    unsigned long out_of_order_stored    = 0;
+    /// Repair-seat segments delivered once their gap filled.
+    unsigned long out_of_order_recovered = 0;
+};
+
+/**
+ * @brief   The TCP module, a plain instance the wiring owns.
+ * @note    The connection table is fixed at eight seats and the listener
+ *          table at four; exhaustion is refused by name, never queued.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+class TcpModule {
 public:
-    static constexpr uint32_t kMaxTcpCons = 8;  ///< connection-table size
+    /**
+     * @brief         Aims the module at its sink and source address.
+     *
+     * @param[in]     sink          Where built segments go.
+     * @param[in]     own_address   Source address the pseudo header sums.
+     * @return        None
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void init(const DatagramSink& sink, uint32_t own_address);
 
-    /// @brief Open a passive listener on @p local_port (mirrors UDP bind).
-    /// @return false if @p local_port is already listened or the table is full.
-    bool listen(uint16_t local_port, TcpListener& listener);
-    /// @brief Release a passive listener.  No-op if @p local_port is not listened.
-    void stop_listen(uint16_t local_port);
+    /**
+     * @brief         Re-aims the module without forgetting anything.
+     *
+     * @param[in]     sink          The new outgoing path.
+     * @param[in]     own_address   The new source address.
+     * @return        None
+     * @note          For the boot wiring's reroute: the loopback world
+     *                runs first, a wire joins later, and the connection
+     *                table and counters survive the aim.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void aim(const DatagramSink& sink, uint32_t own_address);
 
-    /// @brief Bind/replace the TcpListener for an EXISTING connection (F7-M6).
-    ///
-    /// M5 leaves active-open TCBs (connect) with listener=null, so inbound
-    /// on_data/on_close never fire for them.  The socket layer rebinds a
-    /// connection's listener to the owning socket -- a client socket after
-    /// connect(), an accepted child after accept() -- so its on_data/on_close
-    /// receive the connection's traffic directly.  No-op if no such connection.
-    void set_listener(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port,
-                      TcpListener& l);
+    /**
+     * @brief         Judges one segment and drives the machine it names.
+     *
+     * @param[in]     bytes   First segment byte.
+     * @param[in]     length  Segment bytes, payload included.
+     * @param[in]     header  The IPv4 header it travelled in.
+     * @return        None
+     * @note          The service pass owns the clock: an
+     *                acknowledgement that clears every unacknowledged
+     *                byte measures its round trip against the module's
+     *                last service time.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length, const Ipv4View& header);
 
-    /// @brief Active open: send SYN to @p remote, enter SYN_SENT.  The handshake
-    ///        completes on the next inbound SYN-ACK (drained by poll).  Fails if a
-    ///        connection on this 4-tuple already exists or the table is full.
-    cinux::lib::ErrorOr<void> connect(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
-                                      uint16_t remote_port, Ipv4Module& ipv4, NetStack& stack);
+    /**
+     * @brief         Opens a listener under a port, passively.
+     *
+     * @param[in]     port      The port handshakes must name.
+     * @param[in]     events    Where the listener's news goes.
+     * @return        The listener's ticket, or the refusal.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    base::Result<TcpListenTicket, base::KernelError> listen(uint16_t port, const TcpEvents& events);
 
-    /// @brief Send @p data on an ESTABLISHED connection (PSH|ACK).  Advances
-    ///        SND.NXT by @p len; the peer's ACK (drained by poll) acknowledges it.
-    ///        Fails if no such connection or it is not ESTABLISHED.
-    cinux::lib::ErrorOr<void> send(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
-                                   uint16_t remote_port, const uint8_t* data, uint32_t len,
-                                   Ipv4Module& ipv4, NetStack& stack);
+    /**
+     * @brief         Closes a listener; seated connections live on.
+     *
+     * @param[in]     ticket   The ticket listen() answered.
+     * @return        True when a listener sat there; false for a stale
+     *                ticket.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    bool unlisten(const TcpListenTicket& ticket);
 
-    /// @brief Active close: send FIN.  From ESTABLISHED -> FIN_WAIT_1 (we
-    ///        initiate); from CLOSE_WAIT -> LAST_ACK (we finish after the peer's
-    ///        FIN).  The teardown completes as the remaining FIN/ACK exchange is
-    ///        drained by poll.  Fails if no such connection or not in a closeable
-    ///        state.
-    cinux::lib::ErrorOr<void> close(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
-                                    uint16_t remote_port, Ipv4Module& ipv4, NetStack& stack);
+    /**
+     * @brief         Takes the ticket of one completed handshake.
+     *
+     * @param[in]     ticket   The listener's ticket.
+     * @return        The accepted connection's ticket, or kWouldBlock
+     *                when the queue is empty.
+     * @note          The accepted callback only rings the bell; the
+     *                connection's ticket waits in the listener's queue
+     *                until this call takes it.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    base::Result<TcpTicket, base::KernelError> take_accepted(const TcpListenTicket& ticket);
 
-    /// @brief L4Handler: verify the pseudo-header checksum, then advance the FSM
-    ///        for the matching connection (passive-open a SYN to a listened port,
-    ///        RST an unroutable segment, complete the handshake on SYN-ACK/ACK).
-    ///        A bad checksum is a silent drop (like UDP/ICMP).
-    void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
-                NetStack& stack) override;
+    /**
+     * @brief         Opens a connection to a remote port, actively.
+     *
+     * @param[in]     local_port       The port to speak from, zero for an
+     *                                 ephemeral pick.
+     * @param[in]     remote_address   Address to open against.
+     * @param[in]     remote_port      Port to open against.
+     * @param[in]     events           Where the connection's news goes.
+     * @param[in]     now              The monotonic now, in nanoseconds.
+     * @return        The connection's ticket, or the refusal.
+     * @note          The SYN leaves at once; the connection stands in
+     *                syn-sent until the answer arrives, and the refusal
+     *                of a refused open surfaces through the farewell
+     *                callback, not through this return value. The now
+     *                starts the SYN's retransmission clock.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    base::Result<TcpTicket, base::KernelError> connect(uint16_t local_port, uint32_t remote_address,
+                                                       uint16_t           remote_port,
+                                                       const TcpEvents&   events,
+                                                       unsigned long long now);
 
-    // --- test observation ---
-    uint32_t connection_count() const;  ///< non-Closed connections in the table
-    TcpState state_of(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port) const;
-    // checksum-gate diagnostics (kept from batch 1 as a lightweight tap)
-    uint32_t valid_count() const { return valid_count_; }
-    uint16_t last_src_port() const { return last_src_port_; }
-    uint16_t last_dst_port() const { return last_dst_port_; }
-    uint32_t last_seq() const { return last_seq_; }
-    uint32_t last_ack() const { return last_ack_; }
-    uint8_t  last_flags() const { return last_flags_; }
-    void     reset_diag() {
-        valid_count_   = 0;
-        last_src_port_ = 0;
-        last_dst_port_ = 0;
-        last_seq_      = 0;
-        last_ack_      = 0;
-        last_flags_    = 0;
-    }
+    /**
+     * @brief         Offers payload bytes to the connection to send.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @param[in]     payload  First payload byte.
+     * @param[in]     length   Payload bytes offered.
+     * @param[in]     now      The monotonic now, in nanoseconds.
+     * @return        How many bytes the connection took, or the refusal.
+     * @note          Takes only what the unacknowledged ceiling allows,
+     *                split into honest segments; a short take means the
+     *                rest waits for acknowledgements to open room. Every
+     *                taken byte stays in the connection's retention ring
+     *                until its acknowledgement, and the now starts the
+     *                ring's retransmission clock when the ring was empty.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    base::Result<size_t, base::KernelError> send(const TcpTicket&     ticket,
+                                                 const unsigned char* payload, size_t length,
+                                                 unsigned long long now);
+
+    /**
+     * @brief         Takes up to capacity bytes from the connection's inbox.
+     *
+     * @param[in]     ticket    The connection's ticket.
+     * @param[out]    into      Where the bytes land.
+     * @param[in]     capacity  How many bytes into may hold.
+     * @return        The bytes taken, zero at end-of-file, or the refusal.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    base::Result<size_t, base::KernelError> receive(const TcpTicket& ticket, unsigned char* into,
+                                                    size_t capacity);
+
+    /**
+     * @brief         Whether the peer's farewell has arrived.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        True once the peer's FIN was consumed; a drained
+     *                inbox past that point reads as end-of-file.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool concluded(const TcpTicket& ticket) const;
+
+    /**
+     * @brief         Whether the connection may carry bytes both ways.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        True in the established state.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool established(const TcpTicket& ticket) const;
+
+    /// True only while a live ticket is waiting for handshake segments.
+    [[nodiscard]] bool connecting(const TcpTicket& ticket) const;
+
+    /**
+     * @brief         Begins the graceful farewell for the local direction.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        None
+     * @note          Sends the FIN and moves the machine on; the seat
+     *                frees itself when the dance completes. A connection
+     *                already closing simply ignores the call.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void close(const TcpTicket& ticket);
+
+    /**
+     * @brief         Kills the connection at once with a reset.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        None
+     * @note          For the forced path: the seat frees immediately
+     *                and the farewell callback answers with kReset.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void abandon(const TcpTicket& ticket);
+
+    /**
+     * @brief         Advances every connection's clock work by one step.
+     *
+     * @param[in]     now   The monotonic now, in nanoseconds.
+     * @return        None
+     * @note          The wiring calls this from its heartbeat. One pass
+     *              arms a retransmission guard for every connection with
+     *                bytes in flight; the timer table fires the guards
+     *                whose wait ran out, and the callback re-sends the
+     *                oldest unacknowledged segment, backs the wait off,
+     *                or gives the connection up once its retries are
+     *                spent.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void service(unsigned long long now);
+
+    /**
+     * @brief         The delivery and refusal counters so far.
+     * @return        A reference to the current statistics.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] const TcpStats& stats() const;
+
+    /**
+     * @brief         The monotonic now of the last service pass.
+     * @return        Nanoseconds on the service clock.
+     * @note          The face callers without their own clock use:
+     *                the wiring refreshes it every pump, so it stands
+     *                within one pass of the true now.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] unsigned long long clock() const;
+
+    /**
+     * @brief         The source address the pseudo header sums with.
+     * @return        The module's own address.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] uint32_t own_address() const;
+
+    /**
+     * @brief         Whether the connection offers a reader progress.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        True when bytes wait, the peer said goodbye, or
+     *                the seat itself is gone — all three read as news.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool holds_bytes(const TcpTicket& ticket) const;
+
+    /**
+     * @brief         Names the far end one connection speaks with.
+     *
+     * @param[in]     ticket    The connection's ticket.
+     * @param[out]    address   The peer's address lands here.
+     * @param[out]    port      The peer's port lands here.
+     * @return        True on a live connection.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool peer_of(const TcpTicket& ticket, uint32_t& address, uint16_t& port) const;
+
+    /**
+     * @brief         Whether the ticket still names a seated connection.
+     *
+     * @param[in]     ticket   The connection's ticket.
+     * @return        True while the seat lives; false once released.
+     * @note          The blocking open's failure sense: a ticket that
+     *                stopped being alive never establishes.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool alive(const TcpTicket& ticket) const;
 
 private:
-    /// One connection record (TCB).  state==kClosed marks a free table slot.
+    /**
+     * @brief   One listening port: the handshake's doorbell.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    struct ListenSeat {
+        bool          used                           = false;
+        unsigned long stamp                          = 0;
+        uint16_t      port                           = 0;
+        TcpEvents     events                         = {};
+        TcpTicket     accepted[kTcpAcceptQueueSeats] = {};
+        unsigned long accepted_count                 = 0;
+    };
+
+    /**
+     * @brief   One out-of-order segment parked until its gap fills.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    struct ReorderSeat {
+        bool          used               = false;
+        uint32_t      start              = 0;
+        unsigned long bytes              = 0;
+        unsigned char data[kTcpMssBytes] = {};
+    };
+
+    /**
+     * @brief   One live connection, the whole transmission-control block.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
     struct Connection {
-        TcpState     state      = TcpState::kClosed;
-        uint16_t     local_port = 0;
-        Ipv4Addr     remote_addr{};
-        uint16_t     remote_port = 0;
-        uint32_t     iss         = 0;        ///< our initial send sequence
-        uint32_t     snd_nxt     = 0;        ///< next seq we send
-        uint32_t     rcv_nxt     = 0;        ///< next seq we expect to receive (what we ACK)
-        TcpListener* listener    = nullptr;  ///< set on passive open
+        unsigned long      stamp            = 0;
+        /// When the oldest unacknowledged byte left, in monotonic
+        /// nanoseconds; zero while nothing is in flight.
+        unsigned long long oldest_sent_ns   = 0;
+        /// Retransmissions spent on the current stretch of silence.
+        unsigned long      retransmit_count = 0;
+        /// Smoothed round-trip estimate, in nanoseconds; zero until a
+        /// sample lands.
+        unsigned long long srtt_ns          = 0;
+        /// Round-trip variation, in nanoseconds; zero until a sample lands.
+        unsigned long long rttvar_ns        = 0;
+        /// The current retransmission wait, in nanoseconds; zero until
+        /// the first need.
+        unsigned long long rto_ns           = 0;
+        /// The module this connection serves; the timer's callback walks it.
+        TcpModule*         owner            = nullptr;
+        /// The timer seat guarding this connection's in-flight bytes.
+        time::TimerTicket  rto_seat         = {};
+        TcpEvents          events           = {};
+        uint32_t           remote_address   = 0;
+        /// Oldest unacknowledged sequence number on the send side.
+        uint32_t           snd_una          = 0;
+        /// Next sequence number the send side uses.
+        uint32_t           snd_nxt          = 0;
+        /// Next sequence number expected from the peer.
+        uint32_t           rcv_nxt          = 0;
+        /// Send ceiling the peer last advertised; the default until an
+        /// acknowledgement names a window.
+        uint32_t           snd_window       = static_cast<uint32_t>(kTcpSendWindowBytes);
+        /// Bytes received in order, waiting for their reader.
+        base::container::RingQueue<unsigned char, kTcpReceiveWindowBytes + 1> inbox  = {};
+        /// Bytes sent but unacknowledged, oldest first.
+        base::container::RingQueue<unsigned char, kTcpSendWindowBytes + 1>    outbox = {};
+        /// Out-of-order segments parked until their gap fills.
+        ReorderSeat       reorder[kTcpReorderSeats]                                  = {};
+        /// Duplicate acknowledgements naming the same unacknowledged
+        /// byte since the send window last moved.
+        unsigned long     duplicate_acks                                             = 0;
+        uint16_t          remote_port                                                = 0;
+        uint16_t          local_port                                                 = 0;
+        bool              used                                                       = false;
+        TcpState          state             = TcpState::kClosed;
+        /// True while the timer table holds a seat for this connection.
+        bool              rto_armed         = false;
+        /// The timer seat holding this connection's 2MSL linger.
+        time::TimerTicket time_wait_seat    = {};
+        /// True while the connection lingers in time-wait.
+        bool              time_wait_armed   = false;
+        /// True from a retransmission until an acknowledgement arrives,
+        /// so the round-trip sampler can skip ambiguous stretches.
+        bool              in_retransmission = false;
     };
-    struct ListenSlot {
-        uint16_t     port = 0;
-        TcpListener* l    = nullptr;
+
+    /**
+     * @brief   One piece of news waiting to leave the module's gate.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    struct PendingFire {
+        TcpEvents   events   = {};
+        bool        data     = false;
+        bool        accepted = false;
+        bool        ended    = false;
+        TcpFarewell farewell = TcpFarewell::kGraceful;
     };
 
-    Connection*  find(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port);
-    Connection*  alloc(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port,
-                       TcpListener* listener);
-    TcpListener* find_listener(uint16_t port);
-    uint32_t     next_isn();  ///< deterministic ISN (randomization is a follow-up)
+    Connection* find_connection(uint32_t remote_address, uint16_t remote_port, uint16_t local_port);
+    Connection* live_connection(const TcpTicket& ticket);
+    const Connection*      live_connection(const TcpTicket& ticket) const;
+    ListenSeat*            find_listen(uint16_t port);
+    Connection*            claim_free_connection();
+    uint16_t               pick_local_port();
+    [[nodiscard]] uint16_t receive_window_of(const Connection& connection) const;
+    void transmit_segment(const Connection& connection, unsigned char flags,
+                          const unsigned char* payload, size_t length, uint32_t sequence);
+    void transmit_rst(uint32_t remote_address, uint16_t remote_port, uint16_t local_port,
+                      uint32_t sequence, uint32_t acknowledgement, bool with_ack);
+    void release_connection(Connection& connection, PendingFire& fire, TcpFarewell farewell);
+    void absorb_segment(Connection& connection, const TcpView& view, const unsigned char* payload,
+                        size_t payload_bytes, size_t segment_length, PendingFire& fire);
+    bool absorb_ack(Connection& connection, const TcpView& view, size_t segment_length,
+                    PendingFire& fire);
+    void answer_unclaimed(const Ipv4View& header, const TcpView& view, size_t segment_length);
+    void absorb_bytes(Connection& connection, const TcpView& view, const unsigned char* payload,
+                      size_t payload_bytes, size_t segment_length, PendingFire& fire);
+    void after_ack_movement(Connection& connection, bool moved, unsigned long long now);
+    void store_out_of_order(Connection& connection, const TcpView& view,
+                            const unsigned char* payload, size_t payload_bytes);
+    void harvest_reorder(Connection& connection, PendingFire& fire);
+    void resend_oldest(Connection& connection);
+    void take_rtt_sample(Connection& connection, unsigned long long now);
+    [[nodiscard]] unsigned long long current_rto_of(const Connection& connection) const;
+    void                             arm_rto_guard(Connection& connection);
+    void                             disarm_rto_guard(Connection& connection);
+    void                             retransmit_due(Connection& connection);
+    void                             begin_time_wait(Connection& connection);
+    void                             expire_time_wait(Connection& connection);
+    static void                      on_time_wait_due(void* context);
+    static void                      on_rto_due(void* context);
+    static void                      deliver_fire(const PendingFire& fire);
 
-    /// @brief Build + checksum + emit one TCP segment via ipv4.send (proto 6).
-    ///        The pseudo-header is sourced from the device's InDevice (local) +
-    ///        @p dst.  Data is optional (handshake/control segments pass len=0).
-    cinux::lib::ErrorOr<void> send_segment(NetDevice& dev, Ipv4Addr dst, uint16_t src_port,
-                                           uint16_t dst_port, uint32_t seq, uint32_t ack,
-                                           uint8_t flags, const uint8_t* data, uint32_t len,
-                                           Ipv4Module& ipv4, NetStack& stack);
-
-    Connection cons_[kMaxTcpCons]{};
-    ListenSlot listens_[kMaxTcpCons]{};
-    uint32_t   isn_counter_   = 0x00004000;  ///< ISN source; bumped by 64K per connection
-    uint32_t   valid_count_   = 0;           ///< segments past the checksum gate
-    uint16_t   last_src_port_ = 0;           ///< diagnostics tap (last valid segment)
-    uint16_t   last_dst_port_ = 0;
-    uint32_t   last_seq_      = 0;
-    uint32_t   last_ack_      = 0;
-    uint8_t    last_flags_    = 0;
+    mutable base::SpinMutex gate_;
+    DatagramSink            sink_                               = {};
+    uint32_t                own_address_                        = 0;
+    ListenSeat              listens_[kTcpListenSeats]           = {};
+    Connection              connections_[kTcpConnectionSeats]   = {};
+    unsigned long           ephemeral_cursor_                   = kEphemeralPortFirst;
+    uint32_t                isn_cursor_                         = 0;
+    TcpStats                stats_                              = {};
+    /// Farewells the service pass collected, delivered outside the gate.
+    PendingFire             service_fires_[kTcpConnectionSeats] = {};
+    /// How many seats of service_fires_ hold news.
+    unsigned long           service_fire_count_                 = 0;
+    /// The monotonic now of the running service pass, in nanoseconds.
+    unsigned long long      service_now_ns_                     = 0;
 };
 
 }  // namespace cinux::net

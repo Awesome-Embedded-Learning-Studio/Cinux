@@ -1,36 +1,45 @@
 /**
- * @file kernel/syscall/sys_nanosleep.hpp
- * @brief sys_nanosleep handler declaration (F-ECO batch 3)
+ * @file    sys_nanosleep.hpp
+ * @brief   nanosleep(2): park the caller until the clock says so.
  *
- * Sleep for a timespec duration.  Backed by the HPET monotonic counter (PIT
- * fallback): the sleep poll+yields until the deadline.  One deliberate,
- * documented hobby-OS simplification:
- *   - NO IRQ wake: a timer-interrupt-driven wake (HPET 周期中断) is the F5-M4
- *     follow-up.  Until then the loop busy-polls the counter with yield() giving
- *     other tasks the CPU -- correct, just not efficient.
- * Signal-interruption (-EINTR + remaining time) is not delivered: Cinux does
- * not wake nanosleep on signal, so a requested sleep always completes and @p rem
- * is zeroed.  busybox `sleep` (whole-second) works; sub-second + EINTR later.
- *
- * Reuses ktimespec from sys_clock_gettime.hpp (the kernel timespec layout).
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-19
+ * @version 0.1
+ * @since   0.5.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
-#include "kernel/syscall/sys_clock_gettime.hpp"  // ktimespec
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// nanosleep(req, rem) -- sleep for the requested duration; returns 0.
-int64_t sys_nanosleep(uint64_t req_virt, uint64_t rem_virt, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Sleeps for the asked span, or until a signal lands.
+ *
+ * @param[in]     frame   rdi the timespec asked, rsi the remainder out,
+ *                        may be null.
+ * @return        Zero on timeout, or a negative errno.
+ * @note          The wait runs on cooperative yields against the
+ *                monotonic clock; an unblocked pending signal wakes
+ *                the caller with -EINTR and, when a remainder address
+ *                was given, the unslept span filled in. A span past
+ *                the clock's range sleeps forever's honest cousin:
+ *                nothing.
+ * @since         0.5.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleNanosleep(const SyscallFrame& frame);
 
-/// P0e (SMAP): sleep using KERNEL ktimespec pointers (no user memory).
-/// Tests call this; sys_nanosleep is the user boundary (copy_to/from_user).
-int64_t do_nanosleep_kernel(const ktimespec* req, ktimespec* rem);
+/**
+ * @brief Sleeps on a selected clock with relative or absolute time.
+ * @param[in] frame Linux clock_nanosleep register arguments.
+ * @return Zero or a negative errno.
+ * @since 0.8.0
+ * @ingroup kernel_syscall
+ */
+long long HandleClockNanosleep(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

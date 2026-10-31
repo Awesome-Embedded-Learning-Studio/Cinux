@@ -1,140 +1,65 @@
-/**
- * @file kernel/syscall/sys_read.cpp
- * @brief sys_read handler implementation (P0b SMAP-layered)
- *
- * Layered (Linux-aligned):
- *   - do_read_kernel: pure kernel-to-kernel (fd -> KERNEL buffer). For fd=0 it
- *     calls console_tty_read(kbuf), which blocks on the kernel buffer (AC=0
- *     safe -- the block-then-write rule). For other fds it reads through the
- *     VFS / PageCache into the kernel buffer.
- *   - sys_read: the user boundary. It runs do_read_kernel into a kernel staging
- *     buffer (the only place that may block), then copy_to_user the bytes read
- *     once the task is runnable again. The stac window is only inside
- *     copy_to_user and never spans the block.
- *
- * console_tty_read's signature is unchanged: do_read_kernel simply hands it a
- * kernel buffer instead of the user pointer, so the blocking line discipline
- * never touches user memory while AC may be 0.
- */
-
 #include "kernel/syscall/sys_read.hpp"
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/user_access.hpp"  // P0b (SMAP): copy_to_user
-#include "kernel/drivers/tty/console_tty.hpp"
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"
-#include "kernel/fs/vfs_mount.hpp"
-#include "kernel/mm/page_cache.hpp"
-#include "kernel/mm/slab.hpp"         // P0b: kmalloc staging buffer
-#include "kernel/proc/scheduler.hpp"  // Scheduler::current (fd=0 legacy stdin guard)
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/file_table.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signals.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::syscall {
 
-// ============================================================
-// do_read_kernel: pure kernel-to-kernel read logic (no user memory)
-// ============================================================
+namespace {
 
-int64_t do_read_kernel(int fd, void* kbuf, uint64_t count) {
-    cinux::fs::FDTable& tbl  = cinux::fs::current_fd_table();
-    cinux::fs::File*    file = tbl.get(fd);
-    if (file != nullptr && file->inode != nullptr && file->inode->ops != nullptr) {
-        // offset_lock_ guards the seek-position transaction. Disk-backed reads
-        // may sleep on a page-cache miss, so File uses a sleepable Mutex.
-        // Pipes/pty remain unlocked here because stream offsets have no meaning
-        // and their blocking queues provide their own synchronization.
-        if (file->inode->ops->is_page_cacheable()) {
-            auto g = file->offset_lock_.guard();
-            auto read_result =
-                cinux::mm::g_page_cache.read_bytes(file->inode, file->offset, kbuf, count);
-            if (!read_result.ok()) {
-                return -to_errno(read_result.error());
-            }
-            if (read_result.value() > 0) {
-                file->offset += static_cast<uint64_t>(read_result.value());
-            }
-            return read_result.value();
-        }
-        // Non-page-cacheable streams: direct read, may block on their own wait
-        // queue. Update the unused stream offset without serializing it.
-        auto read_result = file->inode->ops->read(file->inode, file->offset, kbuf, count);
-        if (!read_result.ok()) {
-            return -to_errno(read_result.error());
-        }
-        // EINTR sentinel from a signal-interrupted blocking read (pipe/pty):
-        // InodeOps returns -1 as a success value (it cannot extend lib::Error
-        // without touching the Cinux-Base submodule).  Map to -EINTR.
-        if (read_result.value() == static_cast<int64_t>(-1)) {
-            return -kEintr;
-        }
-        if (read_result.value() > 0) {
-            file->offset += static_cast<uint64_t>(read_result.value());
-        }
-        return read_result.value();
+/// The read staging buffer: one backend read fills it, the accessor
+/// carries it across the user line, and no backend ever sees a
+/// ring-3 address.
+constexpr unsigned long long kReadStageBytes = 1024;
+
+}  // namespace
+
+long long HandleRead(const SyscallFrame& frame) {
+    if (frame.rdi >= fs::kFileTableMax) {
+        return -kEbadf;
     }
-
-    // fd=0 (stdin): read a cooked line through the console TTY line discipline
-    // (F10-M3). console_tty_read() blocks until a line is committed or EOF (^D
-    // on empty). It writes the KERNEL buffer; the block happens with AC=0.
-    if (fd == 0) {
-        // console_tty().read blocks via prepare_to_wait, which needs a current
-        // task. The ring-0 unit-test harness runs without one, so a close+read
-        // on fd 0 (or any reach here with no current) must short-circuit to
-        // -EBADF instead of NotNull-panicking inside the TTY path.
-        if (cinux::proc::Scheduler::current() == nullptr) {
-            return -kEbadf;
-        }
-        return static_cast<int64_t>(
-            cinux::drivers::console_tty().read(reinterpret_cast<char*>(kbuf), count));
-    }
-
-    // No VFS entry and not a legacy fd -- fail
-    return -kEbadf;
-}
-
-// ============================================================
-// sys_read boundary: do_read_kernel into kernel buf (may block) -> copy_to_user
-// ============================================================
-
-int64_t sys_read(uint64_t fd, uint64_t buf_virt, uint64_t count, uint64_t, uint64_t, uint64_t) {
-    if (!cinux::user::access_ok(reinterpret_cast<void*>(buf_virt), count)) {
+    if (frame.rsi >= kUserAddressLimit) {
         return -kEfault;
     }
-    if (count == 0) {
-        return 0;
+    const base::Result<base::Shared<fs::OpenFile>> kSlot = CurrentTask()->files->shared(frame.rdi);
+    if (!kSlot.ok()) {
+        return -kEbadf;
     }
-
-    // Kernel staging buffer: small on stack, large on heap. do_read_kernel
-    // (which may block on console_tty / pipe / disk) writes this buffer while
-    // AC=0; only the copy_to_user below opens the stac window, after the task
-    // is runnable again.
-    constexpr uint64_t kStackStage = 256;
-    uint8_t            stack_buf[kStackStage];
-    void*              kbuf = stack_buf;
-    bool               heap = count > kStackStage;
-    if (heap) {
-        kbuf = cinux::mm::kmalloc(count);
-        if (kbuf == nullptr) {
-            return -cinux::kEnomem;
-        }
-    }
-
-    int64_t n = do_read_kernel(static_cast<int>(fd), kbuf, count);
-    if (n > 0) {
-        if (!cinux::user::copy_to_user(reinterpret_cast<void*>(buf_virt), kbuf,
-                                       static_cast<uint64_t>(n))) {
-            if (heap) {
-                cinux::mm::kfree(kbuf);
+    auto* const   kFile = kSlot.value().get();
+    unsigned char stage[kReadStageBytes];
+    const auto    kWant =
+        static_cast<unsigned long>(frame.rdx < kReadStageBytes ? frame.rdx : kReadStageBytes);
+    for (;;) {
+        const bool kTryRead =
+            (kFile->status_flags & kOpenNonblock) != 0 && kFile->ops->try_read != nullptr;
+        const auto kRead = kTryRead ? kFile->ops->try_read : kFile->ops->read;
+        const base::Result<unsigned long> kGot =
+            kRead(kFile->backend, kFile->node, kFile->offset, stage, kWant);
+        if (kGot.ok()) {
+            if (!uaccess::CopyToUser(frame.rsi, stage, kGot.value())) {
+                return -kEfault;
             }
-            return -kEfault;
+            kFile->offset += kGot.value();
+            return static_cast<long long>(kGot.value());
         }
+        if (kGot.error() != base::KernelError::kWouldBlock ||
+            (kFile->status_flags & kOpenNonblock) != 0) {
+            return -ErrnoFrom(kGot.error());
+        }
+        const proc::Task* const kSelf = CurrentTask();
+        if (proc::HasPendingSignal(*kSelf)) {
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
     }
-
-    if (heap) {
-        cinux::mm::kfree(kbuf);
-    }
-    return n;
 }
 
 }  // namespace cinux::syscall

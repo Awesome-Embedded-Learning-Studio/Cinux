@@ -1,20 +1,30 @@
 /**
- * @file kernel/syscall/sys_set_tid_address.hpp
- * @brief sys_set_tid_address handler declaration (F10-M1 batch 4)
+ * @file    sys_set_tid_address.hpp
+ * @brief   Declaration of the set_tid_address() syscall handler.
  *
- * Records the tid-clearing address used by the pthread_join / thread-exit
- * protocol, and returns the caller's tid.  musl's __init_tp() calls it
- * unconditionally during static startup and stores the return value as the
- * thread's tid, so an unimplemented/zero return corrupts the TCB.
+ * @author  Charliechen114514
+ * @date    2026-10-17
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// set_tid_address(tidptr) -- record cleartid addr, return caller tid.
-int64_t sys_set_tid_address(uint64_t tidptr, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Name the user word the kernel clears when this task
+ *                dies.
+ *
+ * @return        The caller's tid, as the pthread-family protocol
+ *                expects even though the clearing itself comes later.
+ * @since         0.8.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSetTidAddress(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

@@ -1,49 +1,33 @@
 /**
- * @file kernel/syscall/sys_sysinfo.hpp
- * @brief sys_sysinfo handler declaration (F-ECO batch 5)
+ * @file    sys_sysinfo.hpp
+ * @brief   sysinfo(2): the machine's vital signs in one record.
  *
- * Fills Linux struct sysinfo for busybox `free` / `uptime` / `top`.  Backed by
- * the PMM (total/free RAM), the HPET monotonic clock (uptime), and the task
- * registry (procs count).  Fields Cinux does not track (load averages, shared
- * / buffer RAM, swap, highmem) are reported 0 -- honest, not fabricated; memunit
- * is 1 so the RAM fields are bytes (a real load-average + swap awaits the
- * accounting + swap milestones).
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-19
+ * @version 0.1
+ * @since   0.5.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// Linux struct sysinfo layout (x86-64, 112 bytes).  Mirrors musl/glibc so the
-/// bytes we write parse identically in user space.
-struct ksysinfo {
-    int64_t  uptime;     ///< seconds since boot
-    uint64_t loads[3];   ///< 1/5/15-min load avg (0: no load accounting yet)
-    uint64_t totalram;   ///< total usable RAM, in memunit units
-    uint64_t freeram;    ///< free RAM, in memunit units
-    uint64_t sharedram;  ///< 0 (not tracked)
-    uint64_t bufferram;  ///< 0 (not tracked)
-    uint64_t totalswap;  ///< 0 (no swap)
-    uint64_t freeswap;   ///< 0 (no swap)
-    uint16_t procs;      ///< number of live tasks
-    uint16_t pad;        ///< align the following 64-bit fields
-    uint64_t totalhigh;  ///< 0 (no highmem)
-    uint64_t freehigh;   ///< 0 (no highmem)
-    uint32_t memunit;    ///< 1 (ram fields are bytes)
-    char     unused[4];  ///< pad to 112
-};
-static_assert(sizeof(ksysinfo) == 112, "sysinfo is 112 bytes on x86-64");
-
-/// sysinfo(info) -- fill the user struct sysinfo; returns 0.
-int64_t sys_sysinfo(uint64_t info_virt, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-
-/// Tests call this; sys_sysinfo is the user boundary (copy_to_user).
-int64_t do_sysinfo_kernel(ksysinfo* out);
+/**
+ * @brief         Fills one sysinfo record.
+ *
+ * @param[in]     frame   rdi the record's address.
+ * @return        Zero, or a negative errno.
+ * @note          The memory words carry the page manager's two counts
+ *                scaled to bytes, procs counts living process leaders,
+ *                and the unit word is one; uptime and loads stay zero,
+ *                the honest word for a kernel with no load meter yet.
+ * @since         0.5.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSysinfo(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

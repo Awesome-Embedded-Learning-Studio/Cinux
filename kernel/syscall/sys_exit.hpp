@@ -1,50 +1,29 @@
 /**
- * @file kernel/syscall/sys_exit.hpp
- * @brief sys_exit handler declaration
+ * @file    sys_exit.hpp
+ * @brief   Declaration of the exit(code) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Terminate the current task and reap, recording a pre-encoded waitpid
- *        status word (WIFEXITED code<<8, or WIFSIGNALED signal number).
+ * @brief         End the calling task; never returns.
  *
- * Shared by sys_exit() (WIFEXITED) and signal-default-kill (WIFSIGNALED) so the
- * two encode exit_status differently while reusing one Zombie+reap path.
- * Does not return.  (F-USABILITY batch 4.)
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-void exit_and_reap_current(int encoded_status);
-
-/**
- * @brief Terminate the current task with an exit code
- *
- * Marks the current task as Dead and yields to the scheduler.
- * Does not return.
- *
- * @param code  Exit code (0 = success)
- * @return Should not return; scheduler picks the next task
- */
-int64_t sys_exit(uint64_t code, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-
-/**
- * @brief Terminate the current thread group with an exit code (F10-M1 batch 4)
- *
- * musl's exit()/QuickExit path calls exit_group first, falling back to
- * exit() only if it returns.  For the current single-threaded musl model
- * exit_group == exit (terminate the lone task); terminating every thread in
- * the group is a follow-up once CLONE_THREAD programs are exercised.
- *
- * @param code  Exit code (0 = success)
- * @return Should not return.
- */
-int64_t sys_exit_group(uint64_t code, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+[[noreturn]] long long HandleExit(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

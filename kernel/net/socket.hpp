@@ -1,206 +1,510 @@
 /**
- * @file kernel/net/socket.hpp
- * @brief Socket base + SocketOps (InodeOps shim) + sockaddr UAPI (F7-M6).
+ * @file    socket.hpp
+ * @brief   The socket family: one base face, the UDP member first.
  *
- * The user-visible socket API rides on the EXISTING fd layer exactly like
- * PTY/pipe: a socket fd is File -> Inode -> SocketOps (an InodeOps subclass),
- * so sys_read/write/ioctl/close dispatch through ops with ZERO changes to the fd
- * layer.  ONE stateless SocketOps instance serves every socket inode; the
- * per-fd state (the Socket*) lives in inode->fs_private (the PTY pattern).
+ * A socket is a file the way a pipe is one: the descriptor table sees
+ * an ordinary FsOps pair, and only the socket-numbered door knows what
+ * sits behind it. The base class owns what every member shares — the
+ * address pair bookkeeping and the identity counter — and declares the
+ * face each protocol fills in: take and give whole datagrams or
+ * streams, seat addresses, answer them. The UDP member seats itself on
+ * the module's port table and keeps a per-socket receive ring, so two
+ * sockets on one port table never see each other's traffic. The pump
+ * thread and the sending task share each ring, so the ring travels
+ * under a spinlock; delivery copies the borrowed payload before it
+ * returns, the station's own hard rule.
  *
- * Socket is a concrete base with stub virtuals (return NotImplemented): the fd
- * machinery is exercisable BEFORE any protocol adapter exists (batch 1b), and a
- * bare Socket answers socket()/close() while rejecting protocol ops.  B2 (UDP)
- * and B3 (TCP) subclass it -- UdpSocket/UdpListener and TcpSocket/TcpListener --
- * overriding bind/connect/listen/accept/send/recv and pushing inbound frames
- * (copied out of the borrowed on_udp/on_data payload) into a per-socket RX ring.
- *
- * The protocol modules (TcpModule/UdpModule, F7-M4/M5) stay PURE: blocking +
- * buffering live here, in the adapter, not in the FSM (CODING-TASTE §13).
- *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-24
+ * @version 0.1
+ * @since   0.7.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
+#include <atomic>
 
-#include "kernel/fs/inode.hpp"       // InodeOps
-#include "kernel/net/net_types.hpp"  // Ipv4Addr
+#include "cinux/container/ring_queue.hpp"
+#include "cinux/ref_count.hpp"
+#include "cinux/result.hpp"
+#include "kernel/net/local_config.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/raw.hpp"
+#include "kernel/net/tcp.hpp"
+#include "kernel/net/udp.hpp"
+#include "kernel/proc/sync.hpp"
+
+namespace cinux::fs {
+struct FsOps;
+}  // namespace cinux::fs
 
 namespace cinux::net {
 
-// ============================================================
-// UAPI constants (mirror Linux userspace values; musl compiles against these)
-// ============================================================
+/**
+ * @brief   The internet address family word, AF_INET.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr int kAfInet = 2;
 
-constexpr int kAfUnix     = 1;  ///< AF_UNIX (local IPC) -- F8-M3
-constexpr int kAfInet     = 2;  ///< AF_INET (IPv4)
-constexpr int kSockStream = 1;  ///< TCP
-constexpr int kSockDgram  = 2;  ///< UDP
-constexpr int kSockRaw    = 3;  ///< RAW (IPPROTO_ICMP ping, like Linux SOCK_RAW)
+/**
+ * @brief   The stream socket type word, SOCK_STREAM.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr int kSockStream = 1;
 
-/// IPv4 socket address -- kernel mirror of libc sockaddr_in (16 bytes).
-/// @note port is NETWORK order on the wire (musl lays it out big-endian); the
-///       syscall handler ntohs()s it into host order before handing it to a
-///       Socket.  family is host order (musl writes 2).
-struct SockAddrIn {
-    uint16_t family;   ///< AF_INET (host order)
-    uint16_t port;     ///< NETWORK order (big-endian)
-    uint8_t  addr[4];  ///< IPv4 address (network byte order)
-    uint8_t  zero[8];  ///< padding to sizeof(sockaddr) = 16
-};
-static_assert(sizeof(SockAddrIn) == 16, "sockaddr_in is 16 bytes");
+/**
+ * @brief   The datagram socket type word, SOCK_DGRAM.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr int kSockDgram = 2;
 
-/// AF_UNIX socket address -- kernel mirror of libc sockaddr_un.  @p path is a
-/// NUL-terminated filesystem-style leaf name in an IN-MEMORY namespace (a real
-/// tmpfs/ext2-backed bind() is a documented follow-up; this milestone keeps the
-/// kernel off a filesystem dependency).  family is host order (musl writes 1).
-/// @note 110 bytes is the Linux layout; libc sockaddr_un carries trailing pad to
-///       128, which the syscall handler does NOT need (it reads family + path).
-struct SockAddrUn {
-    uint16_t family;     ///< AF_UNIX (host order)
-    char     path[108];  ///< NUL-terminated leaf name
-};
-static_assert(sizeof(SockAddrUn) == 110, "sockaddr_un is family(2) + path[108]");
+/**
+ * @brief   The raw socket type word, SOCK_RAW.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr int kSockRaw = 3;
 
-/// Length of the sockaddr_un path field (Linux sun_path).  Lives here, next to
-/// SockAddrUn, so every translation unit that sees the struct also sees the
-/// bound (the syscall handler + tests loop path bytes up to this length).
-static constexpr uint32_t kUnixPathMax = 108;
-
-/// Generic socket-address storage (F-ECO batch 7b).  getsockname/getpeername
-/// ask the Socket to fill this with a COMPLETE sockaddr (sockaddr_in for AF_INET
-/// or sockaddr_un for AF_UNIX -- family is the first 2 bytes either way).  The
-/// syscall handler then copies sizeof(sockaddr_in)/sizeof(sockaddr_un) bytes to
-/// user space, picking the size from Socket::domain().  112 bytes holds the
-/// largest (sockaddr_un = 110).
-struct SockAddrStorage {
-    char bytes[112];  ///< a full sockaddr_in (16) or sockaddr_un (110)
+/**
+ * @brief   One internet address: the four-byte host word plus a port.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct SocketAddress {
+    /// Host-order address, 0 meaning any.
+    uint32_t      address = 0;
+    /// Host-order port, 0 meaning none chosen yet.
+    uint16_t      port    = 0;
+    int           family  = kAfInet;        ///< Address family selecting the remaining fields.
+    unsigned long name_bytes{};             ///< Significant local name bytes.
+    unsigned char name[kLocalNameBytes]{};  ///< Local name, including an abstract leading zero.
+    /// Receive-only metadata, independent of the sockaddr wire layout.
+    unsigned int received_ttl = 0;
+    unsigned long long received_ns = 0;
+    unsigned long datagram_bytes = 0;
 };
 
-/// shutdown(2) "how" values (Linux).
-constexpr int kShutRd   = 0;  ///< further recv -> EOF
-constexpr int kShutWr   = 1;  ///< further send -> EPIPE
-constexpr int kShutRdwr = 2;  ///< both
-
-class Socket;
-
-/// @brief Socket base -- the per-fd connection state + protocol-agnostic API.
-///
-/// Default virtuals return Error::NotImplemented so batch 1b can land the fd +
-/// syscall plumbing with no protocol adapter: socket() succeeds, close() works,
-/// and bind/connect/send/recv answer "not implemented" (-ENOSYS) until B2/B3
-/// override them.  Subclasses ALSO implement UdpListener / TcpListener so the
-/// protocol modules push inbound bytes INTO the socket (the modules stay pure).
-class Socket {
+/**
+ * @brief   What one member of the socket family offers.
+ * @note    receive and transmit move whole datagrams for the UDP member;
+ *          a stream member reads the same face as its byte window. Both
+ *          take and give are synchronous kernel-side calls — the
+ *          blocking manners belong to the syscall door above, which
+ *          retries on would-block until a signal or a timeout says stop.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+class Socket : public base::RefCount<> {
 public:
-    Socket(int domain, int type) : domain_(domain), type_(type) {}
+    std::atomic<bool> receive_ttl{false};
+    std::atomic<bool> receive_timestamp{false};
+    /**
+     * @brief         Takes one datagram into the caller's buffer.
+     *
+     * @param[out]    sink     First byte of the receiving buffer.
+     * @param[in]     count    Bytes the buffer holds.
+     * @param[out]    from     Where the sender lived, when the caller
+     *                         asked; nullptr to skip the question.
+     * @return        The bytes taken, zero allowed, or kWouldBlock when
+     *                nothing waits.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<unsigned long> receive(void* sink, unsigned long count,
+                                                SocketAddress* from) = 0;
+
+    /**
+     * @brief         Gives one datagram to the addressed destination.
+     *
+     * @param[in]     source        First byte of the payload.
+     * @param[in]     count         Payload bytes, zero allowed.
+     * @param[in]     destination   Where the datagram goes.
+     * @return        The bytes given, always count on success.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<unsigned long> transmit(const void* source, unsigned long count,
+                                                 const SocketAddress& destination) = 0;
+
+    /**
+     * @brief         Seats the socket on a local address and port.
+     *
+     * @param[in]     local   The address to answer to; port zero asks
+     *                        for the next free ephemeral one.
+     * @return        Success, or kAlreadyExists for a taken port.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<void> adopt_local(const SocketAddress& local) = 0;
+
+    /**
+     * @brief         Names the one destination later sends assume.
+     *
+     * @param[in]     peer   The address unnamed sends go to.
+     * @return        Success.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<void> adopt_peer(const SocketAddress& peer) = 0;
+
+    /**
+     * @brief         Answers the socket's own address.
+     *
+     * @param[out]    local   The seated address and port.
+     * @return        Success.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<void> report_local(SocketAddress& local) const = 0;
+
+    /**
+     * @brief         Answers the connected destination.
+     *
+     * @param[out]    peer   The named destination.
+     * @return        Success, or kNotFound when none was named.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<void> report_peer(SocketAddress& peer) const = 0;
+
+    /**
+     * @brief         Whether a reader makes progress right now.
+     * @return        True when something waits to be received.
+     * @note          The poll face: readiness with no side effects, so
+     *                the descriptor scan may ask cheaply and often.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] virtual bool holds_input() const = 0;
+
+    /** @brief Reports poll readiness including closure. @param[in] events Requested poll bits.
+     * @return Ready poll bits. */
+    [[nodiscard]] virtual unsigned short poll_events(unsigned int events) const;
+
+    /** @brief The socket's address family. @return Linux address family number. */
+    [[nodiscard]] int family() const { return family_; }
+
+    /**
+     * @brief         Offers to answer knocks on the seated port.
+     *
+     * @param[in]     backlog   Accepted seats kept waiting; the module's
+     *                          own ceiling wins when this asks for more.
+     * @return        Success, or the refusal.
+     * @note          The stream member's face; datagram members answer
+     *                kNotSupported.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<void> begin_listen(unsigned long backlog);
+
+    /**
+     * @brief         Takes one completed handshake as its own socket.
+     *
+     * @return        The connected socket, or kWouldBlock when no
+     *                handshake waits, or kNotSupported off a stream.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    virtual base::Result<base::Shared<Socket>> accept_one();
+
+    /// Sends EOF while keeping the receiving direction open.
+    virtual base::Result<void> shutdown_write();
+
+    /**
+     * @brief         Whether the opened handshake still runs.
+     * @return        True while the connection sits unestablished.
+     * @note          The blocking connect loop asks this between
+     *                yields; datagram members never run one.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] virtual bool handshake_pending() const;
+
+    /**
+     * @brief         Whether the opened handshake died short of open.
+     *
+     * @return        True when the connection gave up or was reset
+     *                before establishing.
+     * @note          The blocking open answers refusal through this;
+     *                datagram members never run one.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] virtual bool handshake_failed() const;
+
+    /**
+     * @brief         The socket type word this member was born with.
+     * @return        kSockDgram, kSockRaw, or a later member's word.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] int type() const { return type_; }
+
+    /**
+     * @brief         This socket's distinguishing inode number.
+     * @return        A number no other socket shares.
+     * @note          Numbers rise from a boot-wide counter, the pipe
+     *                convention, so stat answers an honest identity.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] unsigned long identity() const { return identity_; }
+
+    /**
+     * @brief   Drops the shared face; the release hook does the rest.
+     * @note    Virtual because the shared FsOps table deletes through
+     *          the base pointer — the member behind it is the only one
+     *          who knows its own full size.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
     virtual ~Socket() = default;
 
-    Socket(const Socket&)            = delete;
-    Socket& operator=(const Socket&) = delete;
-
-    /// @name Protocol API (overridden by UdpSocket / TcpSocket in B2 / B3).
-    ///@{
-    virtual cinux::lib::ErrorOr<void> bind(uint16_t local_port);
-    virtual cinux::lib::ErrorOr<void> connect(Ipv4Addr remote, uint16_t remote_port);
-
-    /// @name AF_UNIX (path-based) API -- overridden by UnixSocket (F8-M3).
-    /// AF_UNIX names are filesystem-style paths, which do NOT fit the
-    /// AF_INET-shaped bind(port)/connect(addr,port) virtuals above.  These
-    /// path-shaped variants default to NotImplemented (so an AF_INET socket
-    /// answers -ENOSYS, never reaching here through sys_bind/sys_connect which
-    /// dispatch on Socket::domain()); UnixSocket overrides both.  listen /
-    /// accept / send / recv are family-agnostic and reuse the virtuals below.
-    ///@{
-    virtual cinux::lib::ErrorOr<void>    bind_path(const char* path);
-    virtual cinux::lib::ErrorOr<void>    connect_path(const char* path);
-    ///@}
-    virtual cinux::lib::ErrorOr<void>    listen(int backlog);
-    /// Passive accept: return a NEW Socket* for a completed connection (TCP).
-    /// The caller (sys_accept) installs it under a fresh fd.
-    virtual cinux::lib::ErrorOr<Socket*> accept(Ipv4Addr* out_remote, uint16_t* out_port);
-    /// Send on a connected socket (TCP established, or UDP after connect()).
-    virtual cinux::lib::ErrorOr<int64_t> send(const uint8_t* buf, uint32_t len);
-    /// Send a datagram to an explicit destination (UDP sendto).
-    virtual cinux::lib::ErrorOr<int64_t> sendto(Ipv4Addr dst, uint16_t dst_port, const uint8_t* buf,
-                                                uint32_t len);
-    /// Receive; on success fills @p out_src/@p out_port (pass nullptr to ignore).
-    /// Blocks on a per-socket wait queue when no data is available (B2/B3).
-    virtual cinux::lib::ErrorOr<int64_t> recv(uint8_t* buf, uint32_t len, Ipv4Addr* out_src,
-                                              uint16_t* out_port);
-    /// Release protocol resources (unbind / stop_listen / FIN).  No-op by default.
-    virtual void                         close();
-    ///@}
-
-    /// @name F-ECO batch 7b: address retrieval (getsockname/getpeername) +
-    /// shutdown.  Default get_*_addr return false (unnamed); subclasses with
-    /// bound/peer state override.  do_shutdown records direction bits that the
-    /// subclass send/recv check at entry (SHUT_WR -> send EPIPE, SHUT_RD -> EOF).
-    ///@{
-    virtual bool get_local_addr(SockAddrStorage* out) const;
-    virtual bool get_peer_addr(SockAddrStorage* out) const;
-    void         do_shutdown(int how);
-    bool         shut_read() const { return (shut_ & kShutRdBit) != 0; }
-    bool         shut_write() const { return (shut_ & kShutWrBit) != 0; }
-    ///@}
-
-    /// @name F8-M5 poll(2)/select(2) readiness + wait registration.
-    /// Subclasses (Udp/Tcp/Unix) override to report their rx ring / accept queue
-    /// and to park a poller on the relevant wait queue (the same queue a blocked
-    /// recv/accept sleeps on, so an incoming byte / connection wakes both).
-    /// Default: a bare unconnected socket reports nothing ready and never parks.
-    ///@{
-    virtual uint32_t poll_events(cinux::proc::Task* waiter, bool* registered);
-    virtual void     poll_detach_waiter(cinux::proc::Task* waiter);
-    ///@}
-
-    int domain() const { return domain_; }  ///< AF_INET
-    int type() const { return type_; }      ///< SOCK_STREAM / SOCK_DGRAM
-
 protected:
-    static constexpr uint8_t kShutRdBit = 1u;  ///< SHUT_RD recorded
-    static constexpr uint8_t kShutWrBit = 2u;  ///< SHUT_WR recorded
+    /**
+     * @brief         Records the birth type and identity.
+     *
+     * @param[in]     socket_type   The type word the caller asked for.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    explicit Socket(int socket_type, int family = kAfInet);
 
-    int     domain_;    ///< AF_INET
-    int     type_;      ///< SOCK_STREAM / SOCK_DGRAM
-    uint8_t shut_ = 0;  ///< shutdown direction bits (do_shutdown)
+private:
+    int           type_     = 0;
+    int           family_   = kAfInet;
+    unsigned long identity_ = 0;
 };
 
-/// Typed accessor: a socket inode's fs_private holds its Socket.  Centralises
-/// the downcast at the InodeOps/socket syscall seam.
-inline Socket* socket_of(const cinux::fs::Inode* inode) {
-    return static_cast<Socket*>(inode->fs_private);
-}
+/**
+ * @brief   Payload bytes one receive slot holds.
+ * @note    The largest UDP payload the stack builds, header excluded,
+ *          so no honest datagram finds a short slot.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr unsigned long kUdpSocketPayloadBytes =
+    kMaxDatagramBytes - kMinIpv4HeaderBytes - kUdpHeaderBytes;
 
-/// @brief InodeOps shim -- makes a socket fd indistinguishable from a pipe fd to
-///        the fd layer.  ONE shared stateless instance (socket_ops()); the
-///        per-fd Socket lives in inode->fs_private.
-///
-/// read() -> Socket::recv, write() -> Socket::send.  The addr-aware operations
-/// (bind/connect/listen/accept/sendto/recvfrom) go through the socket syscalls,
-/// NOT read/write -- sys_read/sys_write are the byte-stream face a connected
-/// socket shows to generic code (and to musl read()/write() on the fd).
-class SocketOps : public cinux::fs::InodeOps {
+/**
+ * @brief   Datagrams one socket's receive ring keeps before dropping.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+inline constexpr unsigned long kUdpSocketQueueDatagrams = 8;
+
+/**
+ * @brief   The UDP member: a seated port and a bounded receive ring.
+ * @note    One socket owns one port on the module's table; its delivery
+ *          callback copies the borrowed payload into the ring under the
+ *          ring's lock, because the pump thread delivers while the
+ *          owning task receives. A full ring drops the newcomer and
+ *          counts it — datagram discipline, not a failure.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+class UdpSocket final : public Socket {
 public:
-    cinux::lib::ErrorOr<int64_t> read(const cinux::fs::Inode* inode, uint64_t /*offset*/, void* buf,
-                                      uint64_t count) override;
-    cinux::lib::ErrorOr<int64_t> write(cinux::fs::Inode* inode, uint64_t /*offset*/,
-                                       const void* buf, uint64_t count) override;
-    // F8-M5 poll: delegate to the per-fd Socket's readiness + wait registration.
-    uint32_t poll_events(const cinux::fs::Inode* inode, cinux::proc::Task* waiter,
-                         bool* registered) override;
-    void     poll_detach_waiter(const cinux::fs::Inode* inode, cinux::proc::Task* waiter) override;
-    // F8-M5 release: closing a socket fd releases its protocol resources
-    // (unbind / stop_listen / FIN).  One Socket per fd, so no refcounting needed.
-    void     release(cinux::fs::Inode* inode) override;
-    // ioctl/stat/open inherit the InodeOps defaults (NotImplemented/-1/false) --
-    // a socket is not a tty, not a disk file, not a cloning device.
+    /**
+     * @brief         Binds the socket to the module it serves.
+     *
+     * @param[in,out] module   The UDP module whose port table this
+     *                         socket joins at adopt_local time.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    explicit UdpSocket(UdpModule& module);
+
+    /**
+     * @brief   Frees the seated port, if one was taken.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    ~UdpSocket() override;
+
+    base::Result<unsigned long> receive(void* sink, unsigned long count,
+                                        SocketAddress* from) override;
+    base::Result<unsigned long> transmit(const void* source, unsigned long count,
+                                         const SocketAddress& destination) override;
+    base::Result<void>          adopt_local(const SocketAddress& local) override;
+    base::Result<void>          adopt_peer(const SocketAddress& peer) override;
+    base::Result<void>          report_local(SocketAddress& local) const override;
+    base::Result<void>          report_peer(SocketAddress& peer) const override;
+    [[nodiscard]] bool          holds_input() const override;
+
+    /**
+     * @brief         Datagrams the ring dropped for being full.
+     * @return        The running count.
+     * @note          The observable face of the drop policy, for tests
+     *                and the curious shell.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] unsigned long dropped() const;
+
+private:
+    static void take(void* context, const UdpDelivery& delivery);
+
+    /**
+     * @brief   One waiting datagram: sender plus payload copy.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    struct Waiting {
+        SocketAddress from{};
+        unsigned char bytes[kUdpSocketPayloadBytes] = {};
+        unsigned long length                        = 0;
+    };
+
+    UdpModule&                                                        module_;
+    SocketAddress                                                     local_{};
+    SocketAddress                                                     peer_{};
+    bool                                                              seated_ = false;
+    bool                                                              named_  = false;
+    mutable proc::Spinlock                                            ring_gate_{};
+    base::container::RingQueue<Waiting, kUdpSocketQueueDatagrams + 1> waiting_{};
+    unsigned long                                                     dropped_ = 0;
 };
 
-/// @brief The single shared SocketOps instance every socket inode points at.
-SocketOps& socket_ops();
+/**
+ * @brief   The erased file face every socket rides.
+ * @return  The static FsOps all sockets share.
+ * @note    read and write land in receive and transmit; the node's
+ *          opaque field points back at the Socket, so retain, release,
+ *          and the readiness question all find their owner. The
+ *          descriptor-numbered door reaches deeper faces on its own.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+const fs::FsOps* SocketOps();
+
+/** @brief ICMP raw socket receiving complete IPv4 datagrams in a bounded ring. */
+class RawSocket : public Socket {
+public:
+    explicit RawSocket(RawModule& module);
+    ~RawSocket() override;
+    [[nodiscard]] bool          seated() const { return seated_; }
+    base::Result<unsigned long> receive(void* sink, unsigned long count,
+                                        SocketAddress* from) override;
+    base::Result<unsigned long> transmit(const void* source, unsigned long count,
+                                         const SocketAddress& destination) override;
+    base::Result<void>          adopt_local(const SocketAddress& local) override;
+    base::Result<void>          adopt_peer(const SocketAddress& peer) override;
+    base::Result<void>          report_local(SocketAddress& local) const override;
+    base::Result<void>          report_peer(SocketAddress& peer) const override;
+    [[nodiscard]] bool          holds_input() const override;
+
+private:
+    struct Waiting {
+        SocketAddress from;
+        unsigned long length = 0;
+        unsigned char bytes[kMaxDatagramBytes]{};
+    };
+    static void            take(void* context, const unsigned char* bytes, size_t length,
+                                const Ipv4View& header);
+    RawModule&             module_;
+    mutable proc::Spinlock gate_;
+    base::container::RingQueue<Waiting, kUdpSocketQueueDatagrams> waiting_;
+    SocketAddress                                                 local_{};
+    SocketAddress                                                 peer_{};
+    bool                                                          named_  = false;
+    bool                                                          seated_ = false;
+};
+
+class PingSocket final : public Socket {
+public:
+    explicit PingSocket(RawModule& module);
+    ~PingSocket() override;
+    [[nodiscard]] bool          seated() const { return seated_; }
+    base::Result<unsigned long> receive(void* sink, unsigned long count,
+                                        SocketAddress* from) override;
+    base::Result<unsigned long> transmit(const void* source, unsigned long count,
+                                         const SocketAddress& destination) override;
+    base::Result<void>          adopt_local(const SocketAddress& local) override;
+    base::Result<void>          adopt_peer(const SocketAddress& peer) override;
+    base::Result<void>          report_local(SocketAddress& local) const override;
+    base::Result<void>          report_peer(SocketAddress& peer) const override;
+    [[nodiscard]] bool          holds_input() const override;
+
+private:
+    struct Waiting {
+        SocketAddress from;
+        unsigned long length = 0;
+        unsigned char bytes[kMaxIcmpEchoBytes]{};
+    };
+    static void            take(void* context, const unsigned char* bytes, size_t length,
+                                const Ipv4View& header);
+    RawModule&             module_;
+    mutable proc::Spinlock gate_;
+    base::container::RingQueue<Waiting, kUdpSocketQueueDatagrams> waiting_;
+    SocketAddress                                                 local_{};
+    SocketAddress                                                 peer_{};
+    bool                                                          named_      = false;
+    bool                                                          seated_     = false;
+    std::uint16_t                                                 identifier_ = 0;
+};
+
+/**
+ * @brief   The TCP member: one listener seat or one connection ticket.
+ * @note    A fresh socket is bare; adopt_local seats a listener, a
+ *          later accept_one mints connected sockets from its queue,
+ *          while adopt_peer opens a connection actively. The farewell
+ *          callback only raises the dead flag — the reader sees
+ *          end-of-file, the writer sees a refusal.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+class TcpSocket final : public Socket {
+public:
+    /**
+     * @brief         Binds the socket to the module it serves.
+     *
+     * @param[in,out] module   The TCP module whose tables this socket
+     *                         joins.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    explicit TcpSocket(TcpModule& module);
+
+    /**
+     * @brief   Returns the seat: listener or connection.
+     * @since   0.7.0
+     * @ingroup kernel_net
+     */
+    ~TcpSocket() override;
+
+    base::Result<unsigned long>        receive(void* sink, unsigned long count,
+                                               SocketAddress* from) override;
+    base::Result<unsigned long>        transmit(const void* source, unsigned long count,
+                                                const SocketAddress& destination) override;
+    base::Result<void>                 adopt_local(const SocketAddress& local) override;
+    base::Result<void>                 adopt_peer(const SocketAddress& peer) override;
+    base::Result<void>                 report_local(SocketAddress& local) const override;
+    base::Result<void>                 report_peer(SocketAddress& peer) const override;
+    [[nodiscard]] bool                 holds_input() const override;
+    base::Result<void>                 begin_listen(unsigned long backlog) override;
+    base::Result<base::Shared<Socket>> accept_one() override;
+    base::Result<void>                 shutdown_write() override;
+    [[nodiscard]] bool                 handshake_pending() const override;
+    [[nodiscard]] bool                 handshake_failed() const override;
+
+private:
+    TcpModule&      module_;
+    SocketAddress   local_{};
+    SocketAddress   peer_{};
+    TcpListenTicket listener_{};
+    TcpTicket       connection_{};
+    bool            bound_     = false;
+    bool            listening_ = false;
+    bool            seated_    = false;
+    bool            opened_    = false;
+};
 
 }  // namespace cinux::net

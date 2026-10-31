@@ -1,32 +1,30 @@
 /**
- * @file kernel/syscall/sys_fork.hpp
- * @brief sys_fork handler declaration
+ * @file    sys_fork.hpp
+ * @brief   Declaration of the fork() syscall handler.
  *
- * Creates a child process as a copy of the calling process using
- * Copy-On-Write page table semantics.
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-12
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Fork the current process
+ * @brief         One call, two returns: the child carries zero.
  *
- * @return Child PID to the parent, 0 to the child, or -1 on error
+ * @return        The child's pid in the parent, 0 is never returned
+ *                here (the child's zero is written by its own entry
+ *                tail), or a negative errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_fork(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-
-/// B3b: vfork (Linux syscall 58).  busybox init vforks /bin/sh then immediately
-/// execves -- parent suspends only until execve/exit -- so a CoW fork (which
-/// returns to the parent right away) is semantically safe: the parent's next
-/// call is waitpid() on the child.  Implemented as an alias for sys_fork.
-int64_t sys_vfork(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleFork(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

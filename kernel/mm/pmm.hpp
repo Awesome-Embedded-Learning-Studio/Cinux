@@ -1,136 +1,148 @@
 /**
- * @file kernel/mm/pmm.hpp
- * @brief Physical Memory Manager -- buddy-system allocator
+ * @file    pmm.hpp
+ * @brief   The physical memory ledger: the class and its one instance.
  *
- * Manages physical page allocation using a buddy allocator (power-of-two free
- * lists) over all usable RAM.  The per-page order metadata (1 byte/page) sits
- * where the old bitmap did, immediately after the kernel image + stack.
- * Supports single and contiguous multi-page allocation; multi-page allocs
- * round up to the next power of two (see alloc_pages).
+ * Pmm turns the E820 map into page accounts — what boot stood on stays
+ * spent, what firmware keeps stays closed, everything else is allocatable
+ * in single pages or power-of-two runs. The kernel-wide ledger is the
+ * Pmm::self() singleton, so subsystem state stays with the subsystem
+ * instead of piling up in the bring-up file; host tests keep constructing
+ * their own ledgers from fake handoffs.
+ *
+ * @author  Charliechen114514
+ * @date    2026-10-12
+ * @version 0.3
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
 #include <stdint.h>
 
-#include "boot/boot_info.h"
-#include "kernel/mm/buddy.hpp"
-#include "kernel/proc/sync.hpp"
+#include "cinux/addr.hpp"
+#include "cinux/bit_ops/bitmap.hpp"
+#include "cinux/singleton.hpp"
+#include "cinux/spin_mutex.hpp"
+#include "kernel/boot/boot_info.hpp"
+#include "kernel/mm/pmm_config.hpp"
 
 namespace cinux::mm {
 
-/// A usable physical memory region extracted from the E820 map.
-struct MemoryRegion {
-    uint64_t base;
-    uint64_t length;
-};
-
 /**
- * @brief Extract usable memory regions from the BIOS memory map
- *
- * Filters for type-1 (usable) entries, removes anything below 1 MB,
- * and aligns each region to 4 KB boundaries.
- *
- * @param info          Boot information from the bootloader
- * @param regions       Output array for extracted regions
- * @param max_regions   Capacity of the regions array
- * @return Number of regions written
+ * @brief   One ledger over the machine's usable RAM.
+ * @note    The bitmap storage is a member, so a Pmm is about half a
+ *          megabyte of .bss at the current 16 GiB ceiling, and the
+ *          frame-share counts add one byte per governed page — the
+ *          teaching shape of struct page's refcount, one cell per
+ *          frame; place instances in static storage, not on small
+ *          stacks.
+ * @since   0.1.0
+ * @ingroup kernel_mm
  */
-uint32_t parse_memory_map(const BootInfo& info, MemoryRegion* regions, uint32_t max_regions);
+class Pmm : public cinux::base::Singleton<Pmm> {
+    friend class cinux::base::Singleton<Pmm>;
 
-/**
- * @brief Physical Memory Manager backed by a BuddyAllocator
- *
- * The per-page order array (1 byte/page) is placed at __kernel_stack_top
- * (virtual), page-aligned.  Public alloc/free take the spinlock; the _locked
- * variants rely on caller-provided exclusion (interrupts disabled, e.g. the
- * page-fault path), matching the BuddyAllocator's own "caller holds exclusion"
- * contract.
- */
-class PMM {
 public:
-    /** Initialise from the bootloader-provided memory map. */
-    void init(const BootInfo& info);
+    /** @brief   Address type carried through the whole public face. */
+    using PhysAddr = cinux::base::PhysAddr;
+    /**
+     * @brief         Builds the ledger from the handed-off memory map.
+     *
+     * @param[in]     info   The boot handoff record; nothing is retained
+     *                       from it after this call.
+     * @return        true when the ledger is ready to allocate from.
+     * @note          Usable RAM below kLowMemoryTop is withheld; the
+     *                kernel image is marked spent where it lies.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] bool init(const cinux::boot::BootInfo& info);
 
-    /** Allocate a single 4 KB page.  Returns physical address, 0 on OOM. */
-    uint64_t alloc_page();
+    /** @brief         Hands out one page; zero address means nothing free. */
+    [[nodiscard]] PhysAddr allocate_page() { return allocate_run(1); }
 
-    /** Free a single page (no-op if phys is 0 or already free). */
-    void free_page(uint64_t phys);
+    /**
+     * @brief         Hands out 2^order physically contiguous pages.
+     *
+     * @param[in]     order   Run size as a power of two, at most kMaxOrder.
+     * @return        Base address of the run, or the zero address on
+     *                refusal or exhaustion.
+     * @note          Orders outside [0, kMaxOrder] are refused.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] PhysAddr allocate_pages(int order);
 
-    /** Allocate @p count contiguous pages.  Returns base phys addr, 0 on OOM.
-     *  The block is rounded up to the next power of two (buddy order); free it
-     *  via free_pages() with the same base -- the recorded order is authoritative. */
-    uint64_t alloc_pages(uint64_t count);
+    /** @brief         Returns one page to the free pool. */
+    void free_page(PhysAddr phys) { free_pages(phys, 0); }
 
-    /** Free the block whose head is @p phys (@p count is ignored -- the buddy's
-     *  recorded order drives coalescing).  No-op if @p phys is not an allocated head. */
-    void free_pages(uint64_t phys, uint64_t count);
+    /**
+     * @brief         Returns a whole run to the free pool.
+     *
+     * @param[in]     phys   Base address of the run.
+     * @param[in]     order  The same order it was allocated with.
+     * @return        None
+     * @note          The order is the caller's contract; freeing with a
+     *                wrong order corrupts the ledger.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    void free_pages(PhysAddr phys, int order);
 
-    /** Current number of free pages. */
-    uint64_t free_page_count() const;
+    /** @brief         Pages currently free. */
+    [[nodiscard]] unsigned long free_page_count() const;
 
-    /** Total number of pages managed. */
-    uint64_t total_page_count() const;
+    /** @brief         Pages the ledger governs at all. */
+    [[nodiscard]] unsigned long managed_page_count() const;
 
-    // F-QA Q4b-1 (DEBT-003): per-page pte_count = how many user PTEs map this
-    // physical page. fork CoW sharing and file/shm mapping call inc; teardown
-    // / munmap / CoW fault call dec_and_test. This counter NEVER frees on its
-    // own -- it only tracks PTE mappings (batch 3 split: was the unified
-    // mapcount that also freed). Freeing is driven by refcount below.
-    void    pte_count_inc(uint64_t phys);
-    void    pte_count_dec(uint64_t phys);  ///< pure PTE -1 (never frees)
-    int16_t pte_count_load(uint64_t phys) const;
+    /**
+     * @brief         Counts one more mapping sharing this frame.
+     *
+     * @param[in]     phys   The frame gaining a shareholder.
+     * @return        None.
+     * @note          Copy-on-write's marking half: a frame mapped at
+     *                several addresses, or by several address spaces,
+     *                carries one count per mapping. Frames nothing
+     *                shared sit at zero and never enter the count.
+     * @warning       None
+     * @throws        None
+     * @since         0.3.0
+     * @ingroup       kernel_mm
+     */
+    void retain_frame(PhysAddr phys);
 
-    // pte_count_dec_and_test: drop one PTE ref; when pte_count reaches 0 also
-    // drop one ownership refcount (which frees the page when THAT reaches 0).
-    // Returns true iff the page was freed (both counters hit 0).  Mirrors the
-    // old unified mapcount_dec_and_test contract so the 7 teardown callers stay
-    // mechanical -- the difference is that a page still owned by the page cache
-    // (CachePhysRef) or a live shmem segment keeps refcount > 0 and survives
-    // teardown even with pte_count == 0 (the lto_plugin corruption root cause
-    // f06ea6b prevented at the type layer instead of by a phantom pte_count+1).
-    bool pte_count_dec_and_test(uint64_t phys);
-
-    // B3 defect C: deferred-free variant.  Like pte_count_dec_and_test but
-    // does NOT free -- returns true when the page would be freed (pte_count
-    // hit 0, refcount hit 0, audit passed).  Caller frees later via free_page()
-    // after a cross-core TLB shootdown.  Audit (free-vs-pte / free-vs-cache)
-    // still runs at dec time so a bad free is caught instantly.
-    bool pte_count_dec_and_test_no_free(uint64_t phys);
-
-    // Per-page refcount = ownership refs. alloc_page sets 1 (the lone-owner
-    // baseline, which doubles as page-cache ownership via CachePhysRef); shm
-    // attach adds an inc. Last ref frees via buddy. pte_count only tracks
-    // PTE mappings and never frees on its own.
-    void    refcount_inc(uint64_t phys);
-    bool    refcount_dec_and_test(uint64_t phys);  ///< true => reached 0, page freed
-    bool    refcount_dec_and_test_no_free(uint64_t phys);  ///< B3: true => would free, NOT freed
-    int16_t refcount_load(uint64_t phys) const;
+    /**
+     * @brief         Counts one fewer mapping and reports the company left.
+     *
+     * @param[in]     phys   The frame losing a shareholder.
+     * @return        Shareholders remaining after the drop; zero for a
+     *                frame that never counted.
+     * @note          The count is bookkeeping, not ownership: freeing
+     *                the frame stays a separate decision the caller
+     *                makes when the count reaches zero.
+     * @warning       None
+     * @throws        None
+     * @since         0.3.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] unsigned long release_frame(PhysAddr phys);
 
 private:
-    // Lock-free buddy access (PRIVATE).  The buddy is NOT thread-safe; these
-    // bypass the PMM spinlock and are callable ONLY from the internal
-    // alloc_page / free_page (which acquire lock_).  They used to be public,
-    // which let the page-fault path (vmm walk_level, handle_pf file/anon) grab
-    // pages without the spinlock -- on SMP that raced handle_cow_fault's locked
-    // alloc and corrupted the buddy (clear_bit(kInvalidPage) #GP at
-    // alloc_order+0x9c).  Keeping them private forces every external caller
-    // through the locked public API by construction.
-    uint64_t alloc_page_locked();
-    void     free_page_locked(uint64_t phys);
+    mutable base::SpinMutex            lock_;
+    [[nodiscard]] PhysAddr             allocate_run(unsigned long page_count);
+    [[nodiscard]] static unsigned long frame_index(PhysAddr phys);
 
-    cinux::proc::Spinlock lock_;
-    BuddyAllocator        buddy_;
-    uint8_t*              order_storage_{};      ///< 1 byte/page, @ __kernel_stack_top
-    uint8_t*              bitmap_storage_{};     ///< per-order free bitmaps, after order_storage
-    int16_t*              pte_count_storage_{};  ///< Q4b-1: 2 bytes/page, after bitmap_storage
-    int16_t*              refcount_storage_{};   ///< batch 3: ownership refs, after pte_count
-    uint64_t              total_pages_{};
-    uint64_t              highest_page_{};
+    cinux::base::bit::Bitmap   bitmap_;
+    cinux::base::bit::WordMask words_[kPmmBitmapWords] = {};
+    unsigned char              shares_[kPmmTotalPages] = {};
+    unsigned long              managed_pages_          = 0;
 };
-
-/// Global PMM instance.
-extern PMM g_pmm;
-
 }  // namespace cinux::mm

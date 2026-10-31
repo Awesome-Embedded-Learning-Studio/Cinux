@@ -1,38 +1,29 @@
 /**
- * @file kernel/syscall/sys_chdir.hpp
- * @brief sys_chdir handler declaration
+ * @file    sys_chdir.hpp
+ * @brief   chdir(path): move the caller's working directory.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-11
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Change the current working directory
- *
- * Resolves the path through the VFS, verifies it is a directory,
- * and updates the current task's cwd.
- *
- * @param path_virt  User virtual address of the null-terminated path string
- * @return 0 on success, or -1 on error
+ * @brief         chdir(path).
+ * @param[in]     frame   The trap frame; the path address, relative or
+ *                        absolute, rides rdi.
+ * @return        Zero, or a negative errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_chdir(uint64_t path_virt, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-
-// ============================================================
-// P0g (SMAP): pure kernel-to-kernel chdir logic (no user memory).
-// Kernel-internal callers and tests use this; sys_chdir is the user boundary.
-// It updates the current task's cwd (kernel state), which is not user memory.
-// ============================================================
-
-/// Change cwd to an already-resolved (canonicalised) directory path. Looks up
-/// the inode, verifies it is a directory, and updates the current task's cwd.
-/// Returns 0 or -errno.
-int64_t do_chdir_kernel(const char* resolved_path);
+long long HandleChdir(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

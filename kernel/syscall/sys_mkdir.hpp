@@ -1,37 +1,29 @@
 /**
- * @file kernel/syscall/sys_mkdir.hpp
- * @brief sys_mkdir handler declaration
+ * @file    sys_mkdir.hpp
+ * @brief   Declaration of the mkdir(path) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Create a new directory at the given path
+ * @brief         Create a directory.
  *
- * Resolves the path through the VFS mount table, splits it into
- * parent directory and leaf name, then invokes InodeOps::mkdir()
- * on the parent directory.
- *
- * @param path_virt  User virtual address of the null-terminated path string
- * @return 0 on success, or -1 on error
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_mkdir(uint64_t path_virt, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-
-// ============================================================
-// P0g (SMAP): pure kernel-to-kernel mkdir logic (no user memory).
-// Kernel-internal callers and tests use this; sys_mkdir is the user boundary.
-// ============================================================
-
-/// Create a directory at an already-resolved (canonicalised) path. Returns
-/// 0 or -errno.
-int64_t do_mkdir_kernel(const char* resolved_path);
+long long HandleMkdir(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

@@ -1,26 +1,12 @@
-/**
- * @file kernel/syscall/sys_getpid.cpp
- * @brief sys_getpid handler implementation
- *
- * Returns the thread-group ID (tgid) of the current task.  For a
- * single-threaded process tgid == pid; for threads of one process all share
- * the leader's tgid, so getpid() reports the same value in every thread
- * (F3-M2 batch 4).
- */
-
 #include "kernel/syscall/sys_getpid.hpp"
 
-#include "kernel/errno.hpp"
-#include "kernel/proc/scheduler.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
 
 namespace cinux::syscall {
 
-int64_t sys_getpid(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
-    auto* task = cinux::proc::Scheduler::current();
-    if (task == nullptr) {
-        return -kEsrch;
-    }
-    return static_cast<int64_t>(task->tgid);
+long long HandleGetpid(const SyscallFrame& /*frame*/) {
+    return static_cast<long long>(CurrentTask()->tgid);
 }
 
 }  // namespace cinux::syscall

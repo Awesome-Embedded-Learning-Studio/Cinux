@@ -1,19 +1,35 @@
 /**
- * @file kernel/syscall/sys_ioctl.hpp
- * @brief sys_ioctl handler declaration (F10-M1 batch 4)
+ * @file    sys_ioctl.hpp
+ * @brief   Declaration of the ioctl(fd, cmd, arg) syscall handler.
  *
- * Minimal stub.  musl probes ioctl(TIOCGWINSZ) on first stdout write to
- * decide buffering; returning -ENOTTY (not a terminal) makes it fall back
- * to line buffering.  Device-specific ioctls are added as drivers need them.
+ * @author  Charliechen114514
+ * @date    2026-10-18
+ * @version 0.3.0
+ * @since   0.3.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// ioctl(fd, request, ...) -- device control. Currently a -ENOTTY stub.
-int64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Device questions: one served answer, everything else
+ *                not-a-terminal.
+ *
+ * @return        Zero on the served ask, or a negative errno.
+ * @note          TCGETS is how the hosted world asks "is this a
+ *                terminal": the console pair answers with an all-zero
+ *                termios record so isatty turns true and job control
+ *                may arm. A real tty with line discipline is a later
+ *                station's work; file descriptors answer ENOTTY, the
+ *                hosted word for "no terminal here".
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleIoctl(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

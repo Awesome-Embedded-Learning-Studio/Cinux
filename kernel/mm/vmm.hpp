@@ -1,127 +1,130 @@
 /**
- * @file kernel/mm/vmm.hpp
- * @brief Virtual Memory Manager
+ * @file    vmm.hpp
+ * @brief   The kernel's own page tables: bring-up and the handoff record.
  *
- * Provides map / unmap / translate operations over the 4-level page table
- * hierarchy (PML4 -> PDPT -> PD -> PT -> Page).  When intermediate tables
- * are missing during a map, new pages are allocated from the PMM and
- * zeroed automatically.
+ * BringUpAddressSpace is the one-shot ceremony that turns the boot
+ * world's handoff doors into the published layout: the direct map of
+ * RAM, the ioremap alias for the framebuffer, the user half dropped to
+ * zero. It hands back the boot record from kernel-owned storage, so the
+ * caller's reference survives the low half going away. MapFramebufferDoor
+ * is the piece a test kernel can run alone when it needs the screen but
+ * not the whole takeover.
  *
- * The VMM class is an instance object (not a static singleton) so that
- * future milestones can manage multiple address spaces.
- *
- * Namespace: cinux::mm
+ * @author  Charliechen114514
+ * @date    2026-10-05
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
 #include <stdint.h>
 
-#include "kernel/proc/sync.hpp"
+#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/boot/boot_info.hpp"
 
 namespace cinux::mm {
 
-class VMM {
+/**
+ * @brief   The kernel world for the shared page walk.
+ * @note    Table pages are reached through the direct map; fresh tables
+ *          come from the PMM pre-zeroed, physical 0 meaning refusal.
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ */
+class KernelTables {
 public:
     /**
-     * @brief Initialise VMM with the current CR3 as the kernel PML4
+     * @brief         Reaches one table page behind the direct map.
      *
-     * Reads CR3 and stores the kernel PML4 physical address for use as
-     * the default page table root in subsequent map/unmap/translate calls.
+     * @param[in]     physical   Physical address of the table page.
+     * @return        Writable view of the table.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    void init();
+    cinux::arch::page::Entry* table(unsigned long physical);
 
     /**
-     * @brief Map a single 4 KB virtual page to a physical page
+     * @brief         Draws one zeroed page from the ledger as a new table.
      *
-     * Walks the 4-level table from PML4 to PT, allocating and zeroing
-     * intermediate tables from the PMM as needed.  Sets the final PT
-     * entry to (phys | flags).
-     *
-     * @param virt   Virtual address to map (page-aligned recommended)
-     * @param phys   Physical address to map to (must be page-aligned)
-     * @param flags  Combination of FLAG_PRESENT, FLAG_WRITABLE, FLAG_USER, etc.
-     * @param pml4   Optional PML4 physical address; nullptr = use kernel PML4
-     * @return true on success, false if PMM allocation failed
+     * @return        Physical address of the fresh table, 0 on refusal.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    bool map(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4 = nullptr);
-
-    /**
-     * @brief Map a single 2 MB huge page
-     *
-     * Walks PML4 → PDPT → PD and writes a 2 MB huge page entry.
-     * Intermediate tables (PDPT, PD) are allocated from the PMM as needed.
-     *
-     * @param virt   Virtual address to map (must be 2 MB-aligned)
-     * @param phys   Physical address to map to (must be 2 MB-aligned)
-     * @param flags  Combination of FLAG_PRESENT, FLAG_WRITABLE, etc.
-     * @param pml4   Optional PML4 physical address; nullptr = use kernel PML4
-     * @return true on success, false if PMM allocation failed
-     */
-    bool map_2mb(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4 = nullptr);
-
-    /**
-     * @brief Unmap a single 4 KB virtual page
-     *
-     * Clears the PT entry for @p virt and flushes the TLB for that page.
-     * Does NOT free the physical page that was mapped -- the caller is
-     * responsible for returning it to the PMM.
-     *
-     * @param virt  Virtual address to unmap
-     * @param pml4  Optional PML4 physical address; nullptr = use kernel PML4
-     */
-    void unmap(uint64_t virt, uint64_t* pml4 = nullptr);
-
-    /**
-     * @brief Split a 2 MB huge page into 512 × 4 KB pages
-     *
-     * If the PD entry for @p virt is a 2 MB huge page, allocate a new PT
-     * and rewrite it as 512 individual 4 KB entries (preserving flags).
-     * After this call, VMM::unmap() works on individual pages in the range.
-     * If the entry is already 4 KB pages, this is a no-op.
-     *
-     * @param virt  Any virtual address within the 2 MB page to split
-     * @return true on success (or already split), false on allocation failure
-     */
-    bool split_2mb_page(uint64_t virt);
-
-    /**
-     * @brief Translate a virtual address to its physical counterpart
-     *
-     * Walks the 4-level page table and returns the physical page base
-     * plus the in-page offset of @p virt.  Returns 0 if the address is
-     * not mapped.
-     *
-     * @param virt  Virtual address to translate
-     * @param pml4  Optional PML4 physical address; nullptr = use kernel PML4
-     * @return Physical address, or 0 if not present
-     */
-    uint64_t translate(uint64_t virt, uint64_t* pml4 = nullptr);
-
-    /**
-     * @brief Map a page without acquiring the internal spinlock
-     *
-     * Same semantics as map() but does NOT acquire the VMM spinlock.
-     * Safe to call from contexts where interrupts are already disabled
-     * (e.g. page fault handler) and no concurrent VMM access is possible.
-     *
-     * @param virt   Virtual address to map (page-aligned)
-     * @param phys   Physical address to map to (page-aligned)
-     * @param flags  PTE flags
-     * @param pml4   Optional PML4 physical address; nullptr = use kernel PML4
-     * @return true on success
-     */
-    bool map_nolock(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4 = nullptr);
-
-    /** Get the saved kernel PML4 physical address. */
-    uint64_t kernel_pml4() const;
-
-private:
-    uint64_t              kernel_pml4_{};
-    cinux::proc::Spinlock lock_;
+    unsigned long take_page();
 };
 
-/// Global VMM instance.
-extern VMM g_vmm;
+/**
+ * @brief         Installs the framebuffer's ioremap alias into the live
+ *                page tables.
+ *
+ * @param[in]     info   The boot handoff record carrying the framebuffer.
+ * @return        None
+ * @note          Seed pages from the low span; no PMM, no direct map,
+ *                  no low-half teardown, so a test kernel can light the
+ *                  screen without the full takeover.
+ * @warning       Must run before any code dereferences the framebuffer
+ *                through its ioremap alias.
+ * @throws        None
+ * @since         0.1.0
+ * @ingroup       kernel_mm
+ */
+void MapFramebufferDoor(const cinux::boot::BootInfo& info);
+
+/**
+ * @brief         Maps one device window into the ioremap alias, uncached.
+ *
+ * @param[in]     physical  Base the device decodes.
+ * @param[in]     bytes     Window size; the walk rounds up to large pages.
+ * @return        True when every slice landed in the live tables.
+ * @note          Walk tables the window lacks come from the PMM, and
+ *                  every slice carries cache-disable so register reads
+ *                  see the device, not a buffer. The kernel's own root
+ *                  is edited; task spaces mirror the upper half and
+ *                  inherit the edit.
+ * @warning       None
+ * @throws        None
+ * @since         0.2.0
+ * @ingroup       kernel_mm
+ */
+[[nodiscard]] bool MapDeviceWindow(uint64_t physical, unsigned long bytes);
+
+/**
+ * @brief         Replaces the boot handoff doors with the published
+ *                layout and archives the handoff record.
+ *
+ * @param[in]     handoff   The boot record, still readable through the
+ *                          low-half window this call is about to drop.
+ * @return        Pointer to the archived copy in kernel-owned storage,
+ *                or nullptr when bring-up failed and the caller should
+ *                stop.
+ * @note          Requires Pmm::init first: upper direct-map tables are
+ *                allocated from the ledger. Interrupts must be off.
+ * @warning       None
+ * @throws        None
+ * @since         0.1.0
+ * @ingroup       kernel_mm
+ */
+const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& handoff);
+
+/**
+ * @brief         The kernel's own page-table root, fixed at takeover.
+ *
+ * @return        Physical address of the kernel PML4.
+ * @note          Capture of the moment switching began: once other
+ *                address spaces activate, CR3 names the live one, while
+ *                this stays the road home.
+ * @warning       None
+ * @throws        None
+ * @since         0.2.0
+ * @ingroup       kernel_mm
+ */
+unsigned long KernelPageRoot();
 
 }  // namespace cinux::mm

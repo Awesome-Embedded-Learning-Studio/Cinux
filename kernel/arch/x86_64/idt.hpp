@@ -1,136 +1,84 @@
 /**
- * @file kernel/arch/x86_64/idt.hpp
- * @brief Interrupt Descriptor Table (IDT) for the big kernel
+ * @file    idt.hpp
+ * @brief   The kernel's full 256-entry interrupt descriptor table.
  *
- * Encapsulates IDT management in a class. Exception vectors, gate types,
- * and privilege levels are expressed through scoped enums used as first-class
- * API types.
+ * The table lives in .bss at zero file cost and is filled by whoever owns
+ * a vector range — exception stubs first, IRQ stubs when the PIC wakes up.
+ * Gate encoding is a pure constexpr function so the host world can pin
+ * every field split in test_idt before any of it reaches hardware.
  *
- * Gate type policy (design decision):
- *   - #BP(3) / #DB(1): Trap Gate (IF preserved)
- *   - All other exceptions: Interrupt Gate (IF cleared)
- *
- * Dependencies: IDT::init() must be called after GDT::init().
- *
- * Namespace: cinux::arch
+ * @author  Charliechen114514
+ * @date    2026-10-02
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_arch
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+namespace cinux::arch::idt {
 
-namespace cinux::arch {
+/// Present, DPL 0, 32-bit interrupt gate: the one gate type this kernel arms.
+inline constexpr unsigned char kTypeInterruptGate = 0x8E;
 
-// ============================================================
-// Exception Vectors (scoped enum)
-// ============================================================
-
-enum class ExceptionVector : uint8_t {
-    DE        = 0,     ///< #DE: Divide Error
-    DB        = 1,     ///< #DB: Debug Exception
-    NMI       = 2,     ///< Non-maskable Interrupt
-    BP        = 3,     ///< #BP: Breakpoint (INT3)
-    OF        = 4,     ///< #OF: Overflow
-    BR        = 5,     ///< #BR: BOUND Range Exceeded
-    UD        = 6,     ///< #UD: Invalid Opcode
-    NM        = 7,     ///< #NM: Device Not Available
-    DF        = 8,     ///< #DF: Double Fault (has error code)
-    TS        = 10,    ///< #TS: Invalid TSS (has error code)
-    NP        = 11,    ///< #NP: Segment Not Present (has error code)
-    SS        = 12,    ///< #SS: Stack-Segment Fault (has error code)
-    GP        = 13,    ///< #GP: General Protection (has error code)
-    PF        = 14,    ///< #PF: Page Fault (has error code)
-    Sigreturn = 0x80,  ///< F3-M1: int $0x80 sigreturn gate (user-callable trap)
+struct [[gnu::packed]] GateEntry {
+    unsigned short offset_low;
+    unsigned short selector;
+    unsigned char  ist;
+    unsigned char  type_attr;
+    unsigned short offset_mid;
+    unsigned int   offset_high;
+    unsigned int   reserved;
 };
 
-// ============================================================
-// IDT Gate Types and Privilege Levels
-// ============================================================
-
-enum class IDTGateType : uint8_t {
-    Interrupt = 0x0E,  ///< 64-bit interrupt gate (clears IF)
-    Trap      = 0x0F,  ///< 64-bit trap gate (preserves IF)
-};
-
-enum class IDTPrivilege : uint8_t {
-    Kernel = 0x00,  ///< Ring 0 only
-    User   = 0x60,  ///< Ring 3 (DPL=3)
-};
-
-/// Build a type_attr byte from privilege and gate type
-constexpr uint8_t make_idt_attr(IDTPrivilege priv, IDTGateType gate) {
-    return 0x80 | static_cast<uint8_t>(priv) | static_cast<uint8_t>(gate);
+/**
+ * @brief         Split one handler address into a gate entry.
+ * @param[in]     handler    Linear address of the stub the gate points at.
+ * @param[in]     selector   Code selector the CPU switches to on entry.
+ * @param[in]     ist        Interrupt-stack-table slot, 0 for none.
+ * @param[in]     type_attr  Gate type byte, kTypeInterruptGate for handlers.
+ * @return        The encoded 16-byte gate.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+constexpr GateEntry EncodeGate(unsigned long long handler, unsigned short selector,
+                               unsigned char ist, unsigned char type_attr) {
+    return GateEntry{
+        .offset_low  = static_cast<unsigned short>(handler & 0xFFFFU),
+        .selector    = selector,
+        .ist         = ist,
+        .type_attr   = type_attr,
+        .offset_mid  = static_cast<unsigned short>((handler >> 16U) & 0xFFFFU),
+        .offset_high = static_cast<unsigned int>(handler >> 32U),
+        .reserved    = 0,
+    };
 }
 
-// ============================================================
-// Interrupt Stack Frame
-// ============================================================
-
-/// x86_64 interrupt stack frame (pushed by ISR stub + CPU)
-struct [[gnu::packed]] InterruptFrame {
-    uint64_t r15, r14, r13, r12;
-    uint64_t r11, r10, r9, r8;
-    uint64_t rdi, rsi, rbp, rdx;
-    uint64_t rcx, rbx, rax;
-    uint64_t error_code;
-    uint64_t rip, cs, rflags, rsp, ss;
+struct [[gnu::packed]] TablePointer {
+    unsigned short     limit;
+    unsigned long long base;
 };
 
-// F-INFRA I-4 (R11): lock the interrupt stack frame. interrupts.S builds this
-// frame by sequential push and the C handler indexes it via (RSP+offset), so
-// the FIELD OFFSETS are the asm ABI contract -- not just the total size. A field
-// reorder here would read the wrong register in the handler with no other signal.
-static_assert(sizeof(InterruptFrame) == 168, "21 x uint64");
-static_assert(offsetof(InterruptFrame, r15) == 0, "first ISR-saved register");
-static_assert(offsetof(InterruptFrame, error_code) == 120, "error_code precedes the CPU frame");
-static_assert(offsetof(InterruptFrame, rip) == 128, "CPU pushes rip at frame+128");
-static_assert(offsetof(InterruptFrame, ss) == 160, "ss is the final CPU-pushed field");
+/**
+ * @brief         Write one gate into the table.
+ * @param[in]     vector   Vector number, 0..255.
+ * @param[in]     entry    Encoded gate value.
+ * @return        None.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void InstallGate(unsigned int vector, GateEntry entry);
 
-// ============================================================
-// IDT Class
-// ============================================================
+/**
+ * @brief         Point the CPU at the table with one lidt.
+ * @return        None.
+ * @note          Nothing fires through gates that were never installed —
+ *                an absent gate raises #GP with the vector in its error
+ *                code, which the exception dump then names.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void LoadIdt();
 
-class IDT {
-public:
-    /// C handler function signature
-    using Handler = void (*)(InterruptFrame*);
-
-    /// Assembly ISR stub signature
-    using Stub = void (*)();
-
-    void init();
-    void set_handler(ExceptionVector vector, Stub stub, uint16_t selector, uint8_t type_attr,
-                     uint8_t ist = 0);
-
-    /// Load this CPU's IDTR to point at the (shared) IDT.  Each CPU must LIDT
-    /// its own IDTR; init() does it for the BSP, APs call this from ap_main.
-    void load();
-
-private:
-    struct [[gnu::packed]] Entry {
-        uint16_t offset_low;
-        uint16_t selector;
-        uint8_t  ist;
-        uint8_t  type_attr;
-        uint16_t offset_mid;
-        uint32_t offset_high;
-        uint32_t reserved;
-    };
-    static_assert(sizeof(Entry) == 16, "IDT entry must be 16 bytes");
-
-    struct [[gnu::packed]] Pointer {
-        uint16_t limit;
-        uint64_t base;
-    };
-
-    static constexpr uint16_t kMaxEntries = 256;
-
-    Entry   entries_[kMaxEntries]{};
-    Pointer idtr_{};
-};
-
-/// Global IDT instance (zero-initialized in BSS)
-extern IDT g_idt;
-
-}  // namespace cinux::arch
+}  // namespace cinux::arch::idt

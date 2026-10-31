@@ -1,31 +1,58 @@
 /**
- * @file kernel/syscall/sys_pipe.hpp
- * @brief sys_pipe handler declaration
+ * @file    sys_pipe.hpp
+ * @brief   Declarations of the pipe and descriptor-copy syscall handlers.
  *
- * Creates an anonymous unidirectional pipe and installs two file
- * descriptors in the calling process's FDTable:
- *   - pipefd[0] is the read end
- *   - pipefd[1] is the write end
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-18
+ * @version 0.3.0
+ * @since   0.3.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
-
-namespace cinux::fs {
-class FDTable;
-}
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-int64_t sys_pipe(uint64_t pipefd_virt, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         pipe(fds): one ring, two descriptors, read end first.
+ *
+ * @return        Zero when both ends land, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandlePipe(const SyscallFrame& frame);
 
-/// P0e (SMAP): build the pipe graph + allocate two fds into a KERNEL int[2].
-/// Tests call this; sys_pipe is the user boundary (copy_to_user the int[2]).
-int64_t do_pipe_kernel(cinux::fs::FDTable& tbl, int* pipefd_kernel);
+/**
+ * @brief         pipe2(fds, flags): the same ring; served flags none,
+ *                zero only.
+ *
+ * @return        Zero with a zero flag word, or -EINVAL for anything
+ *                else.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandlePipe2(const SyscallFrame& frame);
+
+/**
+ * @brief         dup(fd): the same open under the lowest free number.
+ *
+ * @return        The new descriptor number, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleDup(const SyscallFrame& frame);
+
+/**
+ * @brief         dup2(fd, target): the same open under target,
+ *                closing what stood there.
+ *
+ * @return        The target number, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleDup2(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

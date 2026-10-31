@@ -1,262 +1,282 @@
-/**
- * @file kernel/proc/sync.cpp
- * @brief Implementation of synchronization primitives (Spinlock, Mutex, Semaphore)
- */
-
 #include "kernel/proc/sync.hpp"
 
-#include <stdint.h>
+#include <atomic>
+#include <type_traits>
 
-#include "kernel/lib/kprintf.hpp"
+#include "cinux/assert.hpp"
+#include "kernel/arch/x86_64/instructions.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/x86_64/per_cpu.hpp"
 #include "kernel/proc/lockdep.hpp"
-#include "kernel/proc/percpu.hpp"
-#include "kernel/proc/process.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/task.hpp"
 
 namespace cinux::proc {
 
-// ============================================================
-// Spinlock implementation
-// ============================================================
+unsigned int SpinLedger::depth() const {
+    return depth_[arch::per_cpu::PerCpu::self().cpu_id];
+}
 
-void Spinlock::acquire() {
-    // Disable involuntary preemption BEFORE publishing lock ownership.  If a
-    // timer IRQ lands after test-and-set but before the count increment, IRQ
-    // exit could otherwise switch away while this CPU still owns the lock.
-    preempt_disable();
-    while (__atomic_test_and_set(&locked_, __ATOMIC_ACQUIRE)) {
-        __asm__ volatile("pause");
+SpinLedger& DefaultSpinLedger() {
+    static constinit SpinLedger instance{};
+    return instance;
+}
+
+namespace {
+
+template <typename Order, typename Dump>
+void record_acquire(Order& order, const void* lock, Dump&& dump) {
+    if constexpr (std::is_same_v<Order, LockOrder>) {
+        const LockOrder::Status kOutcome = order.acquire(lock);
+        if (kOutcome != LockOrder::Status::kOk) {
+            dump();
+        }
+        cinux::base::safety::Check(kOutcome != LockOrder::Status::kCapacity,
+                                   "lockdep acquisition exhausted identity or held-chain capacity");
+        cinux::base::safety::Check(kOutcome == LockOrder::Status::kOk,
+                                   "lockdep acquisition failed: cycle, recursion or capacity");
     }
-    // F4-M5 R6-Part2: record on this CPU's held stack + lock-order cycle check.
-    // Compiled out (zero cost) when CINUX_LOCKDEP is off.
-    lockdep_acquired(this);
 }
 
-void Spinlock::release() {
-    lockdep_releasing(this);
-    __atomic_clear(&locked_, __ATOMIC_RELEASE);
-    // Publish the unlock before allowing an IRQ-exit preemption.
-    preempt_enable();
-}
-
-Spinlock::IrqGuard::IrqGuard(Spinlock* lock) : lock_(lock) {
-    __asm__ volatile("pushfq; popq %0; cli" : "=rm"(saved_flags_));
-    lock_->acquire();
-}
-
-Spinlock::IrqGuard::~IrqGuard() {
-    lock_->release();
-    __asm__ volatile("pushq %0; popfq" : : "rm"(saved_flags_));
-}
-
-// ============================================================
-// Mutex implementation
-// ============================================================
-
-void Mutex::enqueue_waiter(Task* task) {
-    task->wait_next = nullptr;
-
-    if (wait_head_ == nullptr) {
-        wait_head_ = task;
-        return;
+template <typename Order, typename Dump>
+void record_release(Order& order, const void* lock, Dump&& dump) {
+    if constexpr (std::is_same_v<Order, LockOrder>) {
+        const LockOrder::Status kOutcome = order.release(lock);
+        if (kOutcome != LockOrder::Status::kOk) {
+            dump();
+        }
+        cinux::base::safety::Check(kOutcome == LockOrder::Status::kOk,
+                                   "lockdep release failed: not held or out of order");
     }
-
-    Task* tail = wait_head_;
-    while (tail->wait_next != nullptr) {
-        tail = tail->wait_next;
-    }
-    tail->wait_next = task;
 }
 
-Task* Mutex::dequeue_waiter() {
-    if (wait_head_ == nullptr) {
-        return nullptr;
+template <typename Order>
+void forget_lock(Order& order, const void* lock) {
+    if constexpr (std::is_same_v<Order, LockOrder>) {
+        cinux::base::safety::Check(order.forget(lock), "lockdep destroyed held lock");
     }
+}
 
-    Task* task      = wait_head_;
-    wait_head_      = task->wait_next;
-    task->wait_next = nullptr;
-    return task;
+}  // namespace
+
+void SpinLedger::name_lock(const void* lock, const char* label) {
+    order_.name_lock(lock, label);
+}
+
+void SpinLedger::dump_held() {
+    order_.dump_held();
+}
+
+void SpinLedger::note_acquire(const void* lock) {
+    record_acquire(order_, lock, [this] { dump_held(); });
+    ++depth_[arch::per_cpu::PerCpu::self().cpu_id];
+}
+
+void SpinLedger::note_release(const void* lock) {
+    auto& depth = depth_[arch::per_cpu::PerCpu::self().cpu_id];
+    cinux::base::safety::Check(depth != 0, "spin ledger underflow");
+    record_release(order_, lock, [this] { dump_held(); });
+    --depth;
+}
+
+void SpinLedger::forget(const void* lock) {
+    forget_lock(order_, lock);
+}
+
+void Spinlock::retire() {
+    const cinux::arch::IrqGuard kGuard;
+    cinux::base::safety::Check(!held_.test(std::memory_order_relaxed), "destroyed held spinlock");
+    SpinLedger& ledger = ledger_ != nullptr ? *ledger_ : DefaultSpinLedger();
+    ledger.forget(this);
+}
+
+void Spinlock::lock() {
+    const auto kIrq = cinux::arch::SaveAndDisableIrq();
+    const auto kCpu = static_cast<int>(arch::per_cpu::PerCpu::self().cpu_id);
+    cinux::base::safety::Check(owner_cpu_.load(std::memory_order_relaxed) != kCpu,
+                               "spinlock re-entered on one core");
+    while (held_.test_and_set(std::memory_order_acquire)) {
+        cinux::arch::CpuRelax();
+    }
+    irq_state_ = kIrq;
+    owner_cpu_.store(kCpu, std::memory_order_relaxed);
+    SpinLedger& ledger = ledger_ != nullptr ? *ledger_ : DefaultSpinLedger();
+    ledger.note_acquire(this);
+    holder_ = Scheduler::self().current();
+}
+
+void Spinlock::unlock() {
+    const auto kIrq = irq_state_;
+    cinux::base::safety::Check(holder_ == Scheduler::self().current(),
+                               "spinlock released by a non-holder");
+    holder_            = nullptr;
+    SpinLedger& ledger = ledger_ != nullptr ? *ledger_ : DefaultSpinLedger();
+    ledger.note_release(this);
+    owner_cpu_.store(-1, std::memory_order_relaxed);
+    held_.clear(std::memory_order_release);
+    cinux::arch::RestoreIrq(kIrq);
+}
+
+const char* Spinlock::holder_name() const {
+    return holder_ != nullptr ? holder_->name : "irq/main";
+}
+
+void Spinlock::set_name(const char* label) {
+    name_              = label;
+    SpinLedger& ledger = ledger_ != nullptr ? *ledger_ : DefaultSpinLedger();
+    ledger.name_lock(this, label);
+}
+
+SpinGuard::SpinGuard(Spinlock& lock) : lock_(lock) {
+    lock_.lock();
+}
+
+SpinGuard::~SpinGuard() {
+    lock_.unlock();
+}
+
+SpinGuard Spinlock::guard() {
+    return SpinGuard(*this);
+}
+
+void Mutex::retire() {
+    cinux::base::safety::Check(owner_ == nullptr && waiters_.empty(), "retired busy mutex");
+    spin_.retire();
 }
 
 void Mutex::lock() {
-    Task* self   = current_task();
-    bool  queued = false;
-    for (;;) {
-        // Hold the metadata spinlock with IRQs disabled: enqueue + Blocked must
-        // be atomic against unlock's ownership handoff. The local `queued`
-        // survives a context switch on this task's stack and distinguishes a
-        // real handoff from a recursive lock attempt.
-        {
-            auto g = spin_.irq_guard();
-            if (owner_ == nullptr) {
-                owner_ = self;
-                return;
-            }
-            if (queued && owner_ == self) {
-                return;  // unlock() dequeued us and transferred ownership
-            }
-            if (!queued) {
-                if (self != nullptr && owner_ == self) {
-                    cinux::lib::kpanic("mutex: recursive lock by tid=%lu", self->tid);
-                }
-                enqueue_waiter(self);
-                queued = true;
-            }
-            Scheduler::prepare_to_wait(self);
+    // Release the spinlock before switching, but keep IRQs masked until
+    // park_current() has committed the task's blocked state.
+    const cinux::arch::IrqGuard kParkGuard;
+    Task* const                 kSelf = Scheduler::self().current();
+    {
+        const SpinGuard kGuard(spin_);
+        if (owner_ == nullptr) {
+            owner_ = kSelf;
+            return;
         }
-
-        // Scheduler::unblock() is deliberately generic: signals, timers, child
-        // exit, and device queues may all call it. Treat such wakes as spurious
-        // until unlock() has explicitly handed this mutex to us; never return
-        // from lock() merely because Task::state became runnable.
-        if (!Scheduler::schedule_blocked()) {
-            return;  // single-threaded in-kernel test harness
-        }
+        waiters_.push_back(*kSelf);
+        Scheduler::self().prepare_to_wait();
     }
+    Scheduler::self().schedule_blocked();
 }
 
 void Mutex::unlock() {
-    // Hold the spinlock only for the waiter handoff; release BEFORE unblocking
-    // the new owner (never wake a task while still holding its lock).
-    Task* waiter;
-    {
-        auto  g    = spin_.guard();
-        Task* self = current_task();
-        if (owner_ != self && (owner_ != nullptr || self != nullptr)) {
-            cinux::lib::kpanic("mutex: unlock by non-owner");
-        }
-        waiter = dequeue_waiter();
-        if (waiter == nullptr) {
-            owner_ = nullptr;
-            return;  // g releases
-        }
-        owner_ = waiter;
-    }  // g releases (spin unlocked)
-
-    Scheduler::unblock(waiter);
-}
-
-bool Mutex::try_lock() {
-    auto g = spin_.guard();
-
-    if (owner_ != nullptr) {
-        return false;  // g releases
-    }
-
-    owner_ = current_task();
-    return true;  // g releases
-}
-
-// ============================================================
-// Semaphore implementation
-// ============================================================
-
-Semaphore::Semaphore(int64_t initial) : count_(initial), wait_head_(nullptr) {}
-
-void Semaphore::enqueue_waiter(Task* task) {
-    task->wait_next = nullptr;
-
-    if (wait_head_ == nullptr) {
-        wait_head_ = task;
+    const SpinGuard kGuard(spin_);
+    cinux::base::safety::Check(owner_ == Scheduler::self().current(),
+                               "mutex released by a non-owner");
+    Task* const kNext = waiters_.pop_head();
+    if (kNext != nullptr) {
+        owner_ = kNext;
+        Scheduler::self().unblock(*kNext);
         return;
     }
-
-    Task* tail = wait_head_;
-    while (tail->wait_next != nullptr) {
-        tail = tail->wait_next;
-    }
-    tail->wait_next = task;
+    owner_ = nullptr;
 }
 
-Task* Semaphore::dequeue_waiter() {
-    if (wait_head_ == nullptr) {
-        return nullptr;
-    }
-
-    Task* task      = wait_head_;
-    wait_head_      = task->wait_next;
-    task->wait_next = nullptr;
-    return task;
+MutexGuard::MutexGuard(Mutex& mutex) : mutex_(mutex) {
+    mutex_.lock();
 }
 
-bool Semaphore::has_waiter(Task* task) const {
-    for (Task* waiter = wait_head_; waiter != nullptr; waiter = waiter->wait_next) {
-        if (waiter == task) {
-            return true;
-        }
-    }
-    return false;
+MutexGuard::~MutexGuard() {
+    mutex_.unlock();
 }
 
-void Semaphore::post() {
-    // Increment + dequeue under the lock; release BEFORE unblocking the waiter.
-    Task* waiter;
-    {
-        auto g = spin_.guard();
-        count_++;
-        waiter = dequeue_waiter();
-    }  // g releases
+MutexGuard Mutex::guard() {
+    return MutexGuard(*this);
+}
 
-    if (waiter != nullptr) {
-        Scheduler::unblock(waiter);
-    }
+Semaphore::Semaphore(long long initial) : count_(initial) {}
+
+void Semaphore::retire() {
+    cinux::base::safety::Check(waiters_.empty(), "retired semaphore still has waiters");
+    spin_.retire();
 }
 
 void Semaphore::wait() {
-    Task* self   = current_task();
-    bool  queued = false;
-    for (;;) {
-        {
-            // Decrement and enqueue exactly once. A real post grant removes us
-            // from this queue under the same spinlock; unrelated scheduler wakes
-            // leave us linked and therefore cannot satisfy wait().
-            auto g = spin_.irq_guard();
-            if (!queued) {
-                count_--;
-                if (count_ >= 0) {
-                    return;
-                }
-                enqueue_waiter(self);
-                queued = true;
-            } else if (!has_waiter(self)) {
-                return;  // post() dequeued us: the semaphore grant is ours
-            }
-            Scheduler::prepare_to_wait(self);
+    const cinux::arch::IrqGuard kParkGuard;
+    Task* const                 kSelf = Scheduler::self().current();
+    {
+        const SpinGuard kGuard(spin_);
+        if (count_ > 0) {
+            count_--;
+            return;
         }
-        if (!Scheduler::schedule_blocked()) {
-            return;  // single-threaded in-kernel test harness
-        }
+        waiters_.push_back(*kSelf);
+        Scheduler::self().prepare_to_wait();
     }
+    Scheduler::self().schedule_blocked();
 }
 
 bool Semaphore::try_wait() {
-    auto g = spin_.guard();
-
-    if (count_ <= 0) {
-        return false;  // g releases
+    const SpinGuard kGuard(spin_);
+    if (count_ == 0) {
+        return false;
     }
-
-    count_--;
-    return true;  // g releases
+    --count_;
+    return true;
 }
 
-int64_t Semaphore::count() const {
-    return count_;
+void Semaphore::post() {
+    const SpinGuard kGuard(spin_);
+    Task* const     kNext = waiters_.pop_head();
+    if (kNext != nullptr) {
+        Scheduler::self().unblock(*kNext);
+        return;
+    }
+    count_++;
 }
 
-// ============================================================
-// InterruptGuard implementation
-// ============================================================
-
-InterruptGuard::InterruptGuard() {
-    __asm__ volatile("pushfq; popq %0; cli" : "=rm"(saved_flags_));
-    preempt_disable();  // IRQs disabled: non-preemptable section
+bool Completion::finish(bool success) {
+    const SpinGuard kGuard(spin_);
+    if (state_ != State::kPending) {
+        return false;
+    }
+    state_            = success ? State::kSuccess : State::kFailed;
+    Task* const kNext = waiters_.pop_head();
+    if (kNext != nullptr) {
+        Scheduler::self().unblock(*kNext);
+    }
+    return true;
 }
 
-InterruptGuard::~InterruptGuard() {
-    preempt_enable();
-    __asm__ volatile("pushq %0; popfq" : : "rm"(saved_flags_));
+bool Completion::wait() {
+    const cinux::arch::IrqGuard kParkGuard;
+    Task* const                 kSelf = Scheduler::self().current();
+    {
+        const SpinGuard kGuard(spin_);
+        if (state_ != State::kPending) {
+            return state_ == State::kSuccess;
+        }
+        waiters_.push_back(*kSelf);
+        Scheduler::self().prepare_to_wait();
+    }
+    Scheduler::self().schedule_blocked();
+    {
+        const SpinGuard kGuard(spin_);
+        return state_ == State::kSuccess;
+    }
+}
+
+bool Completion::finished() const {
+    const SpinGuard kGuard(spin_);
+    return state_ != State::kPending;
+}
+
+bool Completion::success() const {
+    const SpinGuard kGuard(spin_);
+    return state_ == State::kSuccess;
+}
+
+void Completion::retire() {
+    cinux::base::safety::Check(waiters_.empty(), "retired completion still has waiters");
+    spin_.retire();
+}
+
+void Completion::rearm() {
+    const SpinGuard kGuard(spin_);
+    cinux::base::safety::Check(waiters_.empty(), "rearm with a waiter still parked");
+    state_ = State::kPending;
 }
 
 }  // namespace cinux::proc

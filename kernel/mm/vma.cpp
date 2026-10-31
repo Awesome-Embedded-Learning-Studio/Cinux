@@ -1,255 +1,357 @@
-/**
- * @file kernel/mm/vma.cpp
- * @brief LinkedListVMAStore implementation
- *
- * Keeps an intrusive doubly-linked list of VMA nodes sorted by start address.
- * insert() merges with adjacent same-flags neighbours; remove() splits a node
- * when only its interior is taken.  See vma.hpp for the ownership and failure
- * model.
- *
- * Namespace: cinux::mm
- */
-
 #include "kernel/mm/vma.hpp"
 
-#include "kernel/fs/file.hpp"  // inode_ref/inode_unref (VMA holds an inode ref)
+#include <utility>
+
+#include "cinux/container/self_list.hpp"
+#include "cinux/math.hpp"
+#include "cinux/own.hpp"
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/mm/shared_pages.hpp"
 
 namespace cinux::mm {
 
 namespace {
 
-/// Page size used to validate range alignment (VMA granularity is one page).
-constexpr uint64_t kPageSize = 4096;
+using arch::page::kSize;
 
-/// True when @p v is a multiple of the page size.
-constexpr bool page_aligned(uint64_t v) {
-    return (v & (kPageSize - 1)) == 0;
+bool overlaps(const VmaRegion& existing, const VmaRegion& spec) {
+    return existing.start < spec.end && spec.start < existing.end;
 }
 
-/// Round @p v up to the next page boundary.
-constexpr uint64_t align_up_page(uint64_t v) {
-    return (v + kPageSize - 1) & ~(kPageSize - 1);
+bool overlaps_span(const VmaRegion& existing, unsigned long start, unsigned long end) {
+    return existing.start < end && start < existing.end;
 }
 
-/// Drop the inode reference a VMA holds for its file backing (if any).  Called
-/// before a node is freed so the backing inode stays alive exactly as long as a
-/// VMA maps it -- without this, the ext2 inode-cache slot can be evicted and
-/// reused for a different file while a VMA still points at it (the ld crash:
-/// a stale backing served libc.so-script zero pages to a mapped library .text).
-void release_backing(VMA* v) {
-    if (v != nullptr && v->backing != nullptr) {
-        cinux::fs::inode_unref(v->backing);
+bool covers(const VmaRegion& region, unsigned long address) {
+    return region.start <= address && address < region.end;
+}
+
+class RegionBatch {
+public:
+    ~RegionBatch() {
+        while (const VmaRegion* region = regions.pop_head()) {
+            delete region;
+        }
     }
-}
 
-/// Allocate and initialise an unlinked VMA node.  Heap exhaustion traps via
-/// operator new (see vma.hpp failure model).
-VMA* make_node(uint64_t start, uint64_t end, VmaFlags flags) {
-    auto* node        = new VMA;
-    node->start       = start;
-    node->end         = end;
-    node->flags       = flags;
-    node->backing     = nullptr;
-    node->file_offset = 0;
-    node->prev        = nullptr;
-    node->next        = nullptr;
-    return node;
+    base::container::SelfList<VmaRegion> regions;
+};
+
+bool stage_protection(RegionBatch& batch, const VmaRegion& source, const VmaRegion& cut,
+                      VmaProtection terms) {
+    const unsigned long kCutStart = base::math::Max(cut.start, source.start);
+    const unsigned long kCutEnd   = base::math::Min(cut.end, source.end);
+    const unsigned long kCuts[]   = {source.start, kCutStart, kCutEnd, source.end};
+    for (unsigned long index = 0; index < 3; ++index) {
+        if (kCuts[index] == kCuts[index + 1]) {
+            continue;
+        }
+        auto* const kPart = new VmaRegion(source);
+        if (kPart == nullptr) {
+            return false;
+        }
+        kPart->start = kCuts[index];
+        kPart->end   = kCuts[index + 1];
+        kPart->file_offset += kPart->start - source.start;
+        if (index == 1) {
+            kPart->readable   = terms.readable;
+            kPart->writable   = terms.writable;
+            kPart->executable = terms.executable;
+        }
+        batch.regions.push_back(*kPart);
+    }
+    return true;
 }
 
 }  // namespace
 
-LinkedListVMAStore::~LinkedListVMAStore() {
-    clear();
-}
-
-void LinkedListVMAStore::clear() {
-    VMA* cur = head_;
-    while (cur != nullptr) {
-        VMA* nxt = cur->next;
-        release_backing(cur);
-        delete cur;
-        cur = nxt;
+base::Result<void> VmaStore::register_range(const VmaRegion& spec) {
+    if (spec.start >= spec.end) {
+        return base::KernelError::kInvalidArgument;
     }
-    head_  = nullptr;
-    count_ = 0;
-}
-
-LinkedListVMAStore::LinkedListVMAStore(LinkedListVMAStore&& other) noexcept
-    : head_(other.head_), count_(other.count_) {
-    other.head_  = nullptr;
-    other.count_ = 0;
-}
-
-LinkedListVMAStore& LinkedListVMAStore::operator=(LinkedListVMAStore&& other) noexcept {
-    if (this != &other) {
-        clear();
-        head_        = other.head_;
-        count_       = other.count_;
-        other.head_  = nullptr;
-        other.count_ = 0;
+    if (!heap_recorded_ && heap_.start < heap_.end && overlaps(heap_, spec)) {
+        return base::KernelError::kAlreadyExists;
     }
-    return *this;
-}
-
-cinux::lib::ErrorOr<void> LinkedListVMAStore::insert(uint64_t start, uint64_t end, VmaFlags flags) {
-    if (start >= end || !page_aligned(start) || !page_aligned(end)) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-
-    // Walk to the first node whose start >= `start`; `prev` trails it.  Because
-    // the list is sorted, only prev/cur can overlap or merge with the new range.
-    VMA* prev = nullptr;
-    VMA* cur  = head_;
-    while (cur != nullptr && cur->start < start) {
-        prev = cur;
-        cur  = cur->next;
-    }
-
-    // Overlap: prev extends into the new range, or cur starts inside it.
-    if (prev != nullptr && prev->end > start) {
-        return cinux::lib::Error::AlreadyExists;
-    }
-    if (cur != nullptr && cur->start < end) {
-        return cinux::lib::Error::AlreadyExists;
-    }
-
-    // Only merge plain unbacked VMAs. File-backed mappings carry per-node
-    // file_offset/backing metadata; merging by flags alone would make one file
-    // offset cover non-contiguous ELF segments.
-    const bool merge_prev = (prev != nullptr) && (prev->end == start) && (prev->flags == flags) &&
-                            prev->backing == nullptr;
-    const bool merge_next =
-        (cur != nullptr) && (cur->start == end) && (cur->flags == flags) && cur->backing == nullptr;
-
-    if (merge_prev && merge_next) {
-        // Bridge prev and cur into a single node.
-        prev->end  = cur->end;
-        prev->next = cur->next;
-        if (cur->next != nullptr) {
-            cur->next->prev = prev;
+    for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
+        if (overlaps(*scan, spec)) {
+            return base::KernelError::kAlreadyExists;
         }
-        release_backing(cur);
-        delete cur;
-        --count_;
-        return {};
     }
-    if (merge_prev) {
-        prev->end = end;
-        return {};
+    auto* const kBorn = new VmaRegion{spec};
+    if (kBorn == nullptr) {
+        return base::KernelError::kOutOfMemory;
     }
-    if (merge_next) {
-        cur->start = start;  // extend cur's left edge; position unchanged
-        return {};
+    if (kBorn->kind == VmaKind::kStack && kBorn->stack_floor == 0) {
+        kBorn->stack_floor = kBorn->start + kSize;
     }
-
-    // No neighbour absorbs it: splice a fresh node between prev and cur.
-    VMA* node  = make_node(start, end, flags);
-    node->prev = prev;
-    node->next = cur;
-    if (cur != nullptr) {
-        cur->prev = node;
-    }
-    if (prev != nullptr) {
-        prev->next = node;
-    } else {
-        head_ = node;  // new lowest node
-    }
-    ++count_;
-    return {};
+    regions_.push_back(*kBorn);
+    return base::Result<void>{};
 }
 
-cinux::lib::ErrorOr<void> LinkedListVMAStore::remove(uint64_t start, uint64_t end) {
-    if (start >= end || !page_aligned(start) || !page_aligned(end)) {
-        return cinux::lib::Error::InvalidArgument;
+const VmaRegion* VmaStore::find(unsigned long address) const {
+    if (!heap_recorded_ && covers(heap_, address)) {
+        return &heap_;
     }
-
-    VMA* cur = head_;
-    while (cur != nullptr) {
-        VMA* nxt = cur->next;  // capture before cur may be deleted
-
-        const bool no_overlap = (cur->end <= start) || (cur->start >= end);
-        if (no_overlap) {
-            cur = nxt;
-            continue;
-        }
-
-        const bool keep_left  = cur->start < start;  // survivor [cur->start, start)
-        const bool keep_right = cur->end > end;      // survivor [end, cur->end)
-
-        if (keep_left && keep_right) {
-            // Middle removed: shrink cur to the left part, splice in a fresh
-            // node for the right part (same backing/flags as cur).  The right
-            // survivor is a NEW node referencing the same backing, so it takes
-            // its own inode_ref (cur keeps its ref for the left survivor).
-            const uint64_t old_start = cur->start;
-            VMA*           right     = make_node(end, cur->end, cur->flags);
-            right->backing           = cur->backing;
-            right->file_offset       = cur->file_offset + (end - old_start);
-            if (right->backing != nullptr) {
-                cinux::fs::inode_ref(right->backing);
-            }
-            cur->end    = start;
-            right->prev = cur;
-            right->next = cur->next;
-            if (cur->next != nullptr) {
-                cur->next->prev = right;
-            }
-            cur->next = right;
-            ++count_;
-        } else if (keep_left) {
-            cur->end = start;  // trim right edge
-        } else if (keep_right) {
-            cur->file_offset += end - cur->start;
-            cur->start = end;  // trim left edge
-        } else {
-            // Fully inside [start, end): unlink and free.
-            if (cur->prev != nullptr) {
-                cur->prev->next = cur->next;
-            } else {
-                head_ = cur->next;
-            }
-            if (cur->next != nullptr) {
-                cur->next->prev = cur->prev;
-            }
-            release_backing(cur);
-            delete cur;
-            --count_;
-        }
-        cur = nxt;
-    }
-    return {};
-}
-
-VMA* LinkedListVMAStore::find(uint64_t addr) {
-    for (VMA* cur = head_; cur != nullptr; cur = cur->next) {
-        if (cur->start > addr) {
-            break;  // sorted: no later node can contain addr
-        }
-        if (addr < cur->end) {
-            return cur;  // cur->start <= addr < cur->end
+    for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
+        if (covers(*scan, address)) {
+            return scan;
         }
     }
     return nullptr;
 }
 
-cinux::lib::ErrorOr<uint64_t> LinkedListVMAStore::find_free_area(uint64_t hint, uint64_t length) {
-    if (length == 0) {
-        return cinux::lib::Error::InvalidArgument;
+bool VmaStore::stack_contains(unsigned long start, unsigned long bytes) const {
+    if (bytes == 0 || bytes > ~0UL - start) {
+        return false;
     }
-    uint64_t search = page_aligned(hint) ? hint : align_up_page(hint);
+    const auto kEnd = start + bytes;
+    for (unsigned long cursor = start; cursor < kEnd;) {
+        const VmaRegion* const kRegion = find(cursor);
+        if (kRegion == nullptr || kRegion->kind != VmaKind::kStack || !kRegion->readable ||
+            !kRegion->writable || cursor < kRegion->stack_floor) {
+            return false;
+        }
+        cursor = base::math::Min(kRegion->end, kEnd);
+    }
+    return true;
+}
 
-    for (VMA* cur = head_; cur != nullptr; cur = cur->next) {
-        if (cur->start > search) {
-            const uint64_t gap = cur->start - search;
-            if (gap >= length) {
-                return search;  // gap before cur is big enough
+VmaStore* VmaStore::clone() const {
+    base::Own<VmaStore> copy(new VmaStore{});
+    if (!copy.holds()) {
+        return nullptr;
+    }
+    copy->heap_          = heap_;
+    copy->heap_max_      = heap_max_;
+    copy->heap_break_    = heap_break_;
+    copy->heap_recorded_ = heap_recorded_;
+    copy->mmap_ceiling_  = mmap_ceiling_;
+    for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
+        VmaRegion region = *scan;
+        if (scan->shared.holds()) {
+            base::Shared<SharedAttachment> attachment;
+            for (const VmaRegion* born = copy->regions_.head(); born != nullptr;
+                 born                  = copy->regions_.after(*born)) {
+                if (born->shared.holds() && born->shared->start == scan->shared->start) {
+                    attachment = born->shared;
+                    break;
+                }
+            }
+            if (!attachment.holds()) {
+                attachment = base::Shared<SharedAttachment>(new SharedAttachment(
+                    scan->shared->pages, scan->shared->start, scan->shared->end));
+                if (!attachment.holds()) {
+                    return nullptr;
+                }
+            }
+            region.shared = std::move(attachment);
+        }
+        const base::Result<void> kFiled = copy->register_range(region);
+        if (!kFiled.ok()) {
+            return nullptr;
+        }
+    }
+    return copy.release();
+}
+
+void VmaStore::teardown() {
+    while (const VmaRegion* const kRegion = regions_.pop_head()) {
+        delete kRegion;
+    }
+}
+
+void VmaStore::seed_heap(unsigned long base, unsigned long max) {
+    heap_.start       = base;
+    heap_.end         = base;
+    heap_.kind        = VmaKind::kAnonymous;
+    heap_.readable    = true;
+    heap_.writable    = true;
+    heap_.executable  = false;
+    heap_.backing     = {};
+    heap_.file_offset = 0;
+    heap_break_       = base;
+    heap_max_         = max;
+    heap_recorded_    = false;
+}
+
+base::Result<unsigned long> VmaStore::move_heap_end(unsigned long target) {
+    if (heap_.start == 0 && heap_.end == 0) {
+        return base::KernelError::kNotFound;
+    }
+    if (target == 0) {
+        return heap_break_;
+    }
+    if (target < heap_.start || target > heap_max_) {
+        return base::KernelError::kInvalidArgument;
+    }
+    const unsigned long kWanted = cinux::base::math::AlignUp(target, kSize);
+    if (kWanted > heap_.end) {
+        for (const VmaRegion* scan = regions_.head(); scan != nullptr;
+             scan                  = regions_.after(*scan)) {
+            if (overlaps_span(*scan, heap_.end, kWanted)) {
+                return base::KernelError::kAlreadyExists;
             }
         }
-        if (cur->end > search) {
-            search = cur->end;  // advance past this node
+    }
+    if (heap_recorded_ && kWanted > heap_.end) {
+        VmaRegion extension{};
+        extension.start    = heap_.end;
+        extension.end      = kWanted;
+        extension.kind     = VmaKind::kAnonymous;
+        extension.readable = true;
+        extension.writable = true;
+        const auto kAdded  = register_range(extension);
+        if (!kAdded.ok()) {
+            return kAdded.error();
+        }
+    } else if (heap_recorded_ && kWanted < heap_.end) {
+        const auto kRemoved = unregister_range(kWanted, heap_.end);
+        if (!kRemoved.ok()) {
+            return kRemoved.error();
         }
     }
-    return search;  // unbounded tail: always fits (M2 adds an upper bound)
+    heap_.end   = kWanted;
+    heap_break_ = target;
+    return target;
+}
+
+base::Result<unsigned long> VmaStore::find_free_spot(unsigned long ceiling,
+                                                     unsigned long bytes) const {
+    if (bytes == 0 || ceiling < bytes) {
+        return base::KernelError::kOutOfMemory;
+    }
+    unsigned long spot_end = ceiling;
+    for (bool moved = true; moved;) {
+        moved = false;
+        if (!heap_recorded_ && heap_.start < spot_end && heap_.end > spot_end - bytes) {
+            spot_end = heap_.start;
+            moved    = true;
+        }
+        for (const VmaRegion* scan = regions_.head(); scan != nullptr;
+             scan                  = regions_.after(*scan)) {
+            if (scan->start < spot_end && scan->end > spot_end - bytes) {
+                spot_end = scan->start;
+                moved    = true;
+            }
+        }
+    }
+    if (spot_end < bytes) {
+        return base::KernelError::kOutOfMemory;
+    }
+    return spot_end - bytes;
+}
+
+base::Result<void> VmaStore::unregister_range(unsigned long start, unsigned long end) {
+    if (start >= end) {
+        return base::KernelError::kInvalidArgument;
+    }
+    if (!heap_recorded_ && heap_.start < heap_.end && overlaps_span(heap_, start, end)) {
+        auto* const kExisting = new VmaRegion(heap_);
+        if (kExisting == nullptr) {
+            return base::KernelError::kOutOfMemory;
+        }
+        regions_.push_back(*kExisting);
+        heap_recorded_ = true;
+    }
+    for (VmaRegion* scan = regions_.head(); scan != nullptr;) {
+        VmaRegion* const kNext = regions_.after(*scan);
+        if (overlaps_span(*scan, start, end)) {
+            const bool kKeepsHead = scan->start < start;
+            const bool kKeepsTail = scan->end > end;
+            if (kKeepsHead && kKeepsTail) {
+                auto* const kTail = new VmaRegion(*scan);
+                if (kTail == nullptr) {
+                    return base::KernelError::kOutOfMemory;
+                }
+                kTail->start       = end;
+                kTail->file_offset = scan->file_offset + (end - scan->start);
+                scan->end          = start;
+                regions_.push_back(*kTail);
+            } else if (kKeepsHead) {
+                scan->end = start;
+            } else if (kKeepsTail) {
+                const unsigned long kOldStart = scan->start;
+                scan->start                   = end;
+                scan->file_offset += end - kOldStart;
+            } else {
+                regions_.remove(*scan);
+                delete scan;
+            }
+        }
+        scan = kNext;
+    }
+    return base::Result<void>{};
+}
+
+base::Result<void> VmaStore::protect(unsigned long start, unsigned long end, VmaProtection terms) {
+    if (start >= end || !span_known(start, end)) {
+        return base::KernelError::kInvalidArgument;
+    }
+    RegionBatch batch;
+    VmaRegion   cut{};
+    cut.start = start;
+    cut.end   = end;
+    for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
+        if (overlaps_span(*scan, start, end) && !stage_protection(batch, *scan, cut, terms)) {
+            return base::KernelError::kOutOfMemory;
+        }
+    }
+    const bool kHeapCovered =
+        !heap_recorded_ && heap_.start < heap_.end && overlaps_span(heap_, start, end);
+    const bool kWholeHeap = kHeapCovered && start <= heap_.start && heap_.end <= end;
+    if (kHeapCovered && !kWholeHeap && !stage_protection(batch, heap_, cut, terms)) {
+        return base::KernelError::kOutOfMemory;
+    }
+    for (VmaRegion* scan = regions_.head(); scan != nullptr;) {
+        VmaRegion* const kNext = regions_.after(*scan);
+        if (overlaps_span(*scan, start, end)) {
+            regions_.remove(*scan);
+            delete scan;
+        }
+        scan = kNext;
+    }
+    if (kWholeHeap) {
+        heap_.readable   = terms.readable;
+        heap_.writable   = terms.writable;
+        heap_.executable = terms.executable;
+    } else if (kHeapCovered) {
+        heap_recorded_ = true;
+    }
+    while (VmaRegion* region = batch.regions.pop_head()) {
+        regions_.push_back(*region);
+    }
+    return base::Result<void>{};
+}
+
+bool VmaStore::span_known(unsigned long start, unsigned long end) const {
+    unsigned long spot = start;
+    while (spot < end) {
+        unsigned long reach = spot;
+        if (!heap_recorded_ && heap_.start <= spot && spot < heap_.end) {
+            reach = heap_.end;
+        }
+        for (const VmaRegion* scan = regions_.head(); scan != nullptr;
+             scan                  = regions_.after(*scan)) {
+            if (scan->start <= spot && spot < scan->end) {
+                reach = cinux::base::math::Max(reach, scan->end);
+            }
+        }
+        if (reach <= spot) {
+            return false;
+        }
+        spot = reach;
+    }
+    return true;
+}
+
+unsigned long VmaStore::max_end() const {
+    unsigned long highest = heap_.end;
+    for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
+        highest = cinux::base::math::Max(highest, scan->end);
+    }
+    return highest;
 }
 
 }  // namespace cinux::mm

@@ -1,57 +1,86 @@
 /**
- * @file kernel/proc/lockdep.hpp
- * @brief Runtime lock-order deadlock detector (F4-M5 R6-Part2, opt-in CINUX_LOCKDEP)
- *
- * When CINUX_LOCKDEP is ON, Spinlock::acquire/release call into lockdep to:
- *   - track the stack of spinlocks held on THIS CPU (per-CPU -- the Part1
- *     global depth counter was SMP-unsafe: two CPUs clobbered one counter);
- *   - maintain a global lock-order graph (edge X->Y = "X held when Y acquired");
- *   - on each acquire, DFS the graph for a cycle (AB-BA) and kpanic if found.
- *
- * It also backs the Scheduler::schedule() "no spinlock held across a context
- * switch" assert via lockdep_held_depth().
- *
- * Compiled out (zero cost) when CINUX_LOCKDEP is off.
- *
- * Namespace: cinux::proc.  Lock identity is the Spinlock object address (static
- * Spinlocks have stable addresses; stack/temporary Spinlocks are not tracked
- * meaningfully, which is fine -- they are not lock-order hazards).
+ * @file    lockdep.hpp
+ * @brief   Shared lock-order graph with per-CPU held chains.
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_proc
+ * @copyright Copyright (c) 2026
  */
-
 #pragma once
 
-#include <stdint.h>
+#include "cinux/container/directed_graph.hpp"
+#include "cinux/container/slot_table.hpp"
+#include "cinux/container/static_stack.hpp"
+#include "kernel/arch/x86_64/per_cpu_config.hpp"
 
 namespace cinux::proc {
 
-#ifdef CINUX_LOCKDEP
+/// One line of the held-chain dump: the lock's registered label, or
+/// null when the lock has no name and only the address speaks.
+using LockdepSink = void (*)(const char* label, unsigned long long address);
 
-/// Call AFTER a Spinlock is acquired.  Records it on this CPU's held stack,
-/// checks for recursive acquire and lock-order cycles, and adds graph edges
-/// from every other held lock to this one.
-void lockdep_acquired(const void* lock);
+/**
+ * @brief   Install where the held-chain dump lines go.
+ * @note    Kernel-only callers hand in a printing bridge; without one
+ *          the dump is a silent walk, so host tests and dump-free
+ *          builds lose nothing.
+ * @since   0.4.0
+ * @ingroup kernel_proc
+ */
+void InstallLockdepSink(LockdepSink sink);
 
-/// Call BEFORE a Spinlock is released.  Pops it from this CPU's held stack.
-void lockdep_releasing(const void* lock);
+/**
+ * @brief Instance-based lock-order checker; callers serialize access.
+ * @note  Identity is a live lock address. forget() removes destroyed locks.
+ *        Capacity exhaustion fails instead of silently losing coverage.
+ * @since 0.1.0
+ * @ingroup kernel_proc
+ */
+class LockOrder {
+public:
+    /// Result of an acquisition or release validation.
+    enum class Status : unsigned char {
+        kOk,
+        kCycle,
+        kRecursive,
+        kCapacity,
+        kNotHeld,
+        kOutOfOrder,
+    };
+    /// Maximum distinct live locks and maximum simultaneous nesting.
+    static constexpr unsigned int kLocks = 64;
+    static constexpr unsigned int kDepth = 16;
 
-/// Count of spinlocks currently held on THIS CPU (0 outside any acquire).
-/// Replaces the Part1 global g_lockdep_held_depth; used by schedule()'s
-/// "no spinlock across context switch" assert.
-uint32_t lockdep_held_depth();
+    /// Record an acquisition only when it preserves an acyclic graph.
+    [[nodiscard]] Status acquire(const void* lock);
 
-/// True iff @p lock is currently held on THIS CPU (present on this CPU's
-/// held stack).  Backs the lockdep_assert_held() macro (race_detect.hpp) --
-/// a "must hold this lock to touch this state" check.  O(depth), depth < 3.
-bool lockdep_is_held(const void* lock);
+    /// Release only the innermost held lock, preserving IRQ restore order.
+    [[nodiscard]] Status release(const void* lock);
 
-#else
+    /// Remove a destroyed, unheld lock and every incident edge.
+    [[nodiscard]] bool forget(const void* lock);
 
-inline void     lockdep_acquired(const void* /*lock*/) {}
-inline void     lockdep_releasing(const void* /*lock*/) {}
-inline uint32_t lockdep_held_depth() {
-    return 0;
-}
+    /// Register the human name of a lock ahead of its first acquisition.
+    void name_lock(const void* lock, const char* label);
 
-#endif
+    /**
+     * @brief   Walk the held chain, one sink call per lock, innermost last.
+     * @since   0.4.0
+     */
+    void dump_held();
+
+private:
+    using HeldChain = base::container::StaticStack<unsigned int, kDepth>;
+    HeldChain&                 held();
+    [[nodiscard]] unsigned int find_lock(const void* lock) const;
+    [[nodiscard]] unsigned int vacant_slot() const;
+
+    base::container::SlotTable<const void*, kLocks> locks_;
+    const char*                                     names_[kLocks] = {};
+    base::DirectedGraph<kLocks>                     graph_;
+    HeldChain                                       held_[arch::per_cpu::kMaxCpus];
+};
 
 }  // namespace cinux::proc

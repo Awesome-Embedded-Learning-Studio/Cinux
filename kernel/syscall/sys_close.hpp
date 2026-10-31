@@ -1,27 +1,36 @@
 /**
- * @file kernel/syscall/sys_close.hpp
- * @brief sys_close handler declaration
+ * @file    sys_close.hpp
+ * @brief   Declaration of the close(fd) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Close a file descriptor
+ * @brief         Give a descriptor back.
  *
- * Releases the File entry associated with the given descriptor
- * in the global FDTable.
- *
- * @param fd  File descriptor to close
- * @return 0 on success, or -1 on error
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_close(uint64_t fd, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleClose(const SyscallFrame& frame);
+
+/**
+ * @brief Closes or marks a descriptor interval, optionally unsharing its table.
+ * @param[in] frame First descriptor, last descriptor and flags in rdi/rsi/rdx.
+ * @return Zero, or negative EINVAL or ENOMEM.
+ */
+long long HandleCloseRange(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

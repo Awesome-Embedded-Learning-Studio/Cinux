@@ -1,170 +1,192 @@
-/**
- * @file kernel/net/udp.cpp
- * @brief UdpModule -- inbound checksum verify + port demux, outbound TX.
- *
- * Inbound: parse the 8-byte header, verify the pseudo-header checksum (unless
- * the sender set checksum=0, RFC 768 "no checksum"), then dispatch to the
- * listener bound to the destination port.  Outbound: lay out [pseudo-header |
- * UDP header | payload] in one buffer, run internet_checksum once over the whole
- * run, embed it, and emit the UDP portion via Ipv4Module::send (proto=17).
- * Zero kprintf.
- *
- * Checksum note: the UDP checksum covers a 12-byte pseudo-header (src IP, dst IP,
- * zero, proto, UDP length) + the UDP header + payload.  Computing it over one
- * contiguous buffer (rather than summing a pseudo-header partial + L4 bytes
- * separately) avoids the fold/complement plumbing -- internet_checksum does both
- * in one pass, and verify_internet_checksum re-sums the same run on RX.
- *
- * Namespace: cinux::net
- */
-
 #include "kernel/net/udp.hpp"
 
-#include <cinux/checksum.hpp>
-#include <cstring>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/net_stack.hpp"  // InDevice, NetStack
+#include "cinux/byte_order.hpp"
+#include "cinux/checksum.hpp"
+#include "kernel/net/ipv4.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 
 namespace cinux::net {
 
 namespace {
 
-/// Max UDP payload we will send: an L4 datagram behind a 14-byte L2 + 20-byte
-/// IPv4 header must fit one Ethernet frame.  The checksum buffer stays off the
-/// kernel stack (HeapBuf below).
-constexpr uint32_t kMaxUdpPayload = 1518 - 14 - sizeof(Ipv4Header) - sizeof(UdpHeader);
+/**
+ * @brief   The pseudo header's fixed shape: twelve bytes, three facts.
+ * @note    Source and destination addresses, the protocol word, and the
+ *          UDP length the checksum must sum ahead of the datagram. Kept
+ *          as byte counts so the write words stay plain.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+constexpr unsigned long kPseudoHeaderBytes = 12;
 
-/// Local RAII heap buffer (no <memory>): the TX/RX checksum buffers (up to
-/// ~1.5KB) stay off the kernel stack.  See ipv4.cpp's HeapBuf for the
-/// freestanding-header rationale (new[]/delete[] via crt_stub, not <memory>).
-struct HeapBuf {
-    uint8_t* p;
-    explicit HeapBuf(size_t n) : p(new uint8_t[n]) {}
-    ~HeapBuf() { delete[] p; }
-    HeapBuf(const HeapBuf&)            = delete;
-    HeapBuf& operator=(const HeapBuf&) = delete;
-};
-
-/// @brief Write the 12-byte UDP pseudo-header at @p ph.  @p udp_len is the UDP
-///        length field (header + payload); TX and RX reconstruct it identically
-///        so the receiver's checksum verify matches the sender's compute.
-void build_pseudo_header(uint8_t* ph, Ipv4Addr src, Ipv4Addr dst, uint16_t udp_len) {
-    for (int i = 0; i < 4; ++i) {
-        ph[i]     = src.oct[i];
-        ph[4 + i] = dst.oct[i];
-    }
-    ph[8]  = 0;  // zero
-    ph[9]  = kIpProtoUdp;
-    ph[10] = static_cast<uint8_t>(udp_len >> 8);
-    ph[11] = static_cast<uint8_t>(udp_len & 0xFF);
+void build_pseudo_header(unsigned char* pseudo, uint32_t source, uint32_t destination,
+                         uint16_t datagram_bytes) {
+    base::WriteWord32Be(pseudo, 0, source);
+    base::WriteWord32Be(pseudo, 4, destination);
+    pseudo[8] = 0;
+    pseudo[9] = kIpv4ProtocolUdp;
+    base::WriteWord16Be(pseudo, 10, datagram_bytes);
 }
 
 }  // namespace
 
-bool UdpModule::bind(uint16_t port, UdpListener& listener) {
-    for (uint32_t i = 0; i < kMaxUdpPorts; ++i) {
-        if (ports_[i].l != nullptr && ports_[i].port == port) {
-            return false;  // already bound
+void UdpModule::init(const DatagramSink& sink, uint32_t own_address) {
+    sink_        = sink;
+    own_address_ = own_address;
+    stats_       = {};
+}
+
+void UdpModule::aim(const DatagramSink& sink, uint32_t own_address) {
+    sink_        = sink;
+    own_address_ = own_address;
+}
+
+void UdpModule::handle(const unsigned char* bytes, size_t length, const Ipv4View& header) {
+    const auto kView = ParseUdp(bytes, length);
+    if (!kView.ok()) {
+        if (kView.error() == UdpError::kDatagramTooShort) {
+            ++stats_.refused_short;
+        } else {
+            ++stats_.refused_length;
+        }
+        return;
+    }
+    if (kView.value().length < kUdpHeaderBytes || kView.value().length > length) {
+        ++stats_.refused_length;
+        return;
+    }
+
+    if (kView.value().checksum != 0) {
+        unsigned char pseudo[kPseudoHeaderBytes] = {};
+        build_pseudo_header(pseudo, header.source, header.destination, kView.value().length);
+        base::InternetChecksum verifier;
+        verifier.add(pseudo, sizeof(pseudo));
+        verifier.add(bytes, kView.value().length);
+        if (verifier.value() != 0) {
+            ++stats_.refused_checksum;
+            return;
         }
     }
-    for (uint32_t i = 0; i < kMaxUdpPorts; ++i) {
-        if (ports_[i].l == nullptr) {
-            ports_[i].port = port;
-            ports_[i].l    = &listener;
+
+    const auto kPorts = ports_gate_.guard();
+    for (unsigned long index = 0; index < port_count_; ++index) {
+        if (ports_[index].port == kView.value().destination_port) {
+            const UdpDelivery kDelivery = {
+                .sender      = header.source,
+                .sender_port = kView.value().source_port,
+                .bytes       = bytes + kUdpHeaderBytes,
+                .length      = static_cast<size_t>(kView.value().length) - kUdpHeaderBytes,
+            };
+            ports_[index].deliver(ports_[index].context, kDelivery);
+            ++stats_.delivered;
+            return;
+        }
+    }
+    ++stats_.unclaimed;
+}
+
+// NOLINTNEXTLINE(readability-function-size) a UDP send names five facts
+bool UdpModule::send(uint32_t destination, uint16_t source_port, uint16_t destination_port,
+                     const unsigned char* payload, size_t length) {
+    if (length > kMaxDatagramBytes - kMinIpv4HeaderBytes - kUdpHeaderBytes) {
+        return false;
+    }
+    unsigned char outgoing[kMaxDatagramBytes]{};
+    const auto    kDatagramBytes = static_cast<uint16_t>(kUdpHeaderBytes + length);
+    base::WriteWord16Be(outgoing, 0, source_port);
+    base::WriteWord16Be(outgoing, 2, destination_port);
+    base::WriteWord16Be(outgoing, 4, kDatagramBytes);
+    base::WriteWord16Be(outgoing, 6, 0);
+    for (size_t index = 0; index < length; ++index) {
+        outgoing[kUdpHeaderBytes + index] = payload[index];
+    }
+
+    unsigned char pseudo[kPseudoHeaderBytes] = {};
+    build_pseudo_header(pseudo, SourceAddressFor(own_address_, destination), destination,
+                        kDatagramBytes);
+    base::InternetChecksum builder;
+    builder.add(pseudo, sizeof(pseudo));
+    builder.add(outgoing, kDatagramBytes);
+    uint16_t checksum = builder.value();
+    if (checksum == 0) {
+        checksum = 0xFFFF;
+    }
+    base::WriteWord16Be(outgoing, 6, checksum);
+
+    if (!sink_.assigned()) {
+        return false;
+    }
+    const OutboundDatagram kDatagram = {
+        .destination = destination,
+        .protocol    = kIpv4ProtocolUdp,
+        .payload     = outgoing,
+        .length      = kDatagramBytes,
+    };
+    sink_.send(sink_.context, kDatagram);
+    ++stats_.sent;
+    return true;
+}
+
+bool UdpModule::bind(uint16_t port, void* context, UdpDeliver deliver) {
+    const auto kPorts = ports_gate_.guard();
+    if (deliver == nullptr) {
+        return false;
+    }
+    if (port_count_ == kUdpPortSeats) {
+        return false;
+    }
+    for (unsigned long index = 0; index < port_count_; ++index) {
+        if (ports_[index].port == port) {
+            return false;
+        }
+    }
+    ports_[port_count_] = {.port = port, .context = context, .deliver = deliver};
+    ++port_count_;
+    return true;
+}
+
+bool UdpModule::unbind(uint16_t port) {
+    const auto kPorts = ports_gate_.guard();
+    for (unsigned long index = 0; index < port_count_; ++index) {
+        if (ports_[index].port == port) {
+            ports_[index] = ports_[port_count_ - 1];
+            --port_count_;
             return true;
         }
     }
-    return false;  // table full
+    return false;
 }
 
-void UdpModule::unbind(uint16_t port) {
-    for (uint32_t i = 0; i < kMaxUdpPorts; ++i) {
-        if (ports_[i].l != nullptr && ports_[i].port == port) {
-            ports_[i].l    = nullptr;
-            ports_[i].port = 0;
-            return;
+uint16_t UdpModule::ephemeral_port() const {
+    const auto kPorts = ports_gate_.guard();
+    for (uint32_t scan = 0; scan <= kEphemeralPortLast - kEphemeralPortFirst; ++scan) {
+        const auto kCandidate = static_cast<uint16_t>(
+            kEphemeralPortFirst + ((ephemeral_cursor_ - kEphemeralPortFirst + scan) %
+                                   (kEphemeralPortLast - kEphemeralPortFirst + 1)));
+        bool taken = false;
+        for (unsigned long index = 0; index < port_count_; ++index) {
+            if (ports_[index].port == kCandidate) {
+                taken = true;
+                break;
+            }
+        }
+        if (!taken) {
+            return kCandidate;
         }
     }
+    return 0;
 }
 
-cinux::lib::ErrorOr<void> UdpModule::send(NetDevice& dev, Ipv4Addr dst, uint16_t src_port,
-                                          uint16_t dst_port, const uint8_t* data, uint32_t len,
-                                          Ipv4Module& ipv4, NetStack& stack) {
-    if (len > kMaxUdpPayload) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    const InDevice* cfg = stack.config_for(dev);
-    if (cfg == nullptr) {
-        return cinux::lib::Error::InvalidArgument;  // no source address for this device
-    }
-
-    const uint16_t udp_len = static_cast<uint16_t>(sizeof(UdpHeader) + len);
-
-    // One contiguous run = [pseudo-header(12) | UDP header(8) | payload(len)].
-    // internet_checksum over the whole run yields the UDP checksum; we then send
-    // the UDP portion (past the pseudo-header) so the pseudo-header never goes on
-    // the wire.  The checksum field is zero during compute, embedded after.
-    HeapBuf buf(12 + sizeof(UdpHeader) + len);
-    build_pseudo_header(buf.p, cfg->local, dst, udp_len);
-
-    UdpHeader h{};
-    h.src_port = src_port;
-    h.dst_port = dst_port;
-    h.length   = udp_len;
-    h.checksum = 0;
-    build_udp_header(h, buf.p + 12);
-    if (len > 0) {
-        std::memcpy(buf.p + 12 + sizeof(UdpHeader), data, len);
-    }
-
-    uint16_t cs = cinux::lib::internet_checksum(buf.p, 12 + sizeof(UdpHeader) + len);
-    // RFC 768: a computed checksum of 0 is transmitted as 0xFFFF (0 == "no checksum").
-    if (cs == 0) {
-        cs = 0xFFFF;
-    }
-    buf.p[12 + 6] = static_cast<uint8_t>(cs >> 8);  // UDP header checksum field
-    buf.p[12 + 7] = static_cast<uint8_t>(cs & 0xFF);
-
-    // Emit the UDP portion (past the 12-byte pseudo-header).
-    return ipv4.send(dev, dst, kIpProtoUdp, buf.p + 12, sizeof(UdpHeader) + len, stack);
+const UdpStats& UdpModule::stats() const {
+    return stats_;
 }
 
-void UdpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& /*dev*/,
-                       Ipv4Module& /*ipv4*/, NetStack& /*stack*/) {
-    if (payload.size() < sizeof(UdpHeader)) {
-        return;  // short / not a UDP datagram
-    }
-    UdpHeader h;
-    parse_udp(payload.data(), h);
-
-    // h.length must cover at least the header and not exceed what was delivered.
-    if (h.length < sizeof(UdpHeader) || h.length > payload.size()) {
-        return;  // insane length -> drop
-    }
-
-    // Verify the checksum unless the sender set checksum=0 ("no checksum", RFC 768).
-    // Reconstruct the SAME run the sender summed: pseudo-header(12, UDP length =
-    // h.length) + the first h.length received bytes (UDP header + payload, with
-    // the embedded checksum).  Trailing bytes beyond h.length are padding, not
-    // summed.
-    if (h.checksum != 0) {
-        HeapBuf buf(12 + h.length);
-        build_pseudo_header(buf.p, ip.src, ip.dst, h.length);
-        std::memcpy(buf.p + 12, payload.data(), h.length);
-        if (!cinux::lib::verify_internet_checksum(buf.p, 12 + h.length)) {
-            return;  // corrupt -> silently drop
-        }
-    }
-
-    const uint32_t plen = h.length - sizeof(UdpHeader);
-    for (uint32_t i = 0; i < kMaxUdpPorts; ++i) {
-        if (ports_[i].l != nullptr && ports_[i].port == h.dst_port) {
-            ports_[i].l->on_udp(ip, h.src_port,
-                                FrameView(payload.data() + sizeof(UdpHeader), plen));
-            return;
-        }
-    }
-    // no listener bound to dst_port -> silent drop (like Linux's no-socket-on-port)
+uint32_t UdpModule::own_address() const {
+    return own_address_;
 }
 
 }  // namespace cinux::net

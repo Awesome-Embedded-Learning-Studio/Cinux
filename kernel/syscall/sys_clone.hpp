@@ -1,27 +1,36 @@
 /**
- * @file kernel/syscall/sys_clone.hpp
- * @brief clone syscall handler (F3-M2 batch 4)
+ * @file    sys_clone.hpp
+ * @brief   Declaration of the clone() syscall handler.
  *
- * Linux syscall 56: create a new task sharing resources per the CLONE_*
- * flags.  Delegates to cinux::proc::clone().
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-17
+ * @version 0.1
+ * @since   0.8.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief clone(flags, stack, parent_tid, child_tid, tls)
+ * @brief         Fork with a say in what stays shared.
  *
- * @return child tid (>0) to the parent, or -errno on failure.
+ * @param[in]     frame   The entry frame: rdi carries the flags, rsi the
+ *                        child's first user stack pointer, r8 the
+ *                        thread pointer for CLONE_SETTLS.
+ * @return        The child's pid in the parent, or a negative errno.
+ * @note          The child wakes at the same syscall return tail the
+ *                fork child does, with rax zero and the caller-given
+ *                stack under it; it is a thread of the maker's group
+ *                under CLONE_THREAD, so getpid there answers the
+ *                maker's tgid.
+ * @since         0.8.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t child_tid,
-                  uint64_t tls, uint64_t);
+long long HandleClone(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

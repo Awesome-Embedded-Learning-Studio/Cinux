@@ -1,5 +1,3 @@
-# user/CMakeLists.txt - User-space program compilation
-
 set(USER_COMPILE_FLAGS
     -ffreestanding
     -fno-exceptions
@@ -8,80 +6,206 @@ set(USER_COMPILE_FLAGS
     -fno-stack-protector
     -mcmodel=small
     -mno-red-zone
+    -std=c++23
     -Wall
     -Wextra
-    -O2
-)
+    -O2)
 
-# ---- User libc (static library) ----
-add_library(user_libc STATIC
-    libc/syscall.cpp
-    libc/string.cpp
-    libc/printf.cpp
-)
-target_compile_options(user_libc PRIVATE ${USER_COMPILE_FLAGS})
-target_compile_definitions(user_libc PRIVATE __USER__)
-target_include_directories(user_libc PUBLIC
+set(USER_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}
-)
+    ${CMAKE_SOURCE_DIR}/base/include)
 
-# ---- User program: shell ----
-add_executable(user_shell
-    programs/shell/main.cpp
-    programs/shell/cmd_echo.cpp
-    programs/shell/cmd_help.cpp
-    programs/shell/cmd_clear.cpp
-    programs/shell/cmd_cat.cpp
-    programs/shell/cmd_ls.cpp
-    programs/shell/cmd_touch.cpp
-    programs/shell/cmd_mkdir.cpp
-    programs/shell/cmd_rm.cpp
-    programs/shell/cmd_rmdir.cpp
-    programs/shell/cmd_cd.cpp
-    programs/shell/cmd_pwd.cpp
-    programs/shell/cmd_stat.cpp
-    programs/shell/cmd_ping.cpp
-    programs/shell/cmd_mkfifo.cpp
-    programs/shell/cmd_fifotest.cpp
-)
+add_executable(user_shell programs/shell.cpp)
 target_compile_options(user_shell PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_shell PRIVATE ${USER_INCLUDE_DIRS})
 target_compile_definitions(user_shell PRIVATE __USER__)
 target_link_options(user_shell PRIVATE
-    -T ${CMAKE_CURRENT_SOURCE_DIR}/linker.ld
     -nostdlib
     -static
     -no-pie
-)
-target_link_libraries(user_shell PRIVATE user_libc)
+    -Wl,-e,_start
+    -lgcc)
 set_target_properties(user_shell PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user)
+
+set_target_properties(user_shell PROPERTIES OUTPUT_NAME "shell.elf")
+
+add_executable(user_hello programs/hello.cpp)
+target_compile_options(user_hello PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_hello PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_hello PRIVATE __USER__)
+target_link_options(user_hello PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_hello PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
-    OUTPUT_NAME "shell"
-)
+    OUTPUT_NAME "hello.elf")
 
-# ---- Post-build: ELF -> flat binary ----
-set(USER_SHELL_ELF $<TARGET_FILE:user_shell>)
-set(USER_SHELL_BIN "${CMAKE_BINARY_DIR}/user/shell.bin")
+add_executable(user_mapper programs/mapper.cpp)
+target_compile_options(user_mapper PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_mapper PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_mapper PRIVATE __USER__)
+target_link_options(user_mapper PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_mapper PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "mapper.elf")
 
-add_custom_command(TARGET user_shell POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O binary ${USER_SHELL_ELF} ${USER_SHELL_BIN}
-    COMMENT "Converting user shell to flat binary"
-    VERBATIM
-)
+add_executable(user_sigdemo programs/sigdemo.cpp)
+target_compile_options(user_sigdemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_sigdemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_sigdemo PRIVATE __USER__)
+target_link_options(user_sigdemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_sigdemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "sigdemo.elf")
 
-# ---- Embed flat binary into linkable .o ----
-set(USER_BINARY_OBJ "${CMAKE_BINARY_DIR}/user/user_binary.o")
+add_executable(user_sigcatch programs/sigcatch.cpp)
+target_compile_options(user_sigcatch PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_sigcatch PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_sigcatch PRIVATE __USER__)
+target_link_options(user_sigcatch PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_sigcatch PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "sigcatch.elf")
 
-add_custom_command(
-    OUTPUT ${USER_BINARY_OBJ}
-    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C
-        ${CMAKE_LINKER} -r -b binary
-        -o ${USER_BINARY_OBJ}
-        shell.bin
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/user
-    DEPENDS user_shell ${USER_SHELL_BIN}
-    COMMENT "Creating linkable object from user binary"
-    VERBATIM
-)
+add_executable(user_nxdemo programs/nxdemo.cpp)
+target_compile_options(user_nxdemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_nxdemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_nxdemo PRIVATE __USER__)
+target_link_options(user_nxdemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_nxdemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "nxdemo.elf")
 
-add_custom_target(user_binary_obj DEPENDS ${USER_BINARY_OBJ})
+add_executable(user_efaulter programs/efaulter.cpp)
+target_compile_options(user_efaulter PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_efaulter PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_efaulter PRIVATE __USER__)
+target_link_options(user_efaulter PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_efaulter PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "efaulter.elf")
+
+add_executable(user_smepdemo programs/smepdemo.cpp)
+target_compile_options(user_smepdemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_smepdemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_smepdemo PRIVATE __USER__)
+target_link_options(user_smepdemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_smepdemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "smepdemo.elf")
+
+add_executable(user_aslrdemo programs/aslrdemo.cpp)
+target_compile_options(user_aslrdemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_aslrdemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_aslrdemo PRIVATE __USER__)
+target_link_options(user_aslrdemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_aslrdemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "aslrdemo.elf")
+
+add_executable(user_tlsdemo programs/tlsdemo.cpp)
+target_compile_options(user_tlsdemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_tlsdemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_tlsdemo PRIVATE __USER__)
+target_link_options(user_tlsdemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_tlsdemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "tlsdemo.elf")
+
+add_executable(user_threaddemo programs/threaddemo.cpp)
+target_compile_options(user_threaddemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_threaddemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_threaddemo PRIVATE __USER__)
+target_link_options(user_threaddemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_threaddemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "threaddemo.elf")
+
+add_executable(user_ttydemo programs/ttydemo.cpp)
+target_compile_options(user_ttydemo PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_ttydemo PRIVATE ${USER_INCLUDE_DIRS})
+target_compile_definitions(user_ttydemo PRIVATE __USER__)
+target_link_options(user_ttydemo PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+    -Wl,-e,_start
+    -lgcc)
+set_target_properties(user_ttydemo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "ttydemo.elf")
+
+add_executable(user_smpstress programs/smpstress.cpp
+    ${CMAKE_SOURCE_DIR}/boot/early/libc.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp)
+target_compile_options(user_smpstress PRIVATE ${USER_COMPILE_FLAGS})
+target_include_directories(user_smpstress PRIVATE ${USER_INCLUDE_DIRS})
+target_link_options(user_smpstress PRIVATE -nostdlib -static -no-pie -Wl,-e,_start -lgcc)
+set_target_properties(user_smpstress PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/user
+    OUTPUT_NAME "smpstress.elf")
+
+foreach(program IN ITEMS shell hello mapper sigdemo sigcatch nxdemo efaulter
+        smepdemo aslrdemo tlsdemo threaddemo ttydemo smpstress)
+    target_sources(user_${program} PRIVATE start.S)
+endforeach()
+
+add_executable(user_ecotest rootfs/busybox/ecotest.c)
+target_compile_options(user_ecotest PRIVATE -std=gnu17 -O2 -Wall -Wextra -Werror -fno-pie)
+target_link_options(user_ecotest PRIVATE -no-pie -Wl,-rpath,/lib
+    -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2)
+set_target_properties(user_ecotest PROPERTIES OUTPUT_NAME ecotest
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/glibc)
+
+add_subdirectory(examples EXCLUDE_FROM_ALL)

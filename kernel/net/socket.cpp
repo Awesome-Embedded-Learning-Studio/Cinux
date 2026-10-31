@@ -1,158 +1,636 @@
-/**
- * @file kernel/net/socket.cpp
- * @brief Socket base default virtuals + SocketOps InodeOps shim (F7-M6 batch 1b).
- *
- * Batch 1b ships only the plumbing: the Socket base stubs (every protocol op
- * returns Error::NotImplemented) + the SocketOps shim (read->recv, write->send).
- * UdpSocket (B2) / TcpSocket (B3) override the virtuals to do real work; the
- * stubs make the fd + syscall machinery exercisable first, in isolation.
- *
- * This file stays decoupled (CODING-TASTE §14 + check_net_decoupling.sh): it
- * pulls in no driver / dma / arch-irq header -- only the net types + the fs
- * InodeOps seam.  The blocking wait-queue path (B2/B3) is scheduler-coupled and
- * host-guarded there, mirroring kernel/ipc/pipe.cpp.
- *
- * Namespace: cinux::net
- */
-
 #include "kernel/net/socket.hpp"
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <atomic>
+#include <cstdint>
+
+#include "cinux/byte_order.hpp"
+#include "cinux/checksum.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
+#include "kernel/net/raw.hpp"
+#include "kernel/net/tcp.hpp"
+#include "kernel/net/udp.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/sync.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 
 namespace cinux::net {
 
-// ============================================================
-// Socket base -- default (stub) virtuals.  Overridden by B2/B3.
-// ============================================================
+namespace {
 
-cinux::lib::ErrorOr<void> Socket::bind(uint16_t /*local_port*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<void> Socket::connect(Ipv4Addr /*remote*/, uint16_t /*remote_port*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-// AF_UNIX path-shaped variants -- default stubs.  Overridden by UnixSocket.
-cinux::lib::ErrorOr<void> Socket::bind_path(const char* /*path*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<void> Socket::connect_path(const char* /*path*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<void> Socket::listen(int /*backlog*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<Socket*> Socket::accept(Ipv4Addr* /*out_remote*/, uint16_t* /*out_port*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<int64_t> Socket::send(const uint8_t* /*buf*/, uint32_t /*len*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<int64_t> Socket::sendto(Ipv4Addr /*dst*/, uint16_t /*dst_port*/,
-                                            const uint8_t* /*buf*/, uint32_t /*len*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-cinux::lib::ErrorOr<int64_t> Socket::recv(uint8_t* /*buf*/, uint32_t /*len*/, Ipv4Addr* /*out_src*/,
-                                          uint16_t* /*out_port*/) {
-    return cinux::lib::Error::NotImplemented;
-}
-void Socket::close() {}
+/// One boot-wide counter: every socket born gets the next number.
+std::atomic<unsigned long> g_socket_identities{0};
 
-// F-ECO batch 7b: address retrieval + shutdown state.  Defaults: no name.  The
-// do_shutdown bits live here (base); subclass send()/recv() consult shut_read()/
-// shut_write() at entry.
-bool Socket::get_local_addr(SockAddrStorage* /*out*/) const {
-    return false;
+/// The mode a socket answers stat with: a socket, owner read-write.
+constexpr unsigned int kSocketMode = 0140600;
+
+base::Result<void> socket_stat(void* /*self*/, fs::FsNode node, fs::FsStat& probed) {
+    probed       = fs::FsStat{};
+    probed.ino   = node.ino;
+    probed.mode  = kSocketMode;
+    probed.links = 1;
+    return {};
 }
-bool Socket::get_peer_addr(SockAddrStorage* /*out*/) const {
-    return false;
+
+// NOLINTNEXTLINE(readability-function-size) the FsOps signature names five
+base::Result<unsigned long> socket_read(void* self, fs::FsNode /*node*/, unsigned long /*offset*/,
+                                        void* sink, unsigned long count) {
+    return static_cast<Socket*>(self)->receive(sink, count, nullptr);
 }
-void Socket::do_shutdown(int how) {
-    if (how == kShutRd || how == kShutRdwr) {
-        shut_ |= kShutRdBit;
-    }
-    if (how == kShutWr || how == kShutRdwr) {
-        shut_ |= kShutWrBit;
+
+// NOLINTNEXTLINE(readability-function-size) the FsOps signature names five
+base::Result<unsigned long> socket_write(void* self, fs::FsNode /*node*/, unsigned long /*offset*/,
+                                         const void* source, unsigned long count) {
+    const SocketAddress kAnyone = {};
+    return static_cast<Socket*>(self)->transmit(source, count, kAnyone);
+}
+
+void socket_retain(void* self, fs::FsNode /*node*/) {
+    static_cast<Socket*>(self)->retain();
+}
+
+void socket_release(void* self, fs::FsNode /*node*/) {
+    auto* const kSocket = static_cast<Socket*>(self);
+    if (kSocket->release()) {
+        delete kSocket;
     }
 }
 
-// ============================================================
-// SocketOps -- the InodeOps shim (one shared, stateless instance).
-// ============================================================
-
-SocketOps& socket_ops() {
-    static SocketOps instance;
-    return instance;
+bool socket_readable(void* self, fs::FsNode /*node*/) {
+    return static_cast<Socket*>(self)->holds_input();
 }
 
-cinux::lib::ErrorOr<int64_t> SocketOps::read(const cinux::fs::Inode* inode, uint64_t /*offset*/,
-                                             void* buf, uint64_t count) {
-    auto* s = socket_of(inode);
-    if (s == nullptr) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    auto r = s->recv(static_cast<uint8_t*>(buf), static_cast<uint32_t>(count), nullptr, nullptr);
-    if (!r.ok()) {
-        return r.error();
-    }
-    return *r;
+const fs::FsOps kOps{
+    .lookup     = nullptr,
+    .make_file  = nullptr,
+    .make_dir   = nullptr,
+    .unlink     = nullptr,
+    .read       = socket_read,
+    .write      = socket_write,
+    .read_dir   = nullptr,
+    .stat       = socket_stat,
+    .retain     = socket_retain,
+    .release    = socket_release,
+    .readable   = socket_readable,
+    .ioctl      = nullptr,
+    .adopt_open = nullptr,
+};
+
+}  // namespace
+
+Socket::Socket(int socket_type, int family)
+    : type_(socket_type),
+      family_(family),
+      identity_(g_socket_identities.fetch_add(1, std::memory_order_relaxed) + 1) {}
+
+unsigned short Socket::poll_events(unsigned int events) const {
+    constexpr unsigned int kRead  = 1;
+    constexpr unsigned int kWrite = 4;
+    return static_cast<unsigned short>((events & kWrite) | (holds_input() ? events & kRead : 0));
 }
 
-cinux::lib::ErrorOr<int64_t> SocketOps::write(cinux::fs::Inode* inode, uint64_t /*offset*/,
-                                              const void* buf, uint64_t count) {
-    auto* s = socket_of(inode);
-    if (s == nullptr) {
-        return cinux::lib::Error::InvalidArgument;
+UdpSocket::UdpSocket(UdpModule& module) : Socket(kSockDgram), module_(module) {}
+
+UdpSocket::~UdpSocket() {
+    const proc::PreemptGuard kPin;
+    if (seated_) {
+        module_.unbind(local_.port);
     }
-    auto r = s->send(static_cast<const uint8_t*>(buf), static_cast<uint32_t>(count));
-    if (!r.ok()) {
-        return r.error();
-    }
-    return *r;
+    ring_gate_.retire();
 }
 
-// ============================================================
-// F8-M5: poll readiness.  Socket base default + SocketOps delegation.
-// ============================================================
-
-// Base default: a bare/unconnected socket reports nothing ready and never parks
-// a poller.  Udp/Tcp/Unix override to inspect their rx ring / accept queue and
-// register on the wait queue a blocked recv/accept already uses.
-uint32_t Socket::poll_events(cinux::proc::Task*, bool* registered) {
-    if (registered != nullptr) {
-        *registered = false;
+base::Result<unsigned long> UdpSocket::receive(void* sink, unsigned long count,
+                                               SocketAddress* from) {
+    if (count == 0) {
+        return 0;
     }
-    return 0;
+    const auto kGate = ring_gate_.guard();
+    Waiting    taken{};
+    if (!waiting_.pop(taken)) {
+        return base::KernelError::kWouldBlock;
+    }
+    const unsigned long kBytes = taken.length < count ? taken.length : count;
+    base::CopyBytes(sink, taken.bytes, kBytes);
+    if (from != nullptr) {
+        *from = taken.from;
+    }
+    return kBytes;
 }
 
-void Socket::poll_detach_waiter(cinux::proc::Task*) {
-    // Base never registers; nothing to remove.
-}
-
-uint32_t SocketOps::poll_events(const cinux::fs::Inode* inode, cinux::proc::Task* waiter,
-                                bool* registered) {
-    auto* s = socket_of(inode);
-    if (s == nullptr) {
-        if (registered != nullptr) {
-            *registered = false;
+base::Result<unsigned long> UdpSocket::transmit(const void* source, unsigned long count,
+                                                const SocketAddress& destination) {
+    const proc::PreemptGuard kPin;
+    if (count > kUdpSocketPayloadBytes) {
+        return base::KernelError::kNotSupported;
+    }
+    SocketAddress target = destination;
+    if (target.address == 0 && target.port == 0) {
+        if (!named_) {
+            return base::KernelError::kNotFound;
         }
-        return cinux::fs::kPollErr;  // no Socket bound to this inode -> error
+        target = peer_;
     }
-    return s->poll_events(waiter, registered);
+
+    if (!seated_) {
+        const uint16_t kGranted = module_.ephemeral_port();
+        if (kGranted == 0 || !module_.bind(kGranted, this, &UdpSocket::take)) {
+            return base::KernelError::kAlreadyExists;
+        }
+        seated_     = true;
+        local_.port = kGranted;
+    }
+    if (!module_.send(target.address, local_.port, target.port,
+                      static_cast<const unsigned char*>(source), count)) {
+        return base::KernelError::kIOError;
+    }
+    return count;
 }
 
-void SocketOps::poll_detach_waiter(const cinux::fs::Inode* inode, cinux::proc::Task* waiter) {
-    auto* s = socket_of(inode);
-    if (s != nullptr) {
-        s->poll_detach_waiter(waiter);
+base::Result<void> UdpSocket::adopt_local(const SocketAddress& local) {
+    const proc::PreemptGuard kPin;
+    if (seated_) {
+        return base::KernelError::kAlreadyExists;
+    }
+    uint16_t port = local.port;
+    if (port == 0) {
+        port = module_.ephemeral_port();
+        if (port == 0) {
+            return base::KernelError::kAlreadyExists;
+        }
+    }
+    if (!module_.bind(port, this, &UdpSocket::take)) {
+        return base::KernelError::kAlreadyExists;
+    }
+    local_      = local;
+    local_.port = port;
+    seated_     = true;
+    return {};
+}
+
+base::Result<void> UdpSocket::adopt_peer(const SocketAddress& peer) {
+    peer_  = peer;
+    named_ = true;
+    return {};
+}
+
+base::Result<void> UdpSocket::report_local(SocketAddress& local) const {
+    local = local_;
+    if (local.address == 0) {
+        local.address = module_.own_address();
+    }
+    return {};
+}
+
+base::Result<void> UdpSocket::report_peer(SocketAddress& peer) const {
+    if (!named_) {
+        return base::KernelError::kNotFound;
+    }
+    peer = peer_;
+    return {};
+}
+
+bool UdpSocket::holds_input() const {
+    const auto kGate = ring_gate_.guard();
+    return waiting_.count() != 0;
+}
+
+unsigned long UdpSocket::dropped() const {
+    const auto kGate = ring_gate_.guard();
+    return dropped_;
+}
+
+void UdpSocket::take(void* context, const UdpDelivery& delivery) {
+    auto* const kSelf = static_cast<UdpSocket*>(context);
+    const auto  kGate = kSelf->ring_gate_.guard();
+    Waiting     room{};
+    room.from = SocketAddress{.address = delivery.sender, .port = delivery.sender_port};
+    room.from.datagram_bytes = delivery.length;
+    room.length =
+        delivery.length < kUdpSocketPayloadBytes ? delivery.length : kUdpSocketPayloadBytes;
+    base::CopyBytes(room.bytes, delivery.bytes, room.length);
+    if (!kSelf->waiting_.push(room)) {
+        ++kSelf->dropped_;
     }
 }
 
-void SocketOps::release(cinux::fs::Inode* inode) {
-    // Closing a socket fd: release the protocol resources (unbind the port,
-    // stop listening, send FIN).  Each socket fd owns exactly one Socket, so a
-    // plain close -> Socket::close() is correct without inode refcounting.
-    auto* s = socket_of(inode);
-    if (s != nullptr) {
-        s->close();
+RawSocket::RawSocket(RawModule& module) : Socket(kSockRaw), module_(module) {
+    seated_ = module_.bind(this, take);
+}
+
+RawSocket::~RawSocket() {
+    if (seated_) {
+        module_.unbind(this);
     }
+    gate_.retire();
+}
+
+base::Result<unsigned long> RawSocket::receive(void* sink, unsigned long count,
+                                               SocketAddress* from) {
+    const auto kGuard = gate_.guard();
+    Waiting    taken{};
+    if (!waiting_.pop(taken)) {
+        return base::KernelError::kWouldBlock;
+    }
+    const auto kBytes = taken.length < count ? taken.length : count;
+    base::CopyBytes(sink, taken.bytes, kBytes);
+    if (from != nullptr) {
+        *from = taken.from;
+    }
+    return kBytes;
+}
+
+base::Result<unsigned long> RawSocket::transmit(const void* source, unsigned long count,
+                                                const SocketAddress& destination) {
+    SocketAddress target = destination;
+    {
+        const auto kGuard = gate_.guard();
+        if (target.address == 0 && named_) {
+            target = peer_;
+        }
+    }
+    if (target.address == 0) {
+        return base::KernelError::kNotFound;
+    }
+    if (count > kMaxDatagramBytes - kMinIpv4HeaderBytes) {
+        return base::KernelError::kNotSupported;
+    }
+    if (!module_.send(target.address, static_cast<const unsigned char*>(source), count)) {
+        return base::KernelError::kIOError;
+    }
+    return count;
+}
+
+base::Result<void> RawSocket::adopt_local(const SocketAddress& local) {
+    const auto kGuard = gate_.guard();
+    local_            = local;
+    return {};
+}
+
+base::Result<void> RawSocket::adopt_peer(const SocketAddress& peer) {
+    const auto kGuard = gate_.guard();
+    peer_             = peer;
+    named_            = true;
+    return {};
+}
+
+base::Result<void> RawSocket::report_local(SocketAddress& local) const {
+    const auto kGuard = gate_.guard();
+    local             = local_;
+    return {};
+}
+
+base::Result<void> RawSocket::report_peer(SocketAddress& peer) const {
+    const auto kGuard = gate_.guard();
+    if (!named_) {
+        return base::KernelError::kNotFound;
+    }
+    peer = peer_;
+    return {};
+}
+
+bool RawSocket::holds_input() const {
+    const auto kGuard = gate_.guard();
+    return waiting_.count() != 0;
+}
+
+void RawSocket::take(void* context, const unsigned char* bytes, size_t length,
+                     const Ipv4View& header) {
+    auto&      self   = *static_cast<RawSocket*>(context);
+    const auto kGuard = self.gate_.guard();
+    if ((self.local_.address != 0 && self.local_.address != header.destination) ||
+        (self.named_ && self.peer_.address != header.source)) {
+        return;
+    }
+    Waiting entry{};
+    entry.from.address = header.source;
+    entry.from.received_ttl = bytes[8];
+    entry.from.received_ns = syscall::RealtimeNanoseconds();
+    entry.from.datagram_bytes = length;
+    entry.length       = length;
+    base::CopyBytes(entry.bytes, bytes, length);
+    static_cast<void>(self.waiting_.push(entry));
+}
+
+PingSocket::PingSocket(RawModule& module)
+    : Socket(kSockDgram), module_(module), identifier_(static_cast<std::uint16_t>(identity())) {
+    seated_ = module_.bind(this, take);
+}
+
+PingSocket::~PingSocket() {
+    if (seated_) {
+        module_.unbind(this);
+    }
+    gate_.retire();
+}
+
+base::Result<unsigned long> PingSocket::receive(void* sink, unsigned long count,
+                                                SocketAddress* from) {
+    if (count == 0) {
+        return 0;
+    }
+    const auto kGuard = gate_.guard();
+    Waiting    taken{};
+    if (!waiting_.pop(taken)) {
+        return base::KernelError::kWouldBlock;
+    }
+    const unsigned long kBytes = taken.length < count ? taken.length : count;
+    base::CopyBytes(sink, taken.bytes, kBytes);
+    if (from != nullptr) {
+        *from = taken.from;
+    }
+    return kBytes;
+}
+
+base::Result<unsigned long> PingSocket::transmit(const void* source, unsigned long count,
+                                                 const SocketAddress& destination) {
+    SocketAddress target     = destination;
+    std::uint16_t identifier = 0;
+    {
+        const auto kGuard = gate_.guard();
+        if (target.address == 0 && named_) {
+            target = peer_;
+        }
+        identifier = identifier_;
+    }
+    if (target.address == 0) {
+        return base::KernelError::kNotFound;
+    }
+    const auto* message = static_cast<const unsigned char*>(source);
+    if (count < kIcmpEchoHeaderBytes || message[0] != kIcmpEchoRequest || message[1] != 0) {
+        return base::KernelError::kInvalidArgument;
+    }
+    if (count > kMaxIcmpEchoBytes) {
+        return base::KernelError::kNotSupported;
+    }
+    unsigned char packet[kMaxIcmpEchoBytes] = {};
+    base::CopyBytes(packet, message, count);
+    base::WriteWord16Be(packet, 2, 0);
+    base::WriteWord16Be(packet, 4, identifier);
+    base::InternetChecksum checksum;
+    checksum.add(packet, count);
+    base::WriteWord16Be(packet, 2, checksum.value());
+    if (!module_.send(target.address, packet, count)) {
+        return base::KernelError::kIOError;
+    }
+    return count;
+}
+
+base::Result<void> PingSocket::adopt_local(const SocketAddress& local) {
+    const auto kGuard = gate_.guard();
+    local_            = local;
+    if (local.port != 0) {
+        identifier_ = local.port;
+    }
+    return {};
+}
+
+base::Result<void> PingSocket::adopt_peer(const SocketAddress& peer) {
+    const auto kGuard = gate_.guard();
+    peer_             = peer;
+    named_            = true;
+    return {};
+}
+
+base::Result<void> PingSocket::report_local(SocketAddress& local) const {
+    const auto kGuard = gate_.guard();
+    local             = local_;
+    local.port        = identifier_;
+    return {};
+}
+
+base::Result<void> PingSocket::report_peer(SocketAddress& peer) const {
+    const auto kGuard = gate_.guard();
+    if (!named_) {
+        return base::KernelError::kNotFound;
+    }
+    peer = peer_;
+    return {};
+}
+
+bool PingSocket::holds_input() const {
+    const auto kGuard = gate_.guard();
+    return waiting_.count() != 0;
+}
+
+void PingSocket::take(void* context, const unsigned char* bytes, size_t length,
+                      const Ipv4View& header) {
+    auto& self = *static_cast<PingSocket*>(context);
+    if (length < header.header_bytes + kIcmpEchoHeaderBytes) {
+        return;
+    }
+    const unsigned char* icmp   = bytes + header.header_bytes;
+    const auto kIcmpLength = length - header.header_bytes;
+    base::InternetChecksum checksum;
+    checksum.add(icmp, kIcmpLength);
+    if (kIcmpLength > kMaxIcmpEchoBytes || icmp[1] != 0 || checksum.value() != 0) {
+        return;
+    }
+    const auto           kGuard = self.gate_.guard();
+    if (icmp[0] != kIcmpEchoReply || base::ReadWord16Be(icmp, 4) != self.identifier_) {
+        return;
+    }
+    if ((self.local_.address != 0 && self.local_.address != header.destination) ||
+        (self.named_ && self.peer_.address != header.source)) {
+        return;
+    }
+    Waiting entry{};
+    entry.from.address = header.source;
+    entry.length       = length - header.header_bytes;
+    entry.from.received_ttl = bytes[8];
+    entry.from.received_ns = syscall::RealtimeNanoseconds();
+    entry.from.datagram_bytes = entry.length;
+    base::CopyBytes(entry.bytes, icmp, entry.length);
+    static_cast<void>(self.waiting_.push(entry));
+}
+
+base::Result<void> Socket::begin_listen(unsigned long /*backlog*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<base::Shared<Socket>> Socket::accept_one() {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<void> Socket::shutdown_write() {
+    return base::KernelError::kNotConnected;
+}
+
+bool Socket::handshake_pending() const {
+    return false;
+}
+
+bool Socket::handshake_failed() const {
+    return false;
+}
+
+TcpSocket::TcpSocket(TcpModule& module) : Socket(kSockStream), module_(module) {}
+
+TcpSocket::~TcpSocket() {
+    const proc::PreemptGuard kPin;
+    if (listening_) {
+        module_.unlisten(listener_);
+    } else if (opened_) {
+        module_.close(connection_);
+    }
+}
+
+base::Result<unsigned long> TcpSocket::receive(void* sink, unsigned long count,
+                                               SocketAddress* from) {
+    if (count == 0) {
+        return 0;
+    }
+    if (!opened_) {
+        return base::KernelError::kNotConnected;
+    }
+    const auto kTaken = module_.receive(connection_, static_cast<unsigned char*>(sink), count);
+    if (!kTaken.ok()) {
+        if (kTaken.error() == base::KernelError::kNotFound) {
+            return static_cast<unsigned long>(0);
+        }
+        return kTaken.error();
+    }
+    if (from != nullptr) {
+        *from = peer_;
+    }
+    return kTaken.value();
+}
+
+base::Result<unsigned long> TcpSocket::transmit(const void* source, unsigned long count,
+                                                const SocketAddress& /*destination*/) {
+    const proc::PreemptGuard kPin;
+    if (!opened_) {
+        return base::KernelError::kNotConnected;
+    }
+    const auto kGiven = module_.send(connection_, static_cast<const unsigned char*>(source), count,
+                                     module_.clock());
+    if (!kGiven.ok()) {
+        return kGiven.error();
+    }
+    return kGiven.value();
+}
+
+base::Result<void> TcpSocket::adopt_local(const SocketAddress& local) {
+    const proc::PreemptGuard kPin;
+    if (local.address != 0 && local.address != module_.own_address() &&
+        local.address != kLoopbackAddress) {
+        return base::KernelError::kInvalidArgument;
+    }
+    if (bound_ || opened_) {
+        return base::KernelError::kAlreadyExists;
+    }
+    local_ = local;
+    bound_ = true;
+    return {};
+}
+
+base::Result<void> TcpSocket::adopt_peer(const SocketAddress& peer) {
+    const proc::PreemptGuard kPin;
+    if (listening_) {
+        return base::KernelError::kNotSupported;
+    }
+    if (peer.address == 0 || peer.port == 0) {
+        return base::KernelError::kInvalidArgument;
+    }
+    if (opened_) {
+        return base::KernelError::kAlreadyExists;
+    }
+    const TcpEvents kNoNews{};
+    const auto      kOpened =
+        module_.connect(local_.port, peer.address, peer.port, kNoNews, module_.clock());
+    if (!kOpened.ok()) {
+        return kOpened.error();
+    }
+    peer_       = peer;
+    connection_ = kOpened.value();
+    opened_     = true;
+    return {};
+}
+
+base::Result<void> TcpSocket::report_local(SocketAddress& local) const {
+    local = local_;
+    return {};
+}
+
+base::Result<void> TcpSocket::report_peer(SocketAddress& peer) const {
+    if (!opened_) {
+        return base::KernelError::kNotConnected;
+    }
+    peer = peer_;
+    return {};
+}
+
+bool TcpSocket::holds_input() const {
+    if (!opened_) {
+        return false;
+    }
+    return module_.holds_bytes(connection_);
+}
+
+base::Result<void> TcpSocket::begin_listen(unsigned long /*backlog*/) {
+    const proc::PreemptGuard kPin;
+    if (!bound_ || opened_) {
+        return base::KernelError::kInvalidArgument;
+    }
+    if (listening_) {
+        return {};
+    }
+    const auto kSeat = module_.listen(local_.port, {});
+    if (!kSeat.ok()) {
+        return kSeat.error();
+    }
+    listener_  = kSeat.value();
+    seated_    = true;
+    listening_ = true;
+    return {};
+}
+
+base::Result<base::Shared<Socket>> TcpSocket::accept_one() {
+    if (!seated_) {
+        return base::KernelError::kNotSupported;
+    }
+    const auto kTaken = module_.take_accepted(listener_);
+    if (!kTaken.ok()) {
+        return kTaken.error();
+    }
+    auto*                born = new TcpSocket(module_);
+    base::Shared<Socket> face{born};
+    born->connection_ = kTaken.value();
+    born->opened_     = true;
+    born->local_      = local_;
+    uint32_t address  = 0;
+    uint16_t port     = 0;
+    if (module_.peer_of(kTaken.value(), address, port)) {
+        born->peer_ = SocketAddress{.address = address, .port = port};
+    }
+    return face;
+}
+
+bool TcpSocket::handshake_pending() const {
+    return opened_ && module_.connecting(connection_);
+}
+
+base::Result<void> TcpSocket::shutdown_write() {
+    const proc::PreemptGuard kPin;
+    if (!opened_ || !module_.alive(connection_) || handshake_pending()) {
+        return base::KernelError::kNotConnected;
+    }
+    module_.close(connection_);
+    return {};
+}
+
+bool TcpSocket::handshake_failed() const {
+    return opened_ && !module_.established(connection_) && !module_.alive(connection_);
+}
+
+const fs::FsOps* SocketOps() {
+    return &kOps;
 }
 
 }  // namespace cinux::net

@@ -1,159 +1,96 @@
-# ==============================================================
-# Cinux Bootloader CMake Configuration
-# ==============================================================
+include(${CMAKE_SOURCE_DIR}/cmake/boot/boot_target.cmake)
 
-# ==============================================================
-# Common Boot Utilities
-# ==============================================================
+add_executable(mbr mbr.cpp)
+add_cinux_boot_binary(mbr 16 mbr.ld -Wl,--gc-sections)
 
-# Compile common/serial.S as an object file for inclusion
-add_library(boot_common OBJECT
-    common/serial.S
-    common/boot.S
-)
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/layout.hpp layout_src)
+string(REGEX MATCH "\\.sectors = ([0-9]+)" layout_match "${layout_src}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/layout.hpp)
 
-# ==============================================================
-# C ELF Loader (32-bit freestanding)
-# ==============================================================
-# REMOVED: No longer needed, using flat binary format
+add_library(boot_pm OBJECT
+    pm/pm.cpp
+    lm/lm_switch.cpp
+    lm/page_tables.cpp
+    load/ferry32.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/driver/base/io.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/driver/serial/serial.cpp)
+target_link_libraries(boot_pm PRIVATE cinux_warnings cinux_boot32)
+target_include_directories(boot_pm PRIVATE
+    ${CMAKE_SOURCE_DIR}/base/include
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_compile_options(boot_common PRIVATE
-    -Wa,--32                    # Generate 32-bit object (can be linked as 16-bit)
-)
+add_executable(lm_blob lm/lm.cpp ${CMAKE_SOURCE_DIR}/kernel/driver/base/io.cpp ${CMAKE_SOURCE_DIR}/kernel/driver/serial/serial.cpp)
+add_cinux_boot_binary(lm_blob 64 lm/lm.ld)
+target_compile_options(lm_blob PRIVATE -mcmodel=small)
 
-# ==============================================================
-# Common Long Mode Support
-# ==============================================================
-
-# Compile common/long_mode.S as an object file for inclusion
-add_library(boot_longmode OBJECT
-    common/long_mode.S
-)
-
-target_compile_options(boot_longmode PRIVATE
-    -Wa,--32                    # Generate 32-bit object (contains .code16, .code32, .code64)
-)
-
-# ==============================================================
-# MBR (Master Boot Record)
-# ==============================================================
-
-add_executable(mbr
-    mbr.S
-)
-
-# Assemble 16-bit code as 32-bit objects, link as 32-bit ELF
-target_compile_options(mbr PRIVATE
-    -Wa,--32                    # Assemble as 32-bit (allows 16-bit code)
-)
-
-target_link_options(mbr PRIVATE
-    -Wl,-m,elf_i386
-    -T ${CMAKE_CURRENT_BINARY_DIR}/mbr.ld
-    -nostdlib
-    -no-pie
-)
-
-# ==============================================================
-# Stage2 Bootloader
-# ==============================================================
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.tmp.o
+           ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.o
+    COMMAND ${CMAKE_OBJCOPY} -I binary -O elf32-i386 -B i386
+            --rename-section .data=.lm_blob
+            ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.bin
+            ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.tmp.o
+    COMMAND ${CMAKE_OBJCOPY} --set-section-flags .lm_blob=alloc,load,readonly,data
+            ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.tmp.o
+            ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.o
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.bin)
+add_custom_target(lm_blob_obj
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.o)
 
 add_executable(stage2
-    stage2.S
-    $<TARGET_OBJECTS:boot_common>   # Include common functions
-    $<TARGET_OBJECTS:boot_longmode> # Include long mode functions
+    stage2.cpp
+    bios.cpp
+    gdt/gdt.cpp
+    pm/pm_switch.cpp
+    load/ferry.cpp
+    load/loader.cpp
+    early/libc.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.o
+    ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
+    $<TARGET_OBJECTS:boot_pm>)
+add_cinux_boot_binary(stage2 16 stage2.ld -Wl,--gc-sections)
+target_compile_options(mbr PRIVATE -ffunction-sections)
+target_include_directories(stage2 PRIVATE ${CMAKE_SOURCE_DIR}/base/src)
+target_compile_options(stage2 PRIVATE -ffunction-sections)
+add_dependencies(stage2 lm_blob_obj)
+
+add_custom_target(stage2_size_check ALL
+    COMMAND ${CMAKE_COMMAND}
+            -DSIZE_FILE=${CMAKE_CURRENT_BINARY_DIR}/stage2.bin
+            -DMAX_SECTORS=${CMAKE_MATCH_1}
+            -P ${CMAKE_SOURCE_DIR}/cmake/boot/stage2_size_check.cmake
+    DEPENDS stage2_bin
 )
 
-target_compile_options(stage2 PRIVATE
-    -Wa,--32                    # Assemble as 32-bit (allows 16-bit and 64-bit code)
-)
+function(add_cinux_image name image_file kernel_bin kernel_dep)
+    add_custom_target(${name}
+        COMMAND ${CMAKE_COMMAND} -E remove ${image_file}
+        COMMAND dd if=/dev/zero of=${image_file} bs=1M count=1 status=none
+        COMMAND dd if=${CMAKE_BINARY_DIR}/boot/mbr.bin
+                of=${image_file} bs=512 count=1 conv=notrunc status=none
+        COMMAND dd if=${CMAKE_BINARY_DIR}/boot/stage2.bin
+                of=${image_file} bs=512 seek=1 conv=notrunc status=none
+        COMMAND dd if=${kernel_bin}
+                of=${image_file} bs=512 seek=32 conv=notrunc status=none
+        DEPENDS mbr_bin stage2_size_check ${kernel_dep}
+    )
+endfunction()
 
-target_link_options(stage2 PRIVATE
-    -Wl,-m,elf_i386
-    -T ${CMAKE_CURRENT_BINARY_DIR}/stage2.ld
-    -nostdlib
-    -no-pie
-)
+add_cinux_image(boot_image
+    ${CMAKE_BINARY_DIR}/boot/cinux.img
+    ${CMAKE_BINARY_DIR}/kernel/kernel.bin kernel_bin)
 
-# ==============================================================
-# Linker Scripts
-# ==============================================================
+foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)
+    string(REPLACE ":" ";" entry_parts "${entry}")
+    list(GET entry_parts 0 ktest)
+    add_cinux_image(boot_ktest_${ktest}
+        ${CMAKE_BINARY_DIR}/boot/cinux_ktest_${ktest}.img
+        ${CMAKE_BINARY_DIR}/kernel/cinux_ktest_${ktest}.bin
+        cinux_ktest_${ktest}_bin)
+endforeach()
 
-# Create MBR linker script
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/mbr.ld
-"
-OUTPUT_FORMAT(\"elf32-i386\")
-ENTRY(_start)
-SECTIONS
-{
-    . = 0x7C00;
-    .text : {
-        *(.text)
-        *(.rodata)
-    }
-    .data : { *(.data) }
-    .bss  : { *(.bss) }
-    /DISCARD/ : { *(.comment*) *(.note*) }
-}
-")
 
-# Create Stage2 linker script
-# Stage2 is loaded by MBR to 0x8000, must match load address
-# The .code64 section is embedded within .text (assembler handles mode switches)
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/stage2.ld
-"OUTPUT_FORMAT(\"elf32-i386\")
-ENTRY(_start)
-SECTIONS
-{
-    . = 0x8000;
-    .text : {
-        *(.text)
-    }
-
-    .gdt ALIGN(8) : {
-        *(.gdt)
-    }
-
-    .rodata : {
-        *(.rodata)
-    }
-
-    .data : {
-        *(.data)
-    }
-
-    .bss : {
-        *(.bss*)
-    }
-    
-    . = 0x10000;
-    
-    ASSERT(. <= 0x10000, \"stage2 too large! exceeds 32KB\")
-    /DISCARD/ : {
-        *(.comment*)
-        *(.note*)
-    }
-}
-")
-
-# ==============================================================
-# Post-Build: Convert to Raw Binary
-# ==============================================================
-
-# MBR binary
-add_custom_command(
-    TARGET mbr
-    POST_BUILD
-    COMMAND objcopy -O binary $<TARGET_FILE:mbr> $<TARGET_FILE_DIR:mbr>/mbr.bin
-    COMMENT "Converting MBR to raw binary: mbr.bin"
-    VERBATIM
-)
-
-# Stage2 binary
-add_custom_command(
-    TARGET stage2
-    POST_BUILD
-    COMMAND objcopy -O binary $<TARGET_FILE:stage2> $<TARGET_FILE_DIR:stage2>/stage2.bin
-    COMMENT "Converting Stage2 to raw binary: stage2.bin"
-    VERBATIM
-)
+add_custom_target(cinux_image ALL DEPENDS boot_image)

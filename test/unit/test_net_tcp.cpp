@@ -1,518 +1,879 @@
-/**
- * @file test/unit/test_net_tcp.cpp
- * @brief Host unit tests for the TCP wire layer + the inbound checksum gate
- *        (batch 1).  TcpModule is registered as L4Handler proto 6; a hand-built
- *        TCP segment over IPv4 is fed through the real Ipv4Module dispatch and
- *        the checksum gate's diagnostics are inspected.  The connection FSM is
- *        exercised in batches 2-3.
- *
- * Links the real tcp.cpp + ipv4.cpp + icmp.cpp + arp.cpp + net_stack.cpp +
- * Cinux-Base checksum.cpp (pure logic, host-linkable).
- *
- * Compile condition: -DCINUX_HOST_TEST
- */
+#include <stdint.h>
 
-#define TEST_FRAMEWORK_IMPL
+#include <cstddef>
 
-#include <cinux/checksum.hpp>
-#include <cinux/expected.hpp>
-#include <cstdint>
-#include <cstring>
-#include <vector>
-
-#include "kernel/net/icmp.hpp"
+#include "../framework/framework.hpp"
+#include "cinux/assert.hpp"
+#include "cinux/byte_order.hpp"
+#include "cinux/checksum.hpp"
+#include "cinux/result.hpp"
+#include "kernel/driver/net/loopback.hpp"
+#include "kernel/driver/net/net_device.hpp"
 #include "kernel/net/ipv4.hpp"
-#include "kernel/net/net_device.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 #include "kernel/net/net_stack.hpp"
 #include "kernel/net/tcp.hpp"
-#include "test_framework.h"
-
-using cinux::lib::internet_checksum;
-using cinux::net::InDevice;
-using cinux::net::Ipv4Addr;
-using cinux::net::Ipv4Module;
-using cinux::net::IcmpModule;
-using cinux::net::kEtherTypeIpv4;
-using cinux::net::kIpProtoTcp;
-using cinux::net::NetDevice;
-using cinux::net::NetStack;
-using cinux::net::Packet;
-using cinux::net::TcpHeader;
-using cinux::net::TcpModule;
+#include "test_assert.hpp"
 
 namespace {
 
-Ipv4Addr ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-    return Ipv4Addr{{a, b, c, d}};
+using cinux::base::ReadWord16Be;
+using cinux::base::ReadWord32Be;
+using cinux::base::WriteWord16Be;
+using cinux::base::WriteWord32Be;
+
+void send_to_loopback(void* context, const cinux::net::OutboundDatagram& datagram) {
+    auto& device = *static_cast<cinux::driver::net::Loopback*>(context);
+    const cinux::driver::net::MacAddress kNobody = {};
+    const cinux::driver::net::EtherType  kIpv4{cinux::net::kEtherTypeIpv4};
+    cinux::base::safety::Check(device.send_l3(kNobody, kIpv4, datagram.payload, datagram.length),
+                               "loopback queue refused a send");
 }
 
-/// No-L2 mock (same shape as test_net_udp): yields queued RX frames and captures
-/// every send_l3 as an IP packet in `sent`.  Copy device (sink==nullptr) -- frame
-/// bytes live in the vectors for the test's lifetime, so handlers can borrow them.
-class NoL2Dev : public NetDevice {
-public:
-    std::vector<std::vector<uint8_t>> rx;
-    std::vector<std::vector<uint8_t>> sent;
-    size_t                            idx = 0;
+void send_via_ipv4(void* context, const cinux::net::OutboundDatagram& datagram) {
+    static_cast<cinux::net::Ipv4Module*>(context)->send(datagram);
+}
 
-    bool mac(cinux::net::EthAddr&) const override { return false; }
-    bool has_ethernet_header() const override { return false; }
-    bool poll_rx(Packet& out) override {
-        if (idx >= rx.size()) {
-            return false;
+struct Wiring {
+    cinux::driver::net::NetPort port;
+    cinux::net::NetStack        stack;
+    cinux::net::Ipv4Module      ipv4;
+    cinux::net::TcpModule       tcp;
+
+    Wiring() {
+        cinux::driver::net::Loopback::self().init();
+        port.adopt(cinux::driver::net::Loopback::self());
+        stack.init();
+        stack.attach_port(port);
+        const cinux::net::DatagramSink kToWire = {
+            .context = &cinux::driver::net::Loopback::self(),
+            .send    = send_to_loopback,
+        };
+        ipv4.init(kToWire, cinux::net::kLoopbackAddress);
+        const cinux::net::DatagramSink kViaIpv4 = {.context = &ipv4, .send = send_via_ipv4};
+        tcp.init(kViaIpv4, cinux::net::kLoopbackAddress);
+        cinux::net::L4Seat tcp_seat;
+        tcp_seat.adopt(tcp);
+        ipv4.seat_protocol(cinux::net::kIpv4ProtocolTcp, tcp_seat);
+        cinux::net::ProtocolSeat ipv4_seat;
+        ipv4_seat.adopt(ipv4);
+        stack.seat_protocol(cinux::net::kEtherTypeIpv4, ipv4_seat);
+    }
+};
+
+struct Collector {
+    unsigned long data_hits             = 0;
+    unsigned long accepted_hits         = 0;
+    unsigned long farewells_graceful    = 0;
+    unsigned long farewells_reset       = 0;
+    unsigned long farewells_unreachable = 0;
+
+    static void on_data(void* context) { ++static_cast<Collector*>(context)->data_hits; }
+    static void on_accepted(void* context) { ++static_cast<Collector*>(context)->accepted_hits; }
+    static void on_farewell(void* context, cinux::net::TcpFarewell farewell) {
+        auto* self = static_cast<Collector*>(context);
+        if (farewell == cinux::net::TcpFarewell::kGraceful) {
+            ++self->farewells_graceful;
+        } else if (farewell == cinux::net::TcpFarewell::kUnreachable) {
+            ++self->farewells_unreachable;
+        } else {
+            ++self->farewells_reset;
         }
-        out.data = rx[idx].data();
-        out.len  = static_cast<uint32_t>(rx[idx].size());
-        out.sink = nullptr;
-        ++idx;
-        return true;
-    }
-    cinux::lib::ErrorOr<void> send_l3(const cinux::net::EthAddr&, uint16_t, const uint8_t* l3,
-                                      uint32_t len) override {
-        sent.emplace_back(l3, l3 + len);
-        return {};
     }
 };
 
-/// Stack + modules wired for a no-L2 device at @p local.  TCP joins ICMP (auto)
-/// in the L4 table via add_l4(proto 6).
-struct Fixture {
-    NoL2Dev    dev;
-    IcmpModule icmp;
-    Ipv4Module ipv4;
-    TcpModule  tcp;
-    NetStack   stack;
-    explicit Fixture(Ipv4Addr local) : ipv4(icmp, nullptr) {
-        stack.add_protocol(kEtherTypeIpv4, ipv4);
-        ipv4.add_l4(kIpProtoTcp, tcp);
-        InDevice cfg{};
-        cfg.local   = local;
-        cfg.gateway = local;
-        stack.attach(dev, cfg);
+struct Recorder {
+    unsigned char frames[24][cinux::net::kMaxDatagramBytes] = {};
+    size_t        lengths[24]                               = {};
+    unsigned long count                                     = 0;
+
+    static void take(void* context, const cinux::net::OutboundDatagram& datagram) {
+        auto* self = static_cast<Recorder*>(context);
+        if (self->count == 24) {
+            return;
+        }
+        for (size_t index = 0; index < datagram.length; ++index) {
+            self->frames[self->count][index] = datagram.payload[index];
+        }
+        self->lengths[self->count] = datagram.length;
+        ++self->count;
+    }
+
+    [[nodiscard]] uint32_t seq_of(unsigned long which) const {
+        return ReadWord32Be(frames[which], 4);
     }
 };
 
-/// Build a 20-byte IPv4 header (valid checksum) wrapping @p l4 + emit the packet.
-std::vector<uint8_t> ip_packet(Ipv4Addr src, Ipv4Addr dst, uint8_t proto,
-                               const std::vector<uint8_t>& l4) {
-    std::vector<uint8_t> p(20 + l4.size(), 0);
-    p[0]                 = 0x45;  // version 4, IHL 5
-    const uint16_t total = static_cast<uint16_t>(20 + l4.size());
-    p[2]                 = static_cast<uint8_t>(total >> 8);
-    p[3]                 = static_cast<uint8_t>(total & 0xFF);
-    p[8]                 = 64;  // TTL
-    p[9]                 = proto;
-    for (int i = 0; i < 4; ++i) {
-        p[12 + i] = src.oct[i];
-        p[16 + i] = dst.oct[i];
-    }
-    std::memcpy(p.data() + 20, l4.data(), l4.size());
-    const uint16_t cs = internet_checksum(p.data(), 20);
-    p[10]             = static_cast<uint8_t>(cs >> 8);
-    p[11]             = static_cast<uint8_t>(cs & 0xFF);
-    return p;
+void deliver(cinux::net::TcpModule& tcp, const unsigned char* segment, size_t length) {
+    const cinux::net::Ipv4View kView = {
+        .header_bytes = cinux::net::kMinIpv4HeaderBytes,
+        .total_length = static_cast<uint16_t>(cinux::net::kMinIpv4HeaderBytes + length),
+        .protocol     = cinux::net::kIpv4ProtocolTcp,
+        .source       = cinux::net::kLoopbackAddress,
+        .destination  = cinux::net::kLoopbackAddress,
+    };
+    tcp.handle(segment, length, kView);
 }
 
-/// Embed the TCP pseudo-header checksum into @p seg's checksum field (bytes
-/// 16-17).  Mirrors the TX path that TcpModule::send_segment will use (batch 2).
-void embed_tcp_checksum(std::vector<uint8_t>& seg, Ipv4Addr src, Ipv4Addr dst) {
-    std::vector<uint8_t> buf(12 + seg.size(), 0);
-    for (int i = 0; i < 4; ++i) {
-        buf[i]     = src.oct[i];
-        buf[4 + i] = dst.oct[i];
+// NOLINTNEXTLINE(readability-function-size) a segment header names eight facts
+void fill_tcp_header(unsigned char* segment, uint16_t sport, uint16_t dport, uint32_t seq,
+                     uint32_t ack, unsigned char flags, uint16_t window,
+                     const unsigned char* payload, size_t payload_bytes) {
+    WriteWord16Be(segment, 0, sport);
+    WriteWord16Be(segment, 2, dport);
+    WriteWord32Be(segment, 4, seq);
+    WriteWord32Be(segment, 8, ack);
+    segment[12] = 0x50;
+    segment[13] = flags;
+    WriteWord16Be(segment, 14, window);
+    WriteWord16Be(segment, 16, 0);
+    for (size_t index = 0; index < payload_bytes; ++index) {
+        segment[cinux::net::kTcpHeaderBytes + index] = payload[index];
     }
-    buf[9]  = kIpProtoTcp;
-    buf[10] = static_cast<uint8_t>(seg.size() >> 8);
-    buf[11] = static_cast<uint8_t>(seg.size() & 0xFF);
-    std::memcpy(buf.data() + 12, seg.data(), seg.size());  // checksum field still 0
-    uint16_t cs = internet_checksum(buf.data(), buf.size());
-    if (cs == 0) {
-        cs = 0xFFFF;  // TCP mandates a nonzero checksum
+    unsigned char pseudo[12] = {};
+    WriteWord32Be(pseudo, 0, cinux::net::kLoopbackAddress);
+    WriteWord32Be(pseudo, 4, cinux::net::kLoopbackAddress);
+    pseudo[8] = 0;
+    pseudo[9] = cinux::net::kIpv4ProtocolTcp;
+    WriteWord16Be(pseudo, 10, static_cast<uint16_t>(cinux::net::kTcpHeaderBytes + payload_bytes));
+    cinux::base::InternetChecksum sum;
+    sum.add(pseudo, sizeof(pseudo));
+    sum.add(segment, cinux::net::kTcpHeaderBytes + payload_bytes);
+    uint16_t checksum = sum.value();
+    if (checksum == 0) {
+        checksum = 0xFFFF;
     }
-    seg[16] = static_cast<uint8_t>(cs >> 8);
-    seg[17] = static_cast<uint8_t>(cs & 0xFF);
+    WriteWord16Be(segment, 16, checksum);
 }
 
-/// Build a checksummed TCP segment (20-byte header + optional payload).
-std::vector<uint8_t> tcp_segment(Ipv4Addr src, Ipv4Addr dst, uint16_t sp, uint16_t dp, uint32_t seq,
-                                 uint32_t ack, uint8_t flags,
-                                 const std::vector<uint8_t>& data = {}) {
-    std::vector<uint8_t> seg(20 + data.size(), 0);
-    seg[0]  = static_cast<uint8_t>(sp >> 8);
-    seg[1]  = static_cast<uint8_t>(sp & 0xFF);
-    seg[2]  = static_cast<uint8_t>(dp >> 8);
-    seg[3]  = static_cast<uint8_t>(dp & 0xFF);
-    seg[4]  = static_cast<uint8_t>(seq >> 24);
-    seg[5]  = static_cast<uint8_t>(seq >> 16);
-    seg[6]  = static_cast<uint8_t>(seq >> 8);
-    seg[7]  = static_cast<uint8_t>(seq & 0xFF);
-    seg[8]  = static_cast<uint8_t>(ack >> 24);
-    seg[9]  = static_cast<uint8_t>(ack >> 16);
-    seg[10] = static_cast<uint8_t>(ack >> 8);
-    seg[11] = static_cast<uint8_t>(ack & 0xFF);
-    seg[12] = static_cast<uint8_t>(5 << 4);  // data offset = 5 (20 bytes)
-    seg[13] = flags;
-    seg[14] = 0x20;  // window = 8192 (arbitrary nonzero)
-    seg[15] = 0x00;
-    // checksum bytes 16-17 left 0 for embed_tcp_checksum
-    if (!data.empty()) {
-        std::memcpy(seg.data() + 20, data.data(), data.size());
-    }
-    embed_tcp_checksum(seg, src, dst);
-    return seg;
-}
-
-/// Feed @p pkt back through the stack as a received frame, then drain one poll.
-void deliver(Fixture& f, const std::vector<uint8_t>& pkt) {
-    f.dev.rx.push_back(pkt);
-    f.stack.poll();
-}
-
-/// Parse the TCP header out of a captured IP packet (skip the 20-byte IPv4
-/// header).  Returns false if @p pkt is too short.
-bool seg_tcp(const std::vector<uint8_t>& pkt, TcpHeader& out) {
-    if (pkt.size() < 20 + 20) {
-        return false;
-    }
-    parse_tcp(pkt.data() + 20, out);
-    return true;
-}
-
-/// Capture listener: records on_accept/on_data/on_close invocations.
-struct Capture : cinux::net::TcpListener {
-    uint32_t                accepts = 0;
-    uint32_t                closes  = 0;
-    uint32_t                datas   = 0;
-    cinux::net::TcpEndpoint last_remote{};
-    std::vector<uint8_t>    last_data;
-    void                    on_accept(const cinux::net::TcpEndpoint& /*local*/,
-                                      const cinux::net::TcpEndpoint& remote) override {
-        ++accepts;
-        last_remote = remote;
-    }
-    void on_data(const cinux::net::TcpEndpoint& /*local*/,
-                 const cinux::net::TcpEndpoint& /*remote*/, cinux::net::FrameView data) override {
-        ++datas;
-        last_data.assign(data.data(), data.data() + data.size());
-    }
-    void on_close(const cinux::net::TcpEndpoint& /*local*/,
-                  const cinux::net::TcpEndpoint& /*remote*/) override {
-        ++closes;
-    }
+struct ManualLink {
+    bool                        ok          = false;
+    uint16_t                    client_port = 0;
+    uint32_t                    client_isn  = 0;
+    uint32_t                    server_isn  = 0;
+    cinux::net::TcpListenTicket listener{};
+    cinux::net::TcpTicket       server{};
 };
 
-/// Drive a full 3-way handshake to ESTABLISHED on both ends: server listens on
-/// 7777, client connects from 1234, each captured segment is fed back.  Leaves
-/// client (1234->7777) and server (7777->1234) ESTABLISHED.  Used by the
-/// data/close tests so they start from a live connection.
-void do_handshake(Fixture& f, Capture& server_l) {
-    ASSERT_TRUE(f.tcp.listen(7777, server_l));
-    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());  // SYN
-    deliver(f, f.dev.sent[0]);  // -> SYN-ACK (server SynReceived)
-    deliver(f, f.dev.sent[1]);  // -> ACK (client Established)
-    deliver(f, f.dev.sent[2]);  // -> server Established + on_accept
+ManualLink drive_handshake(cinux::net::TcpModule& tcp, Recorder& wire, uint16_t port) {
+    ManualLink                  link{};
+    const cinux::net::TcpEvents kEvents{};
+    const auto                  kListener = tcp.listen(port, kEvents);
+    if (!kListener.ok()) {
+        return link;
+    }
+    link.listener      = kListener.value();
+    const auto kClient = tcp.connect(0, cinux::net::kLoopbackAddress, port, kEvents, 0);
+    if (!kClient.ok() || wire.count == 0) {
+        return link;
+    }
+    link.client_isn  = ReadWord32Be(wire.frames[0], 4);
+    link.client_port = ReadWord16Be(wire.frames[0], 0);
+    deliver(tcp, wire.frames[0], wire.lengths[0]);
+    if (wire.count < 2) {
+        return link;
+    }
+    link.server_isn                                = ReadWord32Be(wire.frames[1], 4);
+    unsigned char seg[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(seg, link.client_port, port, link.client_isn + 1, link.server_isn + 1,
+                    cinux::net::kTcpFlagAck, cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, seg, sizeof(seg));
+    const auto kServer = tcp.take_accepted(link.listener);
+    if (!kServer.ok()) {
+        return link;
+    }
+    link.server = kServer.value();
+    link.ok     = true;
+    return link;
 }
 
 }  // namespace
 
-// ============================================================
-// Header parse/build
-// ============================================================
+TEST("tcp: the word book refuses short and offset-dishonest headers") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
 
-TEST("tcp_header: build then parse round-trips every field (big-endian wire)") {
-    TcpHeader in{};
-    in.src_port   = 0x1234;
-    in.dst_port   = 0xBEEF;
-    in.seq        = 0x11223344;
-    in.ack        = 0xDEADBEEF;
-    in.data_off   = 5;
-    in.flags      = 0x18;  // PSH|ACK
-    in.window     = 0xFFFF;
-    in.checksum   = 0xF00D;
-    in.urgent_ptr = 0x0001;
-    uint8_t wire[20];
-    build_tcp_header(in, wire);
-    // data offset sits in the hi nibble of byte 12; flags in byte 13; seq/ack
-    // are 32-bit big-endian.
-    ASSERT_EQ(wire[12], 0x50u);
-    ASSERT_EQ(wire[13], 0x18u);
-    ASSERT_EQ(wire[4], 0x11u);   // seq top byte
-    ASSERT_EQ(wire[11], 0xEFu);  // ack low byte
-    TcpHeader out;
-    parse_tcp(wire, out);
-    ASSERT_EQ(out.src_port, 0x1234u);
-    ASSERT_EQ(out.dst_port, 0xBEEFu);
-    ASSERT_EQ(out.seq, 0x11223344u);
-    ASSERT_EQ(out.ack, 0xDEADBEEFu);
-    ASSERT_EQ(out.data_off, 5u);
-    ASSERT_EQ(out.flags, 0x18u);
-    ASSERT_EQ(out.window, 0xFFFFu);
-    ASSERT_EQ(out.checksum, 0xF00Du);
-    ASSERT_EQ(out.urgent_ptr, 0x0001u);
-    ASSERT_EQ(tcp_header_bytes(out), 20u);
+    unsigned char short_segment[19] = {};
+    deliver(tcp, short_segment, sizeof(short_segment));
+    ASSERT_EQ(tcp.stats().refused_short, 1UL);
+
+    unsigned char bad_offset[cinux::net::kTcpHeaderBytes] = {};
+    bad_offset[12]                                        = 0x40;
+    deliver(tcp, bad_offset, sizeof(bad_offset));
+    ASSERT_EQ(tcp.stats().refused_offset, 1UL);
+    ASSERT_EQ(tcp.stats().segments_sent, 0UL);
 }
 
-// ============================================================
-// Inbound checksum gate (the batch-1 handle() observable)
-// ============================================================
+TEST("tcp: a checksum that fails the pseudo-header sum is refused by name") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
 
-TEST("tcp_handle: a valid segment passes the checksum gate + is recorded") {
-    Fixture f{ip(127, 0, 0, 1)};
-    auto    seg =
-        tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 1000, 2000, 0x10 /*ACK*/);
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
-
-    ASSERT_EQ(f.tcp.valid_count(), 1u);
-    ASSERT_EQ(f.tcp.last_src_port(), 1234u);
-    ASSERT_EQ(f.tcp.last_dst_port(), 7777u);
-    ASSERT_EQ(f.tcp.last_seq(), 1000u);
-    ASSERT_EQ(f.tcp.last_ack(), 2000u);
-    ASSERT_EQ(f.tcp.last_flags(), 0x10u);
+    unsigned char segment[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(segment, 40000, 4242, 1, 0, cinux::net::kTcpFlagAck,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    WriteWord16Be(segment, 16, 0xBEEF);
+    deliver(tcp, segment, sizeof(segment));
+    ASSERT_EQ(tcp.stats().refused_checksum, 1UL);
+    ASSERT_EQ(tcp.stats().unclaimed, 0UL);
+    ASSERT_EQ(tcp.stats().resets_sent, 0UL);
 }
 
-TEST("tcp_handle: a corrupt segment fails the checksum gate -> dropped") {
-    Fixture f{ip(127, 0, 0, 1)};
-    auto    seg =
-        tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 1000, 2000, 0x10, {'h', 'i'});
-    seg[20] ^= 0xFF;  // corrupt the first data byte (covered by the checksum)
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
+TEST("tcp: a handshake completes and rings the listener's bell") {
+    Wiring     wiring;
+    Collector  server_news;
+    Collector  client_news;
+    const auto kListener = wiring.tcp.listen(4242, {
+                                                       .context  = &server_news,
+                                                       .data     = &Collector::on_data,
+                                                       .accepted = &Collector::on_accepted,
+                                                       .farewell = &Collector::on_farewell,
+                                                   });
+    ASSERT_TRUE(kListener.ok());
+    const auto kClient = wiring.tcp.connect(0, cinux::net::kLoopbackAddress, 4242,
+                                            {
+                                                .context  = &client_news,
+                                                .data     = &Collector::on_data,
+                                                .accepted = &Collector::on_accepted,
+                                                .farewell = &Collector::on_farewell,
+                                            },
+                                            0);
+    ASSERT_TRUE(kClient.ok());
 
-    ASSERT_EQ(f.tcp.valid_count(), 0u);  // bad checksum -> silent drop
+    wiring.stack.poll(16);
+
+    ASSERT_TRUE(wiring.tcp.established(kClient.value()));
+    ASSERT_EQ(server_news.accepted_hits, 1UL);
+    const auto kServer = wiring.tcp.take_accepted(kListener.value());
+    ASSERT_TRUE(kServer.ok());
+    ASSERT_TRUE(wiring.tcp.established(kServer.value()));
 }
 
-TEST("tcp_handle: proto 6 reaches TcpModule via the L4 dispatch table") {
-    Fixture f{ip(127, 0, 0, 1)};
-    auto    syn =
-        tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 4321, 80, 0x40000000, 0, 0x02 /*SYN*/);
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, syn));
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: bytes travel both ways and the farewell dance completes") {
+    Wiring     wiring;
+    Collector  server_news;
+    Collector  client_news;
+    const auto kListener = wiring.tcp.listen(4243, {
+                                                       .context  = &server_news,
+                                                       .data     = &Collector::on_data,
+                                                       .accepted = &Collector::on_accepted,
+                                                       .farewell = &Collector::on_farewell,
+                                                   });
+    const auto kClient   = wiring.tcp.connect(0, cinux::net::kLoopbackAddress, 4243,
+                                              {
+                                                  .context  = &client_news,
+                                                  .data     = &Collector::on_data,
+                                                  .accepted = &Collector::on_accepted,
+                                                  .farewell = &Collector::on_farewell,
+                                              },
+                                              0);
+    wiring.stack.poll(16);
+    const auto kServer = wiring.tcp.take_accepted(kListener.value());
+    ASSERT_TRUE(kServer.ok());
 
-    ASSERT_EQ(f.tcp.valid_count(), 1u);
-    ASSERT_EQ(f.tcp.last_flags(), 0x02u);  // SYN dispatched to TCP, not eaten elsewhere
+    const unsigned char kPing[4] = {'p', 'i', 'n', 'g'};
+    const auto          kGiven   = wiring.tcp.send(kClient.value(), kPing, sizeof(kPing), 0);
+    ASSERT_TRUE(kGiven.ok());
+    ASSERT_EQ(kGiven.value(), sizeof(kPing));
+    wiring.stack.poll(16);
+    ASSERT_EQ(server_news.data_hits, 1UL);
+    unsigned char inbox[16] = {};
+    const auto    kTaken    = wiring.tcp.receive(kServer.value(), inbox, sizeof(inbox));
+    ASSERT_TRUE(kTaken.ok());
+    ASSERT_EQ(kTaken.value(), sizeof(kPing));
+    ASSERT_EQ(inbox[0], static_cast<unsigned char>('p'));
+    ASSERT_EQ(inbox[3], static_cast<unsigned char>('g'));
+
+    const unsigned char kPong[4] = {'p', 'o', 'n', 'g'};
+    const auto          kBack    = wiring.tcp.send(kServer.value(), kPong, sizeof(kPong), 0);
+    ASSERT_TRUE(kBack.ok());
+    wiring.stack.poll(16);
+    ASSERT_EQ(client_news.data_hits, 1UL);
+    const auto kRound = wiring.tcp.receive(kClient.value(), inbox, sizeof(inbox));
+    ASSERT_TRUE(kRound.ok());
+    ASSERT_EQ(kRound.value(), sizeof(kPong));
+    ASSERT_EQ(inbox[1], static_cast<unsigned char>('o'));
+
+    wiring.tcp.close(kClient.value());
+    wiring.stack.poll(16);
+    const auto kEof = wiring.tcp.receive(kServer.value(), inbox, sizeof(inbox));
+    ASSERT_TRUE(kEof.ok());
+    ASSERT_EQ(kEof.value(), 0UL);
+
+    wiring.tcp.close(kServer.value());
+    wiring.stack.poll(16);
+    wiring.tcp.service((2 * cinux::net::kTcpMslNanoseconds) + 1);
+    wiring.stack.poll(16);
+    ASSERT_EQ(client_news.farewells_graceful, 1UL);
+    ASSERT_EQ(server_news.farewells_graceful, 1UL);
 }
 
-// ============================================================
-// 3-way handshake (connection table + seq/ACK arithmetic)
-// ============================================================
+TEST("tcp: an open against a closed port is answered with a reset") {
+    Wiring     wiring;
+    Collector  client_news;
+    const auto kClient = wiring.tcp.connect(0, cinux::net::kLoopbackAddress, 4999,
+                                            {
+                                                .context  = &client_news,
+                                                .data     = &Collector::on_data,
+                                                .accepted = &Collector::on_accepted,
+                                                .farewell = &Collector::on_farewell,
+                                            },
+                                            0);
+    ASSERT_TRUE(kClient.ok());
 
-TEST("tcp_handshake: 3-way handshake -> both ends ESTABLISHED, seq/ack correct") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    ASSERT_TRUE(f.tcp.listen(7777, server_l));
+    wiring.stack.poll(16);
 
-    // Client active open -> SYN (captured as an IP packet).
-    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
-    ASSERT_EQ(f.dev.sent.size(), 1u);
-    ASSERT_EQ(f.tcp.connection_count(), 1u);  // client conn
-    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kSynSent);
-
-    TcpHeader syn;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[0], syn));
-    ASSERT_EQ(syn.flags, 0x02u);  // SYN
-    ASSERT_EQ(syn.src_port, 1234u);
-    ASSERT_EQ(syn.dst_port, 7777u);
-    ASSERT_EQ(syn.ack, 0u);
-    const uint32_t s_c = syn.seq;  // client ISN
-
-    // Deliver the SYN -> server passive open -> SYN-ACK.
-    deliver(f, f.dev.sent[0]);
-    ASSERT_EQ(f.tcp.connection_count(), 2u);  // + server conn
-    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kSynReceived);
-    ASSERT_EQ(f.dev.sent.size(), 2u);
-
-    TcpHeader synack;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[1], synack));
-    ASSERT_EQ(synack.flags, 0x12u);   // SYN|ACK
-    ASSERT_EQ(synack.ack, s_c + 1);   // the peer's SYN consumed one sequence number
-    const uint32_t s_s = synack.seq;  // server ISN
-
-    // Deliver the SYN-ACK -> client ACKs, reaches ESTABLISHED.
-    deliver(f, f.dev.sent[1]);
-    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kEstablished);
-    ASSERT_EQ(f.dev.sent.size(), 3u);
-
-    TcpHeader ack3;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[2], ack3));
-    ASSERT_EQ(ack3.flags, 0x10u);  // ACK
-    ASSERT_EQ(ack3.seq, s_c + 1);  // our SYN consumed one
-    ASSERT_EQ(ack3.ack, s_s + 1);  // the peer's SYN consumed one
-
-    // Deliver the ACK -> server ESTABLISHED + on_accept fires.
-    deliver(f, f.dev.sent[2]);
-    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kEstablished);
-    ASSERT_EQ(server_l.accepts, 1u);
-    ASSERT_EQ(server_l.last_remote.port, 1234u);
+    ASSERT_FALSE(wiring.tcp.established(kClient.value()));
+    ASSERT_EQ(client_news.farewells_reset, 1UL);
+    ASSERT_EQ(wiring.tcp.stats().resets_sent, 1UL);
+    ASSERT_EQ(wiring.tcp.stats().resets_received, 1UL);
 }
 
-TEST("tcp_handshake: SYN to a closed (unlistened) port is answered with RST") {
-    Fixture f{ip(127, 0, 0, 1)};
-    // No listener on 9999 -- hand-build a SYN to it.
-    auto    syn = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 9999, 5000, 0, 0x02);
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, syn));
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: stale and out-of-order segments get named answers") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
 
-    ASSERT_EQ(f.dev.sent.size(), 1u);  // the RST
-    TcpHeader rst;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[0], rst));
-    ASSERT_EQ(rst.flags, 0x14u);              // RST|ACK
-    ASSERT_EQ(rst.ack, 5001u);                // ack = SEG.SEQ + 1 (RFC 793)
-    ASSERT_EQ(f.tcp.connection_count(), 0u);  // no connection created
+    const ManualLink kLink = drive_handshake(tcp, wire, 4301);
+    ASSERT_TRUE(kLink.ok);
+    ASSERT_TRUE(tcp.established(kLink.server));
+
+    const unsigned char kAb[2]                                         = {'a', 'b'};
+    unsigned char       seg[cinux::net::kTcpHeaderBytes + sizeof(kAb)] = {};
+    fill_tcp_header(seg, kLink.client_port, 4301, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kAb, sizeof(kAb));
+    deliver(tcp, seg, sizeof(seg));
+    unsigned char inbox[8] = {};
+    const auto    kTaken   = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_TRUE(kTaken.ok());
+    ASSERT_EQ(kTaken.value(), sizeof(kAb));
+
+    unsigned char gap[cinux::net::kTcpHeaderBytes + sizeof(kAb)] = {};
+    fill_tcp_header(gap, kLink.client_port, 4301, kLink.client_isn + 5, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kAb, sizeof(kAb));
+    deliver(tcp, gap, sizeof(gap));
+    ASSERT_EQ(tcp.stats().out_of_order_stored, 1UL);
+
+    unsigned char overlap[cinux::net::kTcpHeaderBytes + 1] = {};
+    fill_tcp_header(overlap, kLink.client_port, 4301, kLink.client_isn + 5, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kAb, 1);
+    deliver(tcp, overlap, sizeof(overlap));
+    ASSERT_EQ(tcp.stats().out_of_order_dropped, 1UL);
+
+    deliver(tcp, seg, sizeof(seg));
+    ASSERT_EQ(tcp.stats().stale_dropped, 1UL);
+
+    const auto kAgain = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_FALSE(kAgain.ok());
+    ASSERT_TRUE(kAgain.error() == cinux::base::KernelError::kWouldBlock);
 }
 
-TEST("tcp_connect: a duplicate 4-tuple is rejected") {
-    Fixture f{ip(127, 0, 0, 1)};
-    ASSERT_TRUE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
-    ASSERT_FALSE(f.tcp.connect(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
+TEST("tcp: an acknowledgement naming unsent bytes is dropped") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4302);
+    ASSERT_TRUE(kLink.ok);
+    const unsigned long kFrames = wire.count;
+
+    unsigned char seg[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(seg, kLink.client_port, 4302, kLink.client_isn + 1, kLink.server_isn + 100,
+                    cinux::net::kTcpFlagAck, cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, seg, sizeof(seg));
+
+    ASSERT_EQ(tcp.stats().ack_beyond_dropped, 1UL);
+    ASSERT_EQ(wire.count, kFrames);
 }
 
-// ============================================================
-// Data transfer + 4-way teardown
-// ============================================================
+TEST("tcp: the connection table refuses a ninth connection") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
 
-TEST("tcp_data: established connection delivers in-order data + ACKs") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    do_handshake(f, server_l);
-    const std::vector<uint8_t> msg = {'h', 'e', 'l', 'l', 'o'};
-
-    // Client sends data -> PSH|ACK segment.
-    ASSERT_TRUE(
-        f.tcp.send(f.dev, 1234, ip(127, 0, 0, 1), 7777, msg.data(), msg.size(), f.ipv4, f.stack)
-            .ok());
-    ASSERT_EQ(f.dev.sent.size(), 4u);  // 3 handshake + 1 data
-    TcpHeader dseg;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[3], dseg));
-    ASSERT_EQ(dseg.flags, 0x18u);  // PSH|ACK
-
-    // Server receives -> on_data + ACK whose ack == data seq + len (rcv_nxt advanced).
-    deliver(f, f.dev.sent[3]);
-    ASSERT_EQ(server_l.datas, 1u);
-    ASSERT_EQ(server_l.last_data, msg);
-    ASSERT_EQ(f.dev.sent.size(), 5u);  // + server ACK
-    TcpHeader sack;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[4], sack));
-    ASSERT_EQ(sack.flags, 0x10u);  // ACK
-    ASSERT_EQ(sack.ack, dseg.seq + static_cast<uint32_t>(msg.size()));
-}
-
-TEST("tcp_close: 4-way teardown -> both connections CLOSED") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    do_handshake(f, server_l);
-
-    // Client active close -> FIN.
-    ASSERT_TRUE(f.tcp.close(f.dev, 1234, ip(127, 0, 0, 1), 7777, f.ipv4, f.stack).ok());
-    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kFinWait1);
-    const size_t fin_idx = f.dev.sent.size() - 1;
-    TcpHeader    fin;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[fin_idx], fin));
-    ASSERT_EQ(fin.flags, 0x11u);  // FIN|ACK
-
-    // Server rx FIN -> ACK + on_close -> CLOSE_WAIT.
-    deliver(f, f.dev.sent[fin_idx]);
-    ASSERT_EQ(server_l.closes, 1u);
-    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kCloseWait);
-    const size_t ack_idx = f.dev.sent.size() - 1;  // server's ACK for the client FIN
-
-    // Client rx ACK -> FIN_WAIT_2.
-    deliver(f, f.dev.sent[ack_idx]);
-    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kFinWait2);
-
-    // Server app closes -> FIN -> LAST_ACK.
-    ASSERT_TRUE(f.tcp.close(f.dev, 7777, ip(127, 0, 0, 1), 1234, f.ipv4, f.stack).ok());
-    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kLastAck);
-    const size_t sfin_idx = f.dev.sent.size() - 1;
-
-    // Client rx server FIN -> ACK -> CLOSED.
-    deliver(f, f.dev.sent[sfin_idx]);
-    ASSERT_EQ(f.tcp.state_of(1234, ip(127, 0, 0, 1), 7777), cinux::net::TcpState::kClosed);
-    const size_t final_ack_idx = f.dev.sent.size() - 1;
-
-    // Server rx final ACK -> CLOSED.  Both connections reaped.
-    deliver(f, f.dev.sent[final_ack_idx]);
-    ASSERT_EQ(f.tcp.state_of(7777, ip(127, 0, 0, 1), 1234), cinux::net::TcpState::kClosed);
-    ASSERT_EQ(f.tcp.connection_count(), 0u);
-}
-
-// ============================================================
-// Adversarial input -- malformed segments are safely dropped (no crash, no
-// spurious state).  Confidence for when M6 makes TCP reachable on real traffic.
-// ============================================================
-
-TEST("tcp_adversarial: a truncated header (< 20 bytes) is dropped") {
-    Fixture                    f{ip(127, 0, 0, 1)};
-    const std::vector<uint8_t> short_seg(10, 0);  // too short for a TCP header
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, short_seg));
-    ASSERT_EQ(f.tcp.valid_count(), 0u);  // never passed the size gate
-    ASSERT_EQ(f.tcp.connection_count(), 0u);
-}
-
-TEST("tcp_adversarial: data_off claiming more than delivered is dropped") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    f.tcp.listen(7777, server_l);
-    // SYN with data_off = 15 (claims a 60-byte header) but only 20 bytes on the
-    // wire.  Must drop, not allocate a connection from the SYN.
-    auto seg = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 100, 0, 0x02);
-    seg[12]  = static_cast<uint8_t>(15 << 4);  // data_off = 15 -> 60 bytes (> 20 delivered)
-    seg[16]  = 0;
-    seg[17]  = 0;  // re-checksum over the modified 20 real bytes
-    embed_tcp_checksum(seg, ip(127, 0, 0, 1), ip(127, 0, 0, 1));
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
-    ASSERT_EQ(f.tcp.connection_count(), 0u);  // malformed -> dropped
-    ASSERT_EQ(server_l.accepts, 0u);
-}
-
-TEST("tcp_adversarial: data_off < 5 (under-min header) is dropped") {
-    Fixture f{ip(127, 0, 0, 1)};
-    auto seg = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, 100, 200, 0x10 /*ACK*/);
-    seg[12]  = static_cast<uint8_t>(0 << 4);  // data_off = 0 -- impossible (< 20 bytes)
-    seg[16]  = 0;
-    seg[17]  = 0;
-    embed_tcp_checksum(seg, ip(127, 0, 0, 1), ip(127, 0, 0, 1));
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, seg));
-    ASSERT_EQ(f.tcp.connection_count(), 0u);  // would have mis-read header as payload
-}
-
-TEST("tcp_adversarial: connection-table overflow drops the 9th SYN (no crash)") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    ASSERT_TRUE(f.tcp.listen(7777, server_l));
-    // 8 SYNs from distinct remotes fill the table (kMaxTcpCons = 8).
-    for (uint16_t i = 0; i < 8; ++i) {
-        auto syn = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), static_cast<uint16_t>(1000 + i),
-                               7777, static_cast<uint32_t>(1000 + i), 0, 0x02);
-        deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, syn));
+    const cinux::net::TcpEvents kEvents{};
+    for (unsigned long attempt = 0; attempt < cinux::net::kTcpConnectionSeats; ++attempt) {
+        const auto kSeat = tcp.connect(0, cinux::net::kLoopbackAddress,
+                                       static_cast<uint16_t>(5000 + attempt), kEvents, 0);
+        ASSERT_TRUE(kSeat.ok());
     }
-    ASSERT_EQ(f.tcp.connection_count(), 8u);
-    // 9th SYN from yet another remote -> table full -> dropped, no crash.
-    auto syn9 = tcp_segment(ip(10, 1, 2, 3), ip(127, 0, 0, 1), 9999, 7777, 999, 0, 0x02);
-    deliver(f, ip_packet(ip(10, 1, 2, 3), ip(127, 0, 0, 1), 6, syn9));
-    ASSERT_EQ(f.tcp.connection_count(), 8u);  // 9th not added
+    const auto kNinth = tcp.connect(0, cinux::net::kLoopbackAddress, 6000, kEvents, 0);
+    ASSERT_FALSE(kNinth.ok());
 }
 
-TEST("tcp_adversarial: a stray ACK to no connection is silently dropped") {
-    Fixture f{ip(127, 0, 0, 1)};
-    auto    ack = tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 9999, 100, 200, 0x10);
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, ack));
-    ASSERT_EQ(f.tcp.connection_count(), 0u);
-    ASSERT_EQ(f.dev.sent.size(), 0u);  // not a SYN -> no RST, just a silent drop
+TEST("tcp: ephemeral ports rise and a closed syn-sent seat is reused") {
+    cinux::net::TcpModule       tcp;
+    Recorder                    wire;
+    const cinux::net::TcpEvents kEvents{};
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const auto kFirst = tcp.connect(0, cinux::net::kLoopbackAddress, 5001, kEvents, 0);
+    ASSERT_TRUE(kFirst.ok());
+    const auto kSecond = tcp.connect(0, cinux::net::kLoopbackAddress, 5002, kEvents, 0);
+    ASSERT_TRUE(kSecond.ok());
+    ASSERT_TRUE(wire.count >= 2);
+    const auto kFirstPort  = ReadWord16Be(wire.frames[0], 0);
+    const auto kSecondPort = ReadWord16Be(wire.frames[1], 0);
+    ASSERT_NE(kFirstPort, kSecondPort);
+    ASSERT_TRUE(kFirstPort >= cinux::net::kEphemeralPortFirst);
+
+    tcp.close(kFirst.value());
+    const auto kThird = tcp.connect(0, cinux::net::kLoopbackAddress, 5003, kEvents, 0);
+    ASSERT_TRUE(kThird.ok());
+    ASSERT_EQ(kThird.value().slot, kFirst.value().slot);
+    ASSERT_EQ(kThird.value().stamp, kFirst.value().stamp + 1);
 }
 
-TEST("tcp_adversarial: out-of-order data on an established conn is dropped") {
-    Fixture f{ip(127, 0, 0, 1)};
-    Capture server_l;
-    do_handshake(f, server_l);
-    // The client ISN is in the captured SYN (dev.sent[0]); craft data with a SEQ
-    // far from the server's RCV.NXT.
-    TcpHeader syn;
-    ASSERT_TRUE(seg_tcp(f.dev.sent[0], syn));
-    const uint32_t bad_seq = syn.seq + 1000;
-    auto           data =
-        tcp_segment(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 1234, 7777, bad_seq, 0, 0x18, {'x'});
-    deliver(f, ip_packet(ip(127, 0, 0, 1), ip(127, 0, 0, 1), 6, data));
-    ASSERT_EQ(server_l.datas, 0u);  // out of order -> no on_data
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: silence re-sends the oldest segment and an acknowledgement silences it") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4305);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char      kPing[4] = {'p', 'i', 'n', 'g'};
+    const unsigned long long kBase    = cinux::net::kTcpInitialRtoNanoseconds;
+    const auto               kGiven   = tcp.send(kLink.server, kPing, sizeof(kPing), kBase);
+    ASSERT_TRUE(kGiven.ok());
+    const unsigned long kAfterSend = wire.count;
+
+    tcp.service(kBase);
+    ASSERT_EQ(wire.count, kAfterSend);
+
+    tcp.service(kBase + cinux::net::kTcpInitialRtoNanoseconds + 1);
+    ASSERT_EQ(tcp.stats().rto_timeouts, 1UL);
+    ASSERT_EQ(tcp.stats().retransmits_sent, 1UL);
+    ASSERT_EQ(wire.count, kAfterSend + 1);
+    ASSERT_EQ(wire.seq_of(wire.count - 1), kLink.server_isn + 1);
+    ASSERT_EQ(wire.frames[wire.count - 1][cinux::net::kTcpHeaderBytes],
+              static_cast<unsigned char>('p'));
+
+    const unsigned long long kAckTime = kBase + (2 * cinux::net::kTcpInitialRtoNanoseconds);
+    tcp.service(kAckTime);
+    unsigned char ack[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(ack, kLink.client_port, 4305, kLink.client_isn + 1,
+                    kLink.server_isn + 1 + sizeof(kPing), cinux::net::kTcpFlagAck,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, ack, sizeof(ack));
+
+    tcp.service(kAckTime + (8 * cinux::net::kTcpMaxRtoNanoseconds));
+    ASSERT_EQ(tcp.stats().retransmits_sent, 1UL);
+    ASSERT_EQ(wire.count, kAfterSend + 1);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: close retransmits unacknowledged payload before its FIN") {
+    using namespace cinux;
+    net::TcpModule tcp;
+    Recorder       wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, net::kLoopbackAddress);
+    const ManualLink kLink = drive_handshake(tcp, wire, 4320);
+    ASSERT_TRUE(kLink.ok);
+    const auto          kBase = net::kTcpInitialRtoNanoseconds;
+    const unsigned char kHi[] = {'h', 'i', '\n'};
+    ASSERT_TRUE(tcp.send(kLink.server, kHi, sizeof(kHi), kBase).ok());
+    tcp.close(kLink.server);
+    tcp.service(kBase);
+    tcp.service(kBase + net::kTcpInitialRtoNanoseconds + 1);
+    ASSERT_EQ(wire.seq_of(wire.count - 1), kLink.server_isn + 1);
+    ASSERT_EQ(wire.lengths[wire.count - 1], net::kTcpHeaderBytes + sizeof(kHi));
+    ASSERT_EQ(wire.frames[wire.count - 1][13] & net::kTcpFlagFin, 0U);
+    ASSERT_EQ(wire.frames[wire.count - 1][net::kTcpHeaderBytes], static_cast<unsigned char>('h'));
+    tcp.abandon(kLink.server);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: a silent peer exhausts the retries and the connection is given up") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    Collector             news;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const unsigned long long kBase   = cinux::net::kTcpInitialRtoNanoseconds;
+    const auto               kClient = tcp.connect(0, cinux::net::kLoopbackAddress, 4306,
+                                                   {
+                                                       .context  = &news,
+                                                       .data     = &Collector::on_data,
+                                                       .accepted = &Collector::on_accepted,
+                                                       .farewell = &Collector::on_farewell,
+                                                   },
+                                                   kBase);
+    ASSERT_TRUE(kClient.ok());
+    const unsigned long kAfterSyn = wire.count;
+
+    tcp.service(kBase);
+    unsigned long long wait  = cinux::net::kTcpInitialRtoNanoseconds;
+    unsigned long long clock = kBase;
+    for (unsigned pass = 0; pass < 5; ++pass) {
+        clock += wait + 1;
+        tcp.service(clock);
+        wait *= 2;
+        ASSERT_EQ(tcp.stats().retransmits_sent, pass + 1UL);
+    }
+    ASSERT_EQ(wire.count, kAfterSyn + 5);
+
+    clock += wait + 1;
+    tcp.service(clock);
+    ASSERT_EQ(tcp.stats().rto_timeouts, 6UL);
+    ASSERT_EQ(tcp.stats().giveups, 1UL);
+    ASSERT_EQ(tcp.stats().retransmits_sent, 5UL);
+    ASSERT_EQ(news.farewells_unreachable, 1UL);
+    ASSERT_EQ(wire.count, kAfterSyn + 5);
+
+    const unsigned char kOne[1] = {'x'};
+    const auto          kDead   = tcp.send(kClient.value(), kOne, sizeof(kOne), clock);
+    ASSERT_FALSE(kDead.ok());
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: a filled gap releases the parked segment in order") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4307);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char kLate[2]                                          = {'c', 'd'};
+    unsigned char       late[cinux::net::kTcpHeaderBytes + sizeof(kLate)] = {};
+    fill_tcp_header(late, kLink.client_port, 4307, kLink.client_isn + 3, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kLate, sizeof(kLate));
+    deliver(tcp, late, sizeof(late));
+    ASSERT_EQ(tcp.stats().out_of_order_stored, 1UL);
+    const auto kEmpty = tcp.receive(kLink.server, late, sizeof(late));
+    ASSERT_FALSE(kEmpty.ok());
+    ASSERT_TRUE(kEmpty.error() == cinux::base::KernelError::kWouldBlock);
+
+    const unsigned char kMissing[2]                                             = {'a', 'b'};
+    unsigned char       missing[cinux::net::kTcpHeaderBytes + sizeof(kMissing)] = {};
+    fill_tcp_header(missing, kLink.client_port, 4307, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kMissing, sizeof(kMissing));
+    deliver(tcp, missing, sizeof(missing));
+    ASSERT_EQ(tcp.stats().out_of_order_recovered, 1UL);
+
+    unsigned char inbox[8] = {};
+    const auto    kTaken   = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_TRUE(kTaken.ok());
+    ASSERT_EQ(kTaken.value(), 4UL);
+    ASSERT_EQ(inbox[0], static_cast<unsigned char>('a'));
+    ASSERT_EQ(inbox[3], static_cast<unsigned char>('d'));
+}
+
+TEST("tcp: three duplicate acknowledgements re-send the oldest segment at once") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4308);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char      kPing[4] = {'p', 'i', 'n', 'g'};
+    const unsigned long long kBase    = cinux::net::kTcpInitialRtoNanoseconds;
+    const auto               kGiven   = tcp.send(kLink.server, kPing, sizeof(kPing), kBase);
+    ASSERT_TRUE(kGiven.ok());
+    const unsigned long kAfterSend = wire.count;
+
+    unsigned char dup[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(dup, kLink.client_port, 4308, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck, cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, dup, sizeof(dup));
+    deliver(tcp, dup, sizeof(dup));
+    ASSERT_EQ(tcp.stats().fast_retransmits, 0UL);
+    deliver(tcp, dup, sizeof(dup));
+    ASSERT_EQ(tcp.stats().fast_retransmits, 1UL);
+    ASSERT_EQ(tcp.stats().retransmits_sent, 0UL);
+    ASSERT_EQ(wire.count, kAfterSend + 1);
+    ASSERT_EQ(wire.seq_of(wire.count - 1), kLink.server_isn + 1);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
+TEST("tcp: the peer's advertised window gates sending and reopens on drain") {
+    Wiring     wiring;
+    Collector  server_news;
+    Collector  client_news;
+    const auto kListener = wiring.tcp.listen(4310, {
+                                                       .context  = &server_news,
+                                                       .data     = &Collector::on_data,
+                                                       .accepted = &Collector::on_accepted,
+                                                       .farewell = &Collector::on_farewell,
+                                                   });
+    const auto kClient   = wiring.tcp.connect(0, cinux::net::kLoopbackAddress, 4310,
+                                              {
+                                                  .context  = &client_news,
+                                                  .data     = &Collector::on_data,
+                                                  .accepted = &Collector::on_accepted,
+                                                  .farewell = &Collector::on_farewell,
+                                              },
+                                              0);
+    wiring.stack.poll(16);
+    const auto kServer = wiring.tcp.take_accepted(kListener.value());
+    ASSERT_TRUE(kServer.ok());
+
+    unsigned char flood[cinux::net::kTcpSendWindowBytes + 64] = {};
+    const auto    kFirst = wiring.tcp.send(kClient.value(), flood, sizeof(flood), 0);
+    ASSERT_TRUE(kFirst.ok());
+    ASSERT_EQ(kFirst.value(), cinux::net::kTcpSendWindowBytes);
+    wiring.stack.poll(16);
+    ASSERT_EQ(server_news.data_hits, 3UL);
+
+    const auto kShut = wiring.tcp.send(kClient.value(), flood, 8, 0);
+    ASSERT_TRUE(kShut.ok());
+    ASSERT_EQ(kShut.value(), 0UL);
+
+    unsigned char drain[32] = {};
+    size_t        seen      = 0;
+    while (seen < cinux::net::kTcpSendWindowBytes) {
+        const auto kTaken = wiring.tcp.receive(kServer.value(), drain, sizeof(drain));
+        ASSERT_TRUE(kTaken.ok());
+        seen += kTaken.value();
+    }
+    wiring.stack.poll(16);
+
+    const unsigned char kMore[4] = {'m', 'o', 'r', 'e'};
+    const auto          kAgain   = wiring.tcp.send(kClient.value(), kMore, sizeof(kMore), 0);
+    ASSERT_TRUE(kAgain.ok());
+    ASSERT_EQ(kAgain.value(), sizeof(kMore));
+}
+
+TEST("tcp: the closing side lingers two maximum segment lifetimes") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4311);
+    ASSERT_TRUE(kLink.ok);
+    const unsigned long long kClock = 100;
+    tcp.service(kClock);
+
+    tcp.close(kLink.server);
+    unsigned char ack[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(ack, kLink.client_port, 4311, kLink.client_isn + 1, kLink.server_isn + 2,
+                    cinux::net::kTcpFlagAck, cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, ack, sizeof(ack));
+    unsigned char fin[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(fin, kLink.client_port, 4311, kLink.client_isn + 1, kLink.server_isn + 2,
+                    cinux::net::kTcpFlagFin | cinux::net::kTcpFlagAck,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, fin, sizeof(fin));
+
+    const unsigned char kOne[1]    = {'x'};
+    const auto          kLingering = tcp.send(kLink.server, kOne, sizeof(kOne), kClock);
+    ASSERT_TRUE(kLingering.error() == cinux::base::KernelError::kBrokenPipe);
+    const unsigned long kFrames = wire.count;
+    deliver(tcp, fin, sizeof(fin));
+    ASSERT_EQ(wire.count, kFrames + 1);
+
+    tcp.service(kClock + (2 * cinux::net::kTcpMslNanoseconds) + 1);
+    const auto kGone = tcp.send(kLink.server, kOne, sizeof(kOne), kClock);
+    ASSERT_TRUE(kGone.error() == cinux::base::KernelError::kNotFound);
+}
+
+TEST("tcp: a fresh SYN during the linger takes the seat at once") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4312);
+    ASSERT_TRUE(kLink.ok);
+    const unsigned long long kClock = 100;
+    tcp.service(kClock);
+
+    tcp.close(kLink.server);
+    unsigned char ack[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(ack, kLink.client_port, 4312, kLink.client_isn + 1, kLink.server_isn + 2,
+                    cinux::net::kTcpFlagAck, cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, ack, sizeof(ack));
+    unsigned char fin[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(fin, kLink.client_port, 4312, kLink.client_isn + 1, kLink.server_isn + 2,
+                    cinux::net::kTcpFlagFin | cinux::net::kTcpFlagAck,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, fin, sizeof(fin));
+
+    const unsigned long kFrames                            = wire.count;
+    unsigned char       fresh[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(fresh, kLink.client_port, 4312, 9000, 0, cinux::net::kTcpFlagSyn,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, fresh, sizeof(fresh));
+    ASSERT_EQ(wire.count, kFrames + 1);
+    ASSERT_NE(wire.seq_of(wire.count - 1), kLink.server_isn);
+    ASSERT_EQ(tcp.stats().unclaimed, 0UL);
+
+    const unsigned char kOne[1] = {'x'};
+    const auto          kGone   = tcp.send(kLink.server, kOne, sizeof(kOne), kClock);
+    ASSERT_TRUE(kGone.error() == cinux::base::KernelError::kNotFound);
+}
+
+TEST("tcp: an out-of-order storm fills the repair seats and drops by name") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4313);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char kTwo[2] = {'x', 'y'};
+    for (unsigned long wave = 0; wave < cinux::net::kTcpReorderSeats; ++wave) {
+        unsigned char seg[cinux::net::kTcpHeaderBytes + sizeof(kTwo)] = {};
+        fill_tcp_header(seg, kLink.client_port, 4313,
+                        kLink.client_isn + 1 + static_cast<uint32_t>((wave + 1) * sizeof(kTwo)),
+                        kLink.server_isn + 1, cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                        cinux::net::kTcpReceiveWindowBytes, kTwo, sizeof(kTwo));
+        deliver(tcp, seg, sizeof(seg));
+    }
+    ASSERT_EQ(tcp.stats().out_of_order_stored, cinux::net::kTcpReorderSeats);
+
+    unsigned char extra[cinux::net::kTcpHeaderBytes + sizeof(kTwo)] = {};
+    fill_tcp_header(
+        extra, kLink.client_port, 4313,
+        kLink.client_isn + 1 + static_cast<uint32_t>((cinux::net::kTcpReorderSeats + 1) * 2),
+        kLink.server_isn + 1, cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+        cinux::net::kTcpReceiveWindowBytes, kTwo, sizeof(kTwo));
+    deliver(tcp, extra, sizeof(extra));
+    ASSERT_EQ(tcp.stats().out_of_order_dropped, 1UL);
+
+    unsigned char gap[cinux::net::kTcpHeaderBytes + sizeof(kTwo)] = {};
+    fill_tcp_header(gap, kLink.client_port, 4313, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kTwo, sizeof(kTwo));
+    deliver(tcp, gap, sizeof(gap));
+    ASSERT_EQ(tcp.stats().out_of_order_recovered, cinux::net::kTcpReorderSeats);
+
+    unsigned char inbox[32] = {};
+    const size_t  kWant     = (cinux::net::kTcpReorderSeats + 1) * 2;
+    const auto    kTaken    = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_EQ(kTaken.value(), kWant);
+}
+
+TEST("tcp: a stale storm never moves the read cursor") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4314);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char kTwo[2]                                         = {'o', 'l'};
+    unsigned char       seg[cinux::net::kTcpHeaderBytes + sizeof(kTwo)] = {};
+    fill_tcp_header(seg, kLink.client_port, 4314, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+                    cinux::net::kTcpReceiveWindowBytes, kTwo, sizeof(kTwo));
+    deliver(tcp, seg, sizeof(seg));
+    for (unsigned long wave = 0; wave < 4; ++wave) {
+        deliver(tcp, seg, sizeof(seg));
+    }
+    ASSERT_EQ(tcp.stats().stale_dropped, 4UL);
+
+    unsigned char inbox[8] = {};
+    const auto    kTaken   = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_EQ(kTaken.value(), sizeof(kTwo));
+    const auto kDry = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_TRUE(kDry.error() == cinux::base::KernelError::kWouldBlock);
+}
+
+TEST("tcp: a reset on a live connection releases the seat at once") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4315);
+    ASSERT_TRUE(kLink.ok);
+
+    unsigned char rst[cinux::net::kTcpHeaderBytes] = {};
+    fill_tcp_header(rst, kLink.client_port, 4315, kLink.client_isn + 1, kLink.server_isn + 1,
+                    cinux::net::kTcpFlagRst | cinux::net::kTcpFlagAck,
+                    cinux::net::kTcpReceiveWindowBytes, nullptr, 0);
+    deliver(tcp, rst, sizeof(rst));
+    ASSERT_EQ(tcp.stats().resets_received, 1UL);
+    ASSERT_FALSE(tcp.established(kLink.server));
+    const unsigned char kOne[1] = {'x'};
+    const auto          kGone   = tcp.send(kLink.server, kOne, sizeof(kOne), 0);
+    ASSERT_TRUE(kGone.error() == cinux::base::KernelError::kNotFound);
+}
+
+TEST("tcp: a segment beyond the receive window is refused without a seat") {
+    cinux::net::TcpModule tcp;
+    Recorder              wire;
+    tcp.init({.context = &wire, .send = &Recorder::take}, cinux::net::kLoopbackAddress);
+
+    const ManualLink kLink = drive_handshake(tcp, wire, 4316);
+    ASSERT_TRUE(kLink.ok);
+
+    const unsigned char kTwo[2]                                             = {'f', 'g'};
+    unsigned char       far_seg[cinux::net::kTcpHeaderBytes + sizeof(kTwo)] = {};
+    fill_tcp_header(
+        far_seg, kLink.client_port, 4316,
+        kLink.client_isn + 1 + static_cast<uint32_t>(cinux::net::kTcpReceiveWindowBytes),
+        kLink.server_isn + 1, cinux::net::kTcpFlagAck | cinux::net::kTcpFlagPsh,
+        cinux::net::kTcpReceiveWindowBytes, kTwo, sizeof(kTwo));
+    deliver(tcp, far_seg, sizeof(far_seg));
+    ASSERT_EQ(tcp.stats().out_of_order_dropped, 1UL);
+    ASSERT_EQ(tcp.stats().out_of_order_stored, 0UL);
+
+    unsigned char inbox[8] = {};
+    const auto    kDry     = tcp.receive(kLink.server, inbox, sizeof(inbox));
+    ASSERT_TRUE(kDry.error() == cinux::base::KernelError::kWouldBlock);
+}
+
+TEST("tcp: a full loopback story survives four pump passes") {
+    Wiring     wiring;
+    Collector  server_news;
+    Collector  client_news;
+    const auto kListener = wiring.tcp.listen(4317, {
+                                                       .context  = &server_news,
+                                                       .data     = &Collector::on_data,
+                                                       .accepted = &Collector::on_accepted,
+                                                       .farewell = &Collector::on_farewell,
+                                                   });
+    const auto kClient   = wiring.tcp.connect(0, cinux::net::kLoopbackAddress, 4317,
+                                              {
+                                                  .context  = &client_news,
+                                                  .data     = &Collector::on_data,
+                                                  .accepted = &Collector::on_accepted,
+                                                  .farewell = &Collector::on_farewell,
+                                              },
+                                              0);
+    wiring.stack.poll(4);
+    ASSERT_TRUE(wiring.tcp.established(kClient.value()));
+    const auto kServer = wiring.tcp.take_accepted(kListener.value());
+    ASSERT_TRUE(kServer.ok());
+
+    const unsigned char kPing[4] = {'p', 'i', 'n', 'g'};
+    const auto          kGiven   = wiring.tcp.send(kClient.value(), kPing, sizeof(kPing), 0);
+    ASSERT_EQ(kGiven.value(), sizeof(kPing));
+    wiring.stack.poll(4);
+    unsigned char inbox[8] = {};
+    const auto    kArrived = wiring.tcp.receive(kServer.value(), inbox, sizeof(inbox));
+    ASSERT_EQ(kArrived.value(), sizeof(kPing));
+
+    const unsigned char kPong[4] = {'p', 'o', 'n', 'g'};
+    const auto          kBack    = wiring.tcp.send(kServer.value(), kPong, sizeof(kPong), 0);
+    ASSERT_EQ(kBack.value(), sizeof(kPong));
+    wiring.stack.poll(4);
+    const auto kReturned = wiring.tcp.receive(kClient.value(), inbox, sizeof(inbox));
+    ASSERT_EQ(kReturned.value(), sizeof(kPong));
+
+    wiring.tcp.close(kClient.value());
+    wiring.stack.poll(4);
+    const auto kEof = wiring.tcp.receive(kServer.value(), inbox, sizeof(inbox));
+    ASSERT_EQ(kEof.value(), 0UL);
+    wiring.tcp.close(kServer.value());
+    wiring.stack.poll(4);
+    wiring.tcp.service((2 * cinux::net::kTcpMslNanoseconds) + 1);
+    wiring.stack.poll(4);
+    ASSERT_EQ(client_news.farewells_graceful + server_news.farewells_graceful, 2UL);
 }
 
 int main() {
-    RUN_ALL_TESTS();
-    return _tests_failed > 0 ? 1 : 0;
+    return cinux::test::RunAll();
 }

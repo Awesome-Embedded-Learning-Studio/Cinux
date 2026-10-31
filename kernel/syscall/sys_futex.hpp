@@ -1,52 +1,31 @@
 /**
- * @file kernel/syscall/sys_futex.hpp
- * @brief futex syscall handler (F3-M2 batch 2)
+ * @file    sys_futex.hpp
+ * @brief   Declaration of the futex() syscall handler.
  *
- * FUTEX_WAIT / FUTEX_WAKE / FUTEX_*_BITSET.  Backed by a 256-bucket hash
- * table keyed by the futex word's virtual address; each bucket is an
- * intrusive FIFO wait queue (Task::wait_next) guarded by a Spinlock,
- * mirroring kernel/proc/sync.cpp (Mutex/Semaphore).  No timeout / PI /
- * requeue yet.
- *
- * FUTEX_WAIT reads the futex word through get_user(), so an invalid user
- * pointer returns -EFAULT instead of taking a kernel-mode page fault.
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-17
+ * @version 0.1
+ * @since   0.8.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Fast user-space mutex (Linux syscall 202)
+ * @brief         Park the caller on, or wake waiters of, a user word.
  *
- * @param uaddr    futex word, 4-byte aligned user pointer
- * @param op       FUTEX_WAIT / FUTEX_WAKE / FUTEX_*_BITSET
- *                 (FUTEX_PRIVATE_FLAG is ignored)
- * @param val      expected value (WAIT) / max waiters to wake (WAKE)
- * @param timeout  unused -- no timeout support yet (treated as infinite)
- * @param uaddr2   unused (no requeue)
- * @param val3     bitset for FUTEX_*_BITSET
- * @return WAIT: 0 on wake, -EAGAIN if *uaddr!=val, -EINVAL/-EFAULT on bad args;
- *         WAKE: number of waiters woken; unsupported op: -ENOSYS
+ * @return        For a wait: zero once woken, -kEagain when the word
+ *                moved on first. For a wake: how many were woken. Or
+ *                a negative errno (-kEinval for an unknown op or a
+ *                misaligned word, -kEfault for a kernel-half word).
+ * @since         0.8.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_futex(uint64_t uaddr, uint64_t op, uint64_t val, uint64_t timeout, uint64_t uaddr2,
-                  uint64_t val3);
-
-/**
- * @brief Wake up to @p max waiters on futex word @p uaddr (all bits).
- *
- * Kernel-internal wake used by CLONE_CHILD_CLEARTID's exit path (F3-M2 batch 5):
- * when a thread exits it zeros its child_tid and wakes any pthread_join waiter.
- * Same logic as FUTEX_WAKE without the syscall boundary.
- *
- * @return number of waiters woken.
- */
-int64_t futex_wake_addr(uint64_t uaddr, uint32_t max);
+long long HandleFutex(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

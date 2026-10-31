@@ -1,34 +1,46 @@
 /**
- * @file kernel/syscall/sys_write.hpp
- * @brief sys_write handler declaration
+ * @file    sys_write.hpp
+ * @brief   Declaration of the write(fd, buf, count) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Write data from a user buffer to a file descriptor
+ * @brief         Console out, or bytes into an open file.
  *
- * For fd=1 (stdout), outputs to serial + Console via kprintf.
- * Validates that the user buffer resides below USER_ADDR_MAX.
- *
- * @param fd       File descriptor (only fd=1 is supported)
- * @param buf_virt User virtual address of the buffer
- * @param count    Number of bytes to write
- * @return Number of bytes written, or -1 on error
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_write(uint64_t fd, uint64_t buf_virt, uint64_t count, uint64_t, uint64_t, uint64_t);
+long long HandleWrite(const SyscallFrame& frame);
 
-/// P0b (SMAP): pure kernel-to-kernel write (fd + KERNEL buffer -> VFS/fd=1).
-/// Kernel-internal callers and tests use this; sys_write is the user boundary.
-/// May block (pipe full); never touches user memory.
-int64_t do_write_kernel(int fd, const void* kbuf, uint64_t count);
+/**
+ * @brief         Writes one run of bytes through one descriptor.
+ *
+ * @param[in]     descriptor   The fd the bytes belong to; 1 and 2 are
+ *                             the console, the rest are opens.
+ * @param[in]     source       Where the bytes come from, user memory.
+ * @param[in]     count        How many bytes to put.
+ * @return        The count written, or a negative errno.
+ * @note          The single-run body write and writev share; the scatter
+ *                caller adds the segments, the plain caller is one
+ *                segment.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long WriteRun(unsigned long long descriptor, unsigned long long source,
+                   unsigned long long count);
 
 }  // namespace cinux::syscall

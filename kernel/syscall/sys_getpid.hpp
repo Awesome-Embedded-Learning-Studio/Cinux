@@ -1,23 +1,28 @@
 /**
- * @file kernel/syscall/sys_getpid.hpp
- * @brief sys_getpid handler declaration
+ * @file    sys_getpid.hpp
+ * @brief   Declaration of the getpid() syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-12
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Get the process ID of the calling task
+ * @brief         The caller's own pid.
  *
- * @return The PID of the current task, or -1 if no task is running
+ * @return        The pid the scheduler handed this task at seat.
+ * @since         0.1.0
+ * @ingroup kernel_syscall
  */
-int64_t sys_getpid(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleGetpid(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

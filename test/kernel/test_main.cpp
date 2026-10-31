@@ -1,0 +1,111 @@
+#include "framework_kernel.hpp"
+#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/boot/boot_info.hpp"
+#include "kernel/boot/print.hpp"
+#include "kernel/console/console.hpp"
+#include "kernel/debug/kallsyms.hpp"
+#include "kernel/mm/vmm.hpp"
+
+#if defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD) || defined(KTEST_STAGE_PROC) ||      \
+    defined(KTEST_STAGE_BLOCK)
+#    include "cinux/assert.hpp"
+#    include "kernel/arch/x86_64/irq_stubs.hpp"
+#    include "kernel/arch/x86_64/pic.hpp"
+#    include "kernel/driver/pit/pit.hpp"
+#    include "kernel/interrupt/irq.hpp"
+#    include "kernel/time/tick.hpp"
+#endif
+#ifdef KTEST_STAGE_KEYBOARD
+#    include "kernel/driver/keyboard/keyboard.hpp"
+#endif
+#if defined(KTEST_STAGE_MM) || defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK) ||          \
+    defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD)
+#    include "kernel/arch/x86_64/cpuid.hpp"
+#    include "kernel/arch/x86_64/ex_table.hpp"
+#    include "kernel/arch/x86_64/instructions.hpp"
+#    include "kernel/arch/x86_64/msr.hpp"
+#    include "kernel/driver/serial/serial.hpp"
+#    include "kernel/mm/heap_runtime.hpp"
+#    include "kernel/mm/pmm.hpp"
+#    include "kernel/syscall/uaccess.hpp"
+#endif
+#if defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK)
+#    include "kernel/proc/sched_class.hpp"
+#    include "kernel/proc/scheduler.hpp"
+#    include "kernel/proc/task.hpp"
+#endif
+#ifdef KTEST_STAGE_BLOCK
+#    include "kernel/driver/ahci/ahci.hpp"
+#    include "kernel/driver/pci/pci.hpp"
+#endif
+
+namespace kernel {
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+void Main(const cinux::boot::BootInfo& info) {
+    cinux::debug::KallsymsInstallBuiltIn();
+#if defined(KTEST_STAGE_MM) || defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK) ||          \
+    defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD)
+    cinux::driver::SerialInit();
+    if (!cinux::mm::Pmm::self().init(info)) {
+        cinux::print::Println("[ktest] pmm init failed");
+        cinux::arch::Halt();
+    }
+    const cinux::boot::BootInfo* handed = cinux::mm::BringUpAddressSpace(info);
+    if (handed == nullptr) {
+        cinux::print::Println("[ktest] address space bring-up failed");
+        cinux::arch::Halt();
+    }
+    cinux::arch::ex_table::ArmTable();
+    cinux::arch::WriteMsr(cinux::arch::msr::kEfer, cinux::arch::ReadMsr(cinux::arch::msr::kEfer) |
+                                                       cinux::arch::msr::kEferNoExecuteEnable);
+    cinux::syscall::uaccess::ArmWindows(cinux::arch::HasSmap());
+    cinux::console::InitConsole(*handed);
+    if (!cinux::mm::BringUpHeap()) {
+        cinux::print::Println("[ktest] heap bring-up failed");
+        cinux::arch::Halt();
+    }
+#else
+    cinux::mm::MapFramebufferDoor(info);
+    cinux::console::InitConsole(info);
+#endif
+    cinux::print::Println("[ktest] kernel test world alive, %u e820 entries", info.e820_count);
+#if defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK)
+    cinux::proc::Scheduler::self().install_class(cinux::proc::DefaultFifoClass());
+    cinux::proc::Scheduler::self().install_class(cinux::proc::PriorityClass());
+    cinux::proc::InstallKernelSwitchSink();
+#endif
+#if defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD) || defined(KTEST_STAGE_PROC) ||      \
+    defined(KTEST_STAGE_BLOCK)
+    cinux::arch::Pic::self().remap();
+    cinux::time::Tick::self().init(cinux::driver::Pit::self());
+    cinux::arch::irq::InstallIrqStubs();
+    cinux::base::safety::Check(cinux::arch::irq::InstallApicBackend(), "APIC backend init failed");
+    cinux::interrupt::Irq::self().enable_line(cinux::interrupt::IrqLine{.value = 0});
+#endif
+#ifdef KTEST_STAGE_PROC
+    cinux::print::Println("[ktest] proc stage: APIC backend on, PIT live");
+#endif
+#ifdef KTEST_STAGE_KEYBOARD
+    cinux::driver::Keyboard::self().init();
+    cinux::driver::Keyboard::self().attach();
+    cinux::print::Println("[ktest] keyboard attached");
+#endif
+#ifdef KTEST_STAGE_BLOCK
+    asm volatile("sti" : : : "memory");
+    cinux::driver::PciBus::self().init();
+    const bool kDriveUp = cinux::driver::Ahci::self().init();
+    if (!kDriveUp) {
+        cinux::print::Println("[ktest] block stage needs the scratch disk, halting");
+        cinux::arch::Halt();
+    }
+    cinux::print::Println("[ktest] block stage: ahci up");
+#endif
+#if defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD) || defined(KTEST_STAGE_PROC)
+    asm volatile("sti" : : : "memory");
+#endif
+    cinux::test::RunKernelTests();
+    cinux::arch::Halt();
+}
+
+}  // namespace kernel

@@ -1,203 +1,374 @@
 /**
- * @file kernel/mm/vma.hpp
- * @brief VMA (Virtual Memory Area) bookkeeping for per-process address spaces
+ * @file    vma.hpp
+ * @brief   The per-task register of user address ranges.
  *
- * A VMA records a contiguous half-open virtual range [start, end) with access
- * flags and, for file mappings (M2+), an optional backing inode.  An IVMAStore
- * holds the set of VMAs for one AddressSpace and answers the questions the rest
- * of the VM subsystem asks:
+ * A VMA (virtual memory area) is one recorded promise about a stretch of
+ * the user half: where it starts and ends, what may be done there, and
+ * what stands behind it. The register is the book the page-fault path
+ * consults before judging any fault — a fault inside a registered range
+ * is a page the process was promised, one outside is a true segmentation
+ * fault. Registration arrives with exec (the segments and the stack) and
+ * grows when mmap asks for anonymous memory; the fault-path promotion
+ * that finally keeps those promises is its own station. The store is a
+ * plain intrusive chain walked read-only: ranges number in the dozens,
+ * so a linear scan is the honest cost, and no allocation hides in find.
  *
- *   - find(addr)         -- which VMA (if any) owns this faulting address?
- *                           (page-fault validation, batch 4)
- *   - find_free_area()   -- where can a new mapping of length N go?  (mmap, M2)
- *   - insert()/remove()  -- track and untrack ranges, merging/splitting so the
- *                           store stays a minimal sorted list.
- *
- * IVMAStore is abstract so the backend can be swapped (a red-black tree is the
- * natural future upgrade) without touching callers.  This file ships
- * LinkedListVMAStore, an intrusive doubly-linked list kept sorted by start.
- *
- * Ownership: the store OWNS every VMA node it holds.  insert() allocates each
- * node with global operator new (Heap::alloc); the destructor and remove()
- * free nodes.  Pointers returned by find()/first()/next() are borrowed and must
- * not be deleted by the caller.
- *
- * Failure model: invalid arguments and overlapping inserts are reported via
- * cinux::lib::ErrorOr (A.6).  Heap exhaustion is not modelled as a recoverable
- * error -- operator new returns null and construction traps on OOM, the same
- * convention used elsewhere in the kernel (e.g. `new AddressSpace()`); the heap
- * auto-expands, so this is not expected in practice.
- *
- * Synchronization: LinkedListVMAStore is NOT thread-safe.  The owning
- * AddressSpace serialises access with its own lock (batch 2).  Single-threaded
- * unit tests need no locking.
- *
- * Namespace: cinux::mm
+ * @author  Charliechen114514
+ * @date    2026-10-14
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstddef>
-#include <cstdint>
-#include <new>
-
-#include "kernel/mm/slab.hpp"
+#include "cinux/container/self_list.hpp"
+#include "cinux/ref_count.hpp"
+#include "cinux/result.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/mm/layout.hpp"
+#include "kernel/mm/shared_pages.hpp"
 
 namespace cinux::fs {
-struct Inode;  // forward declaration; file backings are filled in M2 (mmap)
+struct OpenFile;
 }
 
 namespace cinux::mm {
 
-/// Access flags for a VMA, mirroring the POSIX mmap prot/flags intent.
-enum class VmaFlags : uint64_t {
-    None      = 0,
-    Read      = 1 << 0,  ///< PROT_READ
-    Write     = 1 << 1,  ///< PROT_WRITE
-    Exec      = 1 << 2,  ///< PROT_EXEC
-    Shared    = 1 << 3,  ///< MAP_SHARED (vs MAP_PRIVATE)
-    Anonymous = 1 << 4,  ///< MAP_ANONYMOUS (no backing file)
-    Stack     = 1 << 5,  ///< grows-down stack region (auto-expand on PF, batch 4)
-    Heap      = 1 << 6,  ///< brk-managed heap region (M3)
-    /// F-GUI-USERSPACE batch 1: device / I-O physical mapping (e.g. framebuffer
-    /// mmap).  The VMA is pre-bound to a fixed physical range (phys_base); the
-    /// page-fault handler maps those pages verbatim with FLAG_PCD (uncached)
-    /// instead of allocating from the PMM.  Teardown (munmap) and fork never
-    /// free or CoW them -- device memory is not PMM-managed.
-    IoPhys    = 1 << 7,
+/**
+ * @brief   What stands behind one registered range.
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ */
+enum class VmaKind : unsigned char {
+    kAnonymous,  ///< Fresh memory with no file behind it; faults refill from zero.
+    kFile,       ///< Bytes that trace back to a file node, as exec's segments do.
+    kStack,      ///< The main stack, which grows downward toward lower addresses.
+    kDevice,     ///< Hardware frames behind a memory device, as the framebuffer's
+                 ///< shared mapping does; faults map the device's own pages.
 };
 
-constexpr VmaFlags operator|(VmaFlags a, VmaFlags b) noexcept {
-    return static_cast<VmaFlags>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
-}
-
-constexpr VmaFlags operator&(VmaFlags a, VmaFlags b) noexcept {
-    return static_cast<VmaFlags>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
-}
-
-constexpr VmaFlags& operator|=(VmaFlags& a, VmaFlags b) noexcept {
-    a = a | b;
-    return a;
-}
-
-/// @brief True when @p value has every bit of @p bit set.
-constexpr bool has_flag(VmaFlags value, VmaFlags bit) noexcept {
-    return (static_cast<uint64_t>(value) & static_cast<uint64_t>(bit)) ==
-           static_cast<uint64_t>(bit);
-}
-
 /**
- * @brief One contiguous virtual memory region [start, end).
- *
- * Nodes are intrusive (prev/next) so an IVMAStore can link them without a side
- * table.  They are heap-allocated and owned by the store.
+ * @brief   One recorded promise: a half-open range plus its terms.
+ * @note    [start, end) on purpose — an empty range is expressible and
+ *          refused at registration, and end belongs to the next range,
+ *          never to this one. The backing node travels by value: it is
+ *          the identity of the source, read by the fault path and by
+ *          dumps, never dereferenced on the register's own authority.
+ *          The face beside it — erased ops and the backend instance —
+ *          is what turns that identity into bytes when a fault asks
+ *          for a file page; without it a kFile range is a promise the
+ *          fault path cannot keep, so exec and mmap fill both or
+ *          neither.
+ * @since   0.1.0
+ * @ingroup kernel_mm
  */
-struct VMA {
-    // F2-M7b: heap VMA nodes are served by the dedicated vma slab cache.
-    static void* operator new(size_t) { return cinux::mm::cache_alloc(cinux::mm::g_vma_cache); }
-    static void* operator new(size_t, std::align_val_t) {
-        return cinux::mm::cache_alloc(cinux::mm::g_vma_cache);
-    }
-    static void operator delete(void* p) { cinux::mm::cache_free(cinux::mm::g_vma_cache, p); }
-    static void operator delete(void* p, std::align_val_t) {
-        cinux::mm::cache_free(cinux::mm::g_vma_cache, p);
-    }
-
-    uint64_t          start{};  ///< Range start (page-aligned), inclusive
-    uint64_t          end{};    ///< Range end (page-aligned), exclusive
-    VmaFlags          flags{VmaFlags::None};
-    cinux::fs::Inode* backing{nullptr};  ///< File backend (M2 mmap); null when anonymous
-    uint64_t          file_offset{0};    ///< Offset into the backing inode (M2)
-    /// F-GUI-USERSPACE batch 1: base physical address for an IoPhys VMA (device
-    /// mmap such as /dev/fb0).  The fault handler resolves a faulting page to
-    /// phys_base + (fault_page - start); 0 for every other VMA kind.  Fork
-    /// carries it verbatim so the child maps the same device memory.
-    uint64_t          phys_base{0};
-    VMA*              prev{nullptr};  ///< Intrusive list link
-    VMA*              next{nullptr};
+struct VmaRegion : base::container::SelfNode<VmaRegion> {
+    unsigned long    start{};        ///< First byte the promise covers.
+    unsigned long    end{};          ///< One past the last covered byte.
+    VmaKind          kind{};         ///< What stands behind the bytes.
+    unsigned long    stack_floor{};  ///< First usable stack byte, unchanged by splitting.
+    bool             readable{};     ///< Loads through this range are promised.
+    bool             writable{};     ///< Stores through this range are promised.
+    bool             executable{};   ///< Running code from this range is promised.
+    fs::FsNode       backing{};      ///< The source node when kind is kFile.
+    const fs::FsOps* file_ops{};     ///< The backend face that serves backing's bytes.
+    void*            file_self{};    ///< The backend instance behind file_ops.
+    base::Shared<fs::MountLease> file_lifetime{nullptr};  ///< Runtime file backend ownership.
+    base::Shared<fs::OpenFile>   open_file{nullptr};  ///< Pins a file after its descriptor closes.
+    unsigned long long           file_offset{};       ///< File byte matching start, when backed.
+    base::Shared<SharedAttachment> shared;  ///< Shared storage, empty for private regions.
 };
 
-// F-INFRA I-4 (R11): VMA nodes are slab-cached and threaded onto an intrusive
-// list; pin the layout so a field insertion does not silently desync callers.
-static_assert(sizeof(VMA) == 64, "VMA layout (slab node; 5 u64 + 3 ptr, flags counted as u64)");
+/**
+ * @brief   The terms a promise may be rewritten under.
+ * @since   0.2.0
+ * @ingroup kernel_mm
+ */
+struct VmaProtection {
+    bool readable{};    ///< Loads through the stretch are promised.
+    bool writable{};    ///< Stores through the stretch are promised.
+    bool executable{};  ///< Running code from the stretch is promised.
+};
 
 /**
- * @brief Abstract set of VMAs for one address space
- *
- * Implementations keep the set sorted by start address and coalesce adjacent
- * ranges with identical flags.  Mutating operations report logical failures
- * (bad range, overlap) via cinux::lib::ErrorOr (A.6); queries return raw
- * borrowed pointers, using nullptr for the normal "not found" case.
+ * @brief   The register itself: an intrusive chain of promises, one per task.
+ * @note    Owned by the task through a pointer, because exec builds the
+ *          next program's register beside the live one and swaps only on
+ *          success. Cloning is the fork story: the child's register is a
+ *          deep copy taken while every page is still shared. Ranges keep
+ *          arrival order; the chain is short and find is linear by
+ *          design, so there is no ordering invariant to maintain and no
+ *          rebalancing story to teach.
+ * @since   0.1.0
+ * @ingroup kernel_mm
  */
-class IVMAStore {
+class VmaStore : public cinux::base::RefCount<> {
 public:
-    virtual ~IVMAStore() = default;
+    VmaStore() = default;
 
-    /// Track [start, end) with @p flags, merging with adjacent same-flags
-    /// neighbours.  @return Error::InvalidArgument (bad/unaligned range) or
-    /// Error::AlreadyExists (overlaps an existing VMA).
-    virtual cinux::lib::ErrorOr<void> insert(uint64_t start, uint64_t end, VmaFlags flags) = 0;
+    /**
+     * @brief         Names this world's mmap ceiling.
+     *
+     * @param[in]     ceiling   Where anonymous mmap hunts begin; the
+     *                          boot default is the compiled-in top.
+     * @return        None.
+     * @note          exec lowers the ceiling by one random page-multiple
+     *                per world, so no two programs agree on where their
+     *                          mappings start.
+     * @since         0.3.0
+     * @ingroup       kernel_mm
+     */
+    void set_mmap_ceiling(unsigned long ceiling) { mmap_ceiling_ = ceiling; }
 
-    /// Untrack the intersection of every VMA with [start, end), splitting a VMA
-    /// when only its middle is removed.  @return Error::InvalidArgument (bad
-    /// range).
-    virtual cinux::lib::ErrorOr<void> remove(uint64_t start, uint64_t end) = 0;
+    VmaStore(const VmaStore&)            = delete;
+    VmaStore& operator=(const VmaStore&) = delete;
 
-    /// VMA that contains @p addr, or nullptr if none.
-    virtual VMA* find(uint64_t addr) = 0;
+    /**
+     * @brief         Records one promise about the user half.
+     *
+     * @param[in]     spec   The range and its terms.
+     * @return        Ok, or kInvalidArgument when the range is empty or
+     *                inverted, kAlreadyExists when it overlaps a recorded one.
+     * @note          Overlap is refused, not merged: exec's segments never
+     *                touch, and mmap hands out disjoint spots by
+     *                construction, so an overlap names a caller bug and is
+     *                reported rather than absorbed.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<void> register_range(const VmaRegion& spec);
 
-    /// Lowest page-aligned address >= @p hint backed by a gap of @p length.
-    /// @return Error::InvalidArgument when @p length is 0.
-    virtual cinux::lib::ErrorOr<uint64_t> find_free_area(uint64_t hint, uint64_t length) = 0;
+    /**
+     * @brief         Finds the promise covering one address.
+     *
+     * @param[in]     address   The byte to look up.
+     * @return        The covering region, nullptr when none does.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] const VmaRegion* find(unsigned long address) const;
 
-    /// First VMA in address order (for fork/execve traversal), or nullptr.
-    virtual VMA* first() = 0;
+    [[nodiscard]] bool stack_contains(unsigned long start, unsigned long bytes) const;
 
-    /// VMA following @p cur in address order, or nullptr.
-    virtual VMA* next(VMA* cur) = 0;
+    /**
+     * @brief         Builds an independent copy of the whole register.
+     *
+     * @return        The copy, nullptr when an allocation refused.
+     * @note          All-or-nothing: a copy that stops halfway hands back
+     *                nullptr with every partial node returned, so fork can
+     *                treat one null as its whole rollback signal.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] VmaStore* clone() const;
 
-    /// Number of VMA nodes currently held.
-    virtual std::size_t count() const = 0;
+    /**
+     * @brief         Returns every recorded region to the heap.
+     *
+     * @return        None.
+     * @note          Also the destructor's body: a register that goes out
+     *                of scope cleans up after itself, so owners delete and
+     *                nothing more.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    void teardown();
 
-    /// Free every VMA node and empty the store.  Used by execve() to discard a
-    /// forked-inherited VMA set before loading the new image (the replacement
-    /// path: a fresh AddressSpace has none, but a forked child has the parent's).
-    virtual void clear() = 0;
-};
+    /**
+     * @brief         The destructor's share of the lifecycle.
+     * @return        None
+     * @note          None
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    ~VmaStore() { teardown(); }
 
-/**
- * @brief Sorted intrusive doubly-linked-list backend for IVMAStore
- *
- * O(n) per operation -- fine for a teaching kernel's modest VMA count; the
- * interface lets a future O(log n) tree backend drop in unchanged.
- */
-class LinkedListVMAStore : public IVMAStore {
-public:
-    LinkedListVMAStore() = default;
-    ~LinkedListVMAStore() override;
+    /**
+     * @brief         Whether any promise is recorded.
+     *
+     * @return        True when the register holds no region.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] bool empty() const { return regions_.empty(); }
 
-    LinkedListVMAStore(const LinkedListVMAStore&)            = delete;
-    LinkedListVMAStore& operator=(const LinkedListVMAStore&) = delete;
+    /**
+     * @brief         How many promises the register holds.
+     *
+     * @return        Chain region count; the brk span is not counted.
+     * @note          The overview face for the panic dump: a number a
+     *                human compares against what the program meant to
+     *                map, without walking the chain itself.
+     * @warning       None
+     * @throws        None
+     * @since         0.3.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] unsigned long long region_count() const { return regions_.size(); }
 
-    // Move transfers ownership of every node; the source is left empty so its
-    // destructor frees nothing.  Required because AddressSpace (which holds a
-    // store by value) is itself move-only.
-    LinkedListVMAStore(LinkedListVMAStore&& other) noexcept;
-    LinkedListVMAStore& operator=(LinkedListVMAStore&& other) noexcept;
+    /**
+     * @brief         Names the heap span this world grows by brk.
+     *
+     * @param[in]     base   Where the program image ends; the break starts
+     *                       there and only moves up.
+     * @param[in]     max    The highest address the break may reach.
+     * @return        None.
+     * @note          The heap is not a chain region: its length starts at
+     *                zero, and an empty range cannot register. It rides as
+     *                its own member the fault path reads through find(),
+     *                so a brk page and an mmap page ask the register the
+     *                same question and get the same shape of answer.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    void seed_heap(unsigned long base, unsigned long max);
 
-    cinux::lib::ErrorOr<void>     insert(uint64_t start, uint64_t end, VmaFlags flags) override;
-    cinux::lib::ErrorOr<void>     remove(uint64_t start, uint64_t end) override;
-    VMA*                          find(uint64_t addr) override;
-    cinux::lib::ErrorOr<uint64_t> find_free_area(uint64_t hint, uint64_t length) override;
-    VMA*                          first() override { return head_; }
-    VMA*                          next(VMA* cur) override { return cur ? cur->next : nullptr; }
-    std::size_t                   count() const override { return count_; }
-    void                          clear() override;
+    /**
+     * @brief         Moves the break, Linux fashion.
+     *
+     * @param[in]     target   The break wanted; 0 only asks for the
+     *                         current one.
+     * @return        The break after the move, or kNotFound when the
+     *                world never seeded a heap.
+     * @note          The break preserves the requested byte address; the
+     *                coverage ends at the following page boundary. Requests
+     *                outside the seeded bounds fail without changing either.
+     *                The syscall releases resident pages after a shrink.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<unsigned long> move_heap_end(unsigned long target);
+
+    /**
+     * @brief         The break as it stands.
+     *
+     * @return        The current break, or 0 before seed_heap.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] unsigned long heap_end() const { return heap_break_; }
+
+    /// Where this world's anonymous mmap hunts begin; the boot default
+    /// is the compiled-in top until exec lowers it.
+    [[nodiscard]] unsigned long mmap_ceiling() const { return mmap_ceiling_; }
+
+    /**
+     * @brief         Finds a free stretch below a ceiling, growing down.
+     *
+     * @param[in]     ceiling   The address the stretch must end at or
+     *                          below; page-aligned.
+     * @param[in]     bytes     How many bytes are wanted; page-aligned.
+     * @return        The stretch's first byte, or kOutOfMemory when no
+     *                gap that wide sits below the ceiling.
+     * @note          The mmap-area allocator: the hunt starts at the
+     *                ceiling and every recorded span in the way — chain
+     *                region or heap — pushes the candidate below itself.
+     *                A full pass that moves nothing means the spot is
+     *                genuinely clear.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<unsigned long> find_free_spot(unsigned long ceiling,
+                                                             unsigned long bytes) const;
+
+    /**
+     * @brief         Withdraws the stretch's pages from every promise.
+     *
+     * @param[in]     start   First byte of the stretch.
+     * @param[in]     end     One past the last byte.
+     * @return        Ok, kInvalidArgument for an empty stretch; a
+     *                partly-covered promise is no refusal.
+     * @note          A promise the stretch clips keeps its surviving
+     *                head or tail as its own region, the file offset
+     *                walking with the tail. The heap shrinks back to the
+     *                stretch's start when the stretch cuts it, and
+     *                empties when the stretch covers its base. Which
+     *                translations still name pages of the withdrawn
+     *                ranges is the caller's separate question.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<void> unregister_range(unsigned long start, unsigned long end);
+
+    /**
+     * @brief         Rewrites the terms of every promise inside a stretch.
+     *
+     * @param[in]     start   First byte of the stretch.
+     * @param[in]     end     One past the last byte.
+     * @param[in]     terms   The new terms.
+     * @return        Ok, kInvalidArgument when a page of the stretch
+     *                belongs to no recorded span.
+     * @note          Partial coverage splits a region at both ends,
+     *                preserving outside permissions and backing offsets.
+     *                All replacement nodes are allocated before mutation.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<void> protect(unsigned long start, unsigned long end,
+                                             VmaProtection terms);
+
+    /**
+     * @brief         One past the highest recorded byte.
+     *
+     * @return        The highest end among chain regions and the heap.
+     * @note          Where exec plants the break: the image ends, the
+     *                break starts.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] unsigned long max_end() const;
 
 private:
-    VMA*        head_{nullptr};
-    std::size_t count_{0};
+    /**
+     * @brief         Whether every page of a stretch belongs to a span
+     *                the register knows.
+     * @param[in]     start   First byte of the stretch.
+     * @param[in]     end     One past the last byte.
+     * @return        True when the heap or the chain covers the stretch
+     *                with no unmapped hole.
+     * @note          The gate protect answers to instead of the whole-span
+     *                rule: rewriting terms never withdraws a promise, so
+     *                a stretch that cuts through spans is still sound.
+     * @since         0.4.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] bool span_known(unsigned long start, unsigned long end) const;
+
+    base::container::SelfList<VmaRegion> regions_;       ///< The promises, arrival order.
+    VmaRegion                            heap_{};        ///< The brk span, empty until seeded.
+    unsigned long                        heap_break_{};  ///< Exact byte-valued program break.
+    unsigned long                        heap_max_{};    ///< The break's ceiling from exec.
+    bool heap_recorded_{};  ///< Partial protection moved heap coverage into ordinary regions.
+    unsigned long mmap_ceiling_{cinux::mm::kUserMmapTop};  ///< Where anonymous mmap hunts begin.
 };
 
 }  // namespace cinux::mm

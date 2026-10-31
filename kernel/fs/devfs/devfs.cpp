@@ -1,446 +1,296 @@
-/**
- * @file kernel/fs/devfs.cpp
- * @brief DevFS implementation: device-file inodes + device InodeOps subclasses
- *
- * Defines the device behaviour as InodeOps subclasses (NullDevOps / ZeroDevOps
- * / ConsoleDevOps / DevDirOps) in an anonymous namespace, then the DevFs
- * FileSystem backend that owns the node table.  Pure logic only -- no kprintf,
- * no kernel-only I/O -- so this translation unit links cleanly into the host
- * unit tests (the console device reaches the outside world solely through the
- * injected CharSink).
- */
+#include "kernel/fs/devfs/devfs.hpp"
 
-#include "devfs.hpp"
+#include <string_view>
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include "kernel/fs/file.hpp"     // inode_ref (lookup returns a ref'd Inode*)
-#include "kernel/lib/string.hpp"
+#include "cinux/assert.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/result.hpp"
+#include "kernel/driver/device/device.hpp"
+#include "kernel/driver/input/input_config.hpp"
+#include "kernel/driver/tty/pty_config.hpp"
+#include "kernel/fs/devfs/devfs_config.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::fs {
 
+static_assert(2U + kDevfsDeviceMax <= driver::kPtyInoBase,
+              "the seated device band must stay below the pty band");
+static_assert(driver::kPtyInoBase + (2U * driver::kPtyPairs) < driver::kInputInoBase,
+              "the pty band must stay below the per-open input band");
+
 namespace {
 
-// ============================================================
-// Shared helpers
-// ============================================================
-
-/// Fill a struct stat for a character-device inode.  Common to null/zero/
-/// console: they differ only in st_rdev, which the caller supplies.
-void fill_chardev_stat(const Inode* inode, struct stat* st, uint64_t rdev) {
-    // Zero first so the Linux-ABI padding/_nsec/__unused fields stay 0
-    // (no kernel-stack bytes leak to user space).
-    memset(st, 0, sizeof(*st));
-    st->st_dev     = 0;
-    st->st_ino     = inode->ino;
-    st->st_nlink   = 1;
-    st->st_mode    = inode->mode;  // kSIfChr | perms, set at registration
-    st->st_rdev    = rdev;
-    st->st_size    = 0;
-    st->st_blksize = 4096;
+base::Result<unsigned long> null_read(void* /*context*/, void* /*sink*/, unsigned long /*count*/) {
+    return 0;
 }
 
-// ============================================================
-// /dev/null (1:3) -- discard writes, read returns EOF
-// ============================================================
-
-class NullDevOps : public InodeOps {
-public:
-    cinux::lib::ErrorOr<int64_t> read(const Inode*, uint64_t, void*, uint64_t) override {
-        return 0;  // EOF: /dev/null is endlessly empty
-    }
-    cinux::lib::ErrorOr<int64_t> write(Inode*, uint64_t, const void*, uint64_t count) override {
-        return static_cast<int64_t>(count);  // discard, claim all bytes written
-    }
-    cinux::lib::ErrorOr<void> stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        fill_chardev_stat(inode, st, devfs_makedev(1, 3));
-        return {};
-    }
-};
-
-// ============================================================
-// /dev/zero (1:5) -- reads yield zero bytes, writes discarded
-// ============================================================
-
-class ZeroDevOps : public InodeOps {
-public:
-    cinux::lib::ErrorOr<int64_t> read(const Inode*, uint64_t, void* buf, uint64_t count) override {
-        if (buf == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        memset(buf, 0, count);
-        return static_cast<int64_t>(count);
-    }
-    cinux::lib::ErrorOr<int64_t> write(Inode*, uint64_t, const void*, uint64_t count) override {
-        return static_cast<int64_t>(count);  // discard
-    }
-    cinux::lib::ErrorOr<void> stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        fill_chardev_stat(inode, st, devfs_makedev(1, 5));
-        return {};
-    }
-};
-
-// ============================================================
-// /dev/console (5:1) -- writes go to the injected CharSink
-// ============================================================
-
-class ConsoleDevOps : public InodeOps {
-public:
-    explicit ConsoleDevOps(CharSink* sink, ConsoleInput* input)
-        : sink_(sink), input_(input) {}
-
-    cinux::lib::ErrorOr<int64_t> read(const Inode*, uint64_t, void* buf, uint64_t count) override {
-        // B3b: route /dev/console reads through the injected console backend
-        // (busybox init's ash reads command lines this way).  No backend (host
-        // tests / pre-boot) -> NotImplemented, preserving the prior
-        // "output-only" behaviour for unit tests.
-        if (input_ == nullptr) {
-            return cinux::lib::Error::NotImplemented;
-        }
-        return input_->read(buf, count);
-    }
-    cinux::lib::ErrorOr<int64_t> ioctl(const Inode*, uint32_t request, uint64_t arg) override {
-        // B3b: terminal ioctls (TCGETS / TIOCSCTTY / ...) reach the console TTY
-        // via the injected backend.  No backend -> NotImplemented -> sys_ioctl
-        // maps to -ENOTTY.
-        if (input_ == nullptr) {
-            return cinux::lib::Error::NotImplemented;
-        }
-        return input_->ioctl(request, arg);
-    }
-    cinux::lib::ErrorOr<int64_t> write(Inode*, uint64_t, const void* buf, uint64_t count) override {
-        if (buf == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        if (sink_ == nullptr) {
-            return static_cast<int64_t>(count);  // no sink wired: discard
-        }
-        return sink_->write(buf, count);
-    }
-    cinux::lib::ErrorOr<void> stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        fill_chardev_stat(inode, st, devfs_makedev(5, 1));
-        return {};
-    }
-
-private:
-    CharSink*     sink_;   ///< Output sink; null => writes discard.
-    ConsoleInput* input_;  ///< Read+ioctl backend (B3b); null => NotImplemented.
-};
-
-// ============================================================
-// Block device node (F6-M1 B1b) -- exposes its IBlockDevice via block_device()
-// so sys_mount can resolve a source path to the device.  read/write are not
-// supported: a block device is consumed by mounting a filesystem over it, not
-// by reading its raw bytes through this inode.
-// ============================================================
-
-class BlockDevOps : public InodeOps {
-public:
-    explicit BlockDevOps(cinux::drivers::IBlockDevice* dev) : dev_(dev) {}
-
-    cinux::lib::ErrorOr<void> stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        memset(st, 0, sizeof(*st));
-        st->st_ino     = inode->ino;
-        st->st_nlink   = 1;
-        st->st_mode    = 0x6000 | 0660;  // S_IFBLK | rw-rw----
-        st->st_blksize = 512;
-        return {};
-    }
-
-    /// Expose the backing block device so sys_mount can resolve this node.
-    cinux::drivers::IBlockDevice* block_device(const Inode*) override { return dev_; }
-
-private:
-    cinux::drivers::IBlockDevice* dev_;
-};
-
-// ============================================================
-// /dev directory -- readdir over the owning DevFs's node table
-// ============================================================
-
-class DevDirOps : public InodeOps {
-public:
-    cinux::lib::ErrorOr<int64_t> readdir(const Inode* inode, uint64_t index, char* name,
-                                         uint64_t name_max) override;
-    cinux::lib::ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        memset(st, 0, sizeof(*st));
-        st->st_ino     = inode->ino;
-        st->st_nlink   = 2;
-        st->st_mode    = kSIfDir | 0755;
-        st->st_blksize = 4096;
-        return {};
-    }
-};
-
-cinux::lib::ErrorOr<int64_t> DevDirOps::readdir(const Inode* inode, uint64_t index, char* name,
-                                                uint64_t name_max) {
-    if (inode == nullptr || inode->fs_private == nullptr || name == nullptr || name_max == 0) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    // fs_private points back at the owning DevFs (set in DevFs::mount).
-    auto* fs = static_cast<const DevFs*>(inode->fs_private);
-
-    if (index == 0) {
-        if (name_max < 2) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        name[0] = '.';
-        name[1] = '\0';
-        return 1;
-    }
-    if (index == 1) {
-        if (name_max < 3) {
-            return cinux::lib::Error::InvalidArgument;
-        }
-        name[0] = '.';
-        name[1] = '.';
-        name[2] = '\0';
-        return 1;
-    }
-
-    uint32_t i = static_cast<uint32_t>(index - 2);
-    if (i >= fs->node_count()) {
-        return 0;  // end of directory
-    }
-    const char* src = fs->node_name(i);
-    uint64_t    n   = 0;
-    while (src != nullptr && src[n] != '\0' && n + 1 < name_max) {
-        name[n] = src[n];
-        ++n;
-    }
-    name[n] = '\0';
-    return 1;
+base::Result<unsigned long> null_write(void* /*context*/, const void* /*source*/,
+                                       unsigned long count) {
+    return count;
 }
 
-}  // anonymous namespace
-
-// ============================================================
-// DevFs
-// ============================================================
-
-DevFs::DevFs(CharSink* console_sink, ConsoleInput* console_input)
-    : console_sink_(console_sink), console_input_(console_input) {}
-
-DevFs::~DevFs() {
-    // ops_ are nullptr before mount() or already freed; deleting nullptr is safe.
-    delete null_ops_;
-    delete zero_ops_;
-    delete console_ops_;
-    delete dir_ops_;
-    for (uint32_t i = 0; i < block_dev_count_; ++i) {
-        delete block_dev_ops_[i];
-    }
+base::Result<unsigned long> zero_read(void* /*context*/, void* sink, unsigned long count) {
+    base::SetBytes(sink, 0, count);
+    return count;
 }
 
-cinux::lib::ErrorOr<void> DevFs::mount() {
-    // Idempotent: a second mount() is a no-op.  Mirrors the re-entrancy safety
-    // of Ramdisk::mount (which resets before re-parsing); without this guard a
-    // repeat call would re-register the nodes and leak the first ops set.
-    if (node_count_ > 0) {
-        return {};
+const DeviceOps kNullOps{
+    .read      = null_read,
+    .write     = null_write,
+    .has_input = nullptr,
+    .ioctl     = nullptr,
+    .release   = nullptr,
+    .context   = nullptr,
+};
+
+const DeviceOps kZeroOps{
+    .read      = zero_read,
+    .write     = null_write,
+    .has_input = nullptr,
+    .ioctl     = nullptr,
+    .release   = nullptr,
+    .context   = nullptr,
+};
+
+bool same_name(const char (&seated)[kFsNameMax], std::string_view name) {
+    return std::string_view(seated) == name;
+}
+
+}  // namespace
+
+void RegisterBuiltinDevices() {
+    const base::Result<void> kNull = driver::DeviceModel::self().seat({
+        .klass       = driver::DeviceClass::kCharacter,
+        .name        = "null",
+        .number      = MakeDeviceId(1, 3),
+        .ops         = &kNullOps,
+        .bus         = "virtual",
+        .driver_name = "mem",
+    });
+    base::safety::Check(kNull.ok(), "device model refused the null seat");
+    const base::Result<void> kZero = driver::DeviceModel::self().seat({
+        .klass       = driver::DeviceClass::kCharacter,
+        .name        = "zero",
+        .number      = MakeDeviceId(1, 5),
+        .ops         = &kZeroOps,
+        .bus         = "virtual",
+        .driver_name = "mem",
+    });
+    base::safety::Check(kZero.ok(), "device model refused the zero seat");
+}
+
+void DevFs::set_dynamic_lookup(base::Result<FsNode> (*resolve)(std::string_view path)) {
+    dynamic_ = resolve;
+}
+
+void DevFs::set_open_adopter(base::Result<FsNode> (*adopt)(FsNode node, std::string_view path)) {
+    adopter_ = adopt;
+}
+
+const DeviceOps* DevFs::ops_of(FsNode node) const {
+    if (node.ino >= driver::kPtyInoBase) {
+        return static_cast<const DeviceOps*>(node.opaque);
     }
+    return static_cast<const DeviceNode*>(node.opaque)->ops;
+}
 
-    // One ops instance per device kind + the directory.  These outlive every
-    // lookup result (Inode::ops points at them) and are freed in ~DevFs.
-    null_ops_    = new NullDevOps();
-    zero_ops_    = new ZeroDevOps();
-    console_ops_ = new ConsoleDevOps(console_sink_, console_input_);
-    dir_ops_     = new DevDirOps();
+base::Result<unsigned long> DevFs::frame_at(FsNode node, unsigned long long offset) const {
+    const DeviceOps* const kOps = ops_of(node);
+    if (kOps == nullptr || kOps->map_frame == nullptr) {
+        return base::KernelError::kNotSupported;
+    }
+    return kOps->map_frame(kOps->context, offset);
+}
 
-    register_node("null", null_ops_);
-    register_node("zero", zero_ops_);
-    register_node("console", console_ops_);
-
-    // Root directory inode: readdir walks this DevFs's node table via fs_private.
-    root_inode_.ino        = 0;
-    root_inode_.type       = InodeType::Directory;
-    root_inode_.ops        = dir_ops_;
-    root_inode_.fs_private = this;
-    root_inode_.mode       = kSIfDir | 0755;
-    root_inode_.nlink      = 2;
-
-    // Virtual /dev/pts directory so the vfs component walk can descend into it
-    // before resolving "<N>".  ino 0xFFFF stays clear of the static node table
-    // (1-based) and the PTY slave inodes (kPtyInoBase = 0x1000).  readdir on
-    // /dev/pts is not wired -- slaves exist on demand; opening /dev/pts/<N> is
-    // the path that matters here.
-    pts_dir_inode_.ino        = 0xFFFF;
-    pts_dir_inode_.type       = InodeType::Directory;
-    pts_dir_inode_.ops        = dir_ops_;
-    pts_dir_inode_.fs_private = this;
-    pts_dir_inode_.mode       = kSIfDir | 0755;
-    pts_dir_inode_.nlink      = 2;
-
+base::Result<void> DevFs::register_device(std::string_view name, unsigned long rdev,
+                                          const DeviceOps& ops) {
+    if (name.empty() || name.size() >= kFsNameMax || name.contains('/')) {
+        return base::KernelError::kInvalidArgument;
+    }
+    for (unsigned long index = 0; index < count_; ++index) {
+        if (same_name(devices_[index].name, name)) {
+            return base::KernelError::kAlreadyExists;
+        }
+    }
+    if (count_ == kDevfsDeviceMax) {
+        return base::KernelError::kOutOfMemory;
+    }
+    DeviceNode& seat = devices_[count_];
+    seat.rdev        = rdev;
+    seat.ops         = &ops;
+    base::CopyBytes(seat.name, name.data(), name.size());
+    ++count_;
     return {};
 }
 
-void DevFs::register_node(const char* name, InodeOps* ops) {
-    if (name == nullptr || ops == nullptr || node_count_ >= DEVFS_MAX_NODES) {
+base::Result<FsNode> DevFs::lookup(std::string_view path) {
+    if (path.empty()) {
+        return FsNode{
+            .opaque = nullptr,
+            .type   = InodeType::kDirectory,
+            .ino    = 1,
+            .size   = 0,
+        };
+    }
+    const unsigned long kSlash = path.find('/');
+    if (kSlash != std::string_view::npos) {
+        if (dynamic_ == nullptr) {
+            return base::KernelError::kNotFound;
+        }
+        return dynamic_(path);
+    }
+    for (unsigned long index = 0; index < count_; ++index) {
+        if (same_name(devices_[index].name, path)) {
+            return FsNode{
+                .opaque = &devices_[index],
+                .type   = InodeType::kCharDevice,
+                .ino    = 2 + index,
+                .size   = 0,
+            };
+        }
+    }
+    if (dynamic_ != nullptr) {
+        return dynamic_(path);
+    }
+    return base::KernelError::kNotFound;
+}
+
+base::Result<FsNode> DevFs::make_file(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<FsNode> DevFs::make_dir(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<void> DevFs::unlink(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<unsigned long> DevFs::read(FsNode node, unsigned long /*offset*/, void* sink,
+                                        unsigned long count) const {
+    if (node.type != InodeType::kCharDevice) {
+        return base::KernelError::kIsADirectory;
+    }
+    const DeviceOps* const kOps = ops_of(node);
+    return kOps->read(kOps->context, sink, count);
+}
+
+base::Result<unsigned long> DevFs::write(FsNode node, unsigned long /*offset*/, const void* source,
+                                         unsigned long count) const {
+    if (node.type != InodeType::kCharDevice) {
+        return base::KernelError::kIsADirectory;
+    }
+    const DeviceOps* const kOps = ops_of(node);
+    return kOps->write(kOps->context, source, count);
+}
+
+base::Result<bool> DevFs::read_dir(FsNode node, unsigned long index, FsDirent& entry) {
+    if (node.type != InodeType::kDirectory) {
+        return base::KernelError::kNotADirectory;
+    }
+    entry      = FsDirent{};
+    entry.ino  = 1;
+    entry.type = InodeType::kDirectory;
+    if (index == 0) {
+        entry.name[0] = '.';
+        return true;
+    }
+    if (index == 1) {
+        entry.name[0] = '.';
+        entry.name[1] = '.';
+        return true;
+    }
+    const unsigned long kSeat = index - 2;
+    if (kSeat >= count_) {
+        return false;
+    }
+    base::CopyBytes(entry.name, devices_[kSeat].name, kFsNameMax);
+    entry.ino  = 2 + kSeat;
+    entry.type = InodeType::kCharDevice;
+    return true;
+}
+
+base::Result<void> DevFs::stat(FsNode node, FsStat& probed) {
+    probed      = FsStat{};
+    probed.ino  = node.ino;
+    probed.mode = kFsDirMode;
+    if (node.type != InodeType::kCharDevice) {
+        return {};
+    }
+    probed.mode = kFsCharDevMode;
+    if (node.ino >= driver::kInputInoBase) {
+        probed.rdev = MakeDeviceId(driver::kInputEventMajor, node.ino - driver::kInputInoBase);
+        return {};
+    }
+    if (node.ino < driver::kPtyInoBase) {
+        probed.rdev = static_cast<const DeviceNode*>(node.opaque)->rdev;
+        return {};
+    }
+    const unsigned long kSeat  = node.ino - driver::kPtyInoBase - 1UL;
+    const unsigned long kIndex = kSeat / 2UL;
+    const unsigned long kMajor =
+        (kSeat % 2UL) == 0UL ? driver::kPtyMasterMajor : driver::kPtySlaveMajor;
+    probed.rdev = MakeDeviceId(kMajor, kIndex);
+    return {};
+}
+
+void DevFs::retain(FsNode node) const {
+    if (node.type != InodeType::kCharDevice) {
         return;
     }
-    auto&    node = nodes_[node_count_];
-    uint32_t i    = 0;
-    while (i + 1 < DEVFS_NAME_MAX && name[i] != '\0') {
-        node.name[i] = name[i];
-        ++i;
+    const DeviceOps* const kOps = ops_of(node);
+    if (kOps->retain != nullptr) {
+        kOps->retain(kOps->context);
     }
-    node.name[i]     = '\0';
-    node.inode.ino   = static_cast<uint64_t>(node_count_) + 1;  // 1-based; 0 = root
-    node.inode.type  = InodeType::Regular;
-    node.inode.ops   = ops;
-    node.inode.mode  = kSIfChr | 0666;
-    node.inode.nlink = 1;
-    ++node_count_;
 }
 
-const char* DevFs::node_name(uint32_t i) const {
-    if (i >= node_count_) {
-        return nullptr;
-    }
-    return nodes_[i].name;
-}
-
-void DevFs::add_node(const char* name, InodeOps* ops) {
-    register_node(name, ops);
-}
-
-void DevFs::add_block_node(const char* name, cinux::drivers::IBlockDevice* dev) {
-    if (name == nullptr || dev == nullptr || block_dev_count_ >= MAX_BLOCK_NODES) {
+void DevFs::release(FsNode node) const {
+    if (node.type != InodeType::kCharDevice) {
         return;
     }
-    auto* ops = new BlockDevOps(dev);
-    block_dev_ops_[block_dev_count_++] = ops;
-    register_node(name, ops);
+    const DeviceOps* const kOps = ops_of(node);
+    if (kOps->release != nullptr) {
+        kOps->release(kOps->context);
+    }
 }
 
-void DevFs::set_dynamic_lookup(DynamicLookup resolver) {
-    dynamic_lookup_ = resolver;
+bool DevFs::readable(FsNode node) const {
+    if (node.type != InodeType::kCharDevice) {
+        return true;
+    }
+    const DeviceOps* const kOps = ops_of(node);
+    if (kOps->has_input == nullptr) {
+        return true;
+    }
+    return kOps->has_input(kOps->context);
 }
 
-cinux::lib::ErrorOr<Inode*> DevFs::lookup(const char* path) {
-    if (path == nullptr) {
-        return cinux::lib::Error::InvalidArgument;
+long long DevFs::ioctl(FsNode node, unsigned long long word, unsigned long long argument) const {
+    if (node.type != InodeType::kCharDevice) {
+        return -syscall::kEnotty;
     }
-
-    // Root directory: empty path or "/".
-    if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
-        inode_ref(&root_inode_);
-        return &root_inode_;
+    const DeviceOps* const kOps = ops_of(node);
+    if (kOps->ioctl == nullptr) {
+        return -syscall::kEnotty;
     }
-    // Strip a single leading '/': vfs_resolve may pass "/null" (mount prefix
-    // without trailing slash) or "null" (with trailing slash).
-    if (path[0] == '/') {
-        ++path;
-    }
-
-    for (uint32_t i = 0; i < node_count_; ++i) {
-        const char* a = nodes_[i].name;
-        uint32_t    j = 0;
-        while (a[j] != '\0' && path[j] != '\0') {
-            if (a[j] != path[j]) {
-                break;
-            }
-            ++j;
-        }
-        if (a[j] == '\0' && path[j] == '\0') {
-            inode_ref(&nodes_[i].inode);
-            return &nodes_[i].inode;
-        }
-    }
-
-    // No static node matched.  Defer to the dynamic resolver if boot wired one
-    // (the PTY registry answers /dev/pts/<N> here, on demand).
-    if (dynamic_lookup_ != nullptr) {
-        return dynamic_lookup_(path);
-    }
-    return cinux::lib::Error::NotFound;
+    return kOps->ioctl(kOps->context, word, argument);
 }
 
-cinux::lib::ErrorOr<Inode*> DevFs::lookup_child(const Inode* parent, const char* name,
-                                                 uint32_t namelen) {
-    if (parent == nullptr || name == nullptr || namelen == 0) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-
-    // /dev/pts virtual subdirectory: root -> "pts" -> pts_dir_inode_, then
-    // pts_dir_inode_ -> "<N>" -> the PTY slave inode.  DevFs is flat, so without
-    // this two-level hop the vfs component walk dies at the "pts" component
-    // (dynamic_lookup_ expects the whole "pts/N" spelling) and open("/dev/pts/N")
-    // fails -- the shell then inherits /dev/console and IO bypasses the PTY.
-    if (parent == &root_inode_ && namelen == 3 && name[0] == 'p' && name[1] == 't' &&
-        name[2] == 's') {
-        inode_ref(&pts_dir_inode_);
-        return &pts_dir_inode_;
-    }
-    if (parent == &pts_dir_inode_) {
-        // Reassemble "pts/<N>" -- the spelling dynamic_lookup_ expects.
-        char buf[64];
-        if (namelen >= sizeof(buf) - 4) {
-            return cinux::lib::Error::NotFound;
-        }
-        buf[0] = 'p';
-        buf[1] = 't';
-        buf[2] = 's';
-        buf[3] = '/';
-        for (uint32_t i = 0; i < namelen; ++i) {
-            buf[4 + i] = name[i];
-        }
-        buf[4 + namelen] = '\0';
-        if (dynamic_lookup_ != nullptr) {
-            return dynamic_lookup_(buf);
-        }
-        return cinux::lib::Error::NotFound;
-    }
-
-    // DevFs is otherwise flat: only the root directory contains entries.
-    if (parent != &root_inode_) {
-        return cinux::lib::Error::NotFound;
-    }
-    // Match @p name (a non-NUL-terminated slice) against the static node table.
-    for (uint32_t i = 0; i < node_count_; ++i) {
-        const char* a = nodes_[i].name;
-        uint32_t    j = 0;
-        while (a[j] != '\0' && j < namelen) {
-            if (a[j] != name[j]) {
-                break;
-            }
-            ++j;
-        }
-        if (a[j] == '\0' && j == namelen) {
-            inode_ref(&nodes_[i].inode);
-            return &nodes_[i].inode;
+base::Result<FsNode> DevFs::adopt_open(FsNode node, std::string_view path) {
+    if (node.type == InodeType::kCharDevice) {
+        const auto* ops = ops_of(node);
+        if (ops->open != nullptr) {
+            return ops->open(ops->context, node);
         }
     }
-    // Defer to the dynamic resolver (PTY /dev/pts/<N>).  It takes a NUL-terminated
-    // name, so copy the slice into a local buffer first.
-    char buf[64];
-    if (namelen >= sizeof(buf)) {
-        return cinux::lib::Error::NotFound;
+    auto adopted = adopter_ == nullptr ? base::Result<FsNode>{node} : adopter_(node, path);
+    if (adopted.ok()) {
+        retain(adopted.value());
     }
-    for (uint32_t i = 0; i < namelen; ++i) {
-        buf[i] = name[i];
-    }
-    buf[namelen] = '\0';
-    if (dynamic_lookup_ != nullptr) {
-        return dynamic_lookup_(buf);
-    }
-    return cinux::lib::Error::NotFound;
+    return adopted;
 }
 
 }  // namespace cinux::fs

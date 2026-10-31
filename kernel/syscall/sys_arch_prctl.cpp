@@ -1,61 +1,60 @@
-/**
- * @file kernel/syscall/sys_arch_prctl.cpp
- * @brief sys_arch_prctl handler implementation (F10-M1 batch 4)
- *
- * Handles ARCH_SET_FS / ARCH_GET_FS (the FS base, used for TLS).  GS base
- * and the sub-options are not used by musl and return -EINVAL.  The new FS
- * base is recorded into the current task's CpuContext so a later context
- * switch restores it; set_tls_base() also programs the MSR immediately so
- * subsequent %fs-relative accesses in the syscall return path see it.
- */
-
 #include "kernel/syscall/sys_arch_prctl.hpp"
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/tls.hpp"
-#include "kernel/arch/x86_64/user_access.hpp"
-#include "kernel/errno.hpp"
-#include "kernel/proc/scheduler.hpp"
+#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::syscall {
 
 namespace {
 
-// arch_prctl option codes (Linux x86-64 UAPI).
-constexpr uint64_t kArchSetGs = 0x1001;
-constexpr uint64_t kArchSetFs = 0x1002;
-constexpr uint64_t kArchGetGs = 0x1003;
-constexpr uint64_t kArchGetFs = 0x1004;
+/// arch_prctl op: make addr the caller's GS base.
+inline constexpr Word kArchSetGs = 0x1001;
+/// arch_prctl op: make addr the caller's FS base.
+inline constexpr Word kArchSetFs = 0x1002;
+/// arch_prctl op: report the caller's FS base through addr.
+inline constexpr Word kArchGetFs = 0x1003;
+/// arch_prctl op: report the caller's GS base through addr.
+inline constexpr Word kArchGetGs = 0x1004;
 
-}  // anonymous namespace
+}  // namespace
 
-int64_t sys_arch_prctl(uint64_t code, uint64_t addr, uint64_t, uint64_t, uint64_t, uint64_t) {
-    auto* task = cinux::proc::Scheduler::current();
-
-    switch (code) {
-    case kArchSetFs: {
-        // Program the FS base now and remember it for context switches.
-        cinux::arch::set_tls_base(addr);
-        if (task != nullptr) {
-            task->ctx.fs_base = addr;
+long long HandleArchPrctl(const SyscallFrame& frame) {
+    proc::Task* const kSelf = CurrentTask();
+    switch (frame.rdi) {
+    case kArchSetFs:
+        if (!cinux::arch::IsCanonicalAddress(frame.rsi)) {
+            return -kEinval;
+        }
+        kSelf->ctx.fs_base = frame.rsi;
+        cinux::arch::per_cpu::WriteFsBase(frame.rsi);
+        return 0;
+    case kArchSetGs:
+        if (!cinux::arch::IsCanonicalAddress(frame.rsi)) {
+            return -kEinval;
+        }
+        kSelf->ctx.gs_base = frame.rsi;
+        cinux::arch::per_cpu::WriteKernelGsBase(frame.rsi);
+        return 0;
+    case kArchGetFs: {
+        const unsigned long long kBase = kSelf->ctx.fs_base;
+        if (!uaccess::CopyToUser(frame.rsi, &kBase, sizeof(kBase))) {
+            return -kEfault;
         }
         return 0;
     }
-    case kArchGetFs: {
-        // arch_prctl(GET_FS, &addr) writes the base into a user word.
-        if (task == nullptr) {
-            return -cinux::kEfault;
-        }
-        uint64_t fs_base = cinux::arch::get_tls_base();
-        if (!cinux::user::copy_to_user(reinterpret_cast<void*>(addr), &fs_base, sizeof(fs_base))) {
-            return -cinux::kEfault;
+    case kArchGetGs: {
+        const unsigned long long kBase = kSelf->ctx.gs_base;
+        if (!uaccess::CopyToUser(frame.rsi, &kBase, sizeof(kBase))) {
+            return -kEfault;
         }
         return 0;
     }
     default:
-        // GS base / unsupported sub-options: musl never uses these.
-        return -cinux::kEinval;
+        return -kEinval;
     }
 }
 

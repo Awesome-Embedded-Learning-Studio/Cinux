@@ -1,51 +1,143 @@
 /**
- * @file kernel/syscall/sys_socket.hpp
- * @brief BSD socket syscall handlers (F7-M6).
+ * @file    sys_socket.hpp
+ * @brief   Declarations of the socket-family syscall handlers.
  *
- * Every handler is a thin user-boundary shim: resolve fd -> File -> inode ->
- * SocketOps -> Socket* (fs_private), call the matching Socket virtual, and cross
- * the user/kernel boundary for sockaddr_in + data buffers via copy_to/from_user
- * (SMAP/extable-safe, the same primitives sys_read/sys_ioctl use).  The Socket
- * base (batch 1b) answers these with Error::NotImplemented -> -ENOSYS until
- * B2 (UdpSocket) / B3 (TcpSocket) override the virtuals to do real work.
+ * The descriptor-numbered door into the socket family. Every handler
+ * finds the descriptor's socket through the shared erased face, moves
+ * addresses through the accessor with the wire's own byte order, and
+ * answers the errno words a libc maps without asking. The blocking
+ * manners of receive live here, not in the sockets: would-block turns
+ * into a wait, and a deliverable signal ends it with EINTR.
  *
- * Numbers are Linux x86_64 (see syscall_nums.hpp): socket=41, connect=42,
- * accept=43, sendto=44, recvfrom=45, bind=49, listen=50.
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-24
+ * @version 0.1
+ * @since   0.7.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-namespace cinux::net {
-class Socket;  // forward -- see kernel/net/socket.hpp
-}
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t protocol, uint64_t, uint64_t, uint64_t);
-int64_t sys_bind(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint64_t, uint64_t);
-int64_t sys_connect(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint64_t, uint64_t);
-int64_t sys_listen(uint64_t fd, uint64_t backlog, uint64_t, uint64_t, uint64_t, uint64_t);
-int64_t sys_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t, uint64_t, uint64_t);
-int64_t sys_sendto(uint64_t fd, uint64_t buf, uint64_t len, uint64_t flags, uint64_t addr,
-                   uint64_t addrlen);
-int64_t sys_recvfrom(uint64_t fd, uint64_t buf, uint64_t len, uint64_t flags, uint64_t addr,
-                     uint64_t addrlen_ptr);
+/**
+ * @brief         socket(domain, type, protocol): a new end, one file.
+ * @return        The descriptor number, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSocket(const SyscallFrame& frame);
 
-// --- shared helpers (F-ECO batch 7): reused by accept4 / setsockopt / getsockopt
-// / shutdown / getsockname / getpeername / socketpair handlers. ---
-//
-/// Recover the Socket* behind @p fd, or nullptr if it is not a socket fd.
-cinux::net::Socket* socket_from_fd(uint64_t fd);
-/// Install @p sock under a fresh fd (SocketOps inode + FDTable::alloc RDWR).
-/// Returns the fd or -errno.  Ownership of @p sock + the Inode transfers to the
-/// FDTable's File on success; on failure both are freed.
-int64_t             install_socket_fd(cinux::net::Socket* sock);
-/// accept core shared by sys_accept (flags=0) and sys_accept4 (SOCK_CLOEXEC
-/// etc.).  @p flags is the accept4 flag word; SOCK_CLOEXEC cloexec's the new fd.
-int64_t             do_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t flags);
+/**
+ * @brief         bind(fd, addr, len): seat the socket on an address.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleBind(const SyscallFrame& frame);
+
+/**
+ * @brief         connect(fd, addr, len): name the far end.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleConnect(const SyscallFrame& frame);
+
+/**
+ * @brief         sendto(fd, buf, len, flags, addr, len): one datagram out.
+ * @return        The bytes given, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSendto(const SyscallFrame& frame);
+
+/**
+ * @brief         recvfrom(fd, buf, len, flags, addr, len): one datagram in.
+ * @return        The bytes taken, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleRecvfrom(const SyscallFrame& frame);
+
+/** @brief Scatter a received socket message and its ancillary data. */
+long long HandleRecvmsg(const SyscallFrame& frame);
+/** @brief Gather and transmit a socket message. */
+long long HandleSendmsg(const SyscallFrame& frame);
+
+/**
+ * @brief         shutdown(fd, how): end one or both directions.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleShutdown(const SyscallFrame& frame);
+
+/**
+ * @brief         listen(fd, backlog): offer to answer knocks.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleListen(const SyscallFrame& frame);
+
+/**
+ * @brief         accept(fd, addr, len): answer one knocking caller.
+ * @return        The new descriptor, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleAccept(const SyscallFrame& frame);
+
+/**
+ * @brief         accept4(fd, addr, len, flags): accept with descriptor flags.
+ * @return        The new descriptor, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleAccept4(const SyscallFrame& frame);
+
+/**
+ * @brief         getsockname(fd, addr, len): the seated address.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleGetsockname(const SyscallFrame& frame);
+
+/**
+ * @brief         getpeername(fd, addr, len): the named far end.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleGetpeername(const SyscallFrame& frame);
+
+/**
+ * @brief         socketpair(domain, type, protocol, fds): two ends at once.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSocketpair(const SyscallFrame& frame);
+
+/**
+ * @brief         setsockopt(fd, level, name, val, len): turn one knob.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSetsockopt(const SyscallFrame& frame);
+
+/**
+ * @brief         getsockopt(fd, level, name, val, len): read one knob.
+ * @return        Zero, or a negative errno.
+ * @since         0.7.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleGetsockopt(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

@@ -1,136 +1,136 @@
-/**
- * @file kernel/net/ipv4.cpp
- * @brief Ipv4Module -- inbound validation/dispatch + outbound IP TX.
- *
- * Inbound: parse, sanity-check (version / IHL / total_len / header checksum via
- * verify_internet_checksum), dispatch the L4 payload by IP proto via the inner
- * L4Handler table (proto->handler, like Linux inet_protos).  No fragmentation /
- * options today (IHL=5 only); a non-5 IHL is honoured for the header-length
- * computation but options bytes are not parsed.  Zero kprintf.
- *
- * Namespace: cinux::net
- */
-
 #include "kernel/net/ipv4.hpp"
 
-#include <cinux/checksum.hpp>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/arp.hpp"        // ArpModule
-#include "kernel/net/icmp.hpp"       // IcmpModule
-#include "kernel/net/net_stack.hpp"  // InDevice, NetStack
+#include <algorithm>
+
+#include "cinux/byte_order.hpp"
+#include "cinux/checksum.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 
 namespace cinux::net {
 
-namespace {
-
-// Local RAII heap buffer (no <memory>): owns a new[]/delete[] byte slice so the
-// ~1504B IP TX buffer stays off the stack. new/delete route through the
-// freestanding crt_stub operator new / kmalloc, which the CI freestanding
-// header gate permits (unlike the hosted <memory> header).
-struct HeapBuf {
-    uint8_t* p;
-    explicit HeapBuf(size_t n) : p(new uint8_t[n]) {}
-    ~HeapBuf() { delete[] p; }
-    HeapBuf(const HeapBuf&)            = delete;
-    HeapBuf& operator=(const HeapBuf&) = delete;
-};
-
-}  // namespace
-
-Ipv4Module::Ipv4Module(IcmpModule& icmp, ArpModule* arp) : arp_(arp) {
-    // ICMP (proto 1) routes through the L4 table like any other L4 protocol --
-    // registered here so existing call sites (which only pass icmp + arp) are
-    // unchanged.  icmp.hpp is included above, so the IcmpModule->L4Handler
-    // conversion is visible (the header forward-declares IcmpModule only).
-    add_l4(kIpProtoIcmp, icmp);
+void Ipv4Module::init(const DatagramSink& sink, uint32_t own_address) {
+    sink_             = sink;
+    own_address_      = own_address;
+    stats_            = {};
+    protocol_count_   = 0;
+    observer_         = nullptr;
+    observer_context_ = nullptr;
 }
 
-void Ipv4Module::on_frame(const L2Info& /*l2*/, FrameView payload, NetDevice& dev,
-                          NetStack& stack) {
-    if (payload.size() < sizeof(Ipv4Header)) {
-        return;  // short / not an IPv4 packet
-    }
-    Ipv4Header ip;
-    parse_ipv4(payload.data(), ip);
+void Ipv4Module::aim(const DatagramSink& sink, uint32_t own_address) {
+    sink_        = sink;
+    own_address_ = own_address;
+}
 
-    if (ipv4_version(ip) != 4) {
-        return;
+bool Ipv4Module::seat_protocol(unsigned char protocol, L4Seat seat) {
+    if (protocol_count_ == kMaxL4Seats) {
+        return false;
     }
-    const uint8_t ihl = ipv4_ihl(ip);
-    if (ihl < 5) {
-        return;  // impossibly short header
+    for (unsigned long index = 0; index < protocol_count_; ++index) {
+        if (protocols_[index].protocol == protocol) {
+            return false;
+        }
     }
-    const uint32_t header_len = static_cast<uint32_t>(ihl) * 4;
-    if (header_len > payload.size()) {
-        return;  // truncated header
-    }
+    protocols_[protocol_count_] = {.protocol = protocol, .seat = seat};
+    ++protocol_count_;
+    return true;
+}
 
-    // Header checksum: re-summing a valid header (with embedded checksum) == 0xFFFF.
-    if (!cinux::lib::verify_internet_checksum(payload.data(), header_len)) {
-        return;  // corrupt -> silently drop
-    }
-
-    // Use total_len if sane, else the bytes we actually have.
-    uint32_t total = ip.total_len;
-    if (total < header_len || total > payload.size()) {
-        total = payload.size();  // lenient: trust what the device delivered
-    }
-    const uint32_t l4_len = total - header_len;
-    const uint8_t* l4     = payload.data() + header_len;
-
-    // Dispatch by IP protocol number via the inner L4 table (proto->handler,
-    // like Linux inet_protos): ICMP=1, UDP=17, ...  No match -> silent drop.
-    for (uint32_t i = 0; i < kMaxL4; ++i) {
-        if (l4_[i].h != nullptr && l4_[i].proto == ip.proto) {
-            l4_[i].h->handle(ip, FrameView(l4, l4_len), dev, *this, stack);
+void Ipv4Module::handle(const unsigned char* bytes, size_t length) {
+    const auto kView = ParseIpv4(bytes, length);
+    if (!kView.ok()) {
+        switch (kView.error()) {
+        case Ipv4Error::kDatagramTooShort:
+            ++stats_.refused_short;
+            break;
+        case Ipv4Error::kBadVersion:
+            ++stats_.refused_version;
+            break;
+        case Ipv4Error::kBadHeaderWords:
+            ++stats_.refused_header_words;
+            break;
+        case Ipv4Error::kBadTotalLength:
+            ++stats_.refused_total_length;
             break;
         }
-    }
-}
-
-cinux::lib::ErrorOr<void> Ipv4Module::send(NetDevice& dev, Ipv4Addr dst, uint8_t proto,
-                                           const uint8_t* l4, uint32_t len, NetStack& stack) {
-    static constexpr uint32_t kBuf = 1518 - 14;  // max IP packet behind a 14-byte L2 header
-    if (len > kBuf - sizeof(Ipv4Header)) {
-        return cinux::lib::Error::InvalidArgument;
-    }
-    const InDevice* cfg = stack.config_for(dev);
-    if (cfg == nullptr) {
-        return cinux::lib::Error::InvalidArgument;  // no source address for this device
+        return;
     }
 
-    Ipv4Header ip{};
-    ip.ver_ihl    = static_cast<uint8_t>((4 << 4) | kIpv4HdrWords);
-    ip.total_len  = static_cast<uint16_t>(sizeof(Ipv4Header) + len);
-    ip.id         = next_id_++;
-    ip.flags_frag = 0;  // no fragmentation (a ping fits one packet)
-    ip.ttl        = kIpv4TtlDefault;
-    ip.proto      = proto;
-    ip.checksum   = 0;  // computed below
-    ip.src        = cfg->local;
-    ip.dst        = dst;
-
-    // Heap-allocated: kBuf (1504B) > 1024B frame budget. Network path uses the
-    // heap (not a static buffer) so concurrent TX on SMP does not share storage.
-    HeapBuf  buf(kBuf);
-    uint8_t* p = buf.p;
-    build_ipv4_header(ip, p);  // checksum field still 0
-    for (uint32_t i = 0; i < len; ++i) {
-        p[sizeof(Ipv4Header) + i] = l4[i];
+    base::InternetChecksum verifier;
+    verifier.add(bytes, kView.value().header_bytes);
+    if (verifier.value() != 0) {
+        ++stats_.refused_checksum;
+        return;
     }
-    // Header checksum over the 20-byte header (checksum field zeroed).
-    const uint16_t cs = cinux::lib::internet_checksum(p, sizeof(Ipv4Header));
-    p[10]             = static_cast<uint8_t>(cs >> 8);
-    p[11]             = static_cast<uint8_t>(cs & 0xFF);
 
-    // Next hop: Ethernet resolves dst via ARP (async); loopback skips L2.
-    EthAddr next_hop{};
-    if (dev.has_ethernet_header() && arp_ != nullptr) {
-        if (!arp_->resolve_l3(dev, dst, stack, next_hop)) {
-            return {};  // ARP request sent; IP packet deferred to the next poll
+    const size_t kEffective     = std::min(static_cast<size_t>(kView.value().total_length), length);
+    const size_t kPayloadLength = kEffective - kView.value().header_bytes;
+
+    if (observer_ != nullptr) {
+        observer_(observer_context_, bytes, kEffective, kView.value());
+    }
+
+    for (unsigned long index = 0; index < protocol_count_; ++index) {
+        if (protocols_[index].protocol == kView.value().protocol) {
+            protocols_[index].seat.handle(bytes + kView.value().header_bytes, kPayloadLength,
+                                          kView.value());
+            ++stats_.delivered;
+            return;
         }
     }
-    return stack.send_l3(dev, next_hop, kEtherTypeIpv4, p, sizeof(Ipv4Header) + len);
+    ++stats_.unknown_protocol;
+}
+
+bool Ipv4Module::send(const OutboundDatagram& datagram) {
+    if (!sink_.assigned() || datagram.length > kMaxDatagramBytes - kMinIpv4HeaderBytes) {
+        return false;
+    }
+
+    unsigned char       outgoing[kMaxDatagramBytes] = {};
+    const unsigned long kTotal                      = kMinIpv4HeaderBytes + datagram.length;
+    outgoing[0] =
+        static_cast<unsigned char>((static_cast<unsigned>(kIpv4Version) << 4U) |
+                                   static_cast<unsigned>(kMinIpv4HeaderBytes / sizeof(uint32_t)));
+    outgoing[1] = 0;
+    base::WriteWord16Be(outgoing, 2, static_cast<uint16_t>(kTotal));
+    base::WriteWord16Be(outgoing, 4, 0);
+    base::WriteWord16Be(outgoing, 6, 0);
+    outgoing[8] = kIpv4TimeToLive;
+    outgoing[9] = datagram.protocol;
+    base::WriteWord16Be(outgoing, 10, 0);
+    base::WriteWord32Be(outgoing, 12, SourceAddressFor(own_address_, datagram.destination));
+    base::WriteWord32Be(outgoing, 16, datagram.destination);
+    for (size_t index = 0; index < datagram.length; ++index) {
+        outgoing[kMinIpv4HeaderBytes + index] = datagram.payload[index];
+    }
+
+    base::InternetChecksum builder;
+    builder.add(outgoing, kMinIpv4HeaderBytes);
+    base::WriteWord16Be(outgoing, 10, builder.value());
+
+    const OutboundDatagram kOutbound = {
+        .destination = datagram.destination,
+        .protocol    = datagram.protocol,
+        .payload     = outgoing,
+        .length      = kTotal,
+    };
+    sink_.send(sink_.context, kOutbound);
+    ++stats_.sent;
+    return true;
+}
+
+void Ipv4Module::observe(void* context,
+                         void (*receive)(void*, const unsigned char*, size_t, const Ipv4View&)) {
+    observer_context_ = context;
+    observer_         = receive;
+}
+
+const Ipv4Stats& Ipv4Module::stats() const {
+    return stats_;
 }
 
 }  // namespace cinux::net

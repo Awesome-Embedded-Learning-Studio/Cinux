@@ -1,83 +1,66 @@
-/**
- * @file kernel/syscall/sys_readlink.cpp
- * @brief sys_readlink handler (F-ECO batch 2)
- *
- * Resolves the path to the symlink inode (lookup does not follow symlinks, so
- * the inode IS the link) and delegates to InodeOps::readlink(); copies the
- * kernel result out to the user buffer. Returns bytes written, no NUL.
- *
- * The link target is staged in a 256-byte stack buffer (hobby-OS cap); targets
- * longer than 255 bytes are truncated. PATH_MAX-sized targets are a follow-up.
- */
-
 #include "kernel/syscall/sys_readlink.hpp"
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/user_access.hpp"  // copy_to_user
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"  // inode_unref
-#include "kernel/fs/path.hpp"
-#include "kernel/fs/vfs_mount.hpp"
-#include "kernel/lib/kprintf.hpp"
-#include "kernel/syscall/path_util.hpp"
+#include "cinux/result.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/procfs/procfs.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::syscall {
 
 namespace {
-using cinux::lib::kprintf;
-}
 
-int64_t do_readlink_kernel(const char* resolved_path, char* buf, uint64_t buf_size) {
-    const char*            rel_path = nullptr;
-    cinux::fs::FileSystem* fs       = cinux::fs::vfs_resolve(resolved_path, &rel_path);
-    if (fs == nullptr) {
-        kprintf("[SYS_READLINK] No filesystem mounted for '%s'\n", resolved_path);
-        return -kEnoent;
+long long readlink_path(const char* path, Word destination, Word capacity) {
+    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(path);
+    if (!kView.ok()) {
+        return -ErrnoFrom(kView.error());
     }
+    const fs::FsView& flat = kView.value();
 
-    auto inode_result = fs->lookup(rel_path);
-    if (!inode_result.ok()) {
-        return -to_errno(inode_result.error());
+    const arch::IrqGuard           kGuard;
+    const base::Result<fs::FsNode> kNode = flat.ops->lookup(flat.self, flat.rest);
+    if (!kNode.ok()) {
+        return -ErrnoFrom(kNode.error());
     }
-
-    cinux::fs::Inode* inode = inode_result.value();  // ref'd by lookup
-    if (inode == nullptr || inode->ops == nullptr) {
-        cinux::fs::inode_unref(inode);
-        return -kEio;
-    }
-
-    auto r = inode->ops->readlink(inode, buf, buf_size);
-    cinux::fs::inode_unref(inode);  // drop the lookup ref
-    if (!r.ok()) {
-        return -to_errno(r.error());
-    }
-    return r.value();
-}
-
-int64_t sys_readlink(uint64_t path_virt, uint64_t buf_virt, uint64_t buf_size, uint64_t, uint64_t,
-                     uint64_t) {
-    if (buf_size == 0) {
+    if (kNode.value().ino != fs::kProcExeIno || kNode.value().type != fs::InodeType::kFile) {
         return -kEinval;
     }
-
-    cinux::fs::PathBuf resolved;
-    if (!resolve_user_path(path_virt, resolved.data())) {
+    const proc::Task* const kSelf  = CurrentTask();
+    unsigned long long      length = 0;
+    while (length + 1 < sizeof(kSelf->exe) && kSelf->exe[length] != '\0') {
+        ++length;
+    }
+    const unsigned long long kGive = length < capacity ? length : capacity;
+    if (!uaccess::CopyToUser(destination, kSelf->exe, kGive)) {
         return -kEfault;
     }
-
-    char     kbuf[256];
-    uint64_t cap = (buf_size < 256) ? buf_size : 256;
-    int64_t  n   = do_readlink_kernel(resolved.data(), kbuf, cap);
-    if (n < 0) {
-        return n;
-    }
-
-    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(buf_virt), kbuf,
-                                   static_cast<uint64_t>(n))) {
-        return -kEfault;
-    }
-    return n;
+    return static_cast<long long>(kGive);
 }
+}  // namespace
+
+long long HandleReadlinkat(const SyscallFrame& frame) {
+    char storage[fs::kFsPathMax]{};
+    if (const auto kBad = FoldUserPathAt(frame.rdi, frame.rsi, storage); kBad < 0) {
+        return kBad;
+    }
+    return readlink_path(storage, frame.rdx, frame.r10);
+}
+
+long long HandleReadlink(const SyscallFrame& frame) {
+    if (frame.rsi == 0 || frame.rdx == 0) {
+        return -kEfault;
+    }
+    char storage[fs::kFsPathMax] = {};
+    if (const long long kBad = FoldUserPath(frame.rdi, storage, fs::kFsPathMax); kBad < 0) {
+        return kBad;
+    }
+    return readlink_path(storage, frame.rsi, frame.rdx);
+}
+
 
 }  // namespace cinux::syscall

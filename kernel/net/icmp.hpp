@@ -1,114 +1,115 @@
 /**
- * @file kernel/net/icmp.hpp
- * @brief ICMP wire layout + IcmpModule (echo request -> reply, reply -> record).
+ * @file    icmp.hpp
+ * @brief   The ICMP module: answer echoes, count replies.
  *
- * An L4Handler registered into Ipv4Module's proto table (ICMP is IP proto 1,
- * NOT a separate ethertype -- so IcmpModule is NOT a ProtocolHandler; Ipv4Module
- * dispatches it via the inner L4 table, not the ethertype table).  On an echo
- * request it builds a reply and hands it to Ipv4Module::send; on an echo reply
- * it records id/seq so a ping originator can observe the round-trip.
+ * Echo requests are answered on the spot — same identifier, same
+ * sequence, payload copied, checksum recomputed over the zeroed field —
+ * and aimed back at the asker through the sink the wiring points at the
+ * IPv4 module. Echo replies are not handled; they are observed, and the
+ * counters are the ping demo's whole scoreboard. Everything that fails
+ * the word book or the checksum folds into its own counter, silently:
+ * the discipline of this family is that bad packets die counted deaths.
  *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-23
+ * @version 0.1
+ * @since   0.6.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/ipv4.hpp"  // Ipv4Header, Ipv4Module
+#include "kernel/net/ipv4.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 
 namespace cinux::net {
 
-constexpr uint8_t kIcmpEchoRequest = 8;
-constexpr uint8_t kIcmpEchoReply   = 0;
-
-/// @brief ICMP header, HOST-order parsed view.  8 bytes (echo).
-struct IcmpHeader {
-    uint8_t  type;
-    uint8_t  code;
-    uint16_t checksum;  ///< host order (over the whole ICMP message)
-    uint16_t id;        ///< host order (echo identifier)
-    uint16_t seq;       ///< host order (echo sequence)
-};
-static_assert(sizeof(IcmpHeader) == 8, "ICMP echo header is 8 bytes");
-
-inline void parse_icmp(const uint8_t* p, IcmpHeader& out) {
-    out.type     = p[0];
-    out.code     = p[1];
-    out.checksum = (static_cast<uint16_t>(p[2]) << 8) | p[3];
-    out.id       = (static_cast<uint16_t>(p[4]) << 8) | p[5];
-    out.seq      = (static_cast<uint16_t>(p[6]) << 8) | p[7];
-}
-
-inline void build_icmp_header(const IcmpHeader& in, uint8_t* p) {
-    p[0] = in.type;
-    p[1] = in.code;
-    p[2] = static_cast<uint8_t>(in.checksum >> 8);
-    p[3] = static_cast<uint8_t>(in.checksum & 0xFF);
-    p[4] = static_cast<uint8_t>(in.id >> 8);
-    p[5] = static_cast<uint8_t>(in.id & 0xFF);
-    p[6] = static_cast<uint8_t>(in.seq >> 8);
-    p[7] = static_cast<uint8_t>(in.seq & 0xFF);
-}
-
-/// @brief Inbound ICMP echo-reply observer -- the SOCK_RAW adapter (busybox
-/// ping) implements this and registers itself so IcmpModule delivers every
-/// echo reply into its RX ring.  Mirrors UdpListener: the protocol module
-/// talks to the abstract interface, never the concrete socket, so IcmpModule
-/// stays host-testable without dragging in the Socket adapter layer.
-///
-/// @p payload is BORROWED (valid only for the call); the listener copies if it
-/// needs the bytes past on_icmp_reply (the device recycles the frame after
-/// dispatch).
-class RawListener {
-public:
-    virtual ~RawListener() = default;
-    /// @brief An ICMP echo reply arrived.  Copy it now if you need it later.
-    virtual void on_icmp_reply(const Ipv4Header& ip, FrameView payload) = 0;
+/**
+ * @brief   The echo scoreboard and its refused corner.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct IcmpStats {
+    /// Echo requests answered.
+    unsigned long requests_answered = 0;
+    /// Echo replies observed.
+    unsigned long replies_seen      = 0;
+    /// Identifier of the last observed reply.
+    uint16_t      last_identifier   = 0;
+    /// Sequence of the last observed reply.
+    uint16_t      last_sequence     = 0;
+    /// Messages the word book refused as too short.
+    unsigned long refused_short     = 0;
+    /// Messages whose checksum did not fold to zero.
+    unsigned long refused_checksum  = 0;
+    /// Echo requests larger than a reply could mirror.
+    unsigned long refused_oversized = 0;
 };
 
-class IcmpModule : public L4Handler {
+/**
+ * @brief   The ICMP module, a plain instance the wiring owns.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+class IcmpModule {
 public:
-    /// @brief Handle an inbound ICMP message (L4Handler, dispatched for proto==1).
-    ///        Echo request -> echo reply (via ipv4.send); echo reply -> record +
-    ///        deliver a COPY to every registered RawListener (SOCK_RAW ping path).
-    void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
-                NetStack& stack) override;
+    /**
+     * @brief         Aims the module at its reply path.
+     *
+     * @param[in]     reply_sink  Where echo replies go; the wiring
+     *                            points this at the IPv4 module.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void init(const DatagramSink& reply_sink);
 
-    /// @brief Send an ICMP echo request (the ping originator's TX).  src comes
-    ///        from the device's InDevice (Ipv4Module::send sources it).
-    cinux::lib::ErrorOr<void> send_echo_request(NetDevice& dev, Ipv4Addr dst, uint16_t id,
-                                                uint16_t seq, Ipv4Module& ipv4, NetStack& stack);
+    /**
+     * @brief         Judges one ICMP message, answers or observes it.
+     *
+     * @param[in]     bytes   First message byte.
+     * @param[in]     length  Bytes the message holds.
+     * @param[in]     header  The IPv4 header it travelled in.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length, const Ipv4View& header);
 
-    /// @brief Echo-reply observation (a ping originator reads these after poll).
-    uint32_t reply_count() const { return reply_count_; }
-    uint16_t last_reply_id() const { return last_id_; }
-    uint16_t last_reply_seq() const { return last_seq_; }
-    void     reset() {
-        reply_count_ = 0;
-        last_id_     = 0;
-        last_seq_    = 0;
-    }
-
-    /// @name SOCK_RAW delivery (busybox ping reads echo replies via recvfrom()).
-    /// A RawListener (the RawSocket adapter) registers itself on construct; on
-    /// every inbound echo reply IcmpModule::handle copies the whole ICMP message
-    /// into each registered listener's ring.  unregisters on close() / destruct.
-    /// Best-effort list: a duplicate register is a no-op; unregister of an
-    /// absent entry is a no-op.
-    ///@{
-    void register_raw_socket(RawListener* s);
-    void unregister_raw_socket(RawListener* s);
-    ///@}
+    /**
+     * @brief         The scoreboard so far.
+     * @return        A reference to the current statistics.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] const IcmpStats& stats() const;
 
 private:
-    uint32_t reply_count_ = 0;  ///< echo replies observed
-    uint16_t last_id_     = 0;
-    uint16_t last_seq_    = 0;
-
-    static constexpr uint32_t kMaxRawSockets = 8;  ///< concurrent SOCK_RAW ping users
-    RawListener*              raw_sockets_[kMaxRawSockets]{};
+    DatagramSink  reply_sink_               = {};
+    IcmpStats     stats_                    = {};
+    unsigned char reply_[kMaxIcmpEchoBytes] = {};
 };
+
+/**
+ * @brief         Writes one echo request into a caller-owned buffer.
+ *
+ * @param[out]    message         Buffer of header plus payload bytes.
+ * @param[in]     length          Whole message length, payload included.
+ * @param[in]     identifier      Pairing word for this conversation.
+ * @param[in]     sequence        Ordering word for this message.
+ * @return        None
+ * @note          The payload bytes are filled with an index pattern and
+ *                the checksum is computed over the zeroed field, so the
+ *                receiver's fold-to-zero property holds as sent.
+ * @since         0.6.0
+ * @ingroup       kernel_net
+ */
+void BuildEchoRequest(unsigned char* message, size_t length, uint16_t identifier,
+                      uint16_t sequence);
 
 }  // namespace cinux::net

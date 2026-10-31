@@ -1,243 +1,596 @@
+/**
+ * @file    scheduler.hpp
+ * @brief   The cooperative scheduler: book the classes, delegate the rest.
+ *
+ * Meyers-singleton shape after Pmm and Tick, and split the same way the
+ * walk theme split TableWorld: this class is the semantics — the class
+ * registry, task states, current-task bookkeeping, pick order, reclaim
+ * timing — while two decisions live elsewhere. The machine reality
+ * (register switching, page and memory return) goes through an
+ * injected SwitchSink, and the who-runs-next policy goes through the
+ * registered SchedulingClasses, consulted in registration order; a
+ * task without an explicit class rides the first-registered one. The
+ * kernel installs the assembly-backed sink; a host test installs a
+ * recording sink and asserts the decision stream, which is the part
+ * worth asserting, straight from the same object code. Time slices,
+ * preemption flags and blocking grow on this seam: an interrupt that
+ * only sets a flag is just one more voice asking the scheduler to
+ * decide.
+ *
+ * @author  Charliechen114514
+ * @date    2026-10-16
+ * @version 0.6
+ * @since   0.1.0
+ * @ingroup kernel_proc
+ * @copyright Copyright (c) 2026
+ */
+
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <concepts>
 
-#include "kernel/lib/atomic.hpp"
-#include "kernel/lib/not_null.hpp"
-#include "kernel/proc/percpu.hpp"
-#include "kernel/proc/process.hpp"
-#include "kernel/proc/sync.hpp"
+#include "cinux/container/self_list.hpp"
+#include "cinux/container/static_stack.hpp"
+#include "cinux/scoped_guard.hpp"
+#include "cinux/singleton.hpp"
+#include "cinux/spin_mutex.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/proc/proc_config.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/proc/task_snapshot.hpp"
+
+namespace cinux::arch::per_cpu {
+struct PerCpu;
+}
 
 namespace cinux::proc {
 
-// ============================================================
-// Pluggable scheduling (F3-M4)
-// ============================================================
-//
-// The scheduler is policy-pluggable: a scheduling algorithm is just a
-// SchedulingClass subclass.  Adding one (e.g. a strict-priority class) is:
-//
-//   class PriorityScheduler : public SchedulingClass {
-//    public:
-//     void  enqueue(Task* t) override      { /* insert ordered by priority */ }
-//     void  dequeue(Task* t) override      { /* remove t from the queue */ }
-//     Task* pick_next() override           { /* return highest-priority task */ }
-//     const char* name() const override    { return "Priority"; }
-//     // Optional policy hooks (defaults are no-ops):
-//     bool task_tick(Task* cur) override   { /* true => request preemption */ }
-//     void task_fork(Task* p, Task* c) override { /* derive child params */ }
-//    private:
-//     /* run-queue state + a Spinlock */
-//   };
-//
-//   // At boot, after Scheduler::init() registers the default RoundRobin:
-//   Scheduler::register_class(&my_priority_class);
-//
-// Scheduler::pick_next_task() asks each registered class in registration order
-// (index 0 = highest precedence) for a task; the first non-empty class wins.
-// A task picks its class via Task::sched_class (default &default_rr_); see
-// TaskBuilder::set_sched_class().  RoundRobin itself is a worked example --
-// priority-aware selection (lower Task::priority runs first) plus a 2-tick
-// quantum driven by task_tick().
-
-class SchedulingClass {
-public:
-    virtual ~SchedulingClass() = default;
-
-    // --- Run-queue management (required) ---
-    virtual void        enqueue(Task* task) = 0;
-    virtual void        dequeue(Task* task) = 0;
-    virtual Task*       pick_next()         = 0;
-    virtual const char* name() const        = 0;
-
-    // --- Policy hooks (optional; defaults preserve legacy behaviour) ---
-
-    // Called once per timer tick for the running task.  Return true to ask the
-    // scheduler to preempt (e.g. the time quantum is exhausted); false lets the
-    // task keep running.  Lets each class own its own preemption policy instead
-    // of hard-coding it in Scheduler::tick.
-    virtual bool task_tick(Task* current);
-
-    // Called when a task is forked/cloned so the class can derive the child's
-    // scheduling parameters from the parent (e.g. inherit priority).
-    virtual void task_fork(Task* parent, Task* child);
-
-    // Deadline tick for deadline-based (real-time) scheduling, or 0 when the
-    // class is not deadline-based.  Reserved for future RT scheduling classes.
-    virtual uint64_t task_deadline(Task* task);
-
-    // Is the run queue empty?  Pure peek (no dequeue).  Used by the AP idle loop
-    // (F4-M4 M4-2-2) to re-check for runnable work under cli before sti;hlt,
-    // closing the lost-wakeup window.  Conservative default: a class that does
-    // not override this reports "non-empty" so the idle loop re-runs schedule().
-    virtual bool is_empty() const { return false; }
+/**
+ * @brief   One process's real timer in two spans.
+ * @note    The value is the remaining one-shot span, the interval the
+ *          period a re-arming timer keeps stepping by; both in
+ *          monotonic nanoseconds, zero disarming.
+ * @since   0.7.0
+ * @ingroup kernel_proc
+ */
+struct RealTimerValue {
+    /// Remaining or initial span before the next SIGALRM.
+    unsigned long long value_ns    = 0;
+    /// Period between further expiries, zero for single-shot.
+    unsigned long long interval_ns = 0;
 };
 
-class RoundRobin : public SchedulingClass {
-public:
-    static constexpr int MAX_TASKS = 64;
+class Scheduler;
+class SchedulingClass;
 
-    RoundRobin();
-
-    void        enqueue(Task* task) override;
-    void        dequeue(Task* task) override;
-    Task*       pick_next() override;
-    const char* name() const override;
-    bool        is_empty() const override;  ///< peek count_==0 under lock_ (F4-M4 M4-2-2)
-
-    // Drop every queued task and reset the ring-buffer pointers.  Used by
-    // Scheduler::init() so each (re)init starts from a pristine run queue --
-    // the in-kernel test suite calls init() before every test, and without this
-    // the tasks a previous test added would leak into the next one.  A no-op
-    // at boot, where the queue is already empty.
-    void clear();
-
-    bool task_tick(Task* current) override;
-    void task_fork(Task* parent, Task* child) override;
-    // task_deadline is inherited unchanged (0 = not deadline-based).
-
-private:
-    // Remove the slot at logical index i (0-based from head_) and compact the
-    // ring buffer around it.  Caller must hold lock_.
-    void remove_at_locked(int i);
-
-    Task*            run_queue_[MAX_TASKS];
-    int              head_;
-    int              tail_;
-    int              count_;
-    mutable Spinlock lock_;  ///< mutable: is_empty() peeks count_ under lock (F4-M4 M4-2-2)
+/**
+ * @brief         What a reaped child hands its waiting parent.
+ * @since         0.2.0
+ * @ingroup       kernel_proc
+ */
+struct ChildReceipt {
+    unsigned long long pid;   ///< The child the wait retired.
+    long long          code;  ///< The exit word it died carrying.
 };
 
-class Scheduler {
-public:
-    static constexpr int MAX_CLASSES        = 4;
-    static constexpr int DEFAULT_TIME_SLICE = 2;
+/**
+ * @brief         What a switch executor must do for the scheduler.
+ * @tparam        Sink   The executor type being checked.
+ * @note          Four verbs, no more: carry a task-to-task handoff,
+ *                hand control from kernel Main into a task, hand it
+ *                back, and return a dead task's memory. The scheduler
+ *                calls them and never cares whether registers or a
+ *                log line answered.
+ * @since         0.1.0
+ * @ingroup       kernel_proc
+ */
+template <typename Sink>
+concept SwitchSink = requires(Sink& sink, Task& outgoing, Task& incoming) {
+    { sink.switch_tasks(outgoing, incoming) } -> std::same_as<void>;
+    { sink.enter_from_main(incoming) } -> std::same_as<void>;
+    { sink.return_to_main(outgoing) } -> std::same_as<void>;
+    { sink.reclaim(outgoing) } -> std::same_as<void>;
+};
 
-    static void init();
-    static void register_class(SchedulingClass* sched_class);
-    /// Make @p task runnable. @p wake_ap (default true) sends a reschedule IPI
-    /// so an idle AP can pull it off the shared queue immediately -- the normal
-    /// case for fork/launch. The bootstrap path sets it false: it enqueues the
-    /// very first worker and then run_first() picks it on the BSP itself; an IPI
-    /// there races an AP into stealing it, leaving run_first() with an empty
-    /// queue (the -smp2 "smoke worker did not run" false-green).
-    static void add_task(lib::NotNull<Task*> task, bool wake_ap = true);
-    static void remove_task(lib::NotNull<Task*> task);
-    static void yield();
-    static void exit_current();
+/**
+ * @brief         Owns the ready queue and the current task.
+ * @note          Constant-initialized state only, per the zero-
+ *                construction rule; nothing runs until a sink is
+ *                injected through init.
+ * @since         0.1.0
+ * @ingroup       kernel_proc
+ */
+class Scheduler : public cinux::base::Singleton<Scheduler> {
+    friend class cinux::base::Singleton<Scheduler>;
 
-    /// Reap tasks whose exit_current() deferred their free (Q4e-3 / DEBT-002).
-    /// Called at schedule() entry by whichever task runs next.
-    static void reap_deferred();
-    static void run_first(lib::NotNull<Task*> boot_task);
-
-    // --- Per-CPU idle tasks (F4-M4 M4-2-2) ---
-    //
-    // Each CPU has its own idle task (idle_tasks_[cpu_id]).  Sharing a single
-    // idle task across CPUs is fatal: two CPUs context-switching through it
-    // would share one ctx and one 16 KB stack.  The BSP's idle (idle_tasks_[0])
-    // keeps the legacy idle_entry() (while-hlt, driven by PIT ticks); each AP
-    // builds its own via setup_ap_idle() with ap_idle_entry().  M4-2-2 ships
-    // ap_idle_entry() as a pure sti;hlt (woken by the reschedule IPI) -- APs do
-    // NOT yet run user tasks, because migrating one to an AP GP-faults (M4-3).
-    // The schedule()+sti;hlt runq-pulling loop re-enables there once migration
-    // is safe; has_runnable_task()/is_empty() already back its lost-wakeup check.
-
-    /// This CPU's idle task.  BSP returns idle_tasks_[0].
-    static Task* idle();
-
-    /// Build idle_tasks_[cpu_id] (AP idle, entry=ap_idle_entry) if absent and
-    /// return it.  Idempotent: no-op for cpu 0 (BSP idle is built in init()) and
-    /// if already built.  Called by each AP after Scheduler::init() has run.
-    static Task* setup_ap_idle(uint32_t cpu_id);
-
-    static Task* current();                // reads this CPU's PerCpu::current (per-CPU since M4-1)
-    static void  set_current(Task* task);  // nullable: tests clear per-CPU current with nullptr
-    static bool  is_initialized();
-
-    // In-kernel test-harness role-play guard.  While at least one
-    // NoRescheduleGuard is alive, block() still transitions the task to Blocked
-    // and removes it from the run queue, but does NOT context-switch away.  The
-    // test harness runs single-threaded with no real dispatch loop, role-playing
-    // tasks by installing them as current via set_current(); suppressing
-    // block()'s reschedule lets the harness thread keep observing wait-queue /
-    // task state -- exactly as a second CPU watching a blocked task would.
-    // Production never raises the depth (it stays 0), so this is inert in the
-    // real kernel.  Only block()'s and schedule_blocked()'s schedule() are gated;
-    // tick()/yield()/exit_current() are untouched.
-    class NoRescheduleGuard {
-    public:
-        NoRescheduleGuard();
-        ~NoRescheduleGuard();
+    /** @brief Harness suppression policy for the shared guard. */
+    struct NoReschedulePolicy {
+        /** @brief Stateless per-CPU counter discipline. */
+        struct State {};
+        static void enter(State& state);
+        /** @brief Leave one suppression level. */
+        static void exit(State& state);
     };
 
-    static void tick();
-    /// Consume a deferred reschedule request at the outermost hardware-IRQ
-    /// return point.  Called with IF=0 after the controller EOI.
-    static void preempt_from_irq();
-    static void schedule();
-    static void block(lib::NotNull<Task*> task, const char* reason);
-    static void unblock(lib::NotNull<Task*> task);
+public:
+    /**
+     * @brief Keep a role-play test on its harness stack while marking a wait.
+     * @since 0.3.0
+     * @ingroup kernel_proc
+     */
+    using NoRescheduleGuard = base::ScopedGuard<NoReschedulePolicy>;
 
-    // --- Prepare-to-wait (F4-M4): lost-wakeup-safe blocking for wait paths ---
-    //
-    // The classic wait pattern -- "drop the waiter-lock, THEN block()" -- has a
-    // lost-wakeup window once a second CPU can run the waker concurrently:
-    // between lock release and block(), a concurrent unblock() can flip the task
-    // Ready and enqueue it, only for this CPU's block() to flip it back Blocked
-    // and dequeue it -- the wakeup is lost and the task sleeps forever.
-    //
-    // prepare_to_wait() + schedule_blocked() close the window the way Linux's
-    // prepare_to_wait()/schedule() do:
-    //   1. Under the waiter-lock (and irq_guard, so no local tick preempts us):
-    //        enqueue onto the wait queue;
-    //        prepare_to_wait(self);   // self->state = Blocked  (atomic vs waker)
-    //   2. Release the waiter-lock (re-enable IRQs).
-    //   3. schedule_blocked();        // actually switch out
-    // If a concurrent unblock() raced through the window, self is already Ready
-    // and schedule()'s next==prev path keeps it running instead of sleeping --
-    // no lost wakeup.  schedule_blocked() is the NoRescheduleGuard-aware partner
-    // (the in-kernel test harness role-plays waits without a dispatch loop).
+    /**
+     * @brief         Inject the executor that performs real switches.
+     * @param[in]     sink   Any SwitchSink; stored type-erased.
+     * @return        None.
+     * @note          Called once during bring-up, kernel and every
+     *                test world alike — the Tick init pattern one
+     *                subsystem over.
+     * @since         0.2.0
+     * @ingroup       kernel_proc
+     */
+    template <SwitchSink Sink>
+    void init(Sink& sink) {
+        switch_tasks_ = [](void* ctx, Task& outgoing, Task& incoming) {
+            static_cast<Sink*>(ctx)->switch_tasks(outgoing, incoming);
+        };
+        enter_from_main_ = [](void* ctx, Task& incoming) {
+            static_cast<Sink*>(ctx)->enter_from_main(incoming);
+        };
+        return_to_main_ = [](void* ctx, Task& outgoing) {
+            static_cast<Sink*>(ctx)->return_to_main(outgoing);
+        };
+        reclaim_ = [](void* ctx, Task& dead) { static_cast<Sink*>(ctx)->reclaim(dead); };
+        sink_    = &sink;
+    }
 
-    /// Mark @p task about to sleep (state -> Blocked) WITHOUT switching away.
-    /// Caller holds the waiter-lock under irq_guard; follow with schedule_blocked().
-    static void prepare_to_wait(lib::NotNull<Task*> task);
+    /**
+     * @brief         Hand one ready task to the queue.
+     * @param[in,out] task   Armed task, state and pid get assigned.
+     * @param[in] runnable Queue immediately when true.
+     * @param[in] initial_process Reserve PID 1 for the user init process.
+     * @return        None.
+     * @note          The seam tests drive directly: seat a hand-made
+     *                task, install a recording sink, and the decision
+     *                stream is observable without any machine. The
+     *                kernel side pairs this with TaskBuilder, which
+     *                owns the building half. The task queues on its
+     *                own sched_class; a class-less task is assigned
+     *                the first-registered one here, once.
+     * @since         0.2.0
+     * @ingroup       kernel_proc
+     */
+    void seat(Task& task, bool runnable = true, bool initial_process = false);
 
-    /// Switch away from the current task unless a NoRescheduleGuard is active.
-    /// The wait-path partner of prepare_to_wait(); production (depth == 0) always
-    /// switches. Returns false only when the in-kernel test harness suppresses
-    /// dispatch, allowing blocking primitives to expose their queued state
-    /// without spinning inside a single-threaded test.
-    static bool schedule_blocked();
+    /**
+     * @brief         Register a scheduling class; pick order follows
+     *                registration order.
+     * @param[in]     cls   The class to consult; kept by address.
+     * @return        None.
+     * @note          Registering the same class twice is a no-op, so
+     *                bring-up paths can stay unguarded. Overflow past
+     *                kMaxSchedulingClasses is a loud Check.
+     * @since         0.6.0
+     * @ingroup       kernel_proc
+     */
+    void install_class(SchedulingClass& cls);
 
-    // Ask each class in `classes` (precedence = array order, index 0 first) for
-    // its next runnable task; return the first non-null, or nullptr if every
-    // class is empty.  Exposed as a primitive so the multi-class traversal is
-    // unit-testable in isolation, independent of the global class table.
-    static Task* pick_next_from(SchedulingClass** classes, int count);
+    /**
+     * @brief         How many classes stand registered.
+     * @return        The registration count.
+     * @since         0.6.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] unsigned int class_count() const;
+
+    /**
+     * @brief         One registered class, by registration order.
+     * @param[in]     index   Position in registration order.
+     * @return        The class, nullptr past the end.
+     * @note          The registry read-back: registration order is the
+     *                pick order, and this names the roster without
+     *                reaching into private storage.
+     * @since         0.6.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] SchedulingClass* class_at(unsigned int index) const;
+
+    /**
+     * @brief         Let another task run; the caller comes back later.
+     * @return        None.
+     * @note          Returns only when this task is picked again.
+     *                Cooperative yield and preemption both land here;
+     *                with preemption enabled, the clock rotates tasks
+     *                that never call this.
+     * @since         0.1.0
+     * @ingroup       kernel_proc
+     */
+    void yield();
+
+    /**
+     * @brief         Count one timer tick; arm a rotation request when
+     *                the current task spent its slice.
+     * @return        None.
+     * @note          Called from the timer interrupt handler, which
+     *                only keeps books: the switch itself happens later,
+     *                in the interrupt-exit hook.
+     * @since         0.3.0
+     * @ingroup       kernel_proc
+     */
+    void on_timer_tick(unsigned long long now_ns = 0);
+
+    /** @brief Snapshots and optionally replaces the calling process real timer under the registry
+     * lock. */
+    void real_timer(Task& task, unsigned long long now_ns, RealTimerValue& timer, bool replace);
+
+    /**
+     * @brief         The interrupt-exit question: rotate now?
+     * @return        None.
+     * @note          Called with interrupts off, between the dispatch
+     *                and the iret of every device interrupt. Rotates
+     *                when a slice expired and preemption is enabled;
+     *                the interrupted task resumes through iret with its
+     *                flags restored, so the IF story needs no patching.
+     * @since         0.3.0
+     * @ingroup       kernel_proc
+     */
+    void maybe_preempt();
+
+    /**
+     * @brief         Open or close preemption.
+     * @param[in]     enabled   True to let the clock rotate tasks.
+     * @return        None.
+     * @note          Ships off: the heap and the PMM are shared state
+     *                without protection until the sync station arms
+     *                them, so only run preemption demos whose tasks
+     *                touch no shared structure. The guard count
+     *                (PreemptGuard) also feeds off this switch.
+     * @since         0.3.0
+     * @ingroup       kernel_proc
+     */
+    void set_preemption(bool enabled);
+
+    /**
+     * @brief         Pin the current task to the CPU (one nest level).
+     * @return        None.
+     * @note          While any guard lives, the exit hook declines to
+     *                rotate. The first consumer is the lock family of
+     *                the next station; the heap wears it the day its
+     *                allocator learns about preemption.
+     * @since         0.3.0
+     * @ingroup       kernel_proc
+     */
+    void preempt_disable();
+
+    /**
+     * @brief         Drop one nest level of pinning.
+     * @return        None.
+     * @note          Pairs with preempt_disable; the guard below is
+     *                the way to call them so no path forgets the drop.
+     * @since         0.3.0
+     * @ingroup       kernel_proc
+     */
+    void preempt_enable();
+
+    /**
+     * @brief         End the current task; never returns to it.
+     * @param[in]     code   The exit word ring 3 asked for, zero when
+     *                       a kernel thread's entry merely returned.
+     * @return        None.
+     * @note          Reached through the trampoline's exit hook when
+     *                an entry returns, or directly by choice. A task
+     *                with a parent turns zombie and stays for that
+     *                parent's wait; a parentless one goes straight to
+     *                reclaim, executed after the switch. Either way
+     *                the task's own offspring are settled first —
+     *                zombie grandchildren reaped, live ones released
+     *                to a parentless life — so no pointer outlives its
+     *                target. Two words belong to the dying task alone:
+     *                its join word is zeroed and woken while its own
+     *                world is still mapped, and a thread-group member
+     *                (pid other than tgid) never turns zombie at all —
+     *                it leaves its maker's roll at once and goes
+     *                straight to reclaim, so its group answers through
+     *                the join word, and a wait for it answers none.
+     *                Returning at all is only
+     *                observable under a sink whose switches return —
+     *                the recording sink of a host test; the kernel
+     *                sink never does.
+     * @since         0.2.0
+     * @ingroup       kernel_proc
+     */
+    void exit_current(long long code = 0);
+
+    /**
+     * @brief         Wait for one child to exit and retire it.
+     * @param[in]     wanted    Child pid, -1 for any child, 0 for any
+     *                          child in the caller's own group, below
+     *                          -1 for any child in group -wanted.
+     * @param[in]     no_hang   Return instead of parking when matching
+     *                          children exist but none has exited yet.
+     * @param[out]    receipt   The reaped child's pid and exit word.
+     * @return        True when a child was reaped; false when the
+     *                caller has no child left that matches the
+     *                request — which is what a group-targeted wait
+     *                answers when the only children live in other
+     *                groups.
+     * @note          Parks the caller until a matching zombie exists,
+     *                the same park the lock family uses. A child's
+     *                exit is the only wakeup, and it lands on the
+     *                parent alone — the child knows exactly whose wait
+     *                it finishes. Waking with no match simply parks
+     *                again, so spurious wakeups cost nothing. Under
+     *                no_hang the call never parks: matching children
+     *                alive but none exited hands back a zero-pid
+     *                receipt, which is the caller's cue to answer 0,
+     *                not an error.
+     * @since         0.2.0
+     * @ingroup       kernel_proc
+     */
+    bool wait_child(long long wanted, bool no_hang, ChildReceipt& receipt);
+
+    /**
+     * @brief         Walk every task on the roll, caller's visit in hand.
+     * @tparam        Visit   Callable taking Task&.
+     * @param[in]     visit   What to do with each task.
+     * @return        None.
+     * @note          The kill-a-group face: an interrupt-guarded sweep
+     *                of the one task roll the scheduler keeps, safe
+     *                because a single core serializes reclaims behind
+     *                the same guard. Visitors only read identity fields
+     *                and hand out signals — anything that reclaims
+     *                would mutate the roll mid-walk and is on nobody's
+     *                agenda.
+     * @since         0.5.0
+     * @ingroup       kernel_proc
+     */
+    template <typename Visit>
+    void for_each_task(Visit&& visit) {
+        const QueueGuard kGuard(*this);
+        for (Task* scan = tasks_.head(); scan != nullptr; scan = tasks_.after(*scan)) {
+            visit(*scan);
+        }
+    }
+
+    /**
+     * @brief         Park the current task off the ready queue and
+     *                switch away; returns only after a wake.
+     * @return        None.
+     * @note          The blocking half of every lock: the caller is
+     *                already linked onto the lock's wait queue when
+     *                this runs. A spinlock held across this call
+     *                stops the machine loudly — the rule the lock
+     *                family is built on.
+     * @since         0.4.0
+     * @ingroup       kernel_proc
+     */
+    void block_current();
+
+    /**
+     * @brief Mark the current task blocked while its wait lock is held.
+     * @since 0.3.0
+     * @ingroup kernel_proc
+     */
+    void prepare_to_wait();
+
+    /**
+     * @brief Switch after releasing the wait lock, preserving an intervening wake.
+     * @since 0.3.0
+     * @ingroup kernel_proc
+     */
+    void schedule_blocked();
+
+    /**
+     * @brief         Wake one parked task into the ready queue.
+     * @param[in,out] task   A blocked task, linked by its wait queue.
+     * @return        None.
+     * @note          The waking half; the lock transfers ownership
+     *                before calling this so the woken task resumes
+     *                already holding what it waited for.
+     * @since         0.4.0
+     * @ingroup       kernel_proc
+     */
+    void unblock(Task& task);
+
+    /**
+     * @brief         Halt the current task off every queue until a
+     *                continue names it.
+     * @return        None.
+     * @note          The SIGSTOP landing: the task keeps its kernel
+     *                stack exactly as a parked one does, but no wait
+     *                queue links it — nothing wakes it but another
+     *                task's resume. Returns only after a continue put
+     *                it back and the clock picked it again.
+     * @since         0.7.0
+     * @ingroup       kernel_proc
+     */
+    void stop_current();
+
+    /**
+     * @brief         Put one stopped task back into the ready queue.
+     * @param[in,out] task   A task in TaskState::kStopped.
+     * @return        None.
+     * @note          The SIGCONT landing, and the SIGKILL one — a
+     *                stopped task is never scheduled, so it could
+     *                never deliver its own death; the sender's send
+     *                is the only hand that can lift the halt.
+     * @since         0.7.0
+     * @ingroup       kernel_proc
+     */
+    void resume(Task& task);
+
+    /**
+     * @brief         Take a ready task out of its class queue, halted.
+     * @param[in,out] task   A queued task the stop signal names.
+     * @return        True when it was queued and now stands stopped;
+     *                false when it was not queued to begin with — a
+     *                running or parked task is left for the delivery
+     *                path or the next wake.
+     * @note          The send-time half of SIGSTOP: a task sitting in
+     *                a ready queue must not wait for a delivery that
+     *                only happens on the way back to ring 3, because
+     *                nothing guarantees it ever gets there.
+     * @since         0.7.0
+     * @ingroup       kernel_proc
+     */
+    bool withdraw(Task& task);
+
+    /**
+     * @brief         Hand the CPU to the ready queue until it drains.
+     * @return        None.
+     * @note          Back on kernel Main's stack when the last task
+     *                has exited.
+     * @since         0.1.0
+     * @ingroup       kernel_proc
+     */
+    void run_until_done();
+
+    /**
+     * @brief         The task on the CPU, nullptr on kernel Main.
+     * @return        Current task or nullptr.
+     * @since         0.1.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] Task* current() const;
+
+    /**
+     * @brief         How many tasks still stand in the offspring roll.
+     * @return        The roll's headcount.
+     * @note          The diagnosis face for the orphan story: a task
+     *                joins the roll at seat because it has a parent,
+     *                and the only way off is its parent's exit Current
+     *                detaching it. When every family has finished its
+     *                rounds, the count must be back where it started —
+     *                anything left behind is a grandchild the detach
+     *                walk stranded on the roll.
+     * @since         0.5.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] unsigned long long offspring_count() const;
+
+    /**
+     * @brief Visit one registered task while its lifetime is protected.
+     * @tparam Visit Nonblocking callback that retains no task pointer.
+     * @param[in] pid Identity to look up.
+     * @param[in] visit Operation completed before the registry lock is released.
+     * @return True when a registered task was visited.
+     * @since 0.3.0
+     * @ingroup kernel_proc
+     */
+    template <typename Visit>
+    bool with_task(unsigned long long pid, Visit&& visit) {
+        const QueueGuard kGuard(*this);
+        for (Task* scan = tasks_.head(); scan != nullptr; scan = tasks_.after(*scan)) {
+            if (scan->pid == pid) {
+                visit(*scan);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @brief         Copies one task's vital signs out under the lock.
+     *
+     * @param[in]     pid   Which task.
+     * @param[out]    into  The snapshot to fill.
+     * @return        True when a living task answered; false for no
+     *                such pid.
+     * @note          The pointer that walks the registry never leaves
+     *                this call: every field is copied while the guard
+     *                holds, and the caller carries values only. A
+     *                task that exits after this returns takes nothing
+     *                with it the snapshot still points at.
+     * @since         0.5.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] bool snapshot_by_pid(unsigned long long pid, TaskSnapshot& into);
+
+    /**
+     * @brief         Names the ordinal-th living process group leader.
+     *
+     * @param[in]     ordinal   Which leader, zero-based, walk order.
+     * @param[out]    pid       The leader's pid.
+     * @return        True when that many leaders live; false past the
+     *                last.
+     * @note          Ordinals, not a snapshot: a whole-table copy would
+     *                need a buffer the kernel stack cannot spare, and
+     *                the hosted answer — recompute the walk each time —
+     *                is exactly what a directory listing does anyway.
+     *                The guard covers the walk; what lives between two
+     *                walks is the caller's tolerance, as it is on the
+     *                hosted proc.
+     * @since         0.5.0
+     * @ingroup       kernel_proc
+     */
+    [[nodiscard]] bool nth_group_leader(unsigned long ordinal, unsigned long long& pid);
 
 private:
-    static void  idle_entry();      // BSP idle: while-hlt (PIT-tick driven)
-    static void  ap_idle_entry();   // AP idle: schedule()+sti;hlt loop (IPI driven), F4-M4 M4-2-2
-    static Task* pick_next_task();  // pick_next_from(classes_, class_count_)
+    Scheduler() = default;
 
-    /// Best-effort peek: any runnable task on the shared run queue?  Pure state
-    /// check (no dequeue).  Used by ap_idle_entry's lost-wakeup recheck under cli.
-    static bool has_runnable_task();
+    struct QueuePolicy {
+        struct State {
+            const Scheduler&   scheduler;
+            unsigned long long irq = 0;
+        };
+        static void enter(State& state);
+        static void exit(State& state);
+    };
+    using QueueGuard = base::ScopedGuard<QueuePolicy>;
+    mutable base::SpinMutex         queue_lock_;
+    std::atomic<unsigned long long> next_real_deadline_ns_{~0ULL};
+    void                            expire_real_timers(unsigned long long now_ns);
+    static arch::per_cpu::PerCpu&   local();
 
-    static SchedulingClass*  classes_[MAX_CLASSES];
-    static int               class_count_;
-    static RoundRobin        default_rr_;
-    static Task*             idle_tasks_[kMaxCpus];  ///< per-CPU idle; [0]=BSP (F4-M4 M4-2-2)
-    // Release-published after init() finishes rebuilding the class/runqueue/idle
-    // state; AP boot reads it with acquire before touching that shared state.
-    static lib::Atomic<bool> initialized_;
-    static lib::Atomic<int>  tick_count_;
-    static int               no_reschedule_depth_;  ///< >0 only inside the test harness
+
+    [[nodiscard]] bool  sink_ready() const;
+    void                set_current(Task* task);
+    void                reap_pending();
+    void                rotate_from_interrupt();
+    void                park_current();
+    [[nodiscard]] Task* pick_next();
+    /// Scans the offspring roll for the one zombie the request names.
+    /// Thread-group members (pid other than tgid) are never eligible:
+    /// they exit straight to reclaim, and a joiner watches the tid
+    /// word instead of waiting.
+    Task*               take_zombie_child(Task& watcher, long long wanted, bool& has_eligible);
+    /** @brief Finds a living user init other than the retiring task. */
+    [[nodiscard]] Task* find_adopter(const Task& dying);
+    void                detach_offspring(Task& dying);
+
+    void (*switch_tasks_)(void*, Task&, Task&) = nullptr;
+    void (*enter_from_main_)(void*, Task&)     = nullptr;
+    void (*return_to_main_)(void*, Task&)      = nullptr;
+    void (*reclaim_)(void*, Task&)             = nullptr;
+    void* sink_                                = nullptr;
+
+    cinux::base::container::SelfList<Task, &Task::child_link>                    offspring_;
+    cinux::base::container::SelfList<Task, &Task::registry_link>                 tasks_;
+    cinux::base::container::SelfList<Task, &Task::registry_link>                 retired_;
+    cinux::base::container::SelfList<Task>                                       waiters_;
+    cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
+    unsigned long long                                                           next_pid_ = 1;
+    std::atomic<bool>                                                            preemption_{false};
 };
 
-/// Assembly/C IRQ-epilogue bridge.
-extern "C" void irq_exit();
+/**
+ * @brief         Preemption discipline for the ScopedGuard shell.
+ * @note          The counting lives in the scheduler; the guard shape
+ *                lives in base. An empty State: this discipline needs
+ *                no memory, only the depth.
+ * @since         0.3.0
+ * @ingroup       kernel_proc
+ */
+struct PreemptLockPolicy {
+    using State = struct {};
+
+    static void enter(State& /*state*/) { Scheduler::self().preempt_disable(); }
+
+    static void exit(State& /*state*/) { Scheduler::self().preempt_enable(); }
+};
+
+/// RAII pin of the current task; one per scope, nests freely.
+using PreemptGuard = cinux::base::ScopedGuard<PreemptLockPolicy>;
 
 }  // namespace cinux::proc

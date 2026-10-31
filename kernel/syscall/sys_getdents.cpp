@@ -1,68 +1,102 @@
-/**
- * @file kernel/syscall/sys_getdents.cpp
- * @brief sys_getdents handler (P0e SMAP-layered)
- *
- * Layered: do_getdents_kernel reads one directory entry into a KERNEL buffer
- * (may block on disk I/O, AC=0 safe); sys_getdents is the boundary that
- * copy_to_user's it. The old readdir directly into the user buffer is gone.
- */
-
 #include "kernel/syscall/sys_getdents.hpp"
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/user_access.hpp"  // P0e (SMAP): copy_to_user
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"
-#include "kernel/fs/vfs_mount.hpp"
-#include "kernel/lib/kprintf.hpp"
+#include "cinux/math.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::syscall {
 
-int64_t do_getdents_kernel(int fd, char* kname, uint64_t count) {
-    cinux::fs::File* file = cinux::fs::current_fd_table().get(fd);
-    if (file == nullptr || file->inode == nullptr || file->inode->ops == nullptr) {
-        return -cinux::kEbadf;
+namespace {
+
+/// The name's length with its NUL, capped where the entry's name field ends.
+unsigned long name_run(const fs::FsDirent& entry) {
+    unsigned long length = 0;
+    while (length < fs::kFsNameMax && entry.name[length] != '\0') {
+        ++length;
     }
-    // Directory reads may issue asynchronous filesystem I/O. File's offset
-    // mutex is sleepable, so the readdir + position update stay atomic without
-    // pinning a per-CPU preemption count across the wait.
-    auto g          = file->offset_lock_.guard();
-    auto dir_result = file->inode->ops->readdir(file->inode, file->offset, kname, count);
-    if (!dir_result.ok()) {
-        return -cinux::to_errno(dir_result.error());
-    }
-    if (dir_result.value() == 1) {
-        file->offset++;
-        uint64_t len = 0;
-        while (len < count && kname[len] != '\0') {
-            ++len;
-        }
-        return static_cast<int64_t>(len);
-    }
-    return dir_result.value();
+    return length + 1;
 }
 
-int64_t sys_getdents(uint64_t fd, uint64_t buf_virt, uint64_t count, uint64_t, uint64_t, uint64_t) {
-    if (count == 0) {
-        return -cinux::kEfault;
-    }
-    if (!cinux::user::access_ok(reinterpret_cast<void*>(buf_virt), count)) {
-        return -cinux::kEfault;
-    }
+/// Whole record length for one name: the nineteen-byte head, the name
+/// with its NUL, rounded up to eight so records abut on the walk.
+unsigned long record_bytes(const fs::FsDirent& entry) {
+    return cinux::base::math::AlignUp(kDirent64NameAt + name_run(entry), 8);
+}
 
-    // Stage the entry name in a kernel buffer (readdir may block on disk).
-    uint32_t stage = (count < 256) ? static_cast<uint32_t>(count) : 256;
-    char     kname[256];
-    int64_t  n = do_getdents_kernel(static_cast<int>(fd), kname, stage);
-    if (n <= 0) {
-        return n;
+/// Translates one entry's shape into the wire's type word.
+unsigned char dirent_type_word(fs::InodeType type) {
+    switch (type) {
+    case fs::InodeType::kDirectory:
+        return kDirentTypeDirectory;
+    case fs::InodeType::kCharDevice:
+        return kDirentTypeChar;
+    default:
+        return kDirentTypeFile;
     }
-    if (!cinux::user::copy_to_user(reinterpret_cast<void*>(buf_virt), kname,
-                                   static_cast<uint64_t>(n))) {
-        return -cinux::kEfault;
+}
+
+/// The widest record one entry can produce: the head plus the longest
+/// name with its NUL, rounded up to the record grain.
+constexpr unsigned long kRecordBytes = kDirent64NameAt + fs::kFsNameMax + 8;
+
+/// Places one entry into a record buffer at base, by the byte plan.
+void put_record(unsigned char* base, const fs::FsDirent& entry, unsigned long next_ordinal) {
+    const unsigned long kLen = record_bytes(entry);
+    base::CopyBytes(base + kDirent64InoAt, &entry.ino, sizeof(entry.ino));
+    const auto kCookie  = static_cast<long long>(next_ordinal);
+    const auto kLenWord = static_cast<unsigned short>(kLen);
+    const auto kType    = dirent_type_word(entry.type);
+    base::CopyBytes(base + kDirent64OffAt, &kCookie, sizeof(kCookie));
+    base::CopyBytes(base + kDirent64LenAt, &kLenWord, sizeof(kLenWord));
+    base::CopyBytes(base + kDirent64TypeAt, &kType, sizeof(kType));
+    base::CopyBytes(base + kDirent64NameAt, entry.name, name_run(entry));
+}
+
+}  // namespace
+
+long long HandleGetdents(const SyscallFrame& frame) {
+    if (frame.rdx == 0) {
+        return -kEfault;
     }
-    return n;
+    const base::Result<base::Shared<fs::OpenFile>> kSlot = LiveSlot(frame.rdi);
+    if (!kSlot.ok()) {
+        return -kEbadf;
+    }
+    auto* const   kDir   = kSlot.value().get();
+    unsigned long filled = 0;
+    fs::FsDirent  entry{};
+    for (;;) {
+        const base::Result<bool> kOne =
+            kDir->ops->read_dir(kDir->backend, kDir->node, kDir->offset, entry);
+        if (!kOne.ok()) {
+            return -ErrnoFrom(kOne.error());
+        }
+        if (!kOne.value()) {
+            break;
+        }
+        const unsigned long kNeed = record_bytes(entry);
+        if (filled + kNeed > frame.rdx) {
+            break;
+        }
+        unsigned char record[kRecordBytes];
+        put_record(record, entry, kDir->offset + 1);
+        if (!uaccess::CopyToUser(frame.rsi + filled, record, kNeed)) {
+            return -kEfault;
+        }
+        filled += kNeed;
+        ++kDir->offset;
+    }
+    if (filled == 0 && frame.rdx < kDirent64NameAt) {
+        return -kEinval;
+    }
+    return static_cast<long long>(filled);
 }
 
 }  // namespace cinux::syscall

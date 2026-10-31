@@ -1,227 +1,417 @@
 /**
- * @file kernel/fs/devfs.hpp
- * @brief DevFS -- in-memory /dev filesystem with device-file inodes (F6-M3)
+ * @file    devfs.hpp
+ * @brief   The device file system: kernel-registered devices behind names.
  *
- * DevFS is a virtual, memory-only filesystem (no on-disk backend) mounted at
- * /dev.  Each device node is an Inode whose ops pointer targets a
- * device-specific InodeOps subclass that encapsulates the device's read/write
- * behaviour.  This mirrors Linux's device-inode model: open("/dev/null")
- * resolves to a character-device inode whose fops discard writes and return
- * EOF on read, open("/dev/zero") yields zero bytes, open("/dev/console")
- * routes writes to the system console.
+ * DevFs satisfies FileSystem with plain methods, like RamFs one station
+ * back — but the nodes are not bytes on any medium. Each name in the flat
+ * root namespace maps to a device the kernel itself registered: reading
+ * and writing a device node forwards to that device's two functions, and
+ * the offset a regular file would honor means nothing here. The table is
+ * born with the two pure-computation devices, null and zero; everything
+ * that touches real hardware — the console today — is registered from a
+ * wiring file one step below, so this class stays free of kernel I/O and
+ * a host test can drive it whole. Creation calls are refused: the device
+ * population is a kernel decision, not a file-system one.
  *
- * The console device writes through an injected CharSink, so its dispatch
- * logic is pure and host-testable (a mock sink captures bytes) while the
- * kernel wires a concrete serial-backed sink at boot (devfs_init.cpp, F6-M3
- * batch 2).  Device inode lifetime is bound to the owning DevFs instance.
- *
- * Namespace: cinux::fs
+ * @author  Charliechen114514
+ * @date    2026-10-19
+ * @version 0.1
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <string_view>
 
-#include <cinux/expected.hpp>
-
-#include "fs/vfs_filesystem.hpp"
-
-namespace cinux::drivers {
-class IBlockDevice;  // forward -- add_block_node wires a block-device node
-}
+#include "cinux/bit_ops/bitmask.hpp"
+#include "cinux/result.hpp"
+#include "kernel/fs/devfs/devfs_config.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/vfs.hpp"
 
 namespace cinux::fs {
 
-/// Maximum length of a device node name, including the NUL terminator.
-static constexpr uint32_t DEVFS_NAME_MAX = 32;
+class DevFs;
 
-/// Maximum number of device nodes DevFS can register.
-static constexpr uint32_t DEVFS_MAX_NODES = 16;
-
-/// Linux st_mode file-type bits (subset of the S_IFMT family).  Device nodes
-/// are character devices (S_IFCHR = 0x2000); the /dev directory is S_IFDIR.
-static constexpr uint32_t kSIfChr = 0x2000;
-static constexpr uint32_t kSIfDir = 0x4000;
-
-/// Build a legacy Linux kdev_t-style device number (major:minor): minor in
-/// bits 0..7, major in bits 8..15.  Hobby-OS simplification -- sufficient to
-/// report a distinguishable st_rdev per device node.
-constexpr uint64_t devfs_makedev(uint32_t major, uint32_t minor) {
-    return (static_cast<uint64_t>(major) << 8) | static_cast<uint64_t>(minor & 0xFF);
+/**
+ * @brief         Packs a major:minor pair into one device identity word.
+ *
+ * @param[in]     major   Device class, the high part.
+ * @param[in]     minor   Instance inside the class, the low part.
+ * @return        The packed identity, Linux-compatible at eight bits of
+ *                minor and the rest major.
+ * @since         0.5.0
+ * @ingroup       kernel_fs
+ */
+[[nodiscard]] constexpr unsigned long MakeDeviceId(unsigned long major, unsigned long minor) {
+    constexpr base::bit::BitRange     kMinorRange{.low = 0U, .width = 8U};
+    constexpr base::bit::BitRange     kMajorRange{.low = 8U, .width = 56U};
+    base::bit::BitMask<unsigned long> identity{};
+    identity.deposit(kMajorRange, major);
+    identity.deposit(kMinorRange, minor);
+    return identity.raw;
 }
 
 /**
- * @brief Abstract byte sink for output-only character devices (e.g. /dev/console)
- *
- * The console device writes through this interface so its dispatch logic is
- * pure and host-testable (a mock captures bytes).  The kernel supplies a
- * concrete serial-backed sink at boot; this header stays kernel-decoupled.
+ * @brief   One device identity, unpacked into its two parts.
+ * @since   0.6.0
+ * @ingroup kernel_fs
  */
-class CharSink {
-public:
-    virtual ~CharSink() = default;
-
-    /// Write up to @p count bytes from @p buf; returns the byte count written.
-    virtual cinux::lib::ErrorOr<int64_t> write(const void* buf, uint64_t count) = 0;
+struct DeviceNumber {
+    unsigned long major;  ///< Device class, the high part.
+    unsigned long minor;  ///< Instance inside the class, the low part.
 };
 
 /**
- * @brief Optional console read/ioctl backend for /dev/console (B3b busybox-init)
+ * @brief         Splits one device identity word back into its parts.
  *
- * CharSink above only covers writes.  busybox init opens /dev/console, dups it
- * onto fds 0/1/2, setsid + TIOCSCTTY, and the ash it forks calls isatty
- * (TCGETS) and reads command lines -- all of which route through the console
- * inode's ops.  This interface injects the kernel-side console TTY (cooked
- * stdin + terminal ioctls) so devfs.cpp stays host-testable (no console_tty /
- * user-access dependency); the kernel-only devfs_init.cpp supplies the concrete
- * implementation.  When null (host unit tests, or before boot wiring),
- * /dev/console read/ioctl return NotImplemented.
+ * @param[in]     identity   The word MakeDeviceId packed.
+ * @return        The major and minor it carried.
+ * @since         0.6.0
+ * @ingroup       kernel_fs
  */
-class ConsoleInput {
-public:
-    virtual ~ConsoleInput() = default;
+[[nodiscard]] constexpr DeviceNumber SplitDeviceId(unsigned long identity) {
+    constexpr base::bit::BitRange           kMinorRange{.low = 0U, .width = 8U};
+    constexpr base::bit::BitRange           kMajorRange{.low = 8U, .width = 56U};
+    const base::bit::BitMask<unsigned long> kIdentity{identity};
+    return DeviceNumber{
+        .major = kIdentity.extract(kMajorRange),
+        .minor = kIdentity.extract(kMinorRange),
+    };
+}
 
-    /// Read a cooked line into the KERNEL buffer @p buf (InodeOps::read hands a
-    /// kernel staging buffer, never a user pointer).  Returns the byte count.
-    virtual cinux::lib::ErrorOr<int64_t> read(void* buf, uint64_t count) = 0;
+static_assert(MakeDeviceId(1, 3) == 0x103UL, "device ids keep the eight-bit-minor packing");
+static_assert(SplitDeviceId(0x103UL).major == 1UL && SplitDeviceId(0x103UL).minor == 3UL,
+              "split reverses the packing exactly");
 
-    /// Terminal ioctl (TCGETS / TCSETS / TIOCGWINSZ / TIOCGPGRP / TIOCSPGRP /
-    /// TIOCSCTTY).  @p arg is the opaque USER payload; the implementation
-    /// crosses the user/kernel boundary itself (copy_to/from_user).
-    virtual cinux::lib::ErrorOr<int64_t> ioctl(uint32_t request, uint64_t arg) = 0;
+/// Reads count bytes into sink on behalf of one device.
+using DeviceRead = base::Result<unsigned long> (*)(void* context, void* sink, unsigned long count);
+
+/// Writes count bytes from source on behalf of one device.
+using DeviceWrite = base::Result<unsigned long> (*)(void* context, const void* source,
+                                                    unsigned long count);
+
+/// Whether the device could hand a reader bytes right now.
+using DeviceHasInput = bool (*)(void* context);
+
+/// One device question, answered with zero or a negative errno.
+using DeviceIoctl = long long (*)(void* context, unsigned long long word,
+                                  unsigned long long argument);
+
+/// Names the physical page one mapping offset shows, or a refusal.
+using DeviceMapFrame = base::Result<unsigned long> (*)(void* context, unsigned long long offset);
+
+/**
+ * @brief   The faces one device offers behind its name.
+ * @note    The two directions are required; a device that cannot answer
+ *          one returns its refusing result from its own function — null
+ *          answers a clean zero from read — so the table never carries
+ *          null function pointers there. Readiness, questions and
+ *          retirement are optional: a null has_input reads as
+ *          always-ready, a null ioctl as not-a-terminal, a null
+ *          release as nothing to give back. The context word rides
+ *          along to every seat, the pair-shape FsOps uses one floor up.
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ */
+struct DeviceOps {
+    DeviceRead     read            = nullptr;  ///< Pulls bytes out of the device.
+    DeviceWrite    write           = nullptr;  ///< Pushes bytes into the device.
+    DeviceHasInput has_input       = nullptr;  ///< Optional: can a reader progress now.
+    DeviceIoctl    ioctl           = nullptr;  ///< Optional: answer one device question.
+    /// Optional: the physical frame behind one mapping offset, for memory
+    /// devices mmap faults into user worlds.
+    DeviceMapFrame map_frame       = nullptr;
+    /// Optional: one open description has lost its last descriptor.
+    void (*release)(void* context) = nullptr;
+    void* context                  = nullptr;  ///< The word every seat receives back.
+    /// Optional: one independent open description now holds this device.
+    void (*retain)(void* context)  = nullptr;
+    /// Optional: mint one retained per-open device node from this binding.
+    base::Result<FsNode> (*open)(void* context, FsNode node) = nullptr;
 };
 
 /**
- * @brief In-memory /dev filesystem (device-file inodes, no on-disk backend)
+ * @brief   Seats the two pure-computation devices, null and zero.
  *
- * Mounts at /dev.  mount() registers the standard nodes (/dev/null,
- * /dev/zero, /dev/console); lookup() resolves a name to the node's Inode.
- * The root directory inode supports readdir over the node table.  Device
- * nodes are Inodes whose ops point at device-specific InodeOps subclasses
- * (NullDevOps / ZeroDevOps / ConsoleDevOps) defined in devfs.cpp.
- *
- * Usage:
- *   DevFs devfs(&sink);
- *   devfs.mount();
- *   vfs_mount_add("/dev", &devfs);
- *   Inode* ino = devfs.lookup("null");  // -> character-device inode
+ * @return  None
+ * @note    Bring-up wiring: the registrations travel through the device
+ *          model, so both devices join the model's registry and the
+ *          bound devfs in one breath. Null takes 1:3, zero 1:5, the
+ *          Linux pairings.
+ * @since   0.5.0
+ * @ingroup kernel_fs
  */
-class DevFs : public FileSystem {
+void RegisterBuiltinDevices();
+
+/**
+ * @brief   Memory-backed directory of kernel-registered devices.
+ * @note    A fresh instance is an empty root at inode one; every device
+ *          arrives by registration and takes the next table row and
+ *          inode number. Nodes are table rows, so handles stay valid
+ *          for the instance's whole life and retain/release are
+ *          no-ops. Registration belongs to bring-up, single-threaded,
+ *          before the mount goes live; lookups afterwards only read.
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ */
+class DevFs {
 public:
-    /// @param console_sink   Sink used by /dev/console writes; null = discard.
-    /// @param console_input  Optional /dev/console read+ioctl backend (B3b);
-    ///                       null => read/ioctl return NotImplemented (host).
-    explicit DevFs(CharSink* console_sink = nullptr, ConsoleInput* console_input = nullptr);
+    DevFs() = default;
 
-    /// Releases the device ops instances allocated in mount().
-    ~DevFs() override;
+    DevFs(const DevFs&)            = delete;
+    DevFs& operator=(const DevFs&) = delete;
 
-    cinux::lib::ErrorOr<void>   mount() override;
-    cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
-    // Single-component lookup for the vfs_lookup resolver (F-USABILITY batch 4):
-    // without this the FileSystem base returns ENOSYS and open("/dev/null") etc.
-    // fails.  DevFs is flat (root directory + device nodes only).
-    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
-                                             uint32_t namelen) override;
+    /**
+     * @brief         Seats one device under a name in the flat namespace.
+     *
+     * @param[in]     name   Leaf name, no slash, under kFsNameMax.
+     * @param[in]     rdev   The device identity stat reports.
+     * @param[in]     ops    The device's faces.
+     * @return        Success, or kInvalidArgument (shape, over-long),
+     *                kAlreadyExists (name seated twice), kOutOfMemory
+     *                (table full).
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<void> register_device(std::string_view name, unsigned long rdev,
+                                                     const DeviceOps& ops);
 
-    /// DevFs lookups are dynamic (/dev/tty -> caller's controlling terminal,
-    /// /dev/pts/N -> N-th PTY), so the DentryCache must not pin the first
-    /// resolution -- otherwise every opener after the first sees the first
-    /// opener's terminal (multi-shell SIGTTIN bug).
-    bool dcache_enabled() const override { return false; }
+    /**
+     * @brief         Installs the resolver for names beyond the table.
+     *
+     * @param[in]     resolve   The resolver, or nullptr to uninstall.
+     * @return        None
+     * @note          Lookup consults the seated table first; a miss then
+     *                asks the resolver, which answers whole FsNodes from
+     *                its own namespace (the PTY pairs' /dev/pts seats).
+     *                Bring-up wiring, before the mount goes live.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void set_dynamic_lookup(base::Result<FsNode> (*resolve)(std::string_view path));
 
-    /// Number of registered device nodes (excludes the root directory).
-    uint32_t node_count() const { return node_count_; }
+    /**
+     * @brief         Installs the open-time seat exchanger.
+     *
+     * @param[in]     adopt   The exchanger, or nullptr to uninstall.
+     * @return        None
+     * @note          Every open passes its node through the exchanger,
+     *                which answers the same node back except for a
+     *                cloning device, whose open mints a fresh pair and
+     *                answers its master. Bring-up wiring, before the
+     *                mount goes live.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void set_open_adopter(base::Result<FsNode> (*adopt)(FsNode node, std::string_view path));
 
-    /// Whether mount() has registered nodes (F6-M1: devfs::instance() exposes
-    /// the singleton only once mounted).
-    bool is_mounted() const { return node_count_ > 0; }
+    /**
+     * @brief         Finds a node by mount-relative path.
+     *
+     * @param[in]     path   Empty addresses the root; one name addresses
+     *                      a device.
+     * @return        The node, or kNotFound (no such name, or a path
+     *                      trying to walk through the flat namespace).
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<FsNode> lookup(std::string_view path);
 
-    /// Name of the i-th device node, or nullptr if @p i is out of range.
-    /// Used by the directory readdir implementation.
-    const char* node_name(uint32_t i) const;
+    /**
+     * @brief         Refused: the population is kernel-registered.
+     *
+     * @param[in]     path   Where a file was asked to appear.
+     * @return        kNotSupported.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<FsNode> make_file(std::string_view path);
 
-    /// Register an extra static device node after mount().  Boot wiring for a
-    /// node whose ops live outside devfs.cpp (e.g. /dev/ptmx, whose open() is a
-    /// PTY clone).  No-op if the table is full.
-    void add_node(const char* name, InodeOps* ops);
+    /**
+     * @brief         Refused: the population is kernel-registered.
+     *
+     * @param[in]     path   Where a directory was asked to appear.
+     * @return        kNotSupported.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<FsNode> make_dir(std::string_view path);
 
-    /// F6-M1 B1b: register a block-device node backed by @p dev.  The node's
-    /// InodeOps::block_device() override exposes @p dev so sys_mount can resolve
-    /// a source path (e.g. /dev/sda) to the IBlockDevice to mount.  The per-node
-    /// BlockDevOps instance is owned by this DevFs and freed in ~DevFs.  No-op if
-    /// @p dev is null or the block-node table is full.
-    void add_block_node(const char* name, cinux::drivers::IBlockDevice* dev);
+    /**
+     * @brief         Refused: the population is kernel-registered.
+     *
+     * @param[in]     path   Node asked to disappear.
+     * @return        kNotSupported.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<void> unlink(std::string_view path);
 
-    /// Dynamic per-call resolver for names not in the static table -- the
-    /// /dev/pts/<N> slave inodes are allocated on demand, so they cannot live in
-    /// the fixed node array.  devfs_init wires this to the PTY registry; devfs.cpp
-    /// itself stays PTY-free (and thus host-testable).
-    using DynamicLookup = cinux::lib::ErrorOr<Inode*> (*)(const char* name);
-    void set_dynamic_lookup(DynamicLookup resolver);
+    /**
+     * @brief         Reads from the device behind a node.
+     *
+     * @param[in]     node    Handle from lookup.
+     * @param[in]     offset  Ignored; devices have no cursor.
+     * @param[out]    sink    Destination buffer.
+     * @param[in]     count   Bytes wanted.
+     * @return        Bytes the device answered, or kIsADirectory when
+     *                node is the root.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<unsigned long> read(FsNode node, unsigned long offset, void* sink,
+                                                   unsigned long count) const;
+
+    /**
+     * @brief         Writes to the device behind a node.
+     *
+     * @param[in]     node    Handle from lookup.
+     * @param[in]     offset  Ignored; devices have no cursor.
+     * @param[in]     source  Bytes the device takes.
+     * @param[in]     count   Bytes offered.
+     * @return        Bytes the device took, or kIsADirectory when node
+     *                is the root.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<unsigned long> write(FsNode node, unsigned long offset,
+                                                    const void* source, unsigned long count) const;
+
+    /**
+     * @brief         Hands out one root entry by ordinal.
+     *
+     * @param[in]     node    Directory handle; devices refuse.
+     * @param[in]     index   Zero-based; dot and dot-dot first, then the
+     *                        devices in registration order.
+     * @param[out]    entry   Name and shape of that entry.
+     * @return        True with entry filled; false past the last device.
+     *                kNotADirectory when node is a device.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<bool> read_dir(FsNode node, unsigned long index, FsDirent& entry);
+
+    /**
+     * @brief         Reads one node's metadata.
+     *
+     * @param[in]     node    Handle from lookup.
+     * @param[out]    probed  The metadata: directory mode for the root,
+     *                        character-device mode and the seated rdev
+     *                        for devices; mtime zero, the honest word.
+     * @return        Success.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<void> stat(FsNode node, FsStat& probed);
+
+    /**
+     * @brief         Pins a node for an open descriptor.
+     *
+     * @param[in]     node   Handle from lookup.
+     * @return        None
+     * @note          Forwards to the device's optional ownership hook.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void retain(FsNode node) const;
+
+    /**
+     * @brief         Drops an open descriptor's pin on a node.
+     *
+     * @param[in]     node   Handle from lookup.
+     * @return        None
+     * @note          Table rows outlive every descriptor. Each independent
+     *                open has one retain/release pair; dup and fork share
+     *                the open description and do not add device pins.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void release(FsNode node) const;
+
+    /**
+     * @brief         Whether a reader would make progress on this node now.
+     *
+     * @param[in]     node   A device node this backend minted.
+     * @return        True unless the device's own readiness seat says
+     *                otherwise; a device without one is always ready.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] bool readable(FsNode node) const;
+
+    /**
+     * @brief         Asks one device question.
+     *
+     * @param[in]     node       A device node this backend minted.
+     * @param[in]     word       The question word.
+     * @param[in]     argument   The question's argument word.
+     * @return        The device's answer, or -ENOTTY when it keeps no
+     *                question seat.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] long long ioctl(FsNode node, unsigned long long word,
+                                  unsigned long long argument) const;
+
+    /**
+     * @brief         Replaces a node at open time.
+     *
+     * @param[in]     node    The node lookup produced.
+     * @param[in]     path    The mount-relative path being opened.
+     * @return        The node to seat in the descriptor table: the same
+     *                node unless the dynamic resolver mints a fresh one
+     *                for a cloning device.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<FsNode> adopt_open(FsNode node, std::string_view path);
+
+    /**
+     * @brief   The faces a node carries, whatever seated it.
+     * @param[in] node   A node this backend minted: from the table's
+     *            rows or the dynamic resolver's own namespace.
+     * @return  The device's ops table.
+     * @since   0.5.0
+     * @ingroup kernel_fs
+     */
+    [[nodiscard]] const DeviceOps* ops_of(FsNode node) const;
+
+    /**
+     * @brief         Names the physical frame behind one mapping offset.
+     *
+     * @param[in]     node    Handle from lookup.
+     * @param[in]     offset  Mapping offset, page-aligned.
+     * @return        The frame a shared mapping of this device presents,
+     *                or kNotSupported when the seated device keeps no
+     *                mapping seat and kInvalidArgument when the offset
+     *                stands outside its memory.
+     * @since         0.9.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] base::Result<unsigned long> frame_at(FsNode             node,
+                                                       unsigned long long offset) const;
 
 private:
-    /// A single device node: name plus its pre-allocated Inode.
-    struct DevNode {
-        char  name[DEVFS_NAME_MAX];
-        Inode inode;
+    /**
+     * @brief   One seated device: name, identity, and its faces.
+     * @since   0.5.0
+     * @ingroup kernel_fs
+     */
+    struct DeviceNode {
+        char             name[kFsNameMax] = {};
+        unsigned long    rdev             = 0;
+        const DeviceOps* ops              = nullptr;
     };
 
-    /// Register a character-device node with @p name backed by @p ops.
-    void register_node(const char* name, InodeOps* ops);
+    DeviceNode    devices_[kDevfsDeviceMax] = {};
+    unsigned long count_                    = 0;
 
-    /// Optional resolver for dynamic names (set via set_dynamic_lookup).  lookup
-    /// falls back to it when the static node table has no match.
-    DynamicLookup dynamic_lookup_{nullptr};
+    base::Result<FsNode> (*dynamic_)(std::string_view path) = nullptr;
 
-    /// Fixed node table (each entry owns its Inode).
-    DevNode  nodes_[DEVFS_MAX_NODES];
-    uint32_t node_count_{0};
-
-    /// Block-device nodes added via add_block_node (F6-M1 B1b).  Each entry owns
-    /// a heap-allocated BlockDevOps freed in ~DevFs.
-    static constexpr uint32_t MAX_BLOCK_NODES = 8;
-    InodeOps* block_dev_ops_[MAX_BLOCK_NODES]{};
-    uint32_t  block_dev_count_{0};
-
-    // Device ops instances, owned.  Allocated once in mount() and live for the
-    // DevFs lifetime -- mirrors Ramdisk's file_ops_/dir_ops_ ownership.
-    InodeOps* null_ops_{nullptr};
-    InodeOps* zero_ops_{nullptr};
-    InodeOps* console_ops_{nullptr};
-    InodeOps* dir_ops_{nullptr};
-
-    /// Root directory inode (readdir walks nodes_ via fs_private == this).
-    Inode root_inode_{};
-
-    /// Virtual /dev/pts directory inode.  DevFs is otherwise flat, but the vfs
-    /// resolver walks paths component-by-component, so "pts" must resolve to a
-    /// directory it can descend into before looking up "<N>".  Without it
-    /// open("/dev/pts/N") dies at the "pts" component (dynamic_lookup_ expects
-    /// the whole "pts/N" spelling) and the slave fd is never returned -- the
-    /// shell then inherits /dev/console and all IO bypasses the PTY.
-    Inode pts_dir_inode_{};
-
-    /// Sink wired into the console device; null => console writes discard.
-    CharSink*     console_sink_;
-    /// Read+ioctl backend for /dev/console (B3b); null => read/ioctl return
-    /// NotImplemented (host unit tests).
-    ConsoleInput* console_input_;
+    base::Result<FsNode> (*adopter_)(FsNode node, std::string_view path) = nullptr;
 };
-
-/**
- * @brief Boot hook: construct DevFs with a serial console sink and mount it at
- *        /dev.  Kernel-only implementation in devfs_init.cpp (linked into the
- *        kernel, not the host tests).
- *
- * @return true on success, false if mount() or vfs_mount_add(/dev) fails.
- */
-namespace devfs {
-bool    init();
-Inode*  console_inode();
-DevFs*  instance();  ///< Boot-owned DevFs singleton (F6-M1: sys_mount -t devfs).
-                     ///< nullptr before devfs::init().
-}  // namespace devfs
 
 }  // namespace cinux::fs

@@ -1,40 +1,33 @@
-/**
- * @file kernel/syscall/sys_brk.cpp
- * @brief sys_brk handler implementation (F2-M3)
- *
- * Moves the program break within [brk_initial, brk_max].  Lazy: no pages are
- * mapped here -- the Heap VMA created by execve covers the window and the
- * demand-paging path services the first access to a heap page.
- *
- * Namespace: cinux::syscall
- */
-
 #include "kernel/syscall/sys_brk.hpp"
 
-#include "kernel/proc/process.hpp"
-#include "kernel/proc/scheduler.hpp"
+#include "cinux/assert.hpp"
+#include "cinux/math.hpp"
+#include "cinux/result.hpp"
+#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/mm/vma.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
 
 namespace cinux::syscall {
 
-int64_t sys_brk(uint64_t addr, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
-    auto* task = cinux::proc::Scheduler::current();
-    if (task == nullptr) {
+long long HandleBrk(const SyscallFrame& frame) {
+    const proc::Task* const kSelf = CurrentTask();
+    if (kSelf == nullptr || !kSelf->vmas.holds()) {
         return 0;
     }
-
-    // Query: addr == 0 returns the current break unchanged.
-    if (addr == 0) {
-        return static_cast<int64_t>(task->brk_current);
+    const auto                        kBefore = kSelf->vmas->heap_end();
+    const base::Result<unsigned long> kMoved  = kSelf->vmas->move_heap_end(frame.rdi);
+    if (kMoved.ok()) {
+        const auto kOldPage = base::math::AlignUp(kBefore, arch::page::kSize);
+        const auto kNewPage = base::math::AlignUp(kMoved.value(), arch::page::kSize);
+        if (kNewPage < kOldPage) {
+            const auto kReleased = ReclaimUserSpan(*kSelf, kNewPage, kOldPage - kNewPage);
+            base::safety::Check(kReleased.ok(), "brk shrink lost its retired pages");
+        }
+        return static_cast<long long>(kMoved.value());
     }
-
-    // Honour the request only within [brk_initial, brk_max]; otherwise return
-    // the current break unchanged (Linux semantics -- brk does not fail).
-    if (addr < task->brk_initial || addr > task->brk_max) {
-        return static_cast<int64_t>(task->brk_current);
-    }
-
-    task->brk_current = addr;
-    return static_cast<int64_t>(addr);
+    return static_cast<long long>(kSelf->vmas->heap_end());
 }
 
 }  // namespace cinux::syscall

@@ -1,32 +1,76 @@
 /**
- * @file kernel/syscall/sys_pgrp.hpp
- * @brief Process-group / session syscall handlers (F3-M3 batch 3)
+ * @file    sys_pgrp.hpp
+ * @brief   Declarations of the process-group and session syscall handlers.
  *
- * Thin syscall layer over cinux::proc::setpgid/getpgid/getsid/setsid.  A pid
- * argument of 0 always means "the calling task".  Returns the proc layer's
- * value (>= 0 / -errno).
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-16
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// setpgid(pid, pgid): pid 0 => caller.
-int64_t sys_setpgid(uint64_t pid, uint64_t pgid, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Move a task into a process group.
+ * @param[in]     frame   rdi the target pid (zero means the caller),
+ *                        rsi the group to join (zero means the
+ *                        target's own pid).
+ * @return        Zero on success, or a negative errno naming why the
+ *                move was refused.
+ * @note          POSIX setpgid: the caller may move only itself or
+ *                its own child, and Linux adds a third refusal — a
+ *                child that has already exec'd stays put. v2 carries
+ *                no exec'd flag, so that one refusal is simply absent;
+ *                the caller discipline (shell forks, then setpgid,
+ *                then exec) never reaches it. The move is legal when
+ *                the new group is the target's own pid or an existing
+ *                group in the target's session.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSetpgid(const SyscallFrame& frame);
 
-/// getpgid(pid): pid 0 => caller.  Returns the group id.
-int64_t sys_getpgid(uint64_t pid, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Give the caller a session of its own.
+ * @param[in]     frame   Unused.
+ * @return        The new session id (the caller's pid), or a negative
+ *                errno when the caller already leads a group.
+ * @note          POSIX setsid: refused with EPERM when the caller is
+ *                already a process-group leader, since leading a
+ *                group in the old session would make the new session
+ *                indistinguishable from a move within the old one.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleSetsid(const SyscallFrame& frame);
 
-/// getsid(pid): pid 0 => caller.  Returns the session id.
-int64_t sys_getsid(uint64_t pid, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Read a task's process group.
+ * @param[in]     frame   rdi the target pid (zero means the caller).
+ * @return        The group id, or a negative errno when no such task.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleGetpgid(const SyscallFrame& frame);
 
-/// setsid(): caller founds a new session + group.  Returns the new sid.
-int64_t sys_setsid(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+/** @brief Reports the caller's process group. @param[in] frame Unused arguments. @return Group
+ * identity. */
+long long HandleGetpgrp(const SyscallFrame& frame);
+
+/**
+ * @brief         Read a task's session id.
+ * @param[in]     frame   rdi the target pid (zero means the caller).
+ * @return        The session id, or a negative errno when no such
+ *                task.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleGetsid(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

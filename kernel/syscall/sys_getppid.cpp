@@ -1,23 +1,12 @@
-/**
- * @file kernel/syscall/sys_getppid.cpp
- * @brief sys_getppid handler implementation
- *
- * Returns the parent PID of the current task by reading from the TCB.
- */
-
 #include "kernel/syscall/sys_getppid.hpp"
 
-#include "kernel/errno.hpp"
-#include "kernel/proc/scheduler.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
 
 namespace cinux::syscall {
 
-int64_t sys_getppid(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) {
-    auto* task = cinux::proc::Scheduler::current();
-    if (task == nullptr) {
-        return -kEsrch;
-    }
-    return static_cast<int64_t>(task->ppid);
+long long HandleGetppid(const SyscallFrame& /*frame*/) {
+    return static_cast<long long>(CurrentTask()->ppid());
 }
 
 }  // namespace cinux::syscall

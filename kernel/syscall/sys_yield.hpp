@@ -1,25 +1,29 @@
 /**
- * @file kernel/syscall/sys_yield.hpp
- * @brief sys_yield handler declaration
+ * @file    sys_yield.hpp
+ * @brief   Declaration of the yield() syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Yield the CPU to the next ready task
+ * @brief         Hand the CPU over for a turn.
  *
- * Delegates directly to Scheduler::yield().
- *
- * @return 0 on success
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_yield(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleYield(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

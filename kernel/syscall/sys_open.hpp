@@ -1,57 +1,58 @@
 /**
- * @file kernel/syscall/sys_open.hpp
- * @brief sys_open handler declaration
+ * @file    sys_open.hpp
+ * @brief   Declaration of the open(path, flags) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Open a file and return a file descriptor
+ * @brief         Claim a descriptor for a path, creating on O_CREAT.
  *
- * Resolves the path through the VFS mount table, looks up the
- * corresponding Inode in the backend filesystem, and allocates
- * a file descriptor in the global FDTable.
- *
- * @param path_virt  User virtual address of the null-terminated path string
- * @param flags      Access mode (0=RDONLY, 1=WRONLY, 2=RDWR)
- * @return Non-negative file descriptor on success, or -1 on error
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_open(uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t, uint64_t, uint64_t);
+long long HandleOpen(const SyscallFrame& frame);
 
 /**
- * @brief Open relative to a directory fd (F10-M1 batch 4)
- *
- * musl's open()/fopen() always go through openat.  @p dirfd is AT_FDCWD
- * (-100) for cwd-relative opens (the only case musl uses); other dirfds
- * fall back to cwd as a documented limitation until per-fd paths are
- * tracked.  O_CREAT creates the file when it is missing.
+ * @brief         Open an already folded kernel path.
+ * @return        A descriptor, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_openat(uint64_t dirfd, uint64_t path_virt, uint64_t flags, uint64_t mode, uint64_t,
-                   uint64_t);
+long long OpenPath(const char* path, unsigned long long flags, unsigned long long mode);
+/**
+ * @brief         Opens one relative name through a held directory's backend.
+ * @param[in]     descriptor  The held directory's open descriptor.
+ * @param[in]     relative    The name relative to that descriptor.
+ * @param[in]     flags       The open flags.
+ * @param[in]     mode        Creation permissions.
+ * @return        The descriptor, or a negative errno; kEopnotsupp asks
+ *                the caller to fall back to string folding.
+ * @since         0.9.0
+ * @ingroup       kernel_syscall
+ */
+long long OpenPathAt(unsigned long long descriptor, const char* relative, unsigned long long flags,
+                     unsigned long long mode);
 
-// ============================================================
-// P0g (SMAP): pure kernel-to-kernel open logic (no user memory).
-// Kernel-internal callers and tests use these; sys_open / sys_openat are the
-// user boundaries.
-// ============================================================
-
-/// Open an existing file at an already-resolved path and allocate an fd.
-/// @p flags is the raw access mode (0=RDONLY, 1=WRONLY, 2=RDWR). Returns fd or
-/// -errno.
-int64_t do_open_kernel(const char* resolved_path, uint64_t flags);
-
-/// Open (creating if O_CREAT) at an already-resolved path and allocate an fd.
-/// @p flags is the raw Linux open() flag word (access mode + O_CREAT ...).
-/// @p mode is the requested permission bits for a newly created file.
-/// Returns fd or -errno.
-int64_t do_openat_kernel(const char* resolved_path, uint64_t flags, uint64_t mode = 0);
+/**
+ * @brief         Create or truncate a writable file through the open path.
+ * @return        The descriptor, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleCreat(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

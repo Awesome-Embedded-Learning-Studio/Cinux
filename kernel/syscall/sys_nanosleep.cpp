@@ -1,85 +1,91 @@
-/**
- * @file kernel/syscall/sys_nanosleep.cpp
- * @brief sys_nanosleep handler (F-ECO batch 3)
- *
- * See sys_nanosleep.hpp.  monotonic_ns() mirrors sys_clock_gettime's HPET/PIT
- * fallback (duplicated -- a 5-line helper -- so the two handlers stay
- * independently linkable; nanosleep pulls in no clock_gettime .cpp).
- *
- * Namespace: cinux::syscall
- */
-
 #include "kernel/syscall/sys_nanosleep.hpp"
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (SMAP/extable)
-#include "kernel/drivers/hpet/hpet.hpp"
-#include "kernel/drivers/pit/pit.hpp"  // monotonic fallback when HPET is absent
-#include "kernel/errno.hpp"
-#include "kernel/proc/scheduler.hpp"  // Scheduler::yield
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signals.hpp"
+#include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
+#include "kernel/syscall/wait_time.hpp"
 
 namespace cinux::syscall {
 
 namespace {
 
-constexpr uint64_t kNsPerSec = 1'000'000'000ULL;
-constexpr uint64_t kNsPerMs  = 1'000'000ULL;
+constexpr unsigned long long kNsPerSecond   = 1'000'000'000ULL;
+constexpr unsigned long      kTimespecBytes = sizeof(Timespec);
 
-/// Boot-relative monotonic nanoseconds, HPET-backed with a PIT fallback.
-uint64_t monotonic_ns() {
-    if (cinux::drivers::g_hpet.available()) {
-        return cinux::drivers::g_hpet.monotonic_ns();
+long long wait_until(unsigned long long deadline, unsigned long long remainder, bool absolute) {
+    for (;;) {
+        const auto kNow = MonotonicNanoseconds();
+        if (kNow >= deadline) {
+            return 0;
+        }
+        if (proc::HasPendingSignal(*CurrentTask())) {
+            if (remainder != 0 && !absolute) {
+                const auto     kLeft = deadline - kNow;
+                const Timespec kRemain{
+                    .seconds     = static_cast<long long>(kLeft / kNsPerSecond),
+                    .nanoseconds = static_cast<long long>(kLeft % kNsPerSecond),
+                };
+                if (!uaccess::CopyToUser(remainder, &kRemain, sizeof(kRemain))) {
+                    return -kEfault;
+                }
+            }
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
     }
-    return cinux::drivers::PIT::get_uptime_ms() * kNsPerMs;
 }
 
-}  // anonymous namespace
+}  // namespace
 
-int64_t do_nanosleep_kernel(const ktimespec* req, ktimespec* rem) {
-    if (req == nullptr) {
-        return -cinux::kEinval;
+long long HandleNanosleep(const SyscallFrame& frame) {
+    if (frame.rdi == 0) {
+        return -kEfault;
     }
-    if (req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= static_cast<int64_t>(kNsPerSec)) {
-        return -cinux::kEinval;  // negative or out-of-range nsec
+    if (frame.rsi != 0 &&
+        (frame.rsi >= kUserAddressLimit || !UserRangeWritable(frame.rsi, kTimespecBytes))) {
+        return -kEfault;
     }
-    const uint64_t target_ns =
-        static_cast<uint64_t>(req->tv_sec) * kNsPerSec + static_cast<uint64_t>(req->tv_nsec);
-    const uint64_t deadline = monotonic_ns() + target_ns;
-
-    // Poll the monotonic counter until the deadline, yielding between checks.
-    // There is no dedicated timer wake yet; yielding avoids a hard spin.
-    while (monotonic_ns() < deadline) {
-        cinux::proc::Scheduler::yield();
+    unsigned long long deadline = 0;
+    if (const auto kError = ReadWaitDeadline(frame.rdi, deadline); kError != 0) {
+        return kError;
     }
 
-    if (rem != nullptr) {
-        rem->tv_sec  = 0;
-        rem->tv_nsec = 0;  // fully slept; no signal-interruption path yet
-    }
-    return 0;
+    return wait_until(deadline, frame.rsi, false);
 }
 
-int64_t sys_nanosleep(uint64_t req_virt, uint64_t rem_virt, uint64_t, uint64_t, uint64_t,
-                      uint64_t) {
-    if (req_virt == 0) {
-        return -cinux::kEfault;
+long long HandleClockNanosleep(const SyscallFrame& frame) {
+    if (frame.rdi > 1 || frame.rsi > 1) {
+        return -kEinval;
     }
-    ktimespec req;
-    if (!cinux::user::copy_from_user(&req, reinterpret_cast<void*>(req_virt), sizeof(req))) {
-        return -cinux::kEfault;
+    if (frame.rsi == 0) {
+        auto relative = frame;
+        relative.rdi  = frame.rdx;
+        relative.rsi  = frame.r10;
+        return HandleNanosleep(relative);
     }
-    ktimespec rem_local{0, 0};
-    int64_t   rc = do_nanosleep_kernel(&req, &rem_local);
-    if (rc < 0) {
-        return rc;
+    Timespec asked{};
+    if (const auto kError = ReadTimespec(frame.rdx, asked); kError != 0) {
+        return kError;
     }
-    if (rem_virt != 0) {
-        // Best-effort: a NULL rem is allowed (caller does not care about remaining).
-        static_cast<void>(cinux::user::copy_to_user(reinterpret_cast<void*>(rem_virt), &rem_local,
-                                                    sizeof(rem_local)));
+    const auto kSeconds = static_cast<unsigned long long>(asked.seconds);
+    const auto kTail    = static_cast<unsigned long long>(asked.nanoseconds);
+    if (kSeconds > (~0ULL - kTail) / kNsPerSecond) {
+        return -kEinval;
     }
-    return 0;
+    const auto kTarget = (kSeconds * kNsPerSecond) + kTail;
+    const auto kNow    = frame.rdi == 0 ? RealtimeNanoseconds() : MonotonicNanoseconds();
+    if (kTarget <= kNow) {
+        return 0;
+    }
+    const auto kMono = MonotonicNanoseconds();
+    const auto kLeft = kTarget - kNow;
+    if (kLeft > ~0ULL - kMono) {
+        return -kEinval;
+    }
+    return wait_until(kMono + kLeft, 0, true);
 }
 
 }  // namespace cinux::syscall

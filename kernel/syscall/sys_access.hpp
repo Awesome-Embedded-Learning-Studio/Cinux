@@ -1,24 +1,42 @@
 /**
- * @file kernel/syscall/sys_access.hpp
- * @brief sys_access (Linux 21) handler declaration (F6 / GCC self-host batch 3a)
+ * @file    sys_access.hpp
+ * @brief   Declaration of the access(path, mode) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-17
+ * @version 0.3.0
+ * @since   0.3.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// Kernel-internal access(2): check the current task's permission on the file at
-/// @p resolved_path for @p mode (F_OK=0 / R_OK=4 / W_OK=2 / X_OK=1, OR'd).  Root
-/// bypasses R/W; X requires at least one execute bit.  Returns 0 or -errno.
-int64_t do_access_kernel(const char* resolved_path, uint32_t mode);
+/**
+ * @brief         Does the path answer at all.
+ *
+ * @return        Zero when the path resolves, a negative errno when it
+ *                does not.
+ * @note          The hosted shell hunts executables by poking names;
+ *                with every task its own superuser, existence is the
+ *                whole of permission, so the mode bits ride along
+ *                unexamined.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleAccess(const SyscallFrame& frame);
 
-/// Linux access(2): @p path_virt is a user pointer.
-int64_t sys_access(uint64_t path_virt, uint64_t mode, uint64_t, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief Answers a directory-relative access query from faccessat or faccessat2.
+ * @param[in] frame rdi names AT_FDCWD, rsi the path, rdx the mode.
+ * @return Zero, or a negative errno.
+ * @since 0.8.0
+ * @ingroup kernel_syscall
+ */
+long long HandleFaccessat(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

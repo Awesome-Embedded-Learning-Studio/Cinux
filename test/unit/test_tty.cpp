@@ -1,185 +1,222 @@
-/**
- * @file test/unit/test_tty.cpp
- * @brief Host unit tests for the TTY line discipline (F10-M3 batch 1)
- *
- * Links the real kernel/drivers/tty/tty.cpp (no mocks) and exercises the
- * canonical line discipline: echo, backspace editing, ^C/^D/^U, and raw mode.
- * Self-contained (own asserts + main) so it runs as a plain ctest binary.
- */
+#include <termios.h>
 
 #include <cstddef>
-#include <cstdint>
-#include <cstdio>
+#include <cstring>
 
-#include "kernel/drivers/tty/tty.hpp"
+#include "../framework/framework.hpp"
+#include "kernel/driver/tty/tty.hpp"
+#include "kernel/driver/tty/tty_config.hpp"
+#include "test_assert.hpp"
 
-using cinux::drivers::InputResult;
-using cinux::drivers::TTY;
-using cinux::drivers::Termios;
-using cinux::drivers::TtySignal;
-using cinux::drivers::kCharBackspace;
-using cinux::drivers::kCharEof;
-using cinux::drivers::kCharIntr;
-using cinux::drivers::kEcho;
-using cinux::drivers::kIcanon;
-using cinux::drivers::kIsig;
-using cinux::drivers::kVeof;
-using cinux::drivers::kVintr;
-using cinux::drivers::kVerase;
-using cinux::drivers::make_default_termios;
+// The wire's kernel termios is thirty-six bytes; the libc struct beside
+// it is larger and converted in library code, so its size proves
+// nothing about the syscall record. The flag bits and the flag word's
+// seat are ABI either way.
+static_assert(cinux::driver::kTermiosBytes == 36, "kernel termios is 36 on the wire");
+static_assert(offsetof(struct termios, c_lflag) == cinux::driver::kTermiosLflagAt,
+              "the flag word sits at twelve in both shapes");
+static_assert(ICANON == cinux::driver::kTermiosIcanon, "ICANON bit drifted");
+static_assert(ECHO == cinux::driver::kTermiosEcho, "ECHO bit drifted");
 
-static int g_fail = 0;
+namespace {
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::printf("FAIL line %d: %s\n", __LINE__, #cond);                                    \
-            g_fail = 1;                                                                            \
-        }                                                                                          \
-    } while (0)
+unsigned char g_echo_log[cinux::driver::kTtyLineMax] = {};
+unsigned long g_echo_used                            = 0;
 
-#define CHECK_EQ(a, b)                                                                             \
-    do {                                                                                           \
-        if ((a) != (b)) {                                                                          \
-            std::printf("FAIL line %d: %s != %s\n", __LINE__, #a, #b);                             \
-            g_fail = 1;                                                                            \
-        }                                                                                          \
-    } while (0)
+char          g_seat[cinux::driver::kTtyLineMax] = {};
+unsigned long g_seat_used                        = 0;
+unsigned long g_seat_read                        = 0;
 
-// echo capture sink
-static char   g_echo[256];
-static size_t g_echo_len;
-static void   echo_capture(char c, void* /*ctx*/) {
-    if (g_echo_len < sizeof(g_echo)) {
-        g_echo[g_echo_len++] = c;
+void sink_echo(void* /*context*/, char key) {
+    if (g_echo_used < cinux::driver::kTtyLineMax) {
+        g_echo_log[g_echo_used] = static_cast<unsigned char>(key);
+        ++g_echo_used;
     }
 }
-static void echo_reset() {
-    g_echo_len = 0;
+
+bool seat_takes(void* /*context*/, char* out) {
+    if (g_seat_read >= g_seat_used) {
+        return false;
+    }
+    *out = g_seat[g_seat_read];
+    ++g_seat_read;
+    return true;
+}
+
+bool seat_has(void* /*context*/) {
+    return g_seat_read < g_seat_used;
+}
+
+void no_wait(void* /*context*/) {}
+
+void reset_seat(const char* keys) {
+    g_seat_used = 0;
+    g_seat_read = 0;
+    g_echo_used = 0;
+    for (unsigned long index = 0; keys[index] != '\0'; ++index) {
+        g_seat[g_seat_used] = keys[index];
+        ++g_seat_used;
+    }
+}
+
+const cinux::driver::TtyWiring kWiring{
+    .context  = nullptr,
+    .take_key = seat_takes,
+    .has_key  = seat_has,
+    .echo     = sink_echo,
+    .wait     = no_wait,
+};
+
+unsigned int lflag_word(const unsigned char* record) {
+    unsigned int word = 0;
+    for (unsigned long index = 0; index < 4; ++index) {
+        word |= static_cast<unsigned int>(record[cinux::driver::kTermiosLflagAt + index])
+                << (8U * index);
+    }
+    return word;
+}
+
+}  // namespace
+
+TEST("tty: a fresh terminal answers fully canonical termios") {
+    const cinux::driver::Tty kTty(kWiring);
+    unsigned char            record[cinux::driver::kTermiosBytes] = {};
+    kTty.copy_termios(record);
+    const unsigned int kFlags = lflag_word(record);
+    ASSERT_EQ(kFlags & cinux::driver::kTermiosEcho, cinux::driver::kTermiosEcho);
+    ASSERT_EQ(kFlags & cinux::driver::kTermiosIcanon, cinux::driver::kTermiosIcanon);
+    ASSERT_EQ(kFlags & cinux::driver::kTermiosIsig, cinux::driver::kTermiosIsig);
+    // The wire's c_cc starts at seventeen in both shapes, so the born
+    // control characters read straight off the record without any libc
+    // conversion.
+    const auto kIntr = static_cast<unsigned>(record[17 + VINTR]);
+    const auto kQuit = static_cast<unsigned>(record[17 + VQUIT]);
+    const auto kSusp = static_cast<unsigned>(record[17 + VSUSP]);
+    ASSERT_EQ(kIntr, 0x03U);
+    ASSERT_EQ(kQuit, 0x1CU);
+    ASSERT_EQ(kSusp, 0x1AU);
+}
+
+TEST("tty: a fallen ECHO bit silences the editor's echo") {
+    unsigned char record[cinux::driver::kTermiosBytes] = {};
+    {
+        const cinux::driver::Tty kBorn(kWiring);
+        kBorn.copy_termios(record);
+    }
+    record[cinux::driver::kTermiosLflagAt] = static_cast<unsigned char>(
+        record[cinux::driver::kTermiosLflagAt] & ~cinux::driver::kTermiosEcho);
+
+    reset_seat("");
+    cinux::driver::Tty tty(kWiring);
+    tty.apply_termios(record);
+    ASSERT_TRUE(!tty.feed('h'));
+    ASSERT_TRUE(!tty.feed('i'));
+    ASSERT_TRUE(tty.feed('\n'));
+    ASSERT_EQ(g_echo_used, 0UL);
+}
+
+TEST("tty: a fallen ICANON bit passes bytes through unedited") {
+    unsigned char record[cinux::driver::kTermiosBytes] = {};
+    {
+        const cinux::driver::Tty kBorn(kWiring);
+        kBorn.copy_termios(record);
+    }
+    record[cinux::driver::kTermiosLflagAt] = static_cast<unsigned char>(
+        record[cinux::driver::kTermiosLflagAt] & ~cinux::driver::kTermiosIcanon);
+
+    reset_seat("ab");
+    cinux::driver::Tty tty(kWiring);
+    tty.apply_termios(record);
+    unsigned char       heard[8] = {};
+    const unsigned long kGot     = tty.read_line(heard, sizeof(heard));
+    ASSERT_EQ(kGot, 1UL);
+    ASSERT_EQ(heard[0], static_cast<unsigned char>('a'));
+}
+
+TEST("tty: an applied record answers back verbatim") {
+    unsigned char record[cinux::driver::kTermiosBytes] = {};
+    for (unsigned long index = 0; index < cinux::driver::kTermiosBytes; ++index) {
+        record[index] = static_cast<unsigned char>(index * 3U);
+    }
+    record[cinux::driver::kTermiosLflagAt] = 0x0BU;
+
+    cinux::driver::Tty tty(kWiring);
+    tty.apply_termios(record);
+    unsigned char back[cinux::driver::kTermiosBytes] = {};
+    tty.copy_termios(back);
+    ASSERT_EQ(std::memcmp(record, back, cinux::driver::kTermiosBytes), 0);
+}
+
+TEST("tty: noncanonical ISIG consumes signal bytes without leaking them to read") {
+    reset_seat("\x03");
+    cinux::driver::Tty tty(kWiring);
+    struct termios     record{};
+    tty.copy_termios(reinterpret_cast<unsigned char*>(&record));
+    record.c_lflag = ISIG;
+    tty.apply_termios(reinterpret_cast<const unsigned char*>(&record));
+    unsigned char heard = 0;
+    ASSERT_EQ(tty.read_line(&heard, 1), 0UL);
+    ASSERT_EQ(tty.take_pending_signal(), 2);
+    ASSERT_FALSE(tty.has_line());
+    ASSERT_EQ(g_echo_used, 0UL);
+}
+
+TEST("tty: ash raw settings pass VINTR as data without kernel echo or signals") {
+    reset_seat("\x03");
+    cinux::driver::Tty tty(kWiring);
+    struct termios     record{};
+    tty.copy_termios(reinterpret_cast<unsigned char*>(&record));
+    record.c_lflag = 0;
+    tty.apply_termios(reinterpret_cast<const unsigned char*>(&record));
+    unsigned char heard = 0;
+    ASSERT_EQ(tty.read_line(&heard, 1), 1UL);
+    ASSERT_EQ(heard, record.c_cc[VINTR]);
+    ASSERT_EQ(tty.take_pending_signal(), 0);
+    ASSERT_EQ(g_echo_used, 0UL);
+}
+
+TEST("tty: VINTR may be remapped or disabled") {
+    reset_seat("");
+    cinux::driver::Tty tty(kWiring);
+    struct termios     record{};
+    tty.copy_termios(reinterpret_cast<unsigned char*>(&record));
+    record.c_cc[VINTR] = 'x';
+    tty.apply_termios(reinterpret_cast<const unsigned char*>(&record));
+    tty.feed('x');
+    ASSERT_EQ(tty.take_pending_signal(), 2);
+    record.c_cc[VINTR] = 0;
+    record.c_lflag     = ISIG;
+    tty.apply_termios(reinterpret_cast<const unsigned char*>(&record));
+    tty.feed('\0');
+    unsigned char heard = 99;
+    ASSERT_EQ(tty.read_line(&heard, 1), 1UL);
+    ASSERT_EQ(heard, static_cast<unsigned char>(0));
+    ASSERT_EQ(tty.take_pending_signal(), 0);
+}
+
+TEST("tty: repeated signal keys stay consumed and flush the abandoned line") {
+    reset_seat("");
+    cinux::driver::Tty tty(kWiring);
+    tty.feed('x');
+    tty.feed('\x03');
+    tty.feed('\x03');
+    ASSERT_EQ(tty.take_pending_signal(), 2);
+    tty.feed('y');
+    tty.feed('\n');
+    unsigned char heard[8] = {};
+    ASSERT_EQ(tty.read_line(heard, sizeof(heard)), 2UL);
+    ASSERT_EQ(heard[0], static_cast<unsigned char>('y'));
+}
+
+TEST("tty: polling input translates a signal without a terminal reader") {
+    reset_seat("abc\x03");
+    cinux::driver::Tty tty(kWiring);
+    tty.poll_input();
+    ASSERT_EQ(tty.take_pending_signal(), 2);
+    ASSERT_FALSE(tty.has_line());
+    ASSERT_EQ(tty.take_pending_signal(), 0);
 }
 
 int main() {
-    // Test 1: default termios is cooked (ICANON|ECHO|ISIG) with the right cc.
-    {
-        TTY            t;
-        const Termios& tm = t.termios();
-        CHECK(tm.c_lflag & kIcanon);
-        CHECK(tm.c_lflag & kEcho);
-        CHECK(tm.c_lflag & kIsig);
-        CHECK_EQ(tm.c_cc[kVintr], kCharIntr);
-        CHECK_EQ(tm.c_cc[kVeof], kCharEof);
-        CHECK_EQ(tm.c_cc[kVerase], kCharBackspace);
-    }
-
-    // Test 2: canonical line accumulation + echo.
-    {
-        TTY t;
-        t.set_echo_sink(echo_capture, nullptr);
-        echo_reset();
-        CHECK_EQ(t.input_char('a'), InputResult::kConsumed);
-        CHECK_EQ(t.input_char('b'), InputResult::kConsumed);
-        CHECK_EQ(t.input_char('\n'), InputResult::kLineReady);
-        CHECK_EQ(g_echo_len, static_cast<size_t>(3));
-        CHECK(g_echo[0] == 'a' && g_echo[1] == 'b' && g_echo[2] == '\n');
-        char   buf[16];
-        size_t n = t.read_cooked(buf, sizeof(buf));
-        CHECK_EQ(n, static_cast<size_t>(3));
-        CHECK(buf[0] == 'a' && buf[1] == 'b' && buf[2] == '\n');
-        // queue drained
-        CHECK_EQ(t.read_cooked(buf, sizeof(buf)), static_cast<size_t>(0));
-    }
-
-    // Test 3: backspace editing (VERASE = DEL).
-    {
-        TTY t;
-        t.set_echo_sink(echo_capture, nullptr);
-        echo_reset();
-        t.input_char('a');
-        t.input_char('b');
-        t.input_char(kCharBackspace);  // erase 'b'
-        t.input_char('d');
-        CHECK_EQ(t.input_char('\n'), InputResult::kLineReady);
-        char   buf[16];
-        size_t n = t.read_cooked(buf, sizeof(buf));
-        CHECK_EQ(n, static_cast<size_t>(3));
-        CHECK(buf[0] == 'a' && buf[1] == 'd' && buf[2] == '\n');
-    }
-
-    // Test 4: ^C generates SIGINT (never reaches the line).
-    {
-        TTY t;
-        CHECK_EQ(t.input_char(kCharIntr), InputResult::kSignal);
-        CHECK_EQ(t.pending_signal(), TtySignal::kSigint);
-        char buf[16];
-        CHECK_EQ(t.read_cooked(buf, sizeof(buf)), static_cast<size_t>(0));  // no line
-    }
-
-    // Test 5: ^D on an empty line -> EOF; take_eof() signals it once.
-    {
-        TTY t;
-        CHECK_EQ(t.input_char(kCharEof), InputResult::kEof);
-        CHECK(t.take_eof());
-        CHECK(!t.take_eof());  // consumed -- EOF delivered exactly once
-    }
-
-    // Test 6: ^D after input commits the line WITHOUT a trailing newline.
-    {
-        TTY t;
-        t.input_char('x');
-        t.input_char('y');
-        CHECK_EQ(t.input_char(kCharEof), InputResult::kLineReady);
-        char   buf[16];
-        size_t n = t.read_cooked(buf, sizeof(buf));
-        CHECK_EQ(n, static_cast<size_t>(2));
-        CHECK(buf[0] == 'x' && buf[1] == 'y');
-    }
-
-    // Test 7: ^U kills the line being edited.
-    {
-        TTY t;
-        t.input_char('a');
-        t.input_char('b');
-        t.input_char('c');
-        t.input_char(0x15);  // ^U (VKILL default)
-        t.input_char('z');
-        CHECK_EQ(t.input_char('\n'), InputResult::kLineReady);
-        char   buf[16];
-        size_t n = t.read_cooked(buf, sizeof(buf));
-        CHECK_EQ(n, static_cast<size_t>(2));
-        CHECK(buf[0] == 'z' && buf[1] == '\n');
-    }
-
-    // Test 8: raw mode (~ICANON) passes each byte straight through.
-    {
-        TTY     t;
-        Termios tm;
-        make_default_termios(tm);
-        tm.c_lflag &= ~kIcanon;
-        t.set_termios(tm);
-        CHECK_EQ(t.input_char('x'), InputResult::kLineReady);
-        CHECK_EQ(t.input_char('y'), InputResult::kLineReady);
-        char   buf[16];
-        size_t n = t.read_cooked(buf, sizeof(buf));
-        CHECK_EQ(n, static_cast<size_t>(2));
-        CHECK(buf[0] == 'x' && buf[1] == 'y');
-    }
-
-    // Test 9: overflow drops the extra char (line buffer cap).
-    {
-        TTY  t;
-        bool saw_overflow = false;
-        for (int i = 0; i < 400; i++) {
-            if (t.input_char('a' + (i % 26)) == InputResult::kOverflow) {
-                saw_overflow = true;
-            }
-        }
-        CHECK(saw_overflow);
-    }
-
-    if (g_fail) {
-        std::printf("tty tests FAILED\n");
-        return 1;
-    }
-    std::printf("tty tests OK (9 cases)\n");
-    return 0;
+    return cinux::test::RunAll();
 }

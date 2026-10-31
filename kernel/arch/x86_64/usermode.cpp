@@ -1,45 +1,38 @@
-/**
- * @file kernel/arch/x86_64/usermode.cpp
- * @brief User-mode (Ring 3) transition support implementation
- *
- * Provides usermode_init() which configures the STAR/EFER MSRs for SYSRET and
- * anchors this CPU's GS base at its PerCpu control block (F4-M3 P1-2).  Also
- * provides jump_to_usermode() (see usermode.S) for entering Ring 3.
- */
-
 #include "kernel/arch/x86_64/usermode.hpp"
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include "cinux/assert.hpp"
+#include "cinux/bit_ops/bitmask.hpp"
+#include "kernel/arch/x86_64/gdt.hpp"
+#include "kernel/arch/x86_64/instructions.hpp"
 #include "kernel/arch/x86_64/msr.hpp"
-#include "kernel/lib/kprintf.hpp"
-#include "kernel/proc/percpu.hpp"
+#include "kernel/syscall/syscall.hpp"
 
-namespace cinux::arch {
+namespace cinux::arch::usermode {
 
-extern "C" void usermode_init_asm();
+namespace {
 
-// ============================================================
-// Public interface
-// ============================================================
+constexpr unsigned long long kInterruptFlagMask =
+    cinux::base::bit::MaskBit<unsigned long long>(9).raw;
 
-void usermode_init() {
-    usermode_init_asm();
-    cinux::lib::kprintf("[USER] STAR/EFER MSRs configured for SYSRET.\n");
+constexpr unsigned long long kStarValue =
+    (static_cast<unsigned long long>(gdt::kSysretStarBase) << 48U) |
+    (static_cast<unsigned long long>(gdt::kSelectorCode) << 32U);
 
-    // Anchor the BSP's GS base at its PerCpu block.  The swapgs discipline
-    // (P1-2) keeps MSR_GS_BASE == &percpu_blocks[cpu] throughout kernel mode,
-    // so syscall_entry reads %gs:0 == PerCpu.kernel_stack and percpu() reads
-    // MSR_GS_BASE.  KERNEL_GS_BASE holds the user GS base (0) while in kernel.
-    auto* bsp    = &cinux::proc::percpu_blocks[0];
-    bsp->cpu_id  = 0;
-    bsp->apic_id = 0;
-    cinux::arch::write_msr(cinux::arch::kMsrGsBase, reinterpret_cast<uint64_t>(bsp));
-    cinux::arch::write_msr(cinux::arch::kMsrKernelGsBase, 0);
+static_assert((kStarValue >> 48U) == gdt::kSysretStarBase, "SYSRET base keeps its RPL-3 folding");
+static_assert(((kStarValue >> 32U) & 0xFFFFU) == gdt::kSelectorCode,
+              "SYSCALL entries start on the kernel code selector");
 
-    cinux::lib::kprintf("[USER] BSP PerCpu block at %p (GS base anchored)\n",
-                        reinterpret_cast<void*>(bsp));
+}  // namespace
+
+void EnableFastSystemCalls() {
+    unsigned long long const kEfer =
+        ReadMsr(msr::kEfer) | msr::kEferSyscallEnable | msr::kEferNoExecuteEnable;
+    WriteMsr(msr::kEfer, kEfer);
+    const unsigned long long kReadBack = ReadMsr(msr::kEfer);
+    base::safety::Check(((kReadBack >> 11U) & 1ULL) != 0ULL, "efer refused the no-execute enable");
+    WriteMsr(msr::kStar, kStarValue);
+    WriteMsr(msr::kLstar, reinterpret_cast<unsigned long long>(&SyscallEntry));
+    WriteMsr(msr::kSfmask, kInterruptFlagMask);
 }
 
-}  // namespace cinux::arch
+}  // namespace cinux::arch::usermode

@@ -1,106 +1,215 @@
 /**
- * @file kernel/net/udp.hpp
- * @brief UDP wire layout + UdpModule (L4Handler, IP proto 17) + port demux.
+ * @file    udp.hpp
+ * @brief   The UDP module: ports, checks, and a header builder.
  *
- * A connectionless L4 protocol layered on Ipv4Module exactly like IcmpModule:
- * UdpModule is an L4Handler registered via Ipv4Module::add_l4(kIpProtoUdp, ...).
- * Inbound: validate the pseudo-header checksum, parse the ports, and hand the
- * payload to the UdpListener bound to the destination port (no listener -> silent
- * drop, like Linux).  Outbound: build the UDP header, compute the pseudo-header
- * checksum over [pseudo | header | payload], and emit via ipv4.send.
+ * One module faces both directions. Incoming datagrams are judged three
+ * times — the word book parses the header, the announced length must sit
+ * inside the bytes that arrived, and when a checksum was sent at all the
+ * one's-complement sum over the pseudo header plus the datagram must
+ * fold to zero — and every refusal lands in its own counter. What
+ * survives reaches the listener seated under the destination port; a
+ * datagram nobody claims dies counted, the family's discipline.
+ * Outgoing datagrams are built whole here: fixed eight-byte header,
+ * checksum computed over the pseudo header with the zero rule honored —
+ * a computed zero is sent as 0xFFFF, because an honest zero on the wire
+ * means "no checksum was computed" — then handed to the sink the wiring
+ * points at the IPv4 module. The pseudo header needs the source address
+ * the IPv4 header carries, so this module holds its own copy of the
+ * wiring's address and re-aims alongside it when a wire joins.
  *
- * Port multiplexing is a small fixed table (kMaxUdpPorts) -- the protocol-layer
- * primitive.  The socket API (bind/sendto/recvfrom) rides on top in F7-M6 and
- * grows the table then; this milestone delivers the protocol layer + tests only.
- *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-24
+ * @version 0.1
+ * @since   0.7.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/ipv4.hpp"  // Ipv4Header, Ipv4Module, L4Handler, kIpProtoUdp
-#include "kernel/net/net_types.hpp"
+#include "cinux/spin_mutex.hpp"
+#include "kernel/net/ipv4.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 
 namespace cinux::net {
 
-/// @brief UDP header, HOST-order parsed view.  8 bytes.
-struct UdpHeader {
-    uint16_t src_port;  ///< host order
-    uint16_t dst_port;  ///< host order
-    uint16_t length;    ///< host order (header + payload)
-    uint16_t checksum;  ///< host order (pseudo-header based; 0 == "no checksum")
-};
-static_assert(sizeof(UdpHeader) == 8, "UDP header is 8 bytes");
-
-/// @brief Parse 8 wire bytes into a UdpHeader (host order).
-inline void parse_udp(const uint8_t* p, UdpHeader& out) {
-    out.src_port = (static_cast<uint16_t>(p[0]) << 8) | p[1];
-    out.dst_port = (static_cast<uint16_t>(p[2]) << 8) | p[3];
-    out.length   = (static_cast<uint16_t>(p[4]) << 8) | p[5];
-    out.checksum = (static_cast<uint16_t>(p[6]) << 8) | p[7];
-}
-
-/// @brief Serialise a UdpHeader into 8 wire bytes (big-endian multi-byte).
-inline void build_udp_header(const UdpHeader& in, uint8_t* p) {
-    p[0] = static_cast<uint8_t>(in.src_port >> 8);
-    p[1] = static_cast<uint8_t>(in.src_port & 0xFF);
-    p[2] = static_cast<uint8_t>(in.dst_port >> 8);
-    p[3] = static_cast<uint8_t>(in.dst_port & 0xFF);
-    p[4] = static_cast<uint8_t>(in.length >> 8);
-    p[5] = static_cast<uint8_t>(in.length & 0xFF);
-    p[6] = static_cast<uint8_t>(in.checksum >> 8);
-    p[7] = static_cast<uint8_t>(in.checksum & 0xFF);
-}
-
-/// @brief Inbound UDP observer -- the consumer of datagrams for a bound port.
-///
-/// Registered with UdpModule::bind.  Like all net-stack callbacks, @p payload is
-/// BORROWED: valid only for the duration of on_udp() -- a listener that needs
-/// the bytes longer MUST copy them (the device recycles the buffer after
-/// dispatch).
-class UdpListener {
-public:
-    virtual ~UdpListener() = default;
-
-    /// @brief A UDP datagram arrived addressed to this listener's port.
-    /// @param ip       the IPv4 header (src = sender, for replies).
-    /// @param src_port the sender's port.
-    /// @param payload  the UDP payload (past the 8-byte header).  Borrowed.
-    virtual void on_udp(const Ipv4Header& ip, uint16_t src_port, FrameView payload) = 0;
+/**
+ * @brief   One datagram handed to a listener, its return address with it.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct UdpDelivery {
+    /// Address the datagram travelled from.
+    uint32_t             sender      = 0;
+    /// Port the datagram travelled from.
+    uint16_t             sender_port = 0;
+    /// First payload byte.
+    const unsigned char* bytes       = nullptr;
+    /// Payload bytes.
+    size_t               length      = 0;
 };
 
-class UdpModule : public L4Handler {
+/**
+ * @brief   What a bound port offers: one entry point, the wiring's context.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+using UdpDeliver = void (*)(void* context, const UdpDelivery& delivery);
+
+/**
+ * @brief   The delivery and refusal counters so far.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+struct UdpStats {
+    /// Datagrams handed to a seated listener.
+    unsigned long delivered        = 0;
+    /// Datagrams the word book refused as too short.
+    unsigned long refused_short    = 0;
+    /// Datagrams whose announced length disagreed with the bytes held.
+    unsigned long refused_length   = 0;
+    /// Datagrams whose checksum did not fold to zero.
+    unsigned long refused_checksum = 0;
+    /// Datagrams naming a port nobody bound.
+    unsigned long unclaimed        = 0;
+    /// Datagrams this module built and handed to the sink.
+    unsigned long sent             = 0;
+};
+
+/**
+ * @brief   The UDP module, a plain instance the wiring owns.
+ * @note    A listener's bytes pointer lives only for the call: the
+ *          receive buffer is reused by the next datagram, so a listener
+ *          that wants the payload must copy it before returning. The
+ *          station's own lesson, learned the hard way once.
+ * @since   0.7.0
+ * @ingroup kernel_net
+ */
+class UdpModule {
 public:
-    static constexpr uint32_t kMaxUdpPorts = 16;  ///< protocol-layer table (socket layer grows it)
+    /**
+     * @brief         Aims the module at its sink and source address.
+     *
+     * @param[in]     sink          Where built datagrams go.
+     * @param[in]     own_address   Source address the pseudo header sums.
+     * @return        None
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void init(const DatagramSink& sink, uint32_t own_address);
 
-    /// @brief Bind @p listener to @p port.  Returns false if @p port is already
-    ///        bound or the port table is full.  (Mirrors NetStack::attach's bool.)
-    bool bind(uint16_t port, UdpListener& listener);
+    /**
+     * @brief         Re-aims the module without forgetting anything.
+     *
+     * @param[in]     sink          The new outgoing path.
+     * @param[in]     own_address   The new source address.
+     * @return        None
+     * @note          For the boot wiring's reroute: the loopback world
+     *                runs first, a wire joins later, and the port table
+     *                and counters survive the aim.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void aim(const DatagramSink& sink, uint32_t own_address);
 
-    /// @brief Release @p port.  No-op if not bound.
-    void unbind(uint16_t port);
+    /**
+     * @brief         Judges one datagram and hands it to its listener.
+     *
+     * @param[in]     bytes   First datagram byte.
+     * @param[in]     length  Bytes the datagram holds.
+     * @param[in]     header  The IPv4 header it travelled in.
+     * @return        None
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length, const Ipv4View& header);
 
-    /// @brief Send a UDP datagram.  The source IP comes from the device's
-    ///        InDevice (same source Ipv4Module::send uses).  Builds the UDP
-    ///        header + pseudo-header checksum, emits via ipv4.send (proto=17).
-    cinux::lib::ErrorOr<void> send(NetDevice& dev, Ipv4Addr dst, uint16_t src_port,
-                                   uint16_t dst_port, const uint8_t* data, uint32_t len,
-                                   Ipv4Module& ipv4, NetStack& stack);
+    /**
+     * @brief         Builds and sends one datagram.
+     *
+     * @param[in]     destination       Address the header names.
+     * @param[in]     source_port       Port the header answers to.
+     * @param[in]     destination_port  Port the header names.
+     * @param[in]     payload           First payload byte.
+     * @param[in]     length            Payload bytes, zero allowed.
+     * @return        True when built and handed to the sink; false for
+     *                an oversized payload or an unassigned sink.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    bool send(uint32_t destination, uint16_t source_port, uint16_t destination_port,
+              const unsigned char* payload, size_t length);
 
-    /// @brief L4Handler: validate the pseudo-header checksum, parse the ports,
-    ///        dispatch to the listener bound to the destination port.
-    void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
-                NetStack& stack) override;
+    /**
+     * @brief         Seats one listener under a port.
+     *
+     * @param[in]     port      The port datagrams must name.
+     * @param[in]     context   The listener's own context, opaque here.
+     * @param[in]     deliver   The listener's entry point.
+     * @return        True when seated; false when the table is full or
+     *                the port is already taken.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    bool bind(uint16_t port, void* context, UdpDeliver deliver);
+
+    /**
+     * @brief         Frees a port for the next listener.
+     *
+     * @param[in]     port   The port to release.
+     * @return        True when a listener left; false when none sat there.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    bool unbind(uint16_t port);
+
+    /**
+     * @brief         The first free port in the ephemeral range.
+     * @return        A port no listener holds, or zero when the range
+     *                is exhausted.
+     * @note          For callers that ask for a port without naming
+     *                one; the seat itself is taken by bind.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] uint16_t ephemeral_port() const;
+
+    /**
+     * @brief         The delivery and refusal counters so far.
+     * @return        A reference to the current statistics.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] const UdpStats& stats() const;
+
+    /**
+     * @brief         The source address outgoing headers carry.
+     * @return        The address the wiring last aimed this module at.
+     * @note          A socket bound to the any-address answers this
+     *                        word when asked to name itself.
+     * @since         0.7.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] uint32_t own_address() const;
 
 private:
-    struct PortSlot {
-        uint16_t     port = 0;
-        UdpListener* l    = nullptr;
+    struct PortSeat {
+        uint16_t   port    = 0;
+        void*      context = nullptr;
+        UdpDeliver deliver = nullptr;
     };
-    PortSlot ports_[kMaxUdpPorts]{};
+
+    DatagramSink            sink_        = {};
+    uint32_t                own_address_ = 0;
+    mutable base::SpinMutex ports_gate_;
+    PortSeat                ports_[kUdpPortSeats] = {};
+    unsigned long           port_count_           = 0;
+    unsigned long           ephemeral_cursor_     = kEphemeralPortFirst;
+    UdpStats                stats_                = {};
 };
 
 }  // namespace cinux::net

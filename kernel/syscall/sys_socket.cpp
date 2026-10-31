@@ -1,347 +1,830 @@
-/**
- * @file kernel/syscall/sys_socket.cpp
- * @brief BSD socket syscall handlers (F7-M6).
- *
- * Thin user-boundary shims (see sys_socket.hpp).  fd -> File -> inode -> Socket
- * resolution mirrors sys_ioctl's fd>2 path (the ops pointer discriminates a
- * socket fd from a file/pipe/tty fd).  sockaddr_in crosses the boundary via
- * copy_to/from_user; data buffers stage through a heap kbuf so a large user
- * length never blows the kernel stack frame (-Wframe-larger-than=1024).
- *
- * In batch 1b the Socket base returns Error::NotImplemented for every protocol
- * op, so bind/connect/listen/accept/sendto/recvfrom answer -ENOSYS; socket()
- * itself + close() (via FDTable) already work, which is what the batch-1b kernel
- * test exercises.  B2 (UdpSocket) / B3 (TcpSocket) override the virtuals.
- *
- * Namespace: cinux::syscall
- */
-
 #include "kernel/syscall/sys_socket.hpp"
 
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include <memory>  // std::unique_ptr (RAII; EXEMPT-reviewed in check_freestanding_headers.py)
+#include <algorithm>
 
-#include "kernel/arch/x86_64/user_access.hpp"  // copy_to/from_user (SMAP/extable)
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"          // FDTable / File
-#include "kernel/fs/vfs_mount.hpp"     // current_fd_table()
-#include "kernel/net/net_init.hpp"     // create_socket
-#include "kernel/net/net_types.hpp"    // Ipv4Addr
-#include "kernel/net/socket.hpp"       // Socket / SocketOps / SockAddrIn / SockAddrUn
-#include "kernel/net/unix_socket.hpp"  // UnixSocket (AF_UNIX, F8-M3)
+#include "cinux/byte_order.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/file_table.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/net/local_config.hpp"
+#include "kernel/net/local_socket.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_world.hpp"
+#include "kernel/net/socket.hpp"
+#include "kernel/net/udp.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signals.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/signal.hpp"
+#include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::syscall {
 
-using cinux::fs::FDTable;
-using cinux::fs::File;
-using cinux::fs::Inode;
-using cinux::fs::InodeType;
-using cinux::fs::OpenFlags;
-using cinux::fs::current_fd_table;
-using cinux::net::Ipv4Addr;
-using cinux::net::Socket;
-using cinux::net::SockAddrIn;
-using cinux::net::SockAddrUn;
-using cinux::net::UnixSocket;
-using cinux::net::create_socket;
-using cinux::net::kAfInet;
-using cinux::net::kAfUnix;
-using cinux::net::kSockDgram;
-using cinux::net::kSockRaw;
-using cinux::net::kSockStream;
-using cinux::net::socket_ops;
-using cinux::user::copy_from_user;
-using cinux::user::copy_to_user;
-
 namespace {
 
-/// Cap on a single sendto/recvfrom staging buffer.  UDP fits an Ethernet frame
-/// (~1472); TCP sends in segments.  A page bounds the heap alloc without
-/// touching the kernel stack.  Larger writes loop in a later batch.
-constexpr uint32_t kMaxSockBuf = 4096;
+constexpr unsigned long kSockaddrInBytes  = 16;
+constexpr unsigned long kSockaddrMinBytes = 8;
+constexpr unsigned long kFamilyAt         = 0;
+constexpr unsigned long kPortAt           = 2;
+constexpr unsigned long kAddressAt        = 4;
 
-/// Byte-swap a 16-bit value (sockaddr_in port is NETWORK order on the wire).
-inline uint16_t byte_swap16(uint16_t v) {
-    return static_cast<uint16_t>((v >> 8) | (v << 8));
+constexpr unsigned long long kSockCloexec  = 0x80000;
+constexpr unsigned long long kSockNonblock = 0x800;
+constexpr Word               kMsgDontwait  = 0x40;
+constexpr Word               kMsgNosignal  = 0x4000;
+
+/// Finds the socket behind a descriptor, or answers why not.
+long long socket_of(Word descriptor, net::Socket** out, base::Shared<fs::OpenFile>& held) {
+    *out             = nullptr;
+    const auto kOpen = LiveSlot(descriptor);
+    if (!kOpen.ok()) {
+        return -kEbadf;
+    }
+    if (kOpen.value()->ops != net::SocketOps()) {
+        return -kEnotsock;
+    }
+    held = kOpen.value();
+    *out = static_cast<net::Socket*>(held->backend);
+    return 0;
 }
 
-/// Parse a user sockaddr_in (addr + VALUE addrlen) into host-order addr+port.
-/// @return true on a valid AF_INET address; false on bad ptr / short len / wrong family.
-bool parse_sockaddr_in(uint64_t addr_virt, uint64_t addrlen, Ipv4Addr* out_addr,
-                       uint16_t* out_port) {
-    if (addr_virt == 0 || addrlen < sizeof(SockAddrIn)) {
-        return false;
+/// Reads one internet address from ring 3, wire byte order and all.
+long long read_sockaddr(Word address, Word length, net::SocketAddress& out) {
+    if (address == 0 || length < sizeof(uint16_t)) {
+        return -kEinval;
     }
-    SockAddrIn sa;
-    if (!copy_from_user(&sa, reinterpret_cast<void*>(addr_virt), sizeof(sa))) {
-        return false;
+    uint16_t family = 0;
+    if (!uaccess::CopyFromUser(&family, address, sizeof(family))) {
+        return -kEfault;
     }
-    if (sa.family != kAfInet) {
-        return false;
+    if (family == net::kAfUnix) {
+        if (length > sizeof(family) + net::kLocalNameBytes || length == sizeof(family)) {
+            return -kEinval;
+        }
+        out.family     = net::kAfUnix;
+        out.name_bytes = length - sizeof(family);
+        if (!uaccess::CopyFromUser(out.name, address + sizeof(family), out.name_bytes)) {
+            return -kEfault;
+        }
+        if (out.name[0] != 0) {
+            for (unsigned long index = 0; index < out.name_bytes; ++index) {
+                if (out.name[index] == 0) {
+                    out.name_bytes = index + 1;
+                    break;
+                }
+            }
+        }
+        return 0;
     }
-    *out_port = byte_swap16(sa.port);
-    for (int i = 0; i < 4; ++i) {
-        out_addr->oct[i] = sa.addr[i];
+    if (family != net::kAfInet || length < kSockaddrMinBytes) {
+        return -kEafnosupport;
     }
-    return true;
+    unsigned char record[kSockaddrInBytes] = {};
+    const Word    kBytes                   = length < kSockaddrInBytes ? length : kSockaddrInBytes;
+    if (!uaccess::CopyFromUser(record, address, kBytes)) {
+        return -kEfault;
+    }
+    base::CopyBytes(&family, record + kFamilyAt, sizeof(family));
+    if (family != net::kAfInet) {
+        return -kEafnosupport;
+    }
+    out.port    = base::ReadWord16Be(record, kPortAt);
+    out.address = base::ReadWord32Be(record, kAddressAt);
+    return 0;
 }
 
-/// Write a host-order addr+port back into a user sockaddr_in (accept/recvfrom),
-/// and update the in/out *addrlen.  A NULL @p addr_virt means the caller does
-/// not want the address (Linux allows it) -- a silent no-op.
-bool fill_sockaddr_in(uint64_t addr_virt, uint64_t addrlen_ptr, Ipv4Addr addr, uint16_t port) {
-    if (addr_virt == 0) {
-        return true;
+/// Writes one internet address back to ring 3 and reports its length.
+long long write_sockaddr(Word address, Word length_word, const net::SocketAddress& from) {
+    if (address == 0 || length_word == 0) {
+        return -kEfault;
     }
-    SockAddrIn sa{};
-    sa.family = kAfInet;
-    sa.port   = byte_swap16(port);
-    for (int i = 0; i < 4; ++i) {
-        sa.addr[i] = addr.oct[i];
+    uint32_t wanted = 0;
+    if (!uaccess::CopyFromUser(&wanted, length_word, sizeof(wanted))) {
+        return -kEfault;
     }
-    if (!copy_to_user(reinterpret_cast<void*>(addr_virt), &sa, sizeof(sa))) {
-        return false;
+    unsigned char record[sizeof(uint16_t) + net::kLocalNameBytes] = {};
+    const auto    kFamily = static_cast<uint16_t>(from.family);
+    base::CopyBytes(record + kFamilyAt, &kFamily, sizeof(kFamily));
+    uint32_t whole = kSockaddrInBytes;
+    if (from.family == net::kAfUnix) {
+        whole = static_cast<uint32_t>(sizeof(kFamily) + from.name_bytes);
+        base::CopyBytes(record + sizeof(kFamily), from.name, from.name_bytes);
+    } else {
+        base::WriteWord16Be(record, kPortAt, from.port);
+        base::WriteWord32Be(record, kAddressAt, from.address);
     }
-    if (addrlen_ptr != 0) {
-        uint16_t len = sizeof(sa);
-        copy_to_user(reinterpret_cast<void*>(addrlen_ptr), &len, sizeof(len));  // best-effort
+    const uint32_t kWhole = whole;
+    const auto     kBytes = wanted < kWhole ? wanted : kWhole;
+    if (!uaccess::CopyToUser(address, record, kBytes)) {
+        return -kEfault;
     }
-    return true;
+    if (!uaccess::CopyToUser(length_word, &kWhole, sizeof(kWhole))) {
+        return -kEfault;
+    }
+    return 0;
 }
 
-/// Parse a user sockaddr_un into a NUL-terminated @p out_path (always written).
-/// @return true on a valid AF_UNIX address; false on bad ptr / short len / wrong
-/// family.  @p out_path must have room for kUnixPathMax chars.
-bool parse_sockaddr_un(uint64_t addr_virt, uint64_t addrlen, char* out_path) {
-    if (addr_virt == 0 || addrlen < 2) {  // need at least the family field
-        return false;
+/// Translates the socket family's own refusals into errno words.
+/// One send call's byte ceiling, by the socket's birth type.
+unsigned long send_ceiling_of(int socket_type) {
+    if (socket_type == net::kSockRaw) {
+        return net::kMaxDatagramBytes - net::kMinIpv4HeaderBytes;
     }
-    SockAddrUn sa;
-    if (!copy_from_user(&sa, reinterpret_cast<void*>(addr_virt), sizeof(sa))) {
-        return false;
+    if (socket_type == net::kSockStream) {
+        return net::kTcpMssBytes;
     }
-    if (sa.family != kAfUnix) {
-        return false;
+    return net::kUdpSocketPayloadBytes;
+}
+
+long long errno_of_socket(base::KernelError error) {
+    switch (error) {
+    case base::KernelError::kAlreadyExists:
+        return -kEaddrinuse;
+    case base::KernelError::kNotFound:
+        return -kEdestaddrreq;
+    case base::KernelError::kNotSupported:
+        return -kEmsgsize;
+    case base::KernelError::kNotConnected:
+        return -kEnotconn;
+    case base::KernelError::kBrokenPipe:
+        return -kEpipe;
+    case base::KernelError::kConnectionRefused:
+        return -kEconnrefused;
+    default:
+        return -ErrnoFrom(error);
     }
-    // Force NUL-termination regardless of what userspace wrote.
-    uint32_t i = 0;
-    while (i + 1 < cinux::net::kUnixPathMax && sa.path[i] != '\0') {
-        out_path[i] = sa.path[i];
-        ++i;
+}
+
+/// Whether the calling task has a deliverable signal waiting.
+bool signal_pending() {
+    const proc::Task* const kSelf = CurrentTask();
+    return proc::HasPendingSignal(*kSelf);
+}
+
+struct Outgoing {
+    const void*        source{};
+    unsigned long      count{};
+    Word               flags{};
+    net::SocketAddress destination;
+};
+
+long long transmit_wait(net::Socket& socket, const fs::OpenFile& file, const Outgoing& outgoing) {
+    for (;;) {
+        const auto kGiven = socket.transmit(outgoing.source, outgoing.count, outgoing.destination);
+        if (kGiven.ok()) {
+            return static_cast<long long>(kGiven.value());
+        }
+        if (kGiven.error() != base::KernelError::kWouldBlock) {
+            if (kGiven.error() == base::KernelError::kBrokenPipe &&
+                (outgoing.flags & kMsgNosignal) == 0) {
+                proc::SendSignal(*CurrentTask(), kSigPipe);
+            }
+            return errno_of_socket(kGiven.error());
+        }
+        if ((file.status_flags & kOpenNonblock) != 0 || (outgoing.flags & kMsgDontwait) != 0) {
+            return -kEagain;
+        }
+        if (signal_pending()) {
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
     }
-    out_path[i] = '\0';
-    return out_path[0] != '\0';  // Linux allows empty (abstract) paths; we do not yet
+}
+
+/// Seats one accepted socket behind a fresh descriptor, polling while
+/// the queue stays empty; the caller's address question is answered
+/// when room for it was named.
+long long accept_common(const SyscallFrame& frame, Word extra_flags) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    base::Shared<net::Socket> born;
+    for (;;) {
+        const auto kTaken = socket->accept_one();
+        if (kTaken.ok()) {
+            born = kTaken.value();
+            break;
+        }
+        if (kTaken.error() != base::KernelError::kWouldBlock) {
+            return kTaken.error() == base::KernelError::kNotSupported
+                       ? -kEopnotsupp
+                       : errno_of_socket(kTaken.error());
+        }
+        // accept4 flags apply to the new descriptor. Only the listener's
+        // O_NONBLOCK decides whether an empty queue may wait here.
+        if ((held->status_flags & kOpenNonblock) != 0) {
+            return -kEagain;
+        }
+        if (signal_pending()) {
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
+    }
+    const fs::FsNode kNode = {
+        .opaque = born.get(),
+        .type   = fs::InodeType::kFile,
+        .ino    = born->identity(),
+        .size   = 0,
+    };
+    const auto kSeat = CurrentTask()->files->alloc(
+        net::SocketOps(), born.get(), kNode,
+        {
+            .status  = (extra_flags & kSockNonblock) != 0 ? kOpenNonblock : 0,
+            .cloexec = (extra_flags & kSockCloexec) != 0,
+            .limit   = FileDescriptorLimit(),
+        });
+    if (!kSeat.ok()) {
+        return -kEmfile;
+    }
+    if (frame.rsi != 0) {
+        net::SocketAddress peer{};
+        if (born->report_peer(peer).ok()) {
+            write_sockaddr(frame.rsi, frame.rdx, peer);
+        }
+    }
+    return static_cast<long long>(kSeat.value());
+}
+
+long long make_local_socket(Word type, Word protocol, base::Shared<net::Socket>& socket) {
+    if (protocol != 0) {
+        return -kEprotonosupport;
+    }
+    if (type != net::kSockStream && type != net::kSockDgram) {
+        return -kEsocktnosupport;
+    }
+    socket = net::MakeLocalSocket(static_cast<int>(type));
+    return 0;
+}
+
+long long make_inet_dgram_socket(Word protocol, base::Shared<net::Socket>& socket) {
+    if (protocol == 0 || protocol == static_cast<Word>(net::kIpv4ProtocolUdp)) {
+        socket = base::Shared<net::Socket>{new net::UdpSocket(net::NetWorld::self().udp())};
+        return 0;
+    }
+    if (protocol != kIpProtoIcmp) {
+        return -kEprotonosupport;
+    }
+    auto* ping = new net::PingSocket(net::NetWorld::self().raw());
+    socket     = base::Shared<net::Socket>{ping};
+    if (ping == nullptr || !ping->seated()) {
+        return -kEnomem;
+    }
+    return 0;
 }
 
 }  // namespace
 
-// ============================================================
-// Shared helpers (F-ECO batch 7): exposed in sys_socket.hpp so the accept4 /
-// setsockopt / getsockopt / shutdown / getsockname / getpeername / socketpair
-// handlers reuse the SAME fd->Socket resolution + fd install, not a copy.
-// Bodies are unchanged from their original anonymous-namespace definitions.
-// ============================================================
-
-Socket* socket_from_fd(uint64_t fd) {
-    File* file = current_fd_table().get(static_cast<int>(fd));
-    if (file == nullptr || file->inode == nullptr || file->inode->ops != &socket_ops()) {
-        return nullptr;
+long long HandleSocket(const SyscallFrame& frame) {
+    if (frame.rdi != static_cast<Word>(net::kAfInet) &&
+        frame.rdi != static_cast<Word>(net::kAfUnix)) {
+        return -kEafnosupport;
     }
-    return static_cast<Socket*>(file->inode->fs_private);
+    const Word kRawType   = frame.rsi;
+    const Word kFlags     = kRawType & (kSockCloexec | kSockNonblock);
+    const Word kPlainType = kRawType & ~(kSockCloexec | kSockNonblock);
+    const auto kProtocol  = static_cast<Word>(frame.rdx);
+
+    base::Shared<net::Socket> socket;
+    if (frame.rdi == net::kAfUnix) {
+        const auto kMade = make_local_socket(kPlainType, kProtocol, socket);
+        if (kMade != 0) {
+            return kMade;
+        }
+    } else if (kPlainType == static_cast<Word>(net::kSockStream)) {
+        if (kProtocol != 0 && kProtocol != static_cast<Word>(net::kIpv4ProtocolTcp)) {
+            return -kEprotonosupport;
+        }
+        socket = base::Shared<net::Socket>{new net::TcpSocket(net::NetWorld::self().tcp())};
+    } else if (kPlainType == static_cast<Word>(net::kSockDgram)) {
+        const auto kMade = make_inet_dgram_socket(kProtocol, socket);
+        if (kMade != 0) {
+            return kMade;
+        }
+    } else if (kPlainType == static_cast<Word>(net::kSockRaw)) {
+        if (CurrentTask()->euid != 0) {
+            return -kEperm;
+        }
+        if (kProtocol != kIpProtoIcmp) {
+            return -kEprotonosupport;
+        }
+        auto* raw = new net::RawSocket(net::NetWorld::self().raw());
+        socket    = base::Shared<net::Socket>{raw};
+        if (raw == nullptr || !raw->seated()) {
+            return -kEnomem;
+        }
+    } else {
+        return -kEsocktnosupport;
+    }
+
+    if (!socket.holds()) {
+        return -kEnomem;
+    }
+    const fs::FsNode kNode = {
+        .opaque = socket.get(),
+        .type   = fs::InodeType::kFile,
+        .ino    = socket->identity(),
+        .size   = 0,
+    };
+    const auto kSeat =
+        CurrentTask()->files->alloc(net::SocketOps(), socket.get(), kNode,
+                                    {
+                                        .status = (kFlags & kSockNonblock) != 0 ? kOpenNonblock : 0,
+                                        .cloexec = (kFlags & kSockCloexec) != 0,
+                                        .limit   = FileDescriptorLimit(),
+                                    });
+    if (!kSeat.ok()) {
+        return -kEmfile;
+    }
+    return static_cast<long long>(kSeat.value());
 }
 
-int64_t install_socket_fd(Socket* sock) {
-    // RAII over the raw news: on error both auto-free; on success ownership of
-    // sock + inode transfers to the FDTable's File (closing the fd frees the
-    // File; the Socket/Inode share the pipe-style hobby-OS release-without-hook
-    // limitation).  <memory> is EXEMPT-reviewed for this TU.
-    std::unique_ptr<Socket> s(sock);
-    std::unique_ptr<Inode>  inode(new Inode());
-    inode->ops        = &socket_ops();
-    inode->type       = InodeType::Regular;
-    inode->fs_private = s.get();
-
-    int fd = current_fd_table().alloc(inode.get(), OpenFlags::RDWR);
-    if (fd < 0) {
-        return -cinux::kEmfile;  // s + inode auto-freed at scope exit
+long long HandleBind(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
     }
-    s.release();      // FDTable now owns sock (via inode->fs_private)
-    inode.release();  // FDTable now owns inode
-    return fd;
+    net::SocketAddress asked{};
+    const long long    kRead = read_sockaddr(frame.rsi, frame.rdx, asked);
+    if (kRead != 0) {
+        return kRead;
+    }
+    if (asked.family != socket->family()) {
+        return -kEafnosupport;
+    }
+    if (asked.family == net::kAfInet && asked.address != 0 &&
+        asked.address != net::NetWorld::self().udp().own_address() &&
+        asked.address != net::kLoopbackAddress) {
+        return -kEaddrnotavail;
+    }
+    const auto kSeated = socket->adopt_local(asked);
+    if (!kSeated.ok()) {
+        return errno_of_socket(kSeated.error());
+    }
+    return 0;
 }
 
-int64_t do_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t flags) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
+long long HandleConnect(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
     }
-    Ipv4Addr remote{};
-    uint16_t rport = 0;
-    auto     r     = s->accept(&remote, &rport);
-    if (!r.ok()) {
-        return -cinux::to_errno(r.error());
+    net::SocketAddress named{};
+    const long long    kRead = read_sockaddr(frame.rsi, frame.rdx, named);
+    if (kRead != 0) {
+        return kRead;
     }
-    // EINTR sentinel: a blocking accept() woken by a signal returns -1 cast to
-    // Socket* (it cannot extend lib::Error without touching the Cinux-Base
-    // submodule).  Map it to -EINTR here.
-    if (*r == reinterpret_cast<Socket*>(static_cast<uintptr_t>(-1))) {
-        return -cinux::kEintr;
+    if (named.family != socket->family()) {
+        return -kEafnosupport;
     }
-    int64_t new_fd = install_socket_fd(*r);
-    if (new_fd < 0) {
-        (*r)->close();  // free the accepted socket the fd table could not hold
-        return new_fd;
+    const auto kNamed = socket->adopt_peer(named);
+    if (!kNamed.ok()) {
+        return errno_of_socket(kNamed.error());
     }
-    // SOCK_CLOEXEC (Linux 02000000) -> mark the new fd close-on-exec.  SOCK_NONBLOCK
-    // is accepted but not plumbed (no per-fd nonblock flag yet -- follow-up).
-    constexpr uint64_t kSockCloexec = 02000000;
-    if ((flags & kSockCloexec) != 0) {
-        File* nf = current_fd_table().get(static_cast<int>(new_fd));
-        if (nf != nullptr) {
-            nf->cloexec = true;
+    const unsigned long long kDeadline =
+        MonotonicNanoseconds() + (75ULL * 1000ULL * 1000ULL * 1000ULL);
+    while (socket->handshake_pending() && MonotonicNanoseconds() < kDeadline) {
+        proc::Scheduler::self().yield();
+    }
+    if (socket->handshake_failed()) {
+        return -kEconnrefused;
+    }
+    if (socket->handshake_pending()) {
+        return -kEinprogress;
+    }
+    return 0;
+}
+
+long long HandleSendto(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    if ((frame.r10 & ~(kMsgDontwait | kMsgNosignal)) != 0) {
+        return -kEopnotsupp;
+    }
+    const unsigned long kLimit = send_ceiling_of(socket->type());
+    const auto          kCount = socket->type() == net::kSockStream
+                                     ? std::min(static_cast<unsigned long>(frame.rdx), kLimit)
+                                     : static_cast<unsigned long>(frame.rdx);
+    if (kCount > kLimit) {
+        return -kEmsgsize;
+    }
+    unsigned char payload[net::kMaxDatagramBytes] = {};
+    if (kCount != 0 && !uaccess::CopyFromUser(payload, frame.rsi, kCount)) {
+        return -kEfault;
+    }
+    net::SocketAddress destination{};
+    if (frame.r8 != 0) {
+        const long long kRead = read_sockaddr(frame.r8, frame.r9, destination);
+        if (kRead != 0) {
+            return kRead;
+        }
+    } else {
+        const auto kNamed = socket->report_peer(destination);
+        if (!kNamed.ok()) {
+            return -kEdestaddrreq;
         }
     }
-    // AF_UNIX peers carry no address/port -- leave the caller's sockaddr untouched.
-    if (s->domain() != kAfUnix) {
-        fill_sockaddr_in(addr, addrlen_ptr, remote, rport);
+    if (frame.r8 != 0 && destination.family != socket->family()) {
+        return -kEafnosupport;
     }
-    return new_fd;
+    return transmit_wait(
+        *socket, *held,
+        {.source = payload, .count = kCount, .flags = frame.r10, .destination = destination});
 }
 
-int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t /*protocol*/, uint64_t, uint64_t,
-                   uint64_t) {
-    if (type != static_cast<uint64_t>(kSockStream) && type != static_cast<uint64_t>(kSockDgram) &&
-        type != static_cast<uint64_t>(kSockRaw)) {
-        return -cinux::kEprotonosupport;
+long long HandleRecvfrom(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
     }
-    // AF_UNIX is self-contained (no NIC / L4 module), so build it here directly
-    // instead of going through create_socket() -- that factory is the ONE bridge
-    // to the production L4 stack (AF_INET) and returns nullptr when the stack is
-    // down.  Handling AF_UNIX here keeps it working in the test kernel (no
-    // net_init) and avoids touching drivers/net + net_stub in lockstep.
-    if (domain == static_cast<uint64_t>(kAfUnix)) {
-        Socket* s = new UnixSocket(static_cast<int>(type));
-        return install_socket_fd(s);
+    if ((frame.r10 & ~kMsgDontwait) != 0) {
+        return -kEopnotsupp;
     }
-    if (domain != static_cast<uint64_t>(kAfInet)) {
-        return -cinux::kEafnosupport;
+    const auto kCount = static_cast<unsigned long>(frame.rdx);
+    if (kCount == 0) {
+        return 0;
     }
-    Socket* s = create_socket(static_cast<int>(domain), static_cast<int>(type));
-    if (s == nullptr) {
-        return -cinux::kEprotonosupport;  // stack not up (no NIC) / unsupported
-    }
-    return install_socket_fd(s);
-}
-
-int64_t sys_bind(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint64_t, uint64_t) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
-    }
-    if (s->domain() == kAfUnix) {
-        char path[cinux::net::kUnixPathMax];
-        if (!parse_sockaddr_un(addr, addrlen, path)) {
-            return -cinux::kEfault;
+    unsigned char       payload[net::kMaxDatagramBytes] = {};
+    const unsigned long kWant = kCount < net::kMaxDatagramBytes ? kCount : net::kMaxDatagramBytes;
+    for (;;) {
+        net::SocketAddress from{};
+        const auto         kTaken = socket->receive(payload, kWant, &from);
+        if (kTaken.ok()) {
+            if (!uaccess::CopyToUser(frame.rsi, payload, kTaken.value())) {
+                return -kEfault;
+            }
+            if (frame.r8 != 0) {
+                const long long kWrote = write_sockaddr(frame.r8, frame.r9, from);
+                if (kWrote != 0) {
+                    return kWrote;
+                }
+            }
+            return static_cast<long long>(kTaken.value());
         }
-        auto r = s->bind_path(path);
-        return r.ok() ? 0 : -cinux::to_errno(r.error());
-    }
-    Ipv4Addr a{};
-    uint16_t port = 0;
-    if (!parse_sockaddr_in(addr, addrlen, &a, &port)) {
-        return -cinux::kEfault;
-    }
-    auto r = s->bind(port);
-    return r.ok() ? 0 : -cinux::to_errno(r.error());
-}
-
-int64_t sys_connect(uint64_t fd, uint64_t addr, uint64_t addrlen, uint64_t, uint64_t, uint64_t) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
-    }
-    if (s->domain() == kAfUnix) {
-        char path[cinux::net::kUnixPathMax];
-        if (!parse_sockaddr_un(addr, addrlen, path)) {
-            return -cinux::kEfault;
+        if (kTaken.error() != base::KernelError::kWouldBlock) {
+            return errno_of_socket(kTaken.error());
         }
-        auto r = s->connect_path(path);
-        return r.ok() ? 0 : -cinux::to_errno(r.error());
+        if ((held->status_flags & kOpenNonblock) != 0 || (frame.r10 & kMsgDontwait) != 0) {
+            return -kEagain;
+        }
+        if (signal_pending()) {
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
     }
-    Ipv4Addr a{};
-    uint16_t port = 0;
-    if (!parse_sockaddr_in(addr, addrlen, &a, &port)) {
-        return -cinux::kEfault;
-    }
-    auto r = s->connect(a, port);
-    return r.ok() ? 0 : -cinux::to_errno(r.error());
 }
 
-int64_t sys_listen(uint64_t fd, uint64_t backlog, uint64_t, uint64_t, uint64_t, uint64_t) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
+namespace {
+struct Message {
+    Word name;
+    uint32_t name_length;
+    uint32_t name_padding;
+    Word vectors;
+    Word vector_count;
+    Word control;
+    Word control_length;
+    uint32_t flags;
+    uint32_t flags_padding;
+};
+struct Vector { Word address; Word bytes; };
+struct ControlHeader { Word length; int level; int type; };
+static_assert(sizeof(Message) == 56);
+static_assert(sizeof(ControlHeader) == 16);
+constexpr Word kMaxVectors = 16;
+constexpr Word kMsgTrunc = 0x20;
+constexpr Word kMsgControlTrunc = 8;
+constexpr Word kMsgErrorQueue = 0x2000;
+
+long long read_message(Word address, Message& message, Vector* vectors, Word& capacity) {
+    if (!uaccess::CopyFromUser(&message, address, sizeof(message))) { return -kEfault; }
+    if (message.vector_count > kMaxVectors) { return -kEmsgsize; }
+    if (message.vector_count != 0 && !uaccess::CopyFromUser(
+            vectors, message.vectors, message.vector_count * sizeof(Vector))) { return -kEfault; }
+    capacity = 0;
+    for (Word index = 0; index < message.vector_count; ++index) {
+        if (vectors[index].bytes > (kUserAddressLimit - 1) - capacity) { return -kEinval; }
+        capacity += vectors[index].bytes;
     }
-    auto r = s->listen(static_cast<int>(backlog));
-    return r.ok() ? 0 : -cinux::to_errno(r.error());
+    return 0;
+}
+long long control_message(net::Socket& socket, Message& message, const net::SocketAddress& from) {
+    unsigned char bytes[64]{};
+    unsigned long used = 0;
+    auto append = [&](int level, int type, const void* value, unsigned long length) {
+        const ControlHeader header{sizeof(ControlHeader) + length, level, type};
+        const auto kPadded = (header.length + 7) & ~7ULL;
+        if (message.control == 0 || kPadded > message.control_length - used) {
+            message.flags |= kMsgControlTrunc;
+            return;
+        }
+        base::CopyBytes(bytes + used, &header, sizeof(header));
+        base::CopyBytes(bytes + used + sizeof(header), value, length);
+        used += kPadded;
+    };
+    if (socket.receive_timestamp.load()) {
+        const auto kStamp = from.received_ns != 0 ? from.received_ns : RealtimeNanoseconds();
+        const Word time[2]{kStamp / 1'000'000'000ULL, kStamp % 1'000'000'000ULL / 1000};
+        append(1, 29, time, sizeof(time));  // SCM_TIMESTAMP
+    }
+    if (socket.receive_ttl.load() && from.received_ttl != 0) {
+        const int kTtl = static_cast<int>(from.received_ttl);
+        append(0, 2, &kTtl, sizeof(kTtl));  // IP_TTL
+    }
+    message.control_length = used;
+    return used == 0 || uaccess::CopyToUser(message.control, bytes, used) ? 0 : -kEfault;
+}
 }
 
-int64_t sys_accept(uint64_t fd, uint64_t addr, uint64_t addrlen_ptr, uint64_t, uint64_t, uint64_t) {
-    return do_accept(fd, addr, addrlen_ptr, 0);  // flags=0 (sys_accept has no flags)
+long long HandleSendmsg(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket* socket = nullptr;
+    const auto kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) { return kFound; }
+    if ((frame.rdx & ~(kMsgDontwait | kMsgNosignal)) != 0) { return -kEopnotsupp; }
+    Message message{};
+    Vector vectors[kMaxVectors]{};
+    Word capacity = 0;
+    const auto kParsed = read_message(frame.rsi, message, vectors, capacity);
+    if (kParsed != 0) { return kParsed; }
+    if (message.control_length != 0) { return -kEopnotsupp; }
+    if (capacity > send_ceiling_of(socket->type())) { return -kEmsgsize; }
+    unsigned char payload[net::kMaxDatagramBytes]{};
+    unsigned long offset = 0;
+    for (Word index = 0; index < message.vector_count; ++index) {
+        const auto& part = vectors[index];
+        if (part.bytes != 0 && !uaccess::CopyFromUser(payload + offset, part.address, part.bytes)) {
+            return -kEfault;
+        }
+        offset += part.bytes;
+    }
+    net::SocketAddress target{};
+    if (message.name != 0) {
+        const auto kAddress = read_sockaddr(message.name, message.name_length, target);
+        if (kAddress != 0) { return kAddress; }
+        if (target.family != socket->family()) { return -kEafnosupport; }
+    } else if (!socket->report_peer(target).ok()) { return -kEdestaddrreq; }
+    return transmit_wait(*socket, *held,
+        {.source = payload, .count = capacity, .flags = frame.rdx, .destination = target});
 }
 
-int64_t sys_sendto(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/, uint64_t addr,
-                   uint64_t addrlen) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
+long long HandleRecvmsg(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket* socket = nullptr;
+    const auto kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) { return kFound; }
+    if ((frame.rdx & ~(kMsgDontwait | kMsgTrunc | kMsgErrorQueue)) != 0) { return -kEopnotsupp; }
+    if ((frame.rdx & kMsgErrorQueue) != 0) { return -kEagain; }
+    Message message{};
+    Vector vectors[kMaxVectors]{};
+    Word capacity = 0;
+    const auto kParsed = read_message(frame.rsi, message, vectors, capacity);
+    if (kParsed != 0) { return kParsed; }
+    Word checked = 0;
+    for (Word index = 0; index < message.vector_count && checked < net::kMaxDatagramBytes; ++index) {
+        const auto kPart = std::min(vectors[index].bytes, net::kMaxDatagramBytes - checked);
+        if (kPart != 0 && !UserRangeWritable(vectors[index].address, kPart)) { return -kEfault; }
+        checked += kPart;
     }
-    uint32_t n = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
-    std::unique_ptr<uint8_t[]> kbuf(new uint8_t[n ? n : 1]);
-    if (n != 0 && !copy_from_user(kbuf.get(), reinterpret_cast<void*>(buf), n)) {
-        return -cinux::kEfault;  // kbuf auto-freed
+    unsigned char payload[net::kMaxDatagramBytes]{};
+    for (;;) {
+        net::SocketAddress from{};
+        const auto kTaken = socket->receive(payload, std::min<Word>(capacity, net::kMaxDatagramBytes), &from);
+        if (!kTaken.ok()) {
+            if (kTaken.error() != base::KernelError::kWouldBlock) { return errno_of_socket(kTaken.error()); }
+            if ((frame.rdx & kMsgDontwait) != 0 || (held->status_flags & kOpenNonblock) != 0) {
+                return -kEagain;
+            }
+            if (signal_pending()) { return -kEintr; }
+            proc::Scheduler::self().yield();
+            continue;
+        }
+        unsigned long copied = 0;
+        for (Word index = 0; index < message.vector_count && copied < kTaken.value(); ++index) {
+            const auto kPart = std::min<Word>(vectors[index].bytes, kTaken.value() - copied);
+            if (kPart != 0 && !uaccess::CopyToUser(vectors[index].address, payload + copied, kPart)) {
+                return -kEfault;
+            }
+            copied += kPart;
+        }
+        message.flags = from.datagram_bytes > copied ? kMsgTrunc : 0;
+        if (message.name != 0) {
+            const auto kNamed = write_sockaddr(message.name, frame.rsi + offsetof(Message, name_length), from);
+            if (kNamed != 0) { return kNamed; }
+            message.name_length = from.family == net::kAfUnix ?
+                static_cast<uint32_t>(2 + from.name_bytes) : 16;
+        } else { message.name_length = 0; }
+        const auto kControl = control_message(*socket, message, from);
+        if (kControl != 0) { return kControl; }
+        if (!uaccess::CopyToUser(frame.rsi, &message, sizeof(message))) { return -kEfault; }
+        return static_cast<long long>((frame.rdx & kMsgTrunc) != 0 ?
+            std::max(from.datagram_bytes, copied) : copied);
     }
-    cinux::lib::ErrorOr<int64_t> r = (addr == 0) ? s->send(kbuf.get(), n) : [&] {
-        Ipv4Addr a{};
-        uint16_t port = 0;
-        return parse_sockaddr_in(addr, addrlen, &a, &port)
-                   ? s->sendto(a, port, kbuf.get(), n)
-                   : cinux::lib::ErrorOr<int64_t>(cinux::lib::Error::InvalidArgument);
-    }();
-    // kbuf freed at scope exit (send/sendto borrow, do not consume)
-    if (!r.ok()) {
-        return -cinux::to_errno(r.error());
-    }
-    return *r;
 }
 
-int64_t sys_recvfrom(uint64_t fd, uint64_t buf, uint64_t len, uint64_t /*flags*/, uint64_t addr,
-                     uint64_t addrlen_ptr) {
-    Socket* s = socket_from_fd(fd);
-    if (s == nullptr) {
-        return -cinux::kEbadf;
+long long HandleShutdown(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
     }
-    uint32_t n = len > kMaxSockBuf ? kMaxSockBuf : static_cast<uint32_t>(len);
-    std::unique_ptr<uint8_t[]> kbuf(new uint8_t[n ? n : 1]);
-    Ipv4Addr src{};
-    uint16_t sport = 0;
-    auto     r     = s->recv(kbuf.get(), n, &src, &sport);
-    if (!r.ok()) {
-        return -cinux::to_errno(r.error());  // kbuf auto-freed
+    if (frame.rsi > 2) {
+        return -kEinval;
     }
-    // EINTR sentinel: a blocking recv() woken by a signal returns -1 as a
-    // success-typed value (it cannot extend lib::Error without touching the
-    // Cinux-Base submodule).  Map it to -EINTR here, before any byte-count use.
-    if (*r == static_cast<int64_t>(-1)) {
-        return -cinux::kEintr;
+    if (frame.rsi != 1) {
+        return -kEopnotsupp;
     }
-    uint32_t got = static_cast<uint32_t>(*r);
-    if (got != 0 && !copy_to_user(reinterpret_cast<void*>(buf), kbuf.get(), got)) {
-        return -cinux::kEfault;  // kbuf auto-freed
+    const auto kClosed = socket->shutdown_write();
+    return kClosed.ok() ? 0 : errno_of_socket(kClosed.error());
+}
+
+long long HandleListen(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
     }
-    fill_sockaddr_in(addr, addrlen_ptr, src, sport);
-    return *r;  // kbuf freed at scope exit
+    const auto kOffered = socket->begin_listen(frame.rsi);
+    if (!kOffered.ok()) {
+        return kOffered.error() == base::KernelError::kNotSupported
+                   ? -kEopnotsupp
+                   : errno_of_socket(kOffered.error());
+    }
+    return 0;
+}
+
+
+long long HandleAccept(const SyscallFrame& frame) {
+    return accept_common(frame, 0);
+}
+
+long long HandleAccept4(const SyscallFrame& frame) {
+    if ((frame.r10 & ~(kSockCloexec | kSockNonblock)) != 0) {
+        return -kEinval;
+    }
+    return accept_common(frame, static_cast<Word>(frame.r10));
+}
+
+long long HandleGetsockname(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    net::SocketAddress local{};
+    const auto         kReported = socket->report_local(local);
+    if (!kReported.ok()) {
+        return errno_of_socket(kReported.error());
+    }
+    return write_sockaddr(frame.rsi, frame.rdx, local);
+}
+
+long long HandleGetpeername(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    net::SocketAddress peer{};
+    const auto         kReported = socket->report_peer(peer);
+    if (!kReported.ok()) {
+        return -kEnotconn;
+    }
+    return write_sockaddr(frame.rsi, frame.rdx, peer);
+}
+
+long long HandleSocketpair(const SyscallFrame& frame) {
+    if (frame.rdi != net::kAfUnix) {
+        return -kEafnosupport;
+    }
+    const auto kType = frame.rsi & ~(kSockCloexec | kSockNonblock);
+    if (frame.rdx != 0 || (kType != net::kSockStream && kType != net::kSockDgram)) {
+        return -kEinval;
+    }
+    base::Shared<net::Socket> pair[2];
+    if (!net::MakeLocalPair(static_cast<int>(kType), pair).ok()) {
+        return -kEnomem;
+    }
+    int   descriptors[2] = {-1, -1};
+    auto& files          = *CurrentTask()->files;
+    for (unsigned long index = 0; index < 2; ++index) {
+        const fs::FsNode kNode{
+            .opaque = pair[index].get(),
+            .type   = fs::InodeType::kFile,
+            .ino    = pair[index]->identity(),
+            .size   = 0,
+        };
+        const auto kSeat =
+            files.alloc(net::SocketOps(), pair[index].get(), kNode,
+                        {
+                            .status  = (frame.rsi & kSockNonblock) != 0 ? kOpenNonblock : 0,
+                            .cloexec = (frame.rsi & kSockCloexec) != 0,
+                        });
+        if (!kSeat.ok()) {
+            if (descriptors[0] >= 0) {
+                static_cast<void>(files.free(static_cast<unsigned long>(descriptors[0])));
+            }
+            return -kEmfile;
+        }
+        descriptors[index] = static_cast<int>(kSeat.value());
+    }
+    if (!uaccess::CopyToUser(frame.r10, descriptors, sizeof(descriptors))) {
+        static_cast<void>(files.free(static_cast<unsigned long>(descriptors[0])));
+        static_cast<void>(files.free(static_cast<unsigned long>(descriptors[1])));
+        return -kEfault;
+    }
+    return 0;
+}
+
+long long HandleSetsockopt(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    if (frame.r8 < sizeof(unsigned int)) {
+        return -kEinval;
+    }
+    unsigned int value = 0;
+    if (frame.r10 == 0 || !uaccess::CopyFromUser(&value, frame.r10, sizeof(value))) {
+        return -kEfault;
+    }
+    const auto kLevel = frame.rsi;
+    const auto kName  = frame.rdx;
+    if (kLevel == kSolSocket) {
+        if (kName == 29) { socket->receive_timestamp.store(value != 0); return 0; }
+        if (kName == kSoReuseaddr || kName == kSoSndbuf || kName == kSoRcvbuf ||
+            kName == kSoBroadcast) {
+            return 0;
+        }
+        return -kEnoprotoopt;
+    }
+    if (kLevel == kIpProtoIp && (kName == kIpTtl || kName == kIpMulticastTtl)) {
+        return 0;
+    }
+    if (kLevel == kIpProtoIp && kName == 12) {
+        socket->receive_ttl.store(value != 0);
+        return 0;
+    }
+    return -kEnoprotoopt;
+}
+
+long long HandleGetsockopt(const SyscallFrame& frame) {
+    base::Shared<fs::OpenFile> held;
+    net::Socket*               socket = nullptr;
+    const long long            kFound = socket_of(frame.rdi, &socket, held);
+    if (kFound != 0) {
+        return kFound;
+    }
+    if (frame.r10 == 0 || frame.r8 == 0) {
+        return -kEfault;
+    }
+    unsigned int answer = 0;
+    const auto   kLevel = frame.rsi;
+    const auto   kName  = frame.rdx;
+    if (kLevel == kSolSocket && kName == kSoType) {
+        answer = static_cast<unsigned int>(socket->type());
+    } else if (kLevel == kSolSocket && kName == kSoRcvbuf) {
+        answer =
+            static_cast<unsigned int>(net::kUdpSocketPayloadBytes * net::kUdpSocketQueueDatagrams);
+    } else {
+        return -kEnoprotoopt;
+    }
+    uint32_t length = 0;
+    if (!uaccess::CopyFromUser(&length, frame.r8, sizeof(length))) {
+        return -kEfault;
+    }
+    length = std::min(length, static_cast<uint32_t>(sizeof(answer)));
+    if (!uaccess::CopyToUser(frame.r10, &answer, length) ||
+        !uaccess::CopyToUser(frame.r8, &length, sizeof(length))) {
+        return -kEfault;
+    }
+    return 0;
 }
 
 }  // namespace cinux::syscall

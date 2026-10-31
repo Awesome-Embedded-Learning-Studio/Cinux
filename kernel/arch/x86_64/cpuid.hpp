@@ -1,35 +1,105 @@
 /**
- * @file kernel/arch/x86_64/cpuid.hpp
- * @brief CPUID helpers (F4-B0)
+ * @file    cpuid.hpp
+ * @brief   The named facts the processor answers about itself.
  *
- * Used so far by AT_HWCAP emission (user_launch.cpp) so glibc's IFUNC resolvers
- * can pick SIMD-optimized memcpy/strlen/... paths instead of falling back to the
- * generic C loops. Linux puts CPUID.01H:EDX (FPU/SSE/SSE2/...) into AT_HWCAP;
- * the extended ECX bits and CPUID.07H leaves go to AT_HWCAP2, which Cinux does
- * not yet emit (follow-up if a toolchain binary needs AVX-class dispatch).
+ * CPUID is the processor's self-description service: one instruction,
+ * a leaf number in EAX (and a subleaf in ECX for the strided leaves),
+ * four words of answer. The kernel asks it exactly one kind of
+ * question — "is this CR4 bit implemented?" — and every protection bit
+ * from the 2010s answers through leaf 7. Header inline on purpose: the
+ * question carries no state and each world asks it for free.
  *
- * Freestanding-friendly: no <bitset>, just inline asm + uint32_t outs.
+ * @author  Charliechen114514
+ * @date    2026-10-23
+ * @version 0.3.0
+ * @since   0.3.0
+ * @ingroup kernel_arch
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cstdint>
-
 namespace cinux::arch {
 
-/// Run CPUID with @p leaf in EAX (sub-leaf 0). Writes the four register outs.
-inline void cpuid(uint32_t leaf, uint32_t& eax, uint32_t& ebx, uint32_t& ecx, uint32_t& edx) {
-    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(leaf), "c"(0));
+/// The four words CPUID fills for one (leaf, subleaf) question.
+struct CpuIdWords {
+    /// EAX on return; for leaf 0 it names the highest standard leaf.
+    unsigned int eax{};
+
+    /// EBX on return; leaf 7 carries the protection-feature bitmap here.
+    unsigned int ebx{};
+
+    /// ECX on return.
+    unsigned int ecx{};
+
+    /// EDX on return.
+    unsigned int edx{};
+};
+
+/**
+ * @brief         Asks the processor one CPUID question.
+ *
+ * @param[in]     leaf     The main selector, EAX on entry.
+ * @param[in]     subleaf  The strided selector, ECX on entry; leaves
+ *                         without strides ignore it and pass zero.
+ * @return        The four answer words.
+ * @note          Asking a leaf beyond the processor's knowledge is
+ *                undefined territory — the named facts below ask leaf 0
+ *                first and so should any new question.
+ * @warning       None
+ * @throws        None
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+inline CpuIdWords ReadCpuId(unsigned int leaf, unsigned int subleaf) {
+    CpuIdWords   answer{};
+    // NOLINTNEXTLINE(misc-const-correctness)
+    unsigned int selected = leaf;
+    // NOLINTNEXTLINE(misc-const-correctness)
+    unsigned int stride   = subleaf;
+    asm volatile("cpuid" : "+a"(selected), "+b"(answer.ebx), "+c"(stride), "+d"(answer.edx));
+    answer.eax = selected;
+    answer.ecx = stride;
+    return answer;
 }
 
-/// AT_HWCAP value: CPUID.01H feature flags. Returns EDX zero-extended to 64 bits
-/// (Linux's classic AT_HWCAP encoding: FPU=bit0, ... SSE=bit25, SSE2=bit26, HT).
-/// glibc reads these off AT_HWCAP at startup; 0 (the old value) disables every
-/// SIMD path and forces the slow generic implementations.
-inline uint64_t hwcap_from_cpuid() {
-    uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
-    cpuid(1, eax, ebx, ecx, edx);
-    return static_cast<uint64_t>(edx);
+/**
+ * @brief         Reports whether the processor implements SMEP.
+ *
+ * @return        True when CPUID leaf 7 names CR4 bit 20 available.
+ * @note          Writing the bit into CR4 on a processor without it
+ *                fails the whole write with #GP, so the enable step
+ *                asks here first and skips cleanly when the answer is
+ *                no.
+ * @warning       None
+ * @throws        None
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+inline bool HasSmep() {
+    if (ReadCpuId(0U, 0U).eax < 7U) {
+        return false;
+    }
+    return (ReadCpuId(7U, 0U).ebx & (1U << 7U)) != 0U;
+}
+
+/**
+ * @brief         Reports whether the processor implements SMAP.
+ *
+ * @return        True when CPUID leaf 7 names CR4 bit 21 available.
+ * @note          Same discipline as SMEP: ask first, write only on a
+ *                yes, and the mechanism printout tells the truth when
+ *                the answer is no.
+ * @warning       None
+ * @throws        None
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+inline bool HasSmap() {
+    if (ReadCpuId(0U, 0U).eax < 7U) {
+        return false;
+    }
+    return (ReadCpuId(7U, 0U).ebx & (1U << 20U)) != 0U;
 }
 
 }  // namespace cinux::arch

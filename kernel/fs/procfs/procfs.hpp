@@ -1,151 +1,226 @@
 /**
- * @file kernel/fs/procfs.hpp
- * @brief ProcFS -- in-memory /proc filesystem for process introspection (F6-M2)
+ * @file    procfs.hpp
+ * @brief   The process file system: living facts behind read-only names.
  *
- * ProcFS is a virtual, memory-only filesystem (no on-disk backend) mounted at
- * /proc.  It exposes the live task set as a directory tree, mirroring Linux's
- * /proc process-introspection model:
+ * Every other backend answers with bytes some medium holds. This one
+ * answers with facts the kernel knows right now: the memory counters,
+ * the task roll, each task's vital signs. Nothing is stored — a lookup
+ * mints a node for a name, a read generates the bytes on the spot, and
+ * the next read may honestly differ because the facts did. The class
+ * knows nothing about tasks or memory itself: every fact arrives
+ * through the injected source, the same seam devfs gives its devices,
+ * so a host test drives the whole tree with fakes.
  *
- *   /proc                     directory; readdir lists one entry per live PID
- *   /proc/<pid>               directory; readdir lists the per-process files
- *   /proc/<pid>/stat          pseudo-file; content generated on read
- *   /proc/<pid>/cmdline       pseudo-file; content generated on read
- *
- * The root directory is *dynamic* (its entries are the live PIDs snapshotted
- * from the signal task registry at readdir time), which is the key difference
- * from DevFS (F6-M3), whose root is a fixed node table.  The readdir snapshot
- * is taken via signal_enumerate_task_pids (F6-M2 batch 2) under the registry
- * lock; lookup validates a PID via signal_find_task_by_pid, so /proc only ever
- * exposes live tasks (a PID that exits between readdir and lookup yields
- * NotFound, exactly like Linux).
- *
- * Inode identity: close() frees only the File, never the Inode (file.cpp), so
- * every inode a lookup returns must be owned by and outlive ProcFs.  ProcFs
- * holds fixed pools indexed by PID -- root + per-PID directory/stat/cmdline --
- * with each leaf encoding its PID in `ino` and ProcFs in `fs_private`, so the
- * InodeOps subclasses (which receive only the Inode*) can recover both.  One
- * PID maps to one stable inode, so concurrent lookups of different PIDs never
- * race on a shared scratch slot.  PID_MAX (256) bounds the pools.
- *
- * procfs.cpp reads the kernel task registry and is therefore kernel-linked
- * (not host-testable); it is exercised via the in-QEMU test run_procfs_tests.
- *
- * Namespace: cinux::fs
+ * @author  Charliechen114514
+ * @date    2026-10-19
+ * @version 0.1
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <string_view>
 
-#include <cinux/expected.hpp>
-
-#include "fs/vfs_filesystem.hpp"
+#include "cinux/result.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/proc/task_snapshot.hpp"
 
 namespace cinux::fs {
 
-/// @name Pseudo-file ops factories (defined in procfs_pseudo.cpp).
-/// procfs.cpp mount() calls these so the InodeOps subclasses can live in a
-/// separate translation unit (procfs.cpp stays under the 500-line cap).
-///@{
-InodeOps* procfs_new_meminfo_ops();  // /proc/meminfo (F-ECO busybox `free`)
-InodeOps* procfs_new_cpuinfo_ops();  // /proc/cpuinfo (F4 SMP)
-///@}
+/// Where the per-pid inode numbers begin, above the fixed names.
+inline constexpr unsigned long kProcPidBase = 0x100;
 
-/// Upper bound on PID values.  Must match PidAllocator::PID_MAX
-/// (kernel/proc/pid.hpp); ProcFS keeps a fixed inode pool indexed by PID, so
-/// the bound is asserted in procfs.cpp.  PIDs are 1..kProcPidMax (slot 0 is
-/// unused, matching PidAllocator where PID 0 means "uninitialised").
-static constexpr int kProcPidMax = 256;
+/// The self/exe node's own inode number.
+inline constexpr unsigned long kProcExeIno = 4;
 
-/// Maximum length of a /proc entry name (decimal PID, or "stat"/"cmdline"),
-/// including the NUL terminator.
-static constexpr uint32_t PROCFS_NAME_MAX = 32;
+/// The devices node's own inode number.
+inline constexpr unsigned long kProcDevicesIno = 5;
 
-/// Linux st_mode file-type bits used by ProcFS entries.  Directories are
-/// read-only (0555); pseudo-files are read-only regular files (0444).
-static constexpr uint32_t kProcSIfDir = 0x4000;  ///< S_IFDIR
-static constexpr uint32_t kProcSIfReg = 0x8000;  ///< S_IFREG
+/// The net/dev node's own inode number.
+inline constexpr unsigned long kProcNetDevIno = 6;
+
+/// The longest interface name the net/dev node prints.
+inline constexpr unsigned long kProcIfNameMax = 16;
+
+/// The character class's name, as the devices node prints it.
+inline constexpr const char* kProcClassCharacter = "character";
+
+/// The block class's name, as the devices node prints it.
+inline constexpr const char* kProcClassBlock = "block";
+
+/// The network class's name, as the devices node prints it.
+inline constexpr const char* kProcClassNetwork = "network";
+
+/// The longest class name plus its terminator.
+inline constexpr unsigned long kProcClassMax = 10;
 
 /**
- * @brief In-memory /proc filesystem (process introspection, no on-disk backend)
- *
- * Usage:
- *   ProcFs procfs;
- *   procfs.mount();
- *   vfs_mount_add("/proc", &procfs);
- *   Inode* root = procfs.lookup("");        // -> /proc directory
- *   Inode* dir  = procfs.lookup("1");       // -> /proc/1 directory (live PID 1)
- *   Inode* st   = procfs.lookup("1/stat");  // -> /proc/1/stat pseudo-file
+ * @brief   One seated device's facts, as the devices node tells them.
+ * @note    The class travels as its name — character, block, network —
+ *          so this file keeps no driver types of its own.
+ * @since   0.6.0
+ * @ingroup kernel_fs
  */
-class ProcFs : public FileSystem {
-public:
-    ProcFs();
-    ~ProcFs() override;
-
-    cinux::lib::ErrorOr<void>   mount() override;
-    cinux::lib::ErrorOr<Inode*> lookup(const char* path) override;
-    // Single-component lookup for the vfs_lookup resolver (F-USABILITY batch 4).
-    // vfs_lookup walks one component at a time and follows symlinks; without
-    // this override the FileSystem base returns ENOSYS and open("/proc/meminfo")
-    // fails -> busybox free reports "Function not implemented".
-    cinux::lib::ErrorOr<Inode*> lookup_child(const Inode* parent, const char* name,
-                                             uint32_t namelen) override;
-
-    /// Whether mount() has run (F6-M1: procfs::instance() exposes the singleton
-    /// only once mounted, so sys_mount -t proc refuses an uninitialised FS).
-    bool is_mounted() const { return mounted_; }
-
-private:
-    // One InodeOps instance per inode kind, owned.  Allocated in mount(), freed
-    // in ~ProcFs.  All inodes of a kind share the single ops instance, exactly
-    // as DevFs shares one DevDirOps across the root.
-    InodeOps* root_dir_ops_{nullptr};
-    InodeOps* pid_dir_ops_{nullptr};
-    InodeOps* stat_file_ops_{nullptr};
-    InodeOps* cmdline_file_ops_{nullptr};
-    InodeOps* meminfo_file_ops_{nullptr};  // F-ECO busybox: /proc/meminfo
-    InodeOps* cpuinfo_file_ops_{nullptr};  // F4 SMP: /proc/cpuinfo
-
-    /// /proc root directory inode.  readdir snapshots the live PID registry.
-    Inode root_inode_{};
-
-    /// /proc/meminfo pseudo-file inode (F-ECO busybox).  read regenerates the
-    /// content from g_pmm; ino is fixed (not a PID).
-    Inode meminfo_inode_{};
-
-    /// /proc/cpuinfo pseudo-file inode (F4 SMP).  read regenerates content from
-    /// g_acpi_info (cpu_count + apic_ids); ino is fixed (not a PID).
-    Inode cpuinfo_inode_{};
-
-    /// /proc/<pid> directory inodes, indexed [pid] (slot 0 unused).  ino = pid,
-    /// fs_private = this ProcFs.  Stamped eagerly in mount(); lookup still
-    /// validates liveness via signal_find_task_by_pid before handing one out.
-    Inode pid_dir_inodes_[kProcPidMax + 1]{};
-
-    /// /proc/<pid>/stat pseudo-file inodes, indexed [pid].  ino = pid; read
-    /// regenerates the line from the live Task fields.
-    Inode stat_inodes_[kProcPidMax + 1]{};
-
-    /// /proc/<pid>/cmdline pseudo-file inodes, indexed [pid].  ino = pid.
-    Inode cmdline_inodes_[kProcPidMax + 1]{};
-
-    bool mounted_{false};
+struct ProcDeviceFacts {
+    char          name[kFsNameMax]          = {};  ///< The device's name.
+    char          class_name[kProcClassMax] = {};  ///< The device class, spelled out.
+    unsigned long number = 0;  ///< The packed identity, zero for class-less seats.
 };
 
 /**
- * @brief Boot hook: construct ProcFs, mount it, and register it at /proc.
- *
- * Kernel-only implementation in procfs_init.cpp (linked into the kernel, not
- * the host tests).  Separate from procfs.cpp so procfs.cpp stays free of boot
- * I/O (kprintf) -- the §14 file-gate pattern, same as DevFs.
- *
- * @return true on success, false if mount() or vfs_mount_add(/proc) fails.
+ * @brief Identification facts for one online logical processor.
+ * @ingroup kernel_fs
  */
-namespace procfs {
-bool    init();
-ProcFs* instance();  ///< Boot-owned ProcFs singleton (F6-M1: sys_mount -t proc).
-                     ///< nullptr before procfs::init().
-}  // namespace procfs
+struct ProcCpuFacts {
+    unsigned long processor = 0;     ///< Online logical processor index.
+    unsigned int  apic_id   = 0;     ///< Hardware interrupt-controller identity.
+    unsigned int  family    = 0;     ///< Decoded CPU family.
+    unsigned int  model     = 0;     ///< Decoded CPU model.
+    unsigned int  stepping  = 0;     ///< Processor revision.
+    char          vendor_id[13]{};   ///< Terminated CPUID vendor identifier.
+    char          model_name[49]{};  ///< Terminated CPUID brand string.
+    char          flags[96]{};       ///< Space-separated hardware feature names.
+};
+
+/**
+ * @brief   The facts one procfs instance answers with.
+ * @note    Every seat is a function pointer over a context the
+ *          assembler owns; the kernel wires the scheduler, the page
+ *          manager and the current task, a test wires fakes. Null
+ *          seats answer as empty facts — an unread source is not an
+ *          error, it is a quiet file.
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ */
+struct ProcSource {
+    /// Generates the live mount table in Linux mounts format.
+    unsigned long (*mounts)(void* context, char* out, unsigned long capacity) = nullptr;
+
+    /// Returns elapsed monotonic nanoseconds since boot.
+    unsigned long long (*uptime_ns)(void* context) = nullptr;
+
+    /// Names the ordinal-th living process leader; false past the last.
+    bool (*nth_tgid)(void* context, unsigned long ordinal, unsigned long& tgid) = nullptr;
+
+    /// Copies one task's vital signs; false for no such task.
+    bool (*snapshot)(void* context, unsigned long tgid, proc::TaskSnapshot& into) = nullptr;
+
+    /// Copies the current task's program path; returns its length.
+    unsigned long (*exe_path)(void* context, char* out, unsigned long cap) = nullptr;
+
+    /// Reads the current task's program bytes; false past the end.
+    bool (*exe_bytes)(void* context, unsigned long offset, void* sink, unsigned long count,
+                      unsigned long& gave) = nullptr;
+
+    /// The current task's program size in bytes.
+    unsigned long (*exe_size)(void* context) = nullptr;
+
+    /// The memory counters, in pages.
+    void (*memory)(void* context, unsigned long& free_pages, unsigned long& total_pages) = nullptr;
+
+    /// Byte size of one page returned by the memory source.
+    unsigned long memory_page_bytes = 0;
+
+    /// Names the ordinal-th seated device; false past the last.
+    bool (*nth_device)(void* context, unsigned long ordinal, ProcDeviceFacts& into) = nullptr;
+
+    /// Copies the ordinal-th interface's name into a ProcIfNameMax
+    /// buffer; false past the last. The net/dev node answers with a
+    /// header and one all-zero row per name — the family keeps no
+    /// per-interface traffic books yet, and the node says so by
+    /// printing honest zeros rather than invented bytes.
+    bool (*nth_net_iface)(void* context, unsigned long ordinal, char* out) = nullptr;
+
+    /// Copies one online processor's identification; false past the last.
+    bool (*nth_cpu)(void* context, unsigned long ordinal, ProcCpuFacts& into) = nullptr;
+
+    /// The word every seat receives back.
+    void* context = nullptr;
+};
+
+/**
+ * @brief   Read-only directory of living facts, generated on demand.
+ * @note    The root holds the fixed names — meminfo, self — beside one
+ *          directory per living process leader; each process directory
+ *          holds stat and cmdline. The lookups gate on life: a dead
+ *          pid answers NotFound, never stale facts. self/exe is the
+ *          one lie worth telling exactly: it stands for the current
+ *          task's program, and its bytes come from the source's
+ *          delegate so exec itself can read through it.
+ * @since   0.5.0
+ * @ingroup kernel_fs
+ */
+class ProcFs {
+public:
+    ProcFs() = default;
+
+    ProcFs(const ProcFs&)            = delete;
+    ProcFs& operator=(const ProcFs&) = delete;
+
+    /**
+     * @brief         Installs the facts this instance answers with.
+     *
+     * @param[in]     source   The facts and their context.
+     * @return        None
+     * @note          Bring-up wiring, single-threaded, before the mount
+     *                goes live. The source is borrowed for the
+     *                instance's whole life.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void set_source(const ProcSource& source);
+
+    [[nodiscard]] base::Result<FsNode>        lookup(std::string_view path);
+    [[nodiscard]] base::Result<FsNode>        make_file(std::string_view path);
+    [[nodiscard]] base::Result<FsNode>        make_dir(std::string_view path);
+    [[nodiscard]] base::Result<void>          unlink(std::string_view path);
+    [[nodiscard]] base::Result<unsigned long> read(FsNode node, unsigned long offset, void* sink,
+                                                   unsigned long count);
+    [[nodiscard]] base::Result<unsigned long> write(FsNode node, unsigned long offset,
+                                                    const void* source, unsigned long count);
+    [[nodiscard]] base::Result<bool>          read_dir(FsNode node, unsigned long index,
+                                                       FsDirent& entry) const;
+    [[nodiscard]] base::Result<void>          stat(FsNode node, FsStat& probed);
+    /**
+     * @brief         Pins a node for an open descriptor.
+     *
+     * @param[in]     node   Handle from lookup.
+     * @return        None
+     * @note          No-op: facts have no life to hold.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void                                      retain(FsNode node);
+
+    /**
+     * @brief         Drops an open descriptor's pin on a node.
+     *
+     * @param[in]     node   Handle from lookup.
+     * @return        None
+     * @note          No-op: facts have no life to hold.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    void               release(FsNode node);
+    [[nodiscard]] bool readable(FsNode node);
+    /**
+     * @brief         Asks one device question.
+     *
+     * @param[in]     node       Any handle.
+     * @param[in]     word       The question word.
+     * @param[in]     argument   The question's argument word.
+     * @return        -ENOTTY: no fact is a device.
+     * @since         0.5.0
+     * @ingroup       kernel_fs
+     */
+    long long          ioctl(FsNode node, unsigned long long word, unsigned long long argument);
+    [[nodiscard]] base::Result<FsNode> adopt_open(FsNode node, std::string_view path);
+
+private:
+    ProcSource source_{};
+};
 
 }  // namespace cinux::fs

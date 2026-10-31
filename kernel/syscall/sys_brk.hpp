@@ -1,29 +1,37 @@
 /**
- * @file kernel/syscall/sys_brk.hpp
- * @brief sys_brk handler declaration (F2-M3)
- *
- * Adjusts the program break (user heap end).  Lazy: only moves brk_current --
- * the Heap VMA (created by execve) covers the whole window and pages are
- * demand-paged on first access.
- *
- * Namespace: cinux::syscall
+ * @file    sys_brk.hpp
+ * @brief   brk: moving the break, Linux's return-shape and all.
+ * @author  Charliechen114514
+ * @date    2026-10-14
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Set the program break (Linux syscall 12)
+ * @brief         Serves brk(target).
  *
- * @param addr  New break address, or 0 to query.
- * @return The new break on success, the current break if @p addr is out of
- *         range (< brk_initial or > brk_max).  Never returns an error.
+ * @param[in]     frame   The trap frame; rdi carries the break wanted,
+ *                        0 only asks.
+ * @return        The break after the call — the new one on success, the
+ *                standing one on refusal. brk speaks in addresses, not
+ *                in errnos; a negative return would be a legal address,
+ *                so failure reads as "the break did not move".
+ * @note          No page is mapped or unmapped: the cursor moves and the
+ *                heap span's end moves with it, and pages inside the
+ *                span arrive when their faults ask.
+ * @warning       None
+ * @throws        None
+ * @since         0.2.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_brk(uint64_t addr, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleBrk(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

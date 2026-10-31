@@ -1,39 +1,47 @@
-/**
- * @file kernel/syscall/sys_flock.cpp
- * @brief sys_flock handler (F6-M1 B2)
- *
- * Resolves @p fd to its File/Inode and delegates to FileLockManager with the
- * current task as the lock owner. The ring-internal do_flock_kernel takes the
- * Inode + Task explicitly so mechanism tests can drive it without a real fd
- * table (stack Task + stack Inode, like test_creds' do_ pattern).
- */
-
 #include "kernel/syscall/sys_flock.hpp"
 
-#include <stdint.h>
-
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"         // File (via current_fd_table().get)
-#include "kernel/fs/file_lock.hpp"    // FileLockManager
-#include "kernel/fs/vfs_mount.hpp"    // current_fd_table
-#include "kernel/proc/scheduler.hpp"  // Scheduler::current
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/file_lock.hpp"
+#include "kernel/fs/file_table.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signals.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
 
 namespace cinux::syscall {
 
-int64_t do_flock_kernel(cinux::fs::Inode* inode, cinux::proc::Task* owner, uint32_t operation) {
-    return cinux::fs::FileLockManager::flock(inode, owner, operation);
-}
-
-int64_t sys_flock(uint64_t fd, uint64_t operation, uint64_t, uint64_t, uint64_t, uint64_t) {
-    cinux::fs::File* file = cinux::fs::current_fd_table().get(static_cast<int>(fd));
-    if (file == nullptr) {
+long long HandleFlock(const SyscallFrame& frame) {
+    if (frame.rdi >= fs::kFileTableMax) {
         return -kEbadf;
     }
-    cinux::proc::Task* owner = cinux::proc::Scheduler::current();
-    if (owner == nullptr) {
-        return -kEinval;  // no current task -- cannot own a lock
+    const auto kOperation                                = static_cast<unsigned long>(frame.rsi);
+    const bool kNoBlock                                  = (kOperation & fs::kFlockNb) != 0;
+    const base::Result<base::Shared<fs::OpenFile>> kLive = CurrentTask()->files->get(frame.rdi);
+    if (!kLive.ok()) {
+        return -kEbadf;
     }
-    return do_flock_kernel(file->inode, owner, static_cast<uint32_t>(operation));
+    fs::FileLocks& locks = fs::FileLocks::self();
+    for (;;) {
+        const base::Result<void> kAttempt =
+            locks.attempt(*kLive.value(), kOperation & ~fs::kFlockNb);
+        if (kAttempt.ok()) {
+            return 0;
+        }
+        if (kAttempt.error() != base::KernelError::kWouldBlock) {
+            return -ErrnoFrom(kAttempt.error());
+        }
+        if (kNoBlock) {
+            return -kEagain;
+        }
+        const proc::Task* const kSelf = CurrentTask();
+        if (proc::HasPendingSignal(*kSelf)) {
+            return -kEintr;
+        }
+        proc::Scheduler::self().yield();
+    }
 }
 
 }  // namespace cinux::syscall

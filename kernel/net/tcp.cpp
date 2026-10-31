@@ -1,447 +1,1070 @@
-/**
- * @file kernel/net/tcp.cpp
- * @brief TcpModule -- checksum gate + 3-way handshake FSM (batches 1-2).
- *
- * handle() verifies the TCP pseudo-header checksum (proto 6, mandatory -- unlike
- * UDP a 0 checksum is NOT "no checksum"), then advances the connection state
- * machine for the matching 4-tuple: passive-open a SYN to a listened port
- * ( SYN -> SYN-ACK ), complete an active open on the SYN-ACK ( -> ACK ), and
- * reach ESTABLISHED on the 3rd ACK.  An unroutable SYN is answered with RST;
- * an inbound RST tears down any connection.  Data + 4-way teardown land in
- * batch 3.  Zero kprintf.
- *
- * Namespace: cinux::net
- */
-
 #include "kernel/net/tcp.hpp"
 
-#include <cinux/checksum.hpp>
-#include <cstring>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/net_stack.hpp"  // InDevice, NetStack
+#include <algorithm>
+#include <new>
+
+#include "cinux/byte_order.hpp"
+#include "cinux/checksum.hpp"
+#include "cinux/result.hpp"
+#include "kernel/net/ipv4.hpp"
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
+#include "kernel/time/timer_table.hpp"
 
 namespace cinux::net {
 
 namespace {
 
-/// A fixed window every segment advertises -- no flow control this milestone
-/// (sliding window / retransmit are follow-up).  Nonzero so a peer has room.
-constexpr uint16_t kTcpWindow = 8192;
+constexpr uint32_t kIsnStep = 0x9E3779B9;
 
-/// Local RAII heap buffer (no <memory>): the TX/RX checksum buffers (up to
-/// ~1.5KB) stay off the kernel stack.  See ipv4.cpp's HeapBuf for the
-/// freestanding rationale (new[]/delete[] via crt_stub, not <memory>).
-struct HeapBuf {
-    uint8_t* p;
-    explicit HeapBuf(size_t n) : p(new uint8_t[n]) {}
-    ~HeapBuf() { delete[] p; }
-    HeapBuf(const HeapBuf&)            = delete;
-    HeapBuf& operator=(const HeapBuf&) = delete;
-};
+bool seq_before(uint32_t left, uint32_t right) {
+    return static_cast<int32_t>(left - right) < 0;
+}
 
-/// @brief Write the 12-byte TCP pseudo-header at @p ph (proto 6).  @p tcp_len is
-///        the TCP segment length (header + data); the receiver sums the SAME run
-///        the sender did, so verify matches compute.  Identical to UDP's, bar
-///        the protocol byte.
-void build_pseudo_header(uint8_t* ph, Ipv4Addr src, Ipv4Addr dst, uint16_t tcp_len) {
-    for (int i = 0; i < 4; ++i) {
-        ph[i]     = src.oct[i];
-        ph[4 + i] = dst.oct[i];
+bool seq_before_eq(uint32_t left, uint32_t right) {
+    return static_cast<int32_t>(left - right) <= 0;
+}
+
+bool past_fin(TcpState state) {
+    return state == TcpState::kCloseWait || state == TcpState::kClosing ||
+           state == TcpState::kTimeWait || state == TcpState::kLastAck;
+}
+
+void build_pseudo_header(unsigned char* pseudo, uint32_t source, uint32_t destination,
+                         uint32_t segment_bytes) {
+    base::WriteWord32Be(pseudo, 0, source);
+    base::WriteWord32Be(pseudo, 4, destination);
+    pseudo[8] = 0;
+    pseudo[9] = kIpv4ProtocolTcp;
+    base::WriteWord16Be(pseudo, 10, static_cast<uint16_t>(segment_bytes));
+}
+
+void seal_checksum(unsigned char* segment, size_t segment_bytes, uint32_t source,
+                   uint32_t destination) {
+    unsigned char pseudo[12] = {};
+    build_pseudo_header(pseudo, source, destination, segment_bytes);
+    base::InternetChecksum builder;
+    builder.add(pseudo, sizeof(pseudo));
+    builder.add(segment, segment_bytes);
+    uint16_t checksum = builder.value();
+    if (checksum == 0) {
+        checksum = 0xFFFF;
     }
-    ph[8]  = 0;  // zero
-    ph[9]  = kIpProtoTcp;
-    ph[10] = static_cast<uint8_t>(tcp_len >> 8);
-    ph[11] = static_cast<uint8_t>(tcp_len & 0xFF);
+    base::WriteWord16Be(segment, 16, checksum);
 }
 
 }  // namespace
 
-// ============================================================
-// Connection table / listeners
-// ============================================================
-
-bool TcpModule::listen(uint16_t local_port, TcpListener& listener) {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (listens_[i].l != nullptr && listens_[i].port == local_port) {
-            return false;  // already listened
-        }
-    }
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (listens_[i].l == nullptr) {
-            listens_[i].port = local_port;
-            listens_[i].l    = &listener;
-            return true;
-        }
-    }
-    return false;  // table full
+void TcpModule::init(const DatagramSink& sink, uint32_t own_address) {
+    const auto kGate = gate_.guard();
+    sink_            = sink;
+    own_address_     = own_address;
+    stats_           = {};
 }
 
-void TcpModule::stop_listen(uint16_t local_port) {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (listens_[i].l != nullptr && listens_[i].port == local_port) {
-            listens_[i].l    = nullptr;
-            listens_[i].port = 0;
+void TcpModule::aim(const DatagramSink& sink, uint32_t own_address) {
+    const auto kGate = gate_.guard();
+    sink_            = sink;
+    own_address_     = own_address;
+}
+
+TcpModule::Connection* TcpModule::find_connection(uint32_t remote_address, uint16_t remote_port,
+                                                  uint16_t local_port) {
+    for (auto& seat : connections_) {
+        if (!seat.used) {
+            continue;
+        }
+        if (seat.remote_address == remote_address && seat.remote_port == remote_port &&
+            seat.local_port == local_port) {
+            return &seat;
+        }
+    }
+    return nullptr;
+}
+
+TcpModule::Connection* TcpModule::live_connection(const TcpTicket& ticket) {
+    if (ticket.slot >= kTcpConnectionSeats) {
+        return nullptr;
+    }
+    Connection& seat = connections_[ticket.slot];
+    if (!seat.used || seat.stamp != ticket.stamp) {
+        return nullptr;
+    }
+    return &seat;
+}
+
+const TcpModule::Connection* TcpModule::live_connection(const TcpTicket& ticket) const {
+    if (ticket.slot >= kTcpConnectionSeats) {
+        return nullptr;
+    }
+    const Connection& seat = connections_[ticket.slot];
+    if (!seat.used || seat.stamp != ticket.stamp) {
+        return nullptr;
+    }
+    return &seat;
+}
+
+TcpModule::ListenSeat* TcpModule::find_listen(uint16_t port) {
+    for (auto& seat : listens_) {
+        if (seat.used && seat.port == port) {
+            return &seat;
+        }
+    }
+    return nullptr;
+}
+
+TcpModule::Connection* TcpModule::claim_free_connection() {
+    for (auto& seat : connections_) {
+        if (seat.used) {
+            continue;
+        }
+        const unsigned long kStamp = seat.stamp + 1;
+        // Reconstruct in the table: an assignment from Connection{} creates
+        // a ~14 KiB temporary on a 16 KiB kernel stack with this toolchain.
+        seat.~Connection();
+        new (static_cast<void*>(&seat)) Connection{};
+        seat.used  = true;
+        seat.stamp = kStamp;
+        return &seat;
+    }
+    return nullptr;
+}
+
+uint16_t TcpModule::pick_local_port() {
+    for (uint32_t scan = 0; scan <= kEphemeralPortLast - kEphemeralPortFirst; ++scan) {
+        const auto kCandidate = static_cast<uint16_t>(
+            kEphemeralPortFirst + ((ephemeral_cursor_ - kEphemeralPortFirst + scan) %
+                                   (kEphemeralPortLast - kEphemeralPortFirst + 1)));
+        bool taken = false;
+        for (const auto& seat : listens_) {
+            if (seat.used && seat.port == kCandidate) {
+                taken = true;
+            }
+        }
+        for (const auto& seat : connections_) {
+            if (seat.used && seat.local_port == kCandidate) {
+                taken = true;
+            }
+        }
+        if (!taken) {
+            ephemeral_cursor_ = kCandidate;
+            return kCandidate;
+        }
+    }
+    return 0;
+}
+
+uint16_t TcpModule::receive_window_of(const TcpModule::Connection& connection) const {
+    const unsigned int kHeld = connection.inbox.count();
+    return static_cast<uint16_t>(kTcpReceiveWindowBytes - kHeld);
+}
+
+// NOLINTNEXTLINE(readability-function-size) a segment names five honest facts
+void TcpModule::transmit_segment(const TcpModule::Connection& connection, unsigned char flags,
+                                 const unsigned char* payload, size_t length, uint32_t sequence) {
+    if (!sink_.assigned()) {
+        return;
+    }
+    unsigned char outgoing[kMaxDatagramBytes] = {};
+    const size_t  kSegmentBytes               = kTcpHeaderBytes + length;
+    base::WriteWord16Be(outgoing, 0, connection.local_port);
+    base::WriteWord16Be(outgoing, 2, connection.remote_port);
+    base::WriteWord32Be(outgoing, 4, sequence);
+    base::WriteWord32Be(outgoing, 8, connection.rcv_nxt);
+    outgoing[12] = static_cast<unsigned char>((kTcpHeaderBytes / sizeof(uint32_t)) << 4U);
+    outgoing[13] = flags;
+    base::WriteWord16Be(outgoing, 14, receive_window_of(connection));
+    base::WriteWord16Be(outgoing, 16, 0);
+    base::WriteWord16Be(outgoing, 18, 0);
+    for (size_t index = 0; index < length; ++index) {
+        outgoing[kTcpHeaderBytes + index] = payload[index];
+    }
+    seal_checksum(outgoing, kSegmentBytes,
+                  SourceAddressFor(own_address_, connection.remote_address),
+                  connection.remote_address);
+    const OutboundDatagram kDatagram = {
+        .destination = connection.remote_address,
+        .protocol    = kIpv4ProtocolTcp,
+        .payload     = outgoing,
+        .length      = kSegmentBytes,
+    };
+    sink_.send(sink_.context, kDatagram);
+    ++stats_.segments_sent;
+}
+
+// NOLINTNEXTLINE(readability-function-size) a reset names both sides and both sequence numbers
+void TcpModule::transmit_rst(uint32_t remote_address, uint16_t remote_port, uint16_t local_port,
+                             uint32_t sequence, uint32_t acknowledgement, bool with_ack) {
+    if (!sink_.assigned()) {
+        return;
+    }
+    unsigned char outgoing[kTcpHeaderBytes] = {};
+    unsigned char flags                     = kTcpFlagRst;
+    if (with_ack) {
+        flags |= kTcpFlagAck;
+    }
+    base::WriteWord16Be(outgoing, 0, local_port);
+    base::WriteWord16Be(outgoing, 2, remote_port);
+    base::WriteWord32Be(outgoing, 4, sequence);
+    base::WriteWord32Be(outgoing, 8, acknowledgement);
+    outgoing[12] = static_cast<unsigned char>((kTcpHeaderBytes / sizeof(uint32_t)) << 4U);
+    outgoing[13] = flags;
+    base::WriteWord16Be(outgoing, 14, 0);
+    base::WriteWord16Be(outgoing, 16, 0);
+    base::WriteWord16Be(outgoing, 18, 0);
+    seal_checksum(outgoing, kTcpHeaderBytes, SourceAddressFor(own_address_, remote_address),
+                  remote_address);
+    const OutboundDatagram kDatagram = {
+        .destination = remote_address,
+        .protocol    = kIpv4ProtocolTcp,
+        .payload     = outgoing,
+        .length      = kTcpHeaderBytes,
+    };
+    sink_.send(sink_.context, kDatagram);
+    ++stats_.resets_sent;
+}
+
+void TcpModule::release_connection(TcpModule::Connection& connection, PendingFire& fire,
+                                   TcpFarewell farewell) {
+    disarm_rto_guard(connection);
+    if (connection.time_wait_armed) {
+        time::TimerTable::self().cancel(connection.time_wait_seat);
+        connection.time_wait_armed = false;
+    }
+    fire.events                = connection.events;
+    fire.ended                 = true;
+    fire.farewell              = farewell;
+    const unsigned long kStamp = connection.stamp + 1;
+    connection.~Connection();
+    new (static_cast<void*>(&connection)) Connection{};
+    connection.stamp = kStamp;
+}
+
+void TcpModule::handle(const unsigned char* bytes, size_t length, const Ipv4View& header) {
+    const auto kView = ParseTcp(bytes, length);
+    if (!kView.ok()) {
+        if (kView.error() == TcpError::kSegmentTooShort) {
+            ++stats_.refused_short;
+        } else {
+            ++stats_.refused_offset;
+        }
+        return;
+    }
+    unsigned char pseudo[12] = {};
+    build_pseudo_header(pseudo, header.source, header.destination, static_cast<uint32_t>(length));
+    base::InternetChecksum verifier;
+    verifier.add(pseudo, sizeof(pseudo));
+    verifier.add(bytes, length);
+    if (verifier.value() != 0) {
+        ++stats_.refused_checksum;
+        return;
+    }
+
+    const TcpView& view           = kView.value();
+    const size_t   kPayloadBytes  = length - view.header_bytes;
+    const size_t   kSegmentLength = kPayloadBytes +
+                                    ((view.flags & kTcpFlagSyn) != 0 ? size_t{1} : size_t{0}) +
+                                    ((view.flags & kTcpFlagFin) != 0 ? size_t{1} : size_t{0});
+
+    PendingFire fire{};
+    {
+        const auto  kGate = gate_.guard();
+        Connection* connection =
+            find_connection(header.source, view.source_port, view.destination_port);
+        if (connection != nullptr && connection->state == TcpState::kTimeWait &&
+            (view.flags & kTcpFlagSyn) != 0 && (view.flags & kTcpFlagAck) == 0) {
+            PendingFire discard{};
+            release_connection(*connection, discard, TcpFarewell::kGraceful);
+            answer_unclaimed(header, view, kSegmentLength);
+        } else if (connection != nullptr) {
+            const uint32_t kUnaBefore = connection->snd_una;
+            absorb_segment(*connection, view, bytes + view.header_bytes, kPayloadBytes,
+                           kSegmentLength, fire);
+            if (connection->used) {
+                after_ack_movement(*connection, seq_before(kUnaBefore, connection->snd_una),
+                                   service_now_ns_);
+            }
+        } else {
+            answer_unclaimed(header, view, kSegmentLength);
+        }
+    }
+    deliver_fire(fire);
+}
+
+// NOLINTNEXTLINE(readability-function-size) an orphan names door, seat, and answer
+void TcpModule::answer_unclaimed(const Ipv4View& header, const TcpView& view,
+                                 size_t segment_length) {
+    if ((view.flags & kTcpFlagSyn) != 0 && (view.flags & kTcpFlagAck) == 0) {
+        const ListenSeat* seat  = find_listen(view.destination_port);
+        Connection*       fresh = claim_free_connection();
+        if (seat == nullptr || fresh == nullptr) {
+            if (seat != nullptr) {
+                ++stats_.refused_full;
+            } else {
+                ++stats_.unclaimed;
+            }
+            if (fresh != nullptr) {
+                fresh->used = false;
+            }
+            transmit_rst(header.source, view.source_port, view.destination_port, 0,
+                         view.sequence + static_cast<uint32_t>(segment_length), true);
+            return;
+        }
+        fresh->state          = TcpState::kSynReceived;
+        fresh->events         = seat->events;
+        fresh->remote_address = header.source;
+        fresh->remote_port    = view.source_port;
+        fresh->local_port     = view.destination_port;
+        fresh->owner          = this;
+        fresh->oldest_sent_ns = service_now_ns_;
+        fresh->rcv_nxt        = view.sequence + 1;
+        const uint32_t kIss   = (isn_cursor_ += kIsnStep);
+        fresh->snd_una        = kIss;
+        fresh->snd_nxt        = kIss;
+        transmit_segment(*fresh, kTcpFlagSyn | kTcpFlagAck, nullptr, 0, fresh->snd_nxt);
+        fresh->snd_nxt = kIss + 1;
+        return;
+    }
+    if ((view.flags & kTcpFlagRst) == 0) {
+        if ((view.flags & kTcpFlagAck) != 0) {
+            transmit_rst(header.source, view.source_port, view.destination_port,
+                         view.acknowledgement, 0, false);
+        } else {
+            transmit_rst(header.source, view.source_port, view.destination_port, 0,
+                         view.sequence + static_cast<uint32_t>(segment_length), true);
+        }
+    }
+    ++stats_.unclaimed;
+}
+
+// NOLINTNEXTLINE(readability-function-size) the sliding side of one segment
+bool TcpModule::absorb_ack(TcpModule::Connection& connection, const TcpView& view,
+                           size_t segment_length, PendingFire& fire) {
+    if ((view.flags & kTcpFlagAck) != 0) {
+        connection.snd_window = view.window;
+    }
+    if ((view.flags & kTcpFlagAck) != 0 && seq_before(connection.snd_una, view.acknowledgement)) {
+        if (seq_before(connection.snd_nxt, view.acknowledgement)) {
+            ++stats_.ack_beyond_dropped;
+            return true;
+        }
+        const uint32_t kSpan = view.acknowledgement - connection.snd_una;
+        connection.snd_una   = view.acknowledgement;
+        for (uint32_t index = 0; index < kSpan; ++index) {
+            unsigned char released = 0;
+            if (!connection.outbox.pop(released)) {
+                break;
+            }
+        }
+        connection.duplicate_acks = 0;
+    } else if ((view.flags & kTcpFlagAck) != 0 && view.acknowledgement == connection.snd_una &&
+               segment_length == 0 && connection.snd_una != connection.snd_nxt) {
+        ++connection.duplicate_acks;
+        if (connection.duplicate_acks >= kTcpFastRetransmitAcks) {
+            connection.duplicate_acks = 0;
+            ++stats_.fast_retransmits;
+            resend_oldest(connection);
+        }
+    }
+    if (connection.snd_una == connection.snd_nxt) {
+        switch (connection.state) {
+        case TcpState::kFinWait1:
+            connection.state = TcpState::kFinWait2;
+            break;
+        case TcpState::kClosing:
+            begin_time_wait(connection);
+            return true;
+        case TcpState::kLastAck:
+            release_connection(connection, fire, TcpFarewell::kGraceful);
+            return true;
+        default:
+            break;
+        }
+    }
+    if (segment_length == 0 && view.sequence == connection.rcv_nxt) {
+        return true;
+    }
+    return false;
+}
+
+// NOLINTNEXTLINE(readability-function-size) a segment walks one machine
+void TcpModule::absorb_segment(TcpModule::Connection& connection, const TcpView& view,
+                               const unsigned char* payload, size_t payload_bytes,
+                               size_t segment_length, PendingFire& fire) {
+    fire.events = connection.events;
+    if ((view.flags & kTcpFlagRst) != 0) {
+        ++stats_.resets_received;
+        release_connection(connection, fire, TcpFarewell::kReset);
+        return;
+    }
+
+    switch (connection.state) {
+    case TcpState::kSynSent:
+        if ((view.flags & (kTcpFlagSyn | kTcpFlagAck)) != (kTcpFlagSyn | kTcpFlagAck)) {
+            return;
+        }
+        if (view.acknowledgement != connection.snd_nxt) {
+            ++stats_.ack_beyond_dropped;
+            return;
+        }
+        connection.rcv_nxt    = view.sequence + 1;
+        connection.snd_una    = view.acknowledgement;
+        connection.snd_window = view.window;
+        connection.state      = TcpState::kEstablished;
+        transmit_segment(connection, kTcpFlagAck, nullptr, 0, connection.snd_nxt);
+        return;
+
+    case TcpState::kSynReceived:
+        if ((view.flags & kTcpFlagAck) == 0) {
+            if ((view.flags & kTcpFlagSyn) != 0 && view.sequence + 1 == connection.rcv_nxt &&
+                segment_length == 1) {
+                transmit_segment(connection, kTcpFlagSyn | kTcpFlagAck, nullptr, 0,
+                                 connection.snd_una);
+            }
+            return;
+        }
+        if (view.acknowledgement != connection.snd_nxt) {
+            ++stats_.ack_beyond_dropped;
+            return;
+        }
+        connection.snd_una = view.acknowledgement;
+        connection.state   = TcpState::kEstablished;
+        ++stats_.accepted;
+        fire.events   = connection.events;
+        fire.accepted = true;
+        if (ListenSeat* seat = find_listen(connection.local_port);
+            seat != nullptr && seat->accepted_count < kTcpAcceptQueueSeats) {
+            seat->accepted[seat->accepted_count] = TcpTicket{
+                .slot  = static_cast<unsigned long>(&connection - connections_),
+                .stamp = connection.stamp,
+            };
+            ++seat->accepted_count;
+        }
+        break;
+
+    case TcpState::kEstablished:
+    case TcpState::kFinWait1:
+    case TcpState::kFinWait2:
+    case TcpState::kCloseWait:
+    case TcpState::kClosing:
+    case TcpState::kLastAck:
+        break;
+
+    case TcpState::kTimeWait:
+        transmit_segment(connection, kTcpFlagAck, nullptr, 0, connection.snd_nxt);
+        return;
+
+    case TcpState::kClosed:
+        return;
+    }
+
+    if (absorb_ack(connection, view, segment_length, fire)) {
+        return;
+    }
+    const uint32_t kEnd = view.sequence + static_cast<uint32_t>(segment_length);
+    if (seq_before_eq(kEnd, connection.rcv_nxt)) {
+        ++stats_.stale_dropped;
+        transmit_segment(connection, kTcpFlagAck, nullptr, 0, connection.snd_nxt);
+        return;
+    }
+    if (seq_before(connection.rcv_nxt, view.sequence)) {
+        store_out_of_order(connection, view, payload, payload_bytes);
+        harvest_reorder(connection, fire);
+        transmit_segment(connection, kTcpFlagAck, nullptr, 0, connection.snd_nxt);
+        return;
+    }
+    absorb_bytes(connection, view, payload, payload_bytes, segment_length, fire);
+    harvest_reorder(connection, fire);
+}
+
+// NOLINTNEXTLINE(readability-function-size) a byte harvest names window and room
+void TcpModule::absorb_bytes(TcpModule::Connection& connection, const TcpView& view,
+                             const unsigned char* payload, size_t payload_bytes,
+                             size_t segment_length, PendingFire& fire) {
+    const uint32_t kEnd       = view.sequence + static_cast<uint32_t>(segment_length);
+    const size_t   kOffset    = connection.rcv_nxt - view.sequence;
+    const size_t kPayloadSkip = kOffset - ((view.flags & kTcpFlagSyn) != 0 ? size_t{1} : size_t{0});
+    size_t       taken        = 0;
+    if (kPayloadSkip < payload_bytes) {
+        const size_t kWanted = payload_bytes - kPayloadSkip;
+        const size_t kRoom   = kTcpReceiveWindowBytes - connection.inbox.count();
+        taken                = kWanted < kRoom ? kWanted : kRoom;
+        for (size_t index = 0; index < taken; ++index) {
+            connection.inbox.push(payload[kPayloadSkip + index]);
+        }
+        connection.rcv_nxt += static_cast<uint32_t>(taken);
+        stats_.bytes_delivered += taken;
+        if (taken != 0) {
+            fire.data = true;
+        }
+    }
+    const bool kProgressed = taken != 0;
+    bool       fin_done    = false;
+    if ((view.flags & kTcpFlagFin) != 0 && connection.rcv_nxt + 1 == kEnd) {
+        connection.rcv_nxt = kEnd;
+        switch (connection.state) {
+        case TcpState::kEstablished:
+        case TcpState::kSynReceived:
+            connection.state = TcpState::kCloseWait;
+            break;
+        case TcpState::kFinWait1:
+            connection.state = TcpState::kClosing;
+            break;
+        case TcpState::kFinWait2:
+            connection.state = TcpState::kTimeWait;
+            begin_time_wait(connection);
+            break;
+        default:
+            break;
+        }
+        fin_done = true;
+    }
+    if (kProgressed || fin_done) {
+        transmit_segment(connection, kTcpFlagAck, nullptr, 0, connection.snd_nxt);
+    }
+}
+
+base::Result<TcpListenTicket, base::KernelError> TcpModule::listen(uint16_t         port,
+                                                                   const TcpEvents& events) {
+    const auto kGate = gate_.guard();
+    for (const ListenSeat& seat : listens_) {
+        if (seat.used && seat.port == port) {
+            return base::KernelError::kAlreadyExists;
+        }
+    }
+    for (unsigned long index = 0; index < kTcpListenSeats; ++index) {
+        ListenSeat& seat = listens_[index];
+        if (seat.used) {
+            continue;
+        }
+        const unsigned long kStamp = seat.stamp + 1;
+        seat                       = ListenSeat{};
+        seat.used                  = true;
+        seat.stamp                 = kStamp;
+        seat.port                  = port;
+        seat.events                = events;
+        return TcpListenTicket{.slot = index, .stamp = kStamp};
+    }
+    return base::KernelError::kOutOfMemory;
+}
+
+bool TcpModule::unlisten(const TcpListenTicket& ticket) {
+    const auto kGate = gate_.guard();
+    if (ticket.slot >= kTcpListenSeats) {
+        return false;
+    }
+    ListenSeat& seat = listens_[ticket.slot];
+    if (!seat.used || seat.stamp != ticket.stamp) {
+        return false;
+    }
+    const unsigned long kStamp = seat.stamp + 1;
+    seat                       = ListenSeat{};
+    seat.stamp                 = kStamp;
+    return true;
+}
+
+base::Result<TcpTicket, base::KernelError> TcpModule::take_accepted(const TcpListenTicket& ticket) {
+    const auto kGate = gate_.guard();
+    if (ticket.slot >= kTcpListenSeats) {
+        return base::KernelError::kNotFound;
+    }
+    ListenSeat& seat = listens_[ticket.slot];
+    if (!seat.used || seat.stamp != ticket.stamp) {
+        return base::KernelError::kNotFound;
+    }
+    if (seat.accepted_count == 0) {
+        return base::KernelError::kWouldBlock;
+    }
+    const TcpTicket     kTaken = seat.accepted[0];
+    const unsigned long kCount = seat.accepted_count;
+    std::move(seat.accepted + 1, seat.accepted + kCount, seat.accepted);
+    --seat.accepted_count;
+    return kTaken;
+}
+
+// NOLINTNEXTLINE(readability-function-size) the clock joins the open's four facts
+base::Result<TcpTicket, base::KernelError> TcpModule::connect(uint16_t           local_port,
+                                                              uint32_t           remote_address,
+                                                              uint16_t           remote_port,
+                                                              const TcpEvents&   events,
+                                                              unsigned long long now) {
+    if (remote_address == 0 || remote_port == 0) {
+        return base::KernelError::kInvalidArgument;
+    }
+    const auto  kGate      = gate_.guard();
+    Connection* connection = claim_free_connection();
+    if (connection == nullptr) {
+        return base::KernelError::kOutOfMemory;
+    }
+    const uint16_t kLocal = local_port != 0 ? local_port : pick_local_port();
+    if (kLocal == 0) {
+        connection->used = false;
+        return base::KernelError::kOutOfMemory;
+    }
+    connection->state          = TcpState::kSynSent;
+    connection->events         = events;
+    connection->remote_address = remote_address;
+    connection->remote_port    = remote_port;
+    connection->local_port     = kLocal;
+    connection->owner          = this;
+    connection->oldest_sent_ns = now;
+    const uint32_t kIss        = (isn_cursor_ += kIsnStep);
+    connection->snd_una        = kIss;
+    connection->snd_nxt        = kIss;
+    transmit_segment(*connection, kTcpFlagSyn, nullptr, 0, connection->snd_nxt);
+    connection->snd_nxt = kIss + 1;
+    const auto kSlot    = static_cast<unsigned long>(connection - connections_);
+    return TcpTicket{.slot = kSlot, .stamp = connection->stamp};
+}
+
+base::Result<size_t, base::KernelError> TcpModule::send(const TcpTicket&     ticket,
+                                                        const unsigned char* payload, size_t length,
+                                                        unsigned long long now) {
+    const auto  kGate      = gate_.guard();
+    Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return base::KernelError::kNotFound;
+    }
+    if (connection->state == TcpState::kSynSent || connection->state == TcpState::kSynReceived) {
+        return base::KernelError::kWouldBlock;
+    }
+    if (connection->state != TcpState::kEstablished && connection->state != TcpState::kCloseWait) {
+        return base::KernelError::kBrokenPipe;
+    }
+    const uint32_t kInFlight = connection->snd_nxt - connection->snd_una;
+    const uint32_t kCeiling =
+        std::min(static_cast<uint32_t>(kTcpSendWindowBytes), connection->snd_window);
+    if (kInFlight >= kCeiling) {
+        return static_cast<size_t>(0);
+    }
+    const size_t kRoom     = kCeiling - kInFlight;
+    const size_t kAccepted = std::min(length, kRoom);
+    size_t       done      = 0;
+    while (done < kAccepted) {
+        const size_t kChunk = std::min(kAccepted - done, kTcpMssBytes);
+        transmit_segment(*connection, kTcpFlagAck | kTcpFlagPsh, payload + done, kChunk,
+                         connection->snd_nxt);
+        for (size_t index = 0; index < kChunk; ++index) {
+            connection->outbox.push(payload[done + index]);
+        }
+        connection->snd_nxt += static_cast<uint32_t>(kChunk);
+        done += kChunk;
+    }
+    if (connection->oldest_sent_ns == 0) {
+        connection->oldest_sent_ns = now;
+    }
+    return done;
+}
+
+base::Result<size_t, base::KernelError> TcpModule::receive(const TcpTicket& ticket,
+                                                           unsigned char* into, size_t capacity) {
+    const auto  kGate      = gate_.guard();
+    Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return base::KernelError::kNotFound;
+    }
+    if (connection->inbox.count() == 0) {
+        if (past_fin(connection->state)) {
+            return static_cast<size_t>(0);
+        }
+        return base::KernelError::kWouldBlock;
+    }
+    size_t        taken    = 0;
+    const bool    kWasShut = receive_window_of(*connection) == 0;
+    unsigned char byte     = 0;
+    while (taken < capacity && connection->inbox.pop(byte)) {
+        into[taken] = byte;
+        ++taken;
+    }
+    if (kWasShut && taken != 0 && receive_window_of(*connection) != 0) {
+        transmit_segment(*connection, kTcpFlagAck, nullptr, 0, connection->snd_nxt);
+    }
+    return taken;
+}
+
+bool TcpModule::concluded(const TcpTicket& ticket) const {
+    const auto        kGate      = gate_.guard();
+    const Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return false;
+    }
+    return past_fin(connection->state);
+}
+
+bool TcpModule::established(const TcpTicket& ticket) const {
+    const auto        kGate      = gate_.guard();
+    const Connection* connection = live_connection(ticket);
+    return connection != nullptr && connection->state == TcpState::kEstablished;
+}
+
+bool TcpModule::connecting(const TcpTicket& ticket) const {
+    const auto        kGate      = gate_.guard();
+    const Connection* connection = live_connection(ticket);
+    return connection != nullptr &&
+           (connection->state == TcpState::kSynSent || connection->state == TcpState::kSynReceived);
+}
+
+void TcpModule::close(const TcpTicket& ticket) {
+    const auto  kGate      = gate_.guard();
+    Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return;
+    }
+    switch (connection->state) {
+    case TcpState::kSynSent:
+        connection->used = false;
+        return;
+    case TcpState::kEstablished:
+    case TcpState::kSynReceived:
+        transmit_segment(*connection, kTcpFlagFin | kTcpFlagAck, nullptr, 0, connection->snd_nxt);
+        connection->snd_nxt += 1;
+        connection->state = TcpState::kFinWait1;
+        if (connection->oldest_sent_ns == 0) {
+            connection->oldest_sent_ns = service_now_ns_;
+        }
+        return;
+    case TcpState::kCloseWait:
+        transmit_segment(*connection, kTcpFlagFin | kTcpFlagAck, nullptr, 0, connection->snd_nxt);
+        connection->snd_nxt += 1;
+        connection->state = TcpState::kLastAck;
+        if (connection->oldest_sent_ns == 0) {
+            connection->oldest_sent_ns = service_now_ns_;
+        }
+        return;
+    default:
+        return;
+    }
+}
+
+void TcpModule::abandon(const TcpTicket& ticket) {
+    PendingFire fire{};
+    {
+        const auto  kGate      = gate_.guard();
+        Connection* connection = live_connection(ticket);
+        if (connection == nullptr) {
+            return;
+        }
+        if (connection->state == TcpState::kSynSent) {
+            transmit_rst(connection->remote_address, connection->remote_port,
+                         connection->local_port, connection->snd_nxt, 0, false);
+        } else {
+            transmit_rst(connection->remote_address, connection->remote_port,
+                         connection->local_port, connection->snd_nxt, connection->rcv_nxt, true);
+        }
+        release_connection(*connection, fire, TcpFarewell::kReset);
+    }
+    deliver_fire(fire);
+}
+
+void TcpModule::deliver_fire(const PendingFire& fire) {
+    if (fire.data && fire.events.data != nullptr) {
+        fire.events.data(fire.events.context);
+    }
+    if (fire.accepted && fire.events.accepted != nullptr) {
+        fire.events.accepted(fire.events.context);
+    }
+    if (fire.ended && fire.events.farewell != nullptr) {
+        fire.events.farewell(fire.events.context, fire.farewell);
+    }
+}
+
+void TcpModule::after_ack_movement(Connection& connection, bool moved, unsigned long long now) {
+    if (!moved) {
+        return;
+    }
+    connection.in_retransmission = false;
+    connection.retransmit_count  = 0;
+    if (connection.snd_una == connection.snd_nxt) {
+        take_rtt_sample(connection, now);
+        disarm_rto_guard(connection);
+        connection.oldest_sent_ns = 0;
+    }
+}
+
+void TcpModule::take_rtt_sample(Connection& connection, unsigned long long now) {
+    if (connection.in_retransmission || connection.oldest_sent_ns == 0) {
+        return;
+    }
+    if (now <= connection.oldest_sent_ns) {
+        return;
+    }
+    const unsigned long long kSample = now - connection.oldest_sent_ns;
+    if (connection.srtt_ns == 0) {
+        connection.srtt_ns   = kSample;
+        connection.rttvar_ns = kSample / 2;
+    } else {
+        const unsigned long long kDiff = connection.srtt_ns > kSample
+                                             ? connection.srtt_ns - kSample
+                                             : kSample - connection.srtt_ns;
+        connection.rttvar_ns           = ((3 * connection.rttvar_ns) + kDiff) / 4;
+        connection.srtt_ns             = ((7 * connection.srtt_ns) + kSample) / 8;
+    }
+    connection.rto_ns = current_rto_of(connection);
+}
+
+unsigned long long TcpModule::current_rto_of(const Connection& connection) const {
+    if (connection.srtt_ns == 0) {
+        return kTcpInitialRtoNanoseconds;
+    }
+    const unsigned long long kSpread = connection.rttvar_ns * 4 > kTcpRtoGranularityNanoseconds
+                                           ? connection.rttvar_ns * 4
+                                           : kTcpRtoGranularityNanoseconds;
+    unsigned long long       rto     = connection.srtt_ns + kSpread;
+    rto                              = std::min(rto, kTcpMaxRtoNanoseconds);
+    return rto;
+}
+
+void TcpModule::arm_rto_guard(Connection& connection) {
+    if (connection.rto_armed) {
+        return;
+    }
+    const unsigned long long kWait =
+        connection.rto_ns != 0 ? connection.rto_ns : kTcpInitialRtoNanoseconds;
+    const auto kSeat = time::TimerTable::self().arm(&connection, &TcpModule::on_rto_due,
+                                                    connection.oldest_sent_ns + kWait);
+    if (kSeat.ok()) {
+        connection.rto_seat  = kSeat.value();
+        connection.rto_armed = true;
+    }
+}
+
+void TcpModule::disarm_rto_guard(Connection& connection) {
+    if (!connection.rto_armed) {
+        return;
+    }
+    time::TimerTable::self().cancel(connection.rto_seat);
+    connection.rto_armed = false;
+}
+
+void TcpModule::on_rto_due(void* context) {
+    auto* connection = static_cast<Connection*>(context);
+    if (connection->owner != nullptr) {
+        connection->owner->retransmit_due(*connection);
+    }
+}
+
+void TcpModule::begin_time_wait(Connection& connection) {
+    connection.state = TcpState::kTimeWait;
+    disarm_rto_guard(connection);
+    if (connection.time_wait_armed) {
+        return;
+    }
+    const unsigned long long kWait = 2 * kTcpMslNanoseconds;
+    const auto kSeat = time::TimerTable::self().arm(&connection, &TcpModule::on_time_wait_due,
+                                                    service_now_ns_ + kWait);
+    if (kSeat.ok()) {
+        connection.time_wait_seat  = kSeat.value();
+        connection.time_wait_armed = true;
+    }
+}
+
+void TcpModule::on_time_wait_due(void* context) {
+    auto* connection = static_cast<Connection*>(context);
+    if (connection->owner != nullptr) {
+        connection->owner->expire_time_wait(*connection);
+    }
+}
+
+void TcpModule::expire_time_wait(Connection& connection) {
+    connection.time_wait_armed = false;
+    if (!connection.used || connection.state != TcpState::kTimeWait) {
+        return;
+    }
+    PendingFire fire{};
+    release_connection(connection, fire, TcpFarewell::kGraceful);
+    if (service_fire_count_ < kTcpConnectionSeats) {
+        service_fires_[service_fire_count_] = fire;
+        ++service_fire_count_;
+    }
+}
+
+void TcpModule::store_out_of_order(Connection& connection, const TcpView& view,
+                                   const unsigned char* payload, size_t payload_bytes) {
+    if ((view.flags & kTcpFlagFin) != 0 || payload_bytes == 0 || payload_bytes > kTcpMssBytes) {
+        ++stats_.out_of_order_dropped;
+        return;
+    }
+    const uint32_t kStart = view.sequence;
+    if (!seq_before(kStart, connection.rcv_nxt + static_cast<uint32_t>(kTcpReceiveWindowBytes))) {
+        ++stats_.out_of_order_dropped;
+        return;
+    }
+    const uint32_t kEnd = kStart + static_cast<uint32_t>(payload_bytes);
+    for (const ReorderSeat& seat : connection.reorder) {
+        if (seat.used && seq_before(kStart, seat.start + static_cast<uint32_t>(seat.bytes)) &&
+            seq_before(seat.start, kEnd)) {
+            ++stats_.out_of_order_dropped;
             return;
         }
     }
-}
-
-void TcpModule::set_listener(uint16_t local_port, Ipv4Addr remote_addr, uint16_t remote_port,
-                             TcpListener& l) {
-    // F7-M6: rebind an existing connection's listener so on_data/on_close reach
-    // the owning socket (active-open client / accepted child).  M5 left these
-    // null; this is the additive hook the socket layer needs.
-    Connection* c = find(local_port, remote_addr, remote_port);
-    if (c != nullptr) {
-        c->listener = &l;
-    }
-}
-
-TcpListener* TcpModule::find_listener(uint16_t port) {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (listens_[i].l != nullptr && listens_[i].port == port) {
-            return listens_[i].l;
+    for (ReorderSeat& seat : connection.reorder) {
+        if (seat.used) {
+            continue;
         }
-    }
-    return nullptr;
-}
-
-TcpModule::Connection* TcpModule::find(uint16_t local_port, Ipv4Addr remote_addr,
-                                       uint16_t remote_port) {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        Connection& c = cons_[i];
-        if (c.state != TcpState::kClosed && c.local_port == local_port &&
-            c.remote_addr == remote_addr && c.remote_port == remote_port) {
-            return &c;
+        seat.used  = true;
+        seat.start = kStart;
+        seat.bytes = payload_bytes;
+        for (size_t index = 0; index < payload_bytes; ++index) {
+            seat.data[index] = payload[index];
         }
+        ++stats_.out_of_order_stored;
+        return;
     }
-    return nullptr;
+    ++stats_.out_of_order_dropped;
 }
 
-TcpModule::Connection* TcpModule::alloc(uint16_t local_port, Ipv4Addr remote_addr,
-                                        uint16_t remote_port, TcpListener* listener) {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (cons_[i].state == TcpState::kClosed) {
-            Connection& c = cons_[i];
-            c.state       = TcpState::kSynSent;  // occupied; caller refines
-            c.local_port  = local_port;
-            c.remote_addr = remote_addr;
-            c.remote_port = remote_port;
-            c.iss         = 0;
-            c.snd_nxt     = 0;
-            c.rcv_nxt     = 0;
-            c.listener    = listener;
-            return &c;
-        }
-    }
-    return nullptr;  // table full
-}
-
-uint32_t TcpModule::next_isn() {
-    const uint32_t v = isn_counter_;
-    isn_counter_ += 0x00010000;  // 64K stride: connection seq-spaces never overlap in tests
-    return v;
-}
-
-uint32_t TcpModule::connection_count() const {
-    uint32_t n = 0;
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        if (cons_[i].state != TcpState::kClosed) {
-            ++n;
-        }
-    }
-    return n;
-}
-
-TcpState TcpModule::state_of(uint16_t local_port, Ipv4Addr remote_addr,
-                             uint16_t remote_port) const {
-    for (uint32_t i = 0; i < kMaxTcpCons; ++i) {
-        const Connection& c = cons_[i];
-        if (c.state != TcpState::kClosed && c.local_port == local_port &&
-            c.remote_addr == remote_addr && c.remote_port == remote_port) {
-            return c.state;
-        }
-    }
-    return TcpState::kClosed;
-}
-
-// ============================================================
-// TX primitive
-// ============================================================
-
-cinux::lib::ErrorOr<void> TcpModule::send_segment(NetDevice& dev, Ipv4Addr dst, uint16_t src_port,
-                                                  uint16_t dst_port, uint32_t seq, uint32_t ack,
-                                                  uint8_t flags, const uint8_t* data, uint32_t len,
-                                                  Ipv4Module& ipv4, NetStack& stack) {
-    const InDevice* cfg = stack.config_for(dev);
-    if (cfg == nullptr) {
-        return cinux::lib::Error::InvalidArgument;  // no source address for this device
-    }
-    // One contiguous run = [pseudo-header(12) | TCP header(20) | payload(len)] so
-    // internet_checksum over the whole run yields the TCP checksum in one pass
-    // (same trick as UdpModule::send).  The pseudo-header never goes on the wire;
-    // we emit the TCP portion (past it) via ipv4.send.
-    const uint16_t tcp_len = static_cast<uint16_t>(sizeof(TcpHeader) + len);
-    HeapBuf        buf(12 + sizeof(TcpHeader) + len);
-    build_pseudo_header(buf.p, cfg->local, dst, tcp_len);
-
-    TcpHeader h{};
-    h.src_port   = src_port;
-    h.dst_port   = dst_port;
-    h.seq        = seq;
-    h.ack        = ack;
-    h.data_off   = kTcpHdrWords;
-    h.flags      = flags;
-    h.window     = kTcpWindow;
-    h.checksum   = 0;
-    h.urgent_ptr = 0;
-    build_tcp_header(h, buf.p + 12);
-    if (len > 0) {
-        std::memcpy(buf.p + 12 + sizeof(TcpHeader), data, len);
-    }
-    uint16_t cs = cinux::lib::internet_checksum(buf.p, 12 + sizeof(TcpHeader) + len);
-    if (cs == 0) {
-        cs = 0xFFFF;  // TCP mandates a nonzero checksum
-    }
-    buf.p[12 + 16] = static_cast<uint8_t>(cs >> 8);  // TCP header checksum field
-    buf.p[12 + 17] = static_cast<uint8_t>(cs & 0xFF);
-
-    return ipv4.send(dev, dst, kIpProtoTcp, buf.p + 12, sizeof(TcpHeader) + len, stack);
-}
-
-// ============================================================
-// Active open
-// ============================================================
-
-cinux::lib::ErrorOr<void> TcpModule::connect(NetDevice& dev, uint16_t local_port,
-                                             Ipv4Addr remote_addr, uint16_t remote_port,
-                                             Ipv4Module& ipv4, NetStack& stack) {
-    if (find(local_port, remote_addr, remote_port) != nullptr) {
-        return cinux::lib::Error::AlreadyExists;  // 4-tuple already connected
-    }
-    Connection* c = alloc(local_port, remote_addr, remote_port, nullptr);
-    if (c == nullptr) {
-        return cinux::lib::Error::OutOfMemory;  // table full
-    }
-    c->iss     = next_isn();
-    c->snd_nxt = c->iss + 1;  // our SYN consumes one sequence number
-    c->rcv_nxt = 0;           // unknown until the SYN-ACK
-    c->state   = TcpState::kSynSent;
-    return send_segment(dev, remote_addr, local_port, remote_port, c->iss, 0, kTcpSyn, nullptr, 0,
-                        ipv4, stack);
-}
-
-// ============================================================
-// Data transfer + active close
-// ============================================================
-
-cinux::lib::ErrorOr<void> TcpModule::send(NetDevice& dev, uint16_t local_port, Ipv4Addr remote_addr,
-                                          uint16_t remote_port, const uint8_t* data, uint32_t len,
-                                          Ipv4Module& ipv4, NetStack& stack) {
-    Connection* c = find(local_port, remote_addr, remote_port);
-    if (c == nullptr || c->state != TcpState::kEstablished) {
-        return cinux::lib::Error::InvalidArgument;  // no connection / not established
-    }
-    const uint32_t seq = c->snd_nxt;
-    auto           r   = send_segment(dev, remote_addr, local_port, remote_port, seq, c->rcv_nxt,
-                                      kTcpPsh | kTcpAck, data, len, ipv4, stack);
-    if (r.ok()) {
-        c->snd_nxt += len;  // data consumes len sequence numbers
-    }
-    return r;
-}
-
-cinux::lib::ErrorOr<void> TcpModule::close(NetDevice& dev, uint16_t local_port,
-                                           Ipv4Addr remote_addr, uint16_t remote_port,
-                                           Ipv4Module& ipv4, NetStack& stack) {
-    Connection* c = find(local_port, remote_addr, remote_port);
-    if (c == nullptr) {
-        return cinux::lib::Error::InvalidArgument;  // no connection
-    }
-    // FIN is legal from ESTABLISHED (we initiate) or CLOSE_WAIT (peer already closed).
-    const bool initiator = c->state == TcpState::kEstablished;
-    if (!initiator && c->state != TcpState::kCloseWait) {
-        return cinux::lib::Error::InvalidArgument;  // not in a closeable state
-    }
-    const uint32_t seq = c->snd_nxt;
-    auto           r   = send_segment(dev, remote_addr, local_port, remote_port, seq, c->rcv_nxt,
-                                      kTcpFin | kTcpAck, nullptr, 0, ipv4, stack);
-    if (r.ok()) {
-        c->snd_nxt += 1;  // FIN consumes one sequence number
-        c->state = initiator ? TcpState::kFinWait1 : TcpState::kLastAck;
-    }
-    return r;
-}
-
-// ============================================================
-// Inbound: checksum gate + handshake / data / teardown FSM
-// ============================================================
-
-void TcpModule::handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
-                       NetStack& stack) {
-    if (payload.size() < sizeof(TcpHeader)) {
-        return;  // short / not a TCP segment
-    }
-    // --- checksum gate (mandatory for TCP) ---
-    // Reconstruct the run the sender summed -- pseudo-header(12, TCP length = the
-    // delivered segment bytes) + the whole segment (with embedded checksum) -- and
-    // verify.  The L4 payload IS the whole TCP segment (IPv4 stripped its header),
-    // so payload.size() is the TCP length.  Bad checksum -> silent drop.
-    const uint16_t tcp_len = static_cast<uint16_t>(payload.size());
-    HeapBuf        buf(12 + tcp_len);
-    build_pseudo_header(buf.p, ip.src, ip.dst, tcp_len);
-    std::memcpy(buf.p + 12, payload.data(), tcp_len);
-    if (!cinux::lib::verify_internet_checksum(buf.p, 12 + tcp_len)) {
-        return;  // corrupt -> silently drop
-    }
-
-    TcpHeader h;
-    parse_tcp(payload.data(), h);
-    // diagnostics tap (kept from batch 1)
-    ++valid_count_;
-    last_src_port_ = h.src_port;
-    last_dst_port_ = h.dst_port;
-    last_seq_      = h.seq;
-    last_ack_      = h.ack;
-    last_flags_    = h.flags;
-
-    // Malformed-header hardening: reject segments whose declared header length
-    // is insane -- data_off < 5 (under 20 bytes) or claiming more header than
-    // was delivered.  Without this a data_off of 0 would re-interpret the
-    // header bytes as payload, and a data_off past the buffer would mis-anchor
-    // the data pointer.  Relevant once M6 makes TCP reachable on real traffic.
-    const uint8_t hdrlen = tcp_header_bytes(h);
-    if (hdrlen < sizeof(TcpHeader) || hdrlen > payload.size()) {
-        return;  // malformed data offset -> drop
-    }
-
-    Connection* c = find(h.dst_port, ip.src, h.src_port);
-
-    if (c == nullptr) {
-        // No connection for this 4-tuple.
-        if (h.flags & kTcpRst) {
-            return;  // RST for a non-connection -> ignore
-        }
-        if (h.flags & kTcpSyn) {
-            TcpListener* l = find_listener(h.dst_port);
-            if (l != nullptr) {
-                // Passive open: SYN to a listened port -> SYN-ACK.
-                Connection* nc = alloc(h.dst_port, ip.src, h.src_port, l);
-                if (nc == nullptr) {
-                    return;  // table full -> drop (no RST; a retry may find room)
-                }
-                nc->iss     = next_isn();
-                nc->rcv_nxt = h.seq + 1;    // peer's SYN consumes one
-                nc->snd_nxt = nc->iss + 1;  // our SYN-ACK's SYN consumes one
-                nc->state   = TcpState::kSynReceived;
-                static_cast<void>(send_segment(dev, ip.src, h.dst_port, h.src_port, nc->iss, nc->rcv_nxt,
-                                   kTcpSyn | kTcpAck, nullptr, 0, ipv4, stack));
-            } else {
-                // SYN to a closed port -> RST (RFC 793: ack = SEG.SEQ + 1).
-                static_cast<void>(send_segment(dev, ip.src, h.dst_port, h.src_port, 0, h.seq + 1,
-                                   kTcpRst | kTcpAck, nullptr, 0, ipv4, stack));
+void TcpModule::harvest_reorder(Connection& connection, PendingFire& fire) {
+    bool delivered = true;
+    while (delivered) {
+        delivered = false;
+        for (ReorderSeat& seat : connection.reorder) {
+            if (!seat.used || seat.start != connection.rcv_nxt) {
+                continue;
             }
+            const size_t kRoom = kTcpReceiveWindowBytes - connection.inbox.count();
+            if (seat.bytes > kRoom) {
+                continue;
+            }
+            for (size_t index = 0; index < seat.bytes; ++index) {
+                connection.inbox.push(seat.data[index]);
+            }
+            connection.rcv_nxt += static_cast<uint32_t>(seat.bytes);
+            stats_.bytes_delivered += seat.bytes;
+            ++stats_.out_of_order_recovered;
+            seat      = ReorderSeat{};
+            delivered = true;
+            fire.data = true;
+        }
+    }
+}
+
+void TcpModule::resend_oldest(Connection& connection) {
+    connection.in_retransmission = true;
+    if (connection.state == TcpState::kSynSent) {
+        transmit_segment(connection, kTcpFlagSyn, nullptr, 0, connection.snd_una);
+        return;
+    }
+    // FIN follows every queued byte in sequence space. Until those bytes
+    // are acknowledged, SND.UNA still names payload, even in a closing state.
+    if (connection.outbox.count() == 0 &&
+        (connection.state == TcpState::kFinWait1 || connection.state == TcpState::kClosing ||
+         connection.state == TcpState::kLastAck)) {
+        transmit_segment(connection, kTcpFlagFin | kTcpFlagAck, nullptr, 0, connection.snd_una);
+        return;
+    }
+    const uint32_t kInFlight = connection.snd_nxt - connection.snd_una;
+    size_t         stretch   = kInFlight < static_cast<uint32_t>(kTcpMssBytes)
+                                   ? static_cast<size_t>(kInFlight)
+                                   : static_cast<size_t>(kTcpMssBytes);
+    stretch                  = std::min(stretch, static_cast<size_t>(connection.outbox.count()));
+    if (stretch == 0) {
+        return;
+    }
+    unsigned char payload[kTcpMssBytes] = {};
+    for (size_t index = 0; index < stretch; ++index) {
+        unsigned char carried = 0;
+        if (!connection.outbox.peek(static_cast<unsigned int>(index), carried)) {
+            break;
+        }
+        payload[index] = carried;
+    }
+    transmit_segment(connection, kTcpFlagAck | kTcpFlagPsh, payload, stretch, connection.snd_una);
+}
+
+void TcpModule::retransmit_due(Connection& connection) {
+    connection.rto_armed = false;
+    if (!connection.used) {
+        return;
+    }
+    ++stats_.rto_timeouts;
+    if (connection.retransmit_count >= kTcpMaxRetransmits) {
+        ++stats_.giveups;
+        PendingFire fire{};
+        release_connection(connection, fire, TcpFarewell::kUnreachable);
+        if (service_fire_count_ < kTcpConnectionSeats) {
+            service_fires_[service_fire_count_] = fire;
+            ++service_fire_count_;
         }
         return;
     }
+    ++connection.retransmit_count;
+    ++stats_.retransmits_sent;
+    resend_oldest(connection);
+    unsigned long long wait =
+        connection.rto_ns != 0 ? connection.rto_ns : kTcpInitialRtoNanoseconds;
+    wait *= 2;
+    wait              = std::min(wait, kTcpMaxRtoNanoseconds);
+    connection.rto_ns = wait;
+    const auto kSeat =
+        time::TimerTable::self().arm(&connection, &TcpModule::on_rto_due, service_now_ns_ + wait);
+    if (kSeat.ok()) {
+        connection.rto_seat  = kSeat.value();
+        connection.rto_armed = true;
+    }
+}
 
-    // Existing connection.
-    if (h.flags & kTcpRst) {
-        c->state = TcpState::kClosed;  // RST tears down any connection
-        return;
+void TcpModule::service(unsigned long long now) {
+    PendingFire   fires[kTcpConnectionSeats] = {};
+    unsigned long count                      = 0;
+    {
+        const auto kGate = gate_.guard();
+        service_now_ns_  = now;
+        time::TimerTable::self().advance(now);
+        for (Connection& connection : connections_) {
+            if (connection.used && connection.oldest_sent_ns != 0 &&
+                connection.snd_una != connection.snd_nxt) {
+                arm_rto_guard(connection);
+            }
+        }
+        count = service_fire_count_;
+        for (unsigned long index = 0; index < count; ++index) {
+            fires[index] = service_fires_[index];
+        }
+        service_fire_count_ = 0;
     }
+    for (unsigned long index = 0; index < count; ++index) {
+        deliver_fire(fires[index]);
+    }
+}
 
-    switch (c->state) {
-    case TcpState::kSynSent: {
-        // Expecting the SYN-ACK to our SYN.  (Simultaneous open / a pure SYN
-        // here is not handled -- minimal viable, no retransmit.)
-        if ((h.flags & kTcpSyn) && (h.flags & kTcpAck) && h.ack == c->iss + 1) {
-            c->rcv_nxt = h.seq + 1;  // peer's SYN consumes one
-            static_cast<void>(send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, c->rcv_nxt,
-                               kTcpAck, nullptr, 0, ipv4, stack));
-            c->state = TcpState::kEstablished;
-        }
-        break;
+const TcpStats& TcpModule::stats() const {
+    return stats_;
+}
+
+unsigned long long TcpModule::clock() const {
+    return service_now_ns_;
+}
+
+uint32_t TcpModule::own_address() const {
+    return own_address_;
+}
+
+bool TcpModule::holds_bytes(const TcpTicket& ticket) const {
+    const auto        kGate      = gate_.guard();
+    const Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return true;
     }
-    case TcpState::kSynReceived: {
-        // The 3rd packet: ACK completing the passive handshake.
-        if ((h.flags & kTcpAck) && !(h.flags & kTcpSyn) && h.ack == c->iss + 1) {
-            c->state = TcpState::kEstablished;
-            if (c->listener != nullptr) {
-                const TcpEndpoint local{ip.dst, c->local_port};  // ip.dst = our addr
-                const TcpEndpoint remote{ip.src, c->remote_port};
-                c->listener->on_accept(local, remote);
-            }
-        }
-        break;
+    return connection->inbox.count() != 0 || past_fin(connection->state);
+}
+
+bool TcpModule::peer_of(const TcpTicket& ticket, uint32_t& address, uint16_t& port) const {
+    const auto        kGate      = gate_.guard();
+    const Connection* connection = live_connection(ticket);
+    if (connection == nullptr) {
+        return false;
     }
-    case TcpState::kEstablished: {
-        // In-order data at the front of the receive window only -- no
-        // reassembly / out-of-order (follow-up).  A segment whose SEQ is not
-        // RCV.NXT is dropped (a real stack would re-ACK to elicit a retransmit).
-        // (hdrlen was validated sane at the top of handle: data_off in
-        // [20, payload.size()].)
-        if (h.seq != c->rcv_nxt) {
-            break;  // out of order -> drop
-        }
-        const uint32_t data_len = payload.size() - hdrlen;
-        bool           need_ack = false;
-        if (data_len > 0) {
-            if (c->listener != nullptr) {
-                const TcpEndpoint local{ip.dst, c->local_port};
-                const TcpEndpoint remote{ip.src, c->remote_port};
-                c->listener->on_data(local, remote, FrameView(payload.data() + hdrlen, data_len));
-            }
-            c->rcv_nxt += data_len;
-            need_ack = true;
-        }
-        if (h.flags & kTcpFin) {
-            c->rcv_nxt += 1;  // FIN consumes one
-            need_ack = true;
-            if (c->listener != nullptr) {
-                const TcpEndpoint local{ip.dst, c->local_port};
-                const TcpEndpoint remote{ip.src, c->remote_port};
-                c->listener->on_close(local, remote);
-            }
-            c->state = TcpState::kCloseWait;
-        }
-        if (need_ack) {
-            static_cast<void>(send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, c->rcv_nxt,
-                               kTcpAck, nullptr, 0, ipv4, stack));
-        }
-        break;
-    }
-    case TcpState::kFinWait1:
-        // Expecting the ACK for our FIN -> FIN_WAIT_2.
-        if ((h.flags & kTcpAck) && h.ack == c->snd_nxt) {
-            c->state = TcpState::kFinWait2;
-        }
-        break;
-    case TcpState::kFinWait2:
-        // Expecting the peer's FIN -> ACK it (seq+1) and we are done.  No
-        // TIME_WAIT: no timer here, and the closed peer's final ACK is trusted.
-        if (h.flags & kTcpFin) {
-            static_cast<void>(send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, h.seq + 1,
-                               kTcpAck, nullptr, 0, ipv4, stack));
-            c->state = TcpState::kClosed;
-        }
-        break;
-    case TcpState::kCloseWait:
-        // Waiting for our app to call close().  A retransmitted peer FIN -> re-ACK.
-        if (h.flags & kTcpFin) {
-            static_cast<void>(send_segment(dev, ip.src, c->local_port, c->remote_port, c->snd_nxt, h.seq + 1,
-                               kTcpAck, nullptr, 0, ipv4, stack));
-        }
-        break;
-    case TcpState::kLastAck:
-        // Our FIN was acked -> connection fully closed.
-        if ((h.flags & kTcpAck) && h.ack == c->snd_nxt) {
-            c->state = TcpState::kClosed;
-        }
-        break;
-    default:
-        break;
-    }
+    address = connection->remote_address;
+    port    = connection->remote_port;
+    return true;
+}
+
+bool TcpModule::alive(const TcpTicket& ticket) const {
+    const auto kGate = gate_.guard();
+    return live_connection(ticket) != nullptr;
 }
 
 }  // namespace cinux::net

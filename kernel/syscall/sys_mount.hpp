@@ -1,29 +1,42 @@
 /**
- * @file kernel/syscall/sys_mount.hpp
- * @brief sys_mount (Linux 165) handler declaration (F6-M1)
+ * @file    sys_mount.hpp
+ * @brief   Declarations of the mount and umount2 syscall handlers.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-25
+ * @version 0.1
+ * @since   0.4.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// Kernel-internal mount.  Constructs a backend from @p fstype (currently only
-/// "tmpfs"), mount()s it, and registers it at the absolute @p target path.
-/// @p source is unused (tmpfs has no backing device); accepted for parity with
-/// the Linux ABI and future source-bearing fstypes.  @p flags (MS_*) ignored.
-/// The new backend is heap-allocated and registered as owned, so a later
-/// do_umount2_kernel frees it.  Returns 0 or -errno.
-int64_t do_mount_kernel(const char* source, const char* target, const char* fstype, uint64_t flags);
+/**
+ * @brief         Seats a fresh memory volume at a directory.
+ *
+ * @return        Zero, or a negative errno.
+ * @note          The one filesystem type served is tmpfs; the source
+ *                word is decoration the kernel does not read.
+ * @since         0.4.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleMount(const SyscallFrame& frame);
 
-/// Linux mount(2): @p source_virt / @p target_virt / @p fstype_virt are user
-/// pointers; @p data is mount-options (ignored).  Returns 0 or -errno.
-int64_t sys_mount(uint64_t source_virt, uint64_t target_virt, uint64_t fstype_virt, uint64_t flags,
-                  uint64_t data, uint64_t);
+/**
+ * @brief         Takes one runtime tmpfs seat back.
+ *
+ * @return        Zero, or a negative errno.
+ * @note          Only seats the mount syscall itself made come off;
+ *                the boot's own mounts are not the runtime's to take
+ *                apart.
+ * @since         0.4.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleUmount2(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

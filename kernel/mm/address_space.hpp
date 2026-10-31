@@ -1,183 +1,171 @@
 /**
- * @file kernel/mm/address_space.hpp
- * @brief Per-process virtual address space management
+ * @file    address_space.hpp
+ * @brief   One world of translations: a PML4 the kernel can enter.
  *
- * Encapsulates an independent PML4 root and provides isolated user-space
- * page table management.  Each AddressSpace instance owns a freshly
- * allocated PML4 whose kernel half (entries 256-511) mirrors the global
- * kernel mapping, while the user half (entries 0-255) is private.
+ * An AddressSpace owns a fresh top-level table whose kernel half
+ * (PML4 entries 256..511) is copied from the kernel's own root, so
+ * kernel code keeps running no matter which world is active, while the
+ * user half starts empty and grows only through this space's own
+ * mappings. The owning process lifecycle ends here now: teardown
+ * retires the whole user subtree back to the frame allocator, so this
+ * face covers the full life — build, mirror, map, translate, activate,
+ * retire.
  *
- * Copy construction and copy assignment are deleted to prevent accidental
- * sharing of physical page table pages.
- *
- * Depends on: PMM (for page allocation), VMM (for map/unmap/translate
- * helpers), and x86_64 paging primitives.
- *
- * Namespace: cinux::mm
+ * @author  Charliechen114514
+ * @date    2026-10-12
+ * @version 0.2
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include <cinux/refcount.hpp>  // RefCount (F-QA Q4e-1 / DEBT-006)
-
-#include "kernel/mm/vma.hpp"
-#include "kernel/proc/sync.hpp"
+#include "cinux/ref_count.hpp"
+#include "kernel/arch/x86_64/page_entry.hpp"
 
 namespace cinux::mm {
 
-class AddressSpace {
+/**
+ * @brief   A page-table world of its own.
+ * @note    Not a singleton: one instance per world, the process being
+ *          the future owner. Lives on the heap under shared ownership:
+ *          a fork copies the world, a clone with CLONE_VM points its
+ *          whole thread group at one, and the last task holding it
+ *          tears the user half down.
+ * @since   0.1.0
+ * @ingroup kernel_mm
+ */
+class AddressSpace : public cinux::base::RefCount<> {
 public:
-    // ============================================================
-    // Construction / Destruction
-    // ============================================================
+    /**
+     * @brief         Builds the root table: one ledger page, zeroed,
+     *                kernel half mirrored from the live root.
+     *
+     * @return        true when the space is ready to map into.
+     * @note          Nothing switches yet — the machine stays wherever
+     *                it is; building happens entirely through the
+     *                direct map.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] bool init();
 
     /**
-     * @brief Construct an isolated address space
+     * @brief         Physical address of this space's root table.
      *
-     * Allocates a new PML4 page from the PMM, zeroes it, then copies
-     * kernel-space entries (PML4[256..511]) from the saved kernel PML4
-     * so that the kernel mapping is visible in every address space.
-     *
-     * @note Requires that init_kernel() has been called beforehand.
+     * @return        The PML4 to hand to LoadCr3, 0 before init.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    AddressSpace();
+    [[nodiscard]] unsigned long root() const;
 
     /**
-     * @brief Destroy the address space and free all user-space page tables
+     * @brief         Maps one 4 KiB page inside this space.
      *
-     * Walks PML4[0..255] and, for each present entry, recursively frees
-     * the entire subtree (PDPT -> PD -> PT) back to the PMM.  Finally
-     * frees the PML4 page itself.
+     * @param[in]     virtual_address   Where the page appears here.
+     * @param[in]     physical          The frame it shows.
+     * @return        true when the walk wrote the final entry.
+     * @note          Goes through the shared walk with the kernel
+     *                world's table supply; the live CR3 does not matter.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    ~AddressSpace();
-
-    // Disable copy -- each AddressSpace owns exclusive physical pages
-    AddressSpace(const AddressSpace&)            = delete;
-    AddressSpace& operator=(const AddressSpace&) = delete;
-
-    // Allow move -- transfers ownership of pml4_phys_
-    AddressSpace(AddressSpace&& other) noexcept;
-    AddressSpace& operator=(AddressSpace&& other) noexcept;
-
-    // ============================================================
-    // Reference counting (F-QA Q4e-1 / DEBT-006)
-    // ============================================================
-
-    /** Bump the reference count (CLONE_VM thread shares this address space). */
-    void acquire() { refcount_.acquire(); }
+    [[nodiscard]] bool map(unsigned long virtual_address, unsigned long physical) const;
 
     /**
-     * @brief Drop a reference.
-     * @return true if this was the last reference -- the caller now owns
-     *         cleanup (delete this address space, freeing its PML4 subtree).
+     * @brief         Maps one 4 KiB page ring 3 may reach.
      *
-     * Threads created with CLONE_VM share one AddressSpace; the last thread to
-     * exit releases it. Without this, a sibling thread's exit would free the
-     * shared PML4 and crash the rest of the thread group (DEBT-006).
+     * @param[in]     virtual_address   Where the page appears here.
+     * @param[in]     physical          The frame it shows.
+     * @param[in]     leaf_bits         Flags the final entry carries; the
+     *                                  default keeps the historical shape,
+     *                                  writable, while the fault path and
+     *                                  the loader pass narrower terms.
+     * @return        true when the walk wrote the final entry.
+     * @note          Same walk carrying kUser on every level, so ring 3
+     *                        can descend the whole path; without it the
+     *                        page is kernel-only even in the low half.
+     *                        Only the final entry takes leaf_bits: a
+     *                        table pointer's write bit is a supply
+     *                        detail, the leaf's is the page's law.
+     * @warning       None
+     * @throws        None
+     * @since         0.4.0
+     * @ingroup       kernel_mm
      */
-    bool release() { return refcount_.release(); }
-
-    // ============================================================
-    // Static initialisation
-    // ============================================================
+    [[nodiscard]] bool map_user(unsigned long virtual_address, unsigned long physical,
+                                cinux::arch::page::Entry leaf_bits =
+                                    cinux::arch::page::kWritable | cinux::arch::page::kUser) const;
 
     /**
-     * @brief Read the current CR3 and save it as the kernel PML4
+     * @brief         Translates an address through this space's tables.
      *
-     * Must be called once during boot, after the initial page tables
-     * are set up but before any AddressSpace instance is created.
+     * @param[in]     virtual_address   The byte to resolve.
+     * @return        Physical address of the same byte, 0 when unmapped.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    static void init_kernel();
-
-    // ============================================================
-    // Page table operations
-    // ============================================================
+    [[nodiscard]] unsigned long translate(unsigned long virtual_address) const;
 
     /**
-     * @brief Map a single 4 KB virtual page within this address space
+     * @brief         Switches the machine into this space.
      *
-     * Delegates to VMM using this space's PML4 as the root.
-     *
-     * @param virt   Virtual address to map (page-aligned recommended)
-     * @param phys   Physical address to map to (must be page-aligned)
-     * @param flags  Combination of FLAG_PRESENT, FLAG_WRITABLE, etc.
-     * @return true on success, false on allocation failure
+     * @return        None
+     * @note          Interrupts must be off across the switch; the
+     *                kernel half mirror is what keeps the caller alive
+     *                inside the new world, and LoadCr3(KernelPageRoot())
+     *                is the road back.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
      */
-    bool map(uint64_t virt, uint64_t phys, uint64_t flags);
+    void activate() const;
 
     /**
-     * @brief Unmap a single 4 KB virtual page within this address space
+     * @brief         Returns every frame and table of the user half.
      *
-     * @param virt  Virtual address to unmap
+     * @return        None.
+     * @note          The retiring call of an owning process: walks the
+     *                      user half only — the kernel half is a mirror,
+     *                      its frames belong to the kernel — freeing leaf
+     *                      frames, the tables that routed to them, and
+     *                      the root itself. The space returns to its
+     *                      pre-init shape with root 0 and must not be
+     *                      the live CR3 of any CPU when this runs.
+     * @warning       None
+     * @throws        None
+     * @since         0.2.0
+     * @ingroup       kernel_mm
      */
-    void unmap(uint64_t virt);
+    void teardown();
 
     /**
-     * @brief Translate a virtual address to physical within this space
+     * @brief         Tears the user half down unless already torn.
      *
-     * @param virt  Virtual address to look up
-     * @return Physical address, or 0 if not mapped
+     * @return        None.
+     * @note          The RAII half of the lifecycle: a world that goes
+     *                      out of scope returns its frames by itself, so
+     *                      owners delete and nothing more. Explicit
+     *                      teardown leaves root zero and this runs empty.
+     * @warning       Must not be the live CR3 of any CPU at destruction.
+     * @throws        None
+     * @since         0.3.0
+     * @ingroup       kernel_mm
      */
-    uint64_t translate(uint64_t virt);
-
-    /**
-     * @brief Activate this address space (load CR3)
-     *
-     * Writes this space's PML4 physical address into CR3, making it
-     * the active page table root.  Flushes the TLB implicitly.
-     */
-    void activate();
-
-    // ============================================================
-    // Accessors
-    // ============================================================
-
-    /** Get the physical address of this space's PML4 root. */
-    uint64_t pml4_phys() const;
-
-    /** Get the saved kernel PML4 physical address. */
-    static uint64_t kernel_pml4();
-
-    /** Borrow this space's VMA store (the sorted record of user mappings). */
-    IVMAStore& vmas() { return vma_store_; }
-
-    /** Borrow the lock that serialises VMA store access for this space. */
-    cinux::proc::Spinlock& vma_lock() { return vma_lock_; }
+    ~AddressSpace() { teardown(); }
 
 private:
-    // ============================================================
-    // Internal helpers
-    // ============================================================
-
-    /**
-     * @brief Recursively free all page table pages under a given entry
-     *
-     * @param table_virt  Virtual address of the current-level table
-     * @param level       Current level: 3 = PDPT, 2 = PD, 1 = PT
-     */
-    void free_subtree(uint64_t table_phys, int level);
-
-    // ============================================================
-    // Data members
-    // ============================================================
-
-    /** Physical address of this address space's PML4 root. */
-    uint64_t pml4_phys_{};
-
-    /// VMA bookkeeping: the sorted set of user-space mappings in this space.
-    LinkedListVMAStore vma_store_;
-
-    /// F-QA Q4e-1 (DEBT-006): CLONE_VM shared refcount. Default =1 (owner);
-    /// clone(CLONE_VM) acquire()s; thread exit release()s, last one frees.
-    cinux::lib::RefCount refcount_;
-
-    /// Serialises access to vma_store_ (page-fault path, mmap, etc.).
-    cinux::proc::Spinlock vma_lock_;
-
-    /** Saved kernel PML4 physical address (populated by init_kernel). */
-    static uint64_t kernel_pml4_;
+    unsigned long root_ = 0;
 };
 
 }  // namespace cinux::mm

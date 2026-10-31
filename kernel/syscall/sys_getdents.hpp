@@ -1,33 +1,29 @@
 /**
- * @file kernel/syscall/sys_getdents.hpp
- * @brief sys_getdents handler declaration
+ * @file    sys_getdents.hpp
+ * @brief   Declaration of the getdents(fd, entry) syscall handler.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-07
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Read a single directory entry name into a user buffer
+ * @brief         One directory entry per call.
  *
- * Uses the file descriptor's offset as the directory entry index.
- * On success the offset is advanced by one and the entry name length
- * is returned.  Returns 0 when no more entries remain, -1 on error.
- *
- * @param fd         File descriptor pointing to an open directory
- * @param buf_virt   User virtual address of the destination buffer
- * @param count      Size of the destination buffer
+ * @return        What ring 3 receives: a count, a code, or a negative
+ *                errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_getdents(uint64_t fd, uint64_t buf_virt, uint64_t count, uint64_t, uint64_t, uint64_t);
-
-/// P0e (SMAP): read one directory entry name into a KERNEL buffer (may block).
-/// Tests call this; sys_getdents is the user boundary (copy_to_user).
-int64_t do_getdents_kernel(int fd, char* kname, uint64_t count);
+long long HandleGetdents(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

@@ -1,496 +1,563 @@
-/** @file kernel/fs/procfs.cpp
- * @brief ProcFS backend + InodeOps (root, per-PID dir, stat/cmdline files).
- * Kernel-linked (reads the task registry); exercised via run_procfs_tests.
- */
+#include "kernel/fs/procfs/procfs.hpp"
 
-#include "procfs.hpp"
+#include <iterator>
+#include <span>
+#include <string_view>
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include "kernel/fs/file.hpp"  // inode_ref (lookup returns a ref'd Inode*)
-#include "kernel/lib/string.hpp"
-#include "kernel/proc/pid.hpp"  // PidAllocator::PID_MAX (static_assert drift guard)
-#include "kernel/proc/signal.hpp"  // signal_find_task_by_pid / signal_nth_task_pid / signal_snapshot_task
-#include "kernel/proc/task_snapshot.hpp"  // TaskSnapshot (value type, DEBT-022)
-#include "procfs_content.hpp"             // format_proc_stat / format_proc_cmdline
-
-// ProcFs's fixed PID-indexed pools assume the PID bound matches the allocator.
-// If PidAllocator::PID_MAX ever changes, this fires at compile time.
-static_assert(cinux::fs::kProcPidMax == cinux::proc::PidAllocator::PID_MAX,
-              "ProcFs PID pool bound must match PidAllocator::PID_MAX");
+#include "cinux/container/name_table.hpp"
+#include "cinux/format.hpp"
+#include "cinux/literal_types.hpp"
+#include "cinux/math.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/parse.hpp"
+#include "cinux/result.hpp"
+#include "cinux/text.hpp"
+#include "kernel/fs/devfs/devfs.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/proc/task_snapshot.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::fs {
 
-using cinux::lib::Error;
-
-Inode* take_ref(Inode* i) {
-    inode_ref(i);
-    return i;
-}
-using cinux::lib::ErrorOr;
-using cinux::proc::signal_find_task_by_pid;
-using cinux::proc::signal_snapshot_task;
-using cinux::proc::TaskSnapshot;
-using cinux::proc::signal_nth_task_pid;
-
 namespace {
 
-// ============================================================
-// Shared helpers
-// ============================================================
+/// The root's inode.
+constexpr unsigned long kRootIno = 1;
 
-/// Fill a struct stat for a ProcFS directory inode (root or a /proc/<pid> dir).
-/// Directories are read-only (0555); st_ino echoes the inode number (the PID for
-/// a per-PID dir, 1 for root).  Zeroed first so no kernel-stack bytes leak.
-void fill_dir_stat(const Inode* inode, struct stat* st) {
-    memset(st, 0, sizeof(*st));
-    st->st_ino     = inode->ino;
-    st->st_nlink   = 2;
-    st->st_mode    = kProcSIfDir | 0555;
-    st->st_blksize = 4096;
-}
+/// The meminfo file's inode.
+constexpr unsigned long kMeminfoIno = 2;
 
-/// Emit the "." (index 0) or ".." (index 1) readdir entry into @p name.
-/// Returns 1 on a match, -1 (via Error) when @p name_max is too small, or leaves
-/// the caller to handle index >= 2.  Centralised so every ProcFS directory ops
-/// shares one dot/dotdot spelling.
-ErrorOr<int64_t> fill_dot_entry(uint64_t index, char* name, uint64_t name_max) {
-    if (index == 0) {
-        if (name_max < 2) {
-            return Error::InvalidArgument;
-        }
-        name[0] = '.';
-        name[1] = '\0';
-        return 1;
-    }
-    if (index == 1) {
-        if (name_max < 3) {
-            return Error::InvalidArgument;
-        }
-        name[0] = '.';
-        name[1] = '.';
-        name[2] = '\0';
-        return 1;
-    }
-    return 0;  // not a dot entry; caller handles index >= 2
-}
+/// The self directory's inode.
+constexpr unsigned long kSelfIno = 3;
 
-/// Parse a non-empty decimal run at @p s as a PID.  On success returns true and
-/// sets *@p pid (1..kProcPidMax) and *@p rest to the first char after the digits.
-/// Inputs that would overflow the PID bound (e.g. "99999") are rejected, so the
-/// caller never indexes the inode pool out of range.
-bool parse_pid(const char* s, int* pid, const char** rest) {
-    if (s == nullptr || s[0] < '0' || s[0] > '9') {
+constexpr unsigned long kMountsIno  = 7;
+constexpr unsigned long kUptimeIno  = 8;
+constexpr unsigned long kCpuinfoIno = 9;
+
+/// One pid directory's stride in the inode space.
+constexpr unsigned long kPidStride = 4;
+
+/// One process directory's entries, stat first, cmdline second.
+constexpr unsigned long kPidEntries = 2;
+
+/// One fixed directory name: what lookup answers and read_dir lists.
+struct FixedName {
+    const char*   name;
+    InodeType     type;
+    unsigned long step;
+};
+
+/// The root's fixed names, in listing order, dots aside.
+constexpr FixedName kRootNames[] = {
+    {.name = "meminfo", .type = InodeType::kFile, .step = kMeminfoIno - kRootIno},
+    {.name = "self", .type = InodeType::kDirectory, .step = kSelfIno - kRootIno},
+    {.name = "devices", .type = InodeType::kFile, .step = kProcDevicesIno - kRootIno},
+    {.name = "mounts", .type = InodeType::kFile, .step = kMountsIno - kRootIno},
+    {.name = "uptime", .type = InodeType::kFile, .step = kUptimeIno - kRootIno},
+    {.name = "cpuinfo", .type = InodeType::kFile, .step = kCpuinfoIno - kRootIno},
+};
+
+/// One process directory's fixed names, stat first, cmdline second.
+constexpr FixedName kPidDirNames[] = {
+    {.name = "stat", .type = InodeType::kFile, .step = 1},
+    {.name = "cmdline", .type = InodeType::kFile, .step = 2},
+};
+
+/// Serves one directory's fixed names, the index after the two dots.
+template <unsigned long Count>
+bool serve_fixed(const FixedName (&names)[Count], unsigned long base_ino, unsigned long index,
+                 FsDirent& entry) {
+    if (index < 2 || index - 2 >= Count) {
         return false;
     }
-    int         v = 0;
-    const char* p = s;
-    while (*p >= '0' && *p <= '9') {
-        v = v * 10 + (*p - '0');
-        ++p;
-        if (v > kProcPidMax) {
-            return false;  // out of the allocator's range
-        }
-    }
-    *pid  = v;
-    *rest = p;
+    const FixedName& fixed = names[index - 2];
+    base::CopyText(entry.name, fixed.name);
+    entry.ino  = base_ino + fixed.step;
+    entry.type = fixed.type;
     return true;
 }
 
-// ============================================================
-// Pseudo-file stat/copy helpers (content itself is in procfs_content.cpp)
-// ============================================================
-
-/// Fill a struct stat for a ProcFS regular pseudo-file (stat / cmdline).
-/// Read-only (0444); st_ino echoes the PID.  Zeroed first -- no leak.
-void fill_file_stat(const Inode* inode, struct stat* st) {
-    memset(st, 0, sizeof(*st));
-    st->st_ino     = inode->ino;
-    st->st_nlink   = 1;
-    st->st_mode    = kProcSIfReg | 0444;
-    st->st_blksize = 4096;
+/// The Linux stat layout through field 24 (rss); unavailable accounting
+/// fields are zero, with no terminal represented by tty 0 and tpgid -1.
+unsigned long format_stat(char* out, unsigned long out_cap, const proc::TaskSnapshot& shot) {
+    const base::format::Arg kArgs[] = {
+        base::format::NumS(shot.pid),
+        base::format::Str(shot.name),
+        base::format::NumU(static_cast<unsigned long long>(shot.state)),
+        base::format::NumS(shot.parent_pid),
+        base::format::NumS(shot.pgid),
+        base::format::NumS(shot.sid),
+    };
+    base::format::FormatToBuf(out, out_cap,
+                              "%ld (%s) %c %ld %ld %ld 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+                              base::format::ArgsView::of(kArgs));
+    return base::StrLength(out, out_cap);
 }
 
-/// Copy min(count, len-offset) bytes of generated pseudo-file content into the
-/// caller's buffer.  Returns the byte count (0 once past the end = EOF).  Lets
-/// the read ops share one offset/EOF handling path.
-ErrorOr<int64_t> copy_pseudo(const char* content, uint32_t len, uint64_t offset, void* buf,
-                             uint64_t count) {
-    if (offset >= len) {
-        return 0;  // EOF
+unsigned long format_meminfo(char* out, unsigned long out_cap, const ProcSource& source) {
+    unsigned long free_pages  = 0;
+    unsigned long total_pages = 0;
+    if (source.memory != nullptr) {
+        source.memory(source.context, free_pages, total_pages);
     }
-    uint64_t avail = static_cast<uint64_t>(len) - offset;
-    uint64_t n     = count < avail ? count : avail;
-    memcpy(buf, content + offset, n);
-    return static_cast<int64_t>(n);
+    using base::operator""_KiB;
+    const auto kTotalBytes = total_pages * source.memory_page_bytes;
+    const auto kFreeBytes  = base::math::Min(free_pages, total_pages) * source.memory_page_bytes;
+    const base::format::Arg kArgs[] = {
+        base::format::NumU(kTotalBytes),        base::format::NumU(kTotalBytes - kFreeBytes),
+        base::format::NumU(kFreeBytes),         base::format::NumU(kTotalBytes / 1_KiB),
+        base::format::NumU(kFreeBytes / 1_KiB), base::format::NumU(kFreeBytes / 1_KiB),
+    };
+    base::format::FormatToBuf(out, out_cap,
+                              "        total: used: free: shared: buffers: cached:\n"
+                              "Mem: %lu %lu %lu 0 0 0\nSwap: 0 0 0\n"
+                              "MemTotal:  %lu kB\nMemFree:   %lu kB\n"
+                              "MemAvailable: %lu kB\nBuffers: 0 kB\nCached: 0 kB\n"
+                              "SwapTotal: 0 kB\nSwapFree: 0 kB\n",
+                              base::format::ArgsView::of(kArgs));
+    return base::StrLength(out, out_cap);
 }
 
-// ============================================================
-// /proc root directory -- readdir snapshots the live PID registry (batch 2)
-// ============================================================
-
-class ProcRootDirOps : public InodeOps {
-public:
-    ErrorOr<int64_t> readdir(const Inode* inode, uint64_t index, char* name,
-                             uint64_t name_max) override;
-    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return Error::InvalidArgument;
-        }
-        fill_dir_stat(inode, st);
-        return {};
-    }
-};
-
-// ============================================================
-// /proc/<pid> directory -- readdir lists the per-process files (batch 3)
-// ============================================================
-
-class ProcPidDirOps : public InodeOps {
-public:
-    ErrorOr<int64_t> readdir(const Inode* inode, uint64_t index, char* name,
-                             uint64_t name_max) override;
-    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return Error::InvalidArgument;
-        }
-        fill_dir_stat(inode, st);
-        return {};
-    }
-};
-
-// The root directory lists one entry per live PID.  Indices 0/1 are "." / "..";
-// index i>=2 maps to the (i-2)-th PID in a registry snapshot taken on each call
-// (Linux /proc readdir recomputes the task set per getdents the same way).  The
-// registry is normally stable across one listing, so successive indices see a
-// consistent snapshot.
-ErrorOr<int64_t> ProcRootDirOps::readdir(const Inode* inode, uint64_t index, char* name,
-                                         uint64_t name_max) {
-    if (inode == nullptr || name == nullptr || name_max == 0) {
-        return Error::InvalidArgument;
-    }
-
-    auto dot = fill_dot_entry(index, name, name_max);
-    if (!dot.ok() || dot.value() == 1) {
-        return dot;  // "." / ".." handled, or a name_max too small to spell them
-    }
-
-    // index 2 -> the fixed /proc/meminfo pseudo-file (F-ECO busybox `free`).
-    if (index == 2) {
-        if (name_max < 8) {
-            return Error::InvalidArgument;  // "meminfo" + NUL
-        }
-        memcpy(name, "meminfo", 8);
-        return 1;
-    }
-    // index 3 -> /proc/cpuinfo (F4 SMP: busybox `nproc` + `cat /proc/cpuinfo`).
-    if (index == 3) {
-        if (name_max < 8) {
-            return Error::InvalidArgument;  // "cpuinfo" + NUL
-        }
-        memcpy(name, "cpuinfo", 8);
-        return 1;
-    }
-    // index >= 4: the (index-4)-th live PID.  Walking the registry to the index
-    // directly (rather than snapshotting it onto the stack) keeps this frame
-    // under the kernel's 1024-byte limit.  utoa's contract is 11 bytes; readdir
-    // name buffers are PROCFS_NAME_MAX (32), so the guard never trips in
-    // practice but honours the contract for any caller.
-    if (name_max < 11) {
-        return Error::InvalidArgument;
-    }
-    int pid;
-    if (!signal_nth_task_pid(static_cast<uint32_t>(index - 4), &pid)) {
-        return 0;  // past the last live PID
-    }
-    utoa(name, static_cast<uint32_t>(pid));
-    return 1;
+unsigned long format_cpu(char* out, unsigned long capacity, const ProcCpuFacts& cpu) {
+    const base::format::Arg kArgs[] = {
+        base::format::NumU(cpu.processor), base::format::Str(cpu.vendor_id),
+        base::format::NumU(cpu.family),    base::format::NumU(cpu.model),
+        base::format::Str(cpu.model_name), base::format::NumU(cpu.stepping),
+        base::format::NumU(cpu.apic_id),   base::format::Str(cpu.flags),
+    };
+    base::format::FormatToBuf(out, capacity,
+                              "processor\t: %lu\nvendor_id\t: %s\ncpu family\t: %u\n"
+                              "model\t\t: %u\nmodel name\t: %s\nstepping\t: %u\n"
+                              "apicid\t\t: %u\nflags\t\t: %s\n\n",
+                              base::format::ArgsView::of(kArgs));
+    return base::StrLength(out, capacity);
 }
 
-// ============================================================
-// /proc/<pid>/stat and /proc/<pid>/cmdline -- read-only pseudo-files
-// ============================================================
-
-class ProcStatFileOps : public InodeOps {
-public:
-    ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count) override;
-    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return Error::InvalidArgument;
-        }
-        fill_file_stat(inode, st);
-        return {};
-    }
-};
-
-class ProcCmdlineFileOps : public InodeOps {
-public:
-    ErrorOr<int64_t> read(const Inode* inode, uint64_t offset, void* buf, uint64_t count) override;
-    ErrorOr<void>    stat(const Inode* inode, struct stat* st) override {
-        if (inode == nullptr || st == nullptr) {
-            return Error::InvalidArgument;
-        }
-        fill_file_stat(inode, st);
-        return {};
-    }
-};
-
-ErrorOr<int64_t> ProcPidDirOps::readdir(const Inode* inode, uint64_t index, char* name,
-                                        uint64_t name_max) {
-    if (inode == nullptr || name == nullptr || name_max == 0) {
-        return Error::InvalidArgument;
-    }
-    auto dot = fill_dot_entry(index, name, name_max);
-    if (!dot.ok() || dot.value() == 1) {
-        return dot;
-    }
-    // index 2 -> "stat", index 3 -> "cmdline"; anything beyond is end-of-dir.
-    switch (index) {
-    case 2:
-        if (name_max < 5) {
-            return Error::InvalidArgument;  // "stat" + NUL
-        }
-        memcpy(name, "stat", 5);
-        return 1;
-    case 3:
-        if (name_max < 8) {
-            return Error::InvalidArgument;  // "cmdline" + NUL
-        }
-        memcpy(name, "cmdline", 8);
-        return 1;
-    default:
+unsigned long read_cpuinfo(const ProcSource& source, unsigned long offset, std::span<char> out) {
+    if (source.nth_cpu == nullptr || out.empty()) {
         return 0;
     }
+    unsigned long gave = 0;
+    for (unsigned long ordinal = 0;; ++ordinal) {
+        ProcCpuFacts cpu{};
+        if (!source.nth_cpu(source.context, ordinal, cpu)) {
+            break;
+        }
+        char       record[512]{};
+        const auto kBytes = format_cpu(record, sizeof(record), cpu);
+        if (offset >= kBytes) {
+            offset -= kBytes;
+            continue;
+        }
+        const auto kGive = base::math::Min(kBytes - offset, out.size() - gave);
+        base::CopyBytes(out.data() + gave, record + offset, kGive);
+        gave += kGive;
+        offset = 0;
+        if (gave == out.size()) {
+            break;
+        }
+    }
+    return gave;
 }
 
-// Snapshot the task's fields under the registry lock and render from the
-// snapshot (DEBT-022): no Task* is held past the lock, closing the UAF window
-// that opened once tasks became free (DEBT-002 fixed).  A task that exits
-// before the snapshot yields NotFound.
-ErrorOr<int64_t> ProcStatFileOps::read(const Inode* inode, uint64_t offset, void* buf,
-                                       uint64_t count) {
-    if (inode == nullptr || buf == nullptr) {
-        return Error::InvalidArgument;
+unsigned long cpuinfo_size(const ProcSource& source) {
+    if (source.nth_cpu == nullptr) {
+        return 0;
     }
-    int          pid = static_cast<int>(inode->ino);
-    TaskSnapshot snap;
-    if (!signal_snapshot_task(pid, snap)) {
-        return Error::NotFound;
+    unsigned long bytes = 0;
+    for (unsigned long ordinal = 0;; ++ordinal) {
+        ProcCpuFacts cpu{};
+        if (!source.nth_cpu(source.context, ordinal, cpu)) {
+            break;
+        }
+        char record[512]{};
+        bytes += format_cpu(record, sizeof(record), cpu);
     }
-    char     line[kProcStatLineMax];
-    uint32_t len = format_proc_stat(snap, line, sizeof(line));
-    return copy_pseudo(line, len, offset, buf, count);
+    return bytes;
 }
 
-ErrorOr<int64_t> ProcCmdlineFileOps::read(const Inode* inode, uint64_t offset, void* buf,
-                                          uint64_t count) {
-    if (inode == nullptr || buf == nullptr) {
-        return Error::InvalidArgument;
+/// One class section of the devices node: the header, then every
+/// seated device of that class in seating order.
+unsigned long format_device_section(char* out, unsigned long out_cap, const ProcSource& source,
+                                    const char* section) {
+    const base::format::Arg kHeader[] = {
+        base::format::Str(section),
+    };
+    base::format::FormatToBuf(out, out_cap, "%s:\n", base::format::ArgsView::of(kHeader));
+    unsigned long used = base::StrLength(out, out_cap);
+    if (source.nth_device == nullptr) {
+        return used;
     }
-    int          pid = static_cast<int>(inode->ino);
-    TaskSnapshot snap;
-    if (!signal_snapshot_task(pid, snap)) {
-        return Error::NotFound;
+    for (unsigned long ordinal = 0;; ++ordinal) {
+        ProcDeviceFacts facts{};
+        if (!source.nth_device(source.context, ordinal, facts)) {
+            break;
+        }
+        if (std::string_view(facts.class_name) != std::string_view(section)) {
+            continue;
+        }
+        if (out_cap - used < 2) {
+            break;
+        }
+        if (facts.number != 0) {
+            const DeviceNumber      kId     = SplitDeviceId(facts.number);
+            const base::format::Arg kLine[] = {
+                base::format::Str(facts.name),
+                base::format::NumU(kId.major),
+                base::format::NumU(kId.minor),
+            };
+            base::format::FormatToBuf(out + used, out_cap - used, "  %s %lu:%lu\n",
+                                      base::format::ArgsView::of(kLine));
+        } else {
+            const base::format::Arg kLine[] = {
+                base::format::Str(facts.name),
+            };
+            base::format::FormatToBuf(out + used, out_cap - used, "  %s\n",
+                                      base::format::ArgsView::of(kLine));
+        }
+        used += base::StrLength(out + used, out_cap - used);
     }
-    char     content[kProcCmdlineMax];
-    uint32_t len = format_proc_cmdline(snap, content, sizeof(content));
-    return copy_pseudo(content, len, offset, buf, count);
+    return used;
 }
 
-}  // anonymous namespace
-
-// ============================================================
-// ProcFs
-// ============================================================
-
-ProcFs::ProcFs() = default;
-
-ProcFs::~ProcFs() {
-    delete root_dir_ops_;
-    delete pid_dir_ops_;
-    delete stat_file_ops_;
-    delete cmdline_file_ops_;
-    delete meminfo_file_ops_;
-    delete cpuinfo_file_ops_;
+/// The devices node: three class sections, one line per device.
+unsigned long format_devices(char* out, unsigned long out_cap, const ProcSource& source) {
+    unsigned long used = 0;
+    used += format_device_section(out + used, out_cap, source, kProcClassCharacter);
+    if (used >= out_cap) {
+        return out_cap;
+    }
+    used += format_device_section(out + used, out_cap - used, source, kProcClassBlock);
+    if (used >= out_cap) {
+        return out_cap;
+    }
+    used += format_device_section(out + used, out_cap - used, source, kProcClassNetwork);
+    return used < out_cap ? used : out_cap;
 }
 
-ErrorOr<void> ProcFs::mount() {
-    // Idempotent: a second mount() is a no-op (mirrors DevFs).
-    if (mounted_) {
+/// The net/dev node: Linux's two header lines, then one row per
+/// interface with sixteen honest zeros — the family books no traffic
+/// per interface yet, and the node refuses to invent bytes.
+unsigned long format_net_dev(char* out, unsigned long out_cap, const ProcSource& source) {
+    unsigned long     used     = 0;
+    const char* const kHeads[] = {
+        "Inter-|   Receive                            |  Transmit\n",
+        " face |bytes    packets errs drop fifo frame compressed multicast|bytes    "
+        "packets errs drop fifo colls carrier compressed\n",
+    };
+    for (const char* const kHead : kHeads) {
+        const unsigned long kLen = base::StrLength(kHead, out_cap);
+        if (used + kLen >= out_cap) {
+            return out_cap;
+        }
+        base::CopyBytes(out + used, kHead, kLen);
+        used += kLen;
+    }
+    if (source.nth_net_iface == nullptr) {
+        return used;
+    }
+    for (unsigned long ordinal = 0;; ++ordinal) {
+        char name[kProcIfNameMax] = {};
+        if (!source.nth_net_iface(source.context, ordinal, name)) {
+            break;
+        }
+        const base::format::Arg kRow[] = {
+            base::format::Str(name),
+        };
+        base::format::FormatToBuf(out + used, out_cap - used,
+                                  "%6s: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+                                  base::format::ArgsView::of(kRow));
+        used += base::StrLength(out + used, out_cap - used);
+        if (used >= out_cap - 1) {
+            return out_cap;
+        }
+    }
+    return used;
+}
+
+/// The name bytes plus one NUL, the whole cmdline this kernel keeps.
+unsigned long format_cmdline(char* out, unsigned long out_cap, const proc::TaskSnapshot& shot) {
+    const base::format::Arg kArgs[] = {
+        base::format::Str(shot.name),
+    };
+    base::format::FormatToBuf(out, out_cap, "%s", base::format::ArgsView::of(kArgs));
+    return base::StrLength(out, out_cap) + 1;
+}
+
+/// Parses a whole decimal word; false on any other shape.
+bool parse_whole_decimal(std::string_view text, unsigned long& value) {
+    if (text.size() > 9) {
+        return false;
+    }
+    const base::Result<unsigned long> kParsed = base::ParseDecimal(text);
+    if (!kParsed.ok()) {
+        return false;
+    }
+    value = kParsed.value();
+    return true;
+}
+
+/// Whether a pid is alive through this source.
+bool tgid_lives(const ProcSource& source, unsigned long tgid) {
+    proc::TaskSnapshot shot{};
+    return source.snapshot != nullptr && source.snapshot(source.context, tgid, shot);
+}
+
+/// Generates one process file's bytes for a living task.
+// NOLINTNEXTLINE(readability-function-size) the scratch ladder names five
+bool generate_process(const ProcSource& source, unsigned long tgid, unsigned long kind,
+                      char* scratch, unsigned long scratch_cap, unsigned long& bytes) {
+    proc::TaskSnapshot shot{};
+    if (source.snapshot == nullptr || !source.snapshot(source.context, tgid, shot)) {
+        bytes = 0;
+        return true;
+    }
+    if (kind == 1) {
+        bytes = format_stat(scratch, scratch_cap, shot);
+        return true;
+    }
+    bytes = format_cmdline(scratch, scratch_cap, shot);
+    return true;
+}
+
+/// Generates one pseudo file's bytes; false for an unknown inode.
+// NOLINTNEXTLINE(readability-function-size) the scratch ladder names five
+bool generate(const ProcSource& source, unsigned long ino, char* scratch, unsigned long scratch_cap,
+              unsigned long& bytes) {
+    if (ino == kMountsIno) {
+        bytes = source.mounts != nullptr ? source.mounts(source.context, scratch, scratch_cap) : 0;
+        return true;
+    }
+    if (ino == kUptimeIno) {
+        const auto kNow = source.uptime_ns != nullptr ? source.uptime_ns(source.context) : 0;
+        const base::format::Arg kArgs[] = {
+            base::format::NumU(kNow / 1'000'000'000ULL),
+            base::format::NumU((kNow / 10'000'000ULL) % 100ULL),
+        };
+        base::format::FormatToBuf(scratch, scratch_cap, "%llu.%02llu 0.00\n",
+                                  base::format::ArgsView::of(kArgs));
+        bytes = base::StrLength(scratch, scratch_cap);
+        return true;
+    }
+    if (ino == kMeminfoIno) {
+        bytes = format_meminfo(scratch, scratch_cap, source);
+        return true;
+    }
+    if (ino == kProcDevicesIno) {
+        bytes = format_devices(scratch, scratch_cap, source);
+        return true;
+    }
+    if (ino == kProcNetDevIno) {
+        bytes = format_net_dev(scratch, scratch_cap, source);
+        return true;
+    }
+    if (ino < kProcPidBase) {
+        return false;
+    }
+    const unsigned long kSeat = ino - kProcPidBase;
+    const unsigned long kTgid = kSeat / kPidStride;
+    const unsigned long kKind = kSeat % kPidStride;
+    if (kKind == 0 || kKind > kPidEntries) {
+        return false;
+    }
+    return generate_process(source, kTgid, kKind, scratch, scratch_cap, bytes);
+}
+
+}  // namespace
+
+void ProcFs::set_source(const ProcSource& source) {
+    source_ = source;
+}
+
+base::Result<FsNode> ProcFs::lookup(std::string_view path) {
+    if (path.empty()) {
+        return FsNode{.opaque = nullptr, .type = InodeType::kDirectory, .ino = kRootIno, .size = 0};
+    }
+    const FixedName* const kFixed = base::container::FindByName(kRootNames, path);
+    if (kFixed != nullptr) {
+        return FsNode{
+            .opaque = nullptr,
+            .type   = kFixed->type,
+            .ino    = kRootIno + kFixed->step,
+            .size   = 0,
+        };
+    }
+    if (path == "self/exe") {
+        return FsNode{.opaque = nullptr, .type = InodeType::kFile, .ino = kProcExeIno, .size = 0};
+    }
+    if (path == "net/dev") {
+        return FsNode{
+            .opaque = nullptr,
+            .type   = InodeType::kFile,
+            .ino    = kProcNetDevIno,
+            .size   = 0,
+        };
+    }
+    const unsigned long kSlash = path.find('/');
+    if (kSlash == std::string_view::npos) {
+        unsigned long tgid = 0;
+        if (!parse_whole_decimal(path, tgid) || !tgid_lives(source_, tgid)) {
+            return base::KernelError::kNotFound;
+        }
+        const unsigned long kIno = kProcPidBase + (tgid * kPidStride);
+        return FsNode{.opaque = nullptr, .type = InodeType::kDirectory, .ino = kIno, .size = 0};
+    }
+    unsigned long tgid = 0;
+    if (!parse_whole_decimal(path.substr(0, kSlash), tgid) || !tgid_lives(source_, tgid)) {
+        return base::KernelError::kNotFound;
+    }
+    const std::string_view kLeaf        = path.substr(kSlash + 1);
+    const unsigned long    kDirIno      = kProcPidBase + (tgid * kPidStride);
+    const FixedName* const kPidDirEntry = base::container::FindByName(kPidDirNames, kLeaf);
+    if (kPidDirEntry == nullptr) {
+        return base::KernelError::kNotFound;
+    }
+    return FsNode{
+        .opaque = nullptr,
+        .type   = kPidDirEntry->type,
+        .ino    = kDirIno + kPidDirEntry->step,
+        .size   = 0,
+    };
+}
+
+base::Result<FsNode> ProcFs::make_file(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<FsNode> ProcFs::make_dir(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<void> ProcFs::unlink(std::string_view /*path*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<unsigned long> ProcFs::read(FsNode node, unsigned long offset, void* sink,
+                                         unsigned long count) {
+    if (node.type != InodeType::kFile) {
+        return base::KernelError::kIsADirectory;
+    }
+    if (node.ino == kProcExeIno) {
+        if (source_.exe_bytes == nullptr) {
+            return 0;
+        }
+        unsigned long gave = 0;
+        if (!source_.exe_bytes(source_.context, offset, sink, count, gave)) {
+            return 0;
+        }
+        return gave;
+    }
+    if (node.ino == kCpuinfoIno) {
+        return read_cpuinfo(source_, offset, std::span{static_cast<char*>(sink), count});
+    }
+    char          scratch[512] = {};
+    unsigned long bytes        = 0;
+    if (!generate(source_, node.ino, scratch, sizeof(scratch), bytes)) {
+        return base::KernelError::kNotFound;
+    }
+    if (offset >= bytes) {
+        return 0;
+    }
+    const unsigned long kHave = bytes - offset;
+    const unsigned long kGive = kHave < count ? kHave : count;
+    base::CopyBytes(sink, scratch + offset, kGive);
+    return kGive;
+}
+
+base::Result<unsigned long> ProcFs::write(FsNode /*node*/, unsigned long /*offset*/,
+                                          const void* /*source*/, unsigned long /*count*/) {
+    return base::KernelError::kNotSupported;
+}
+
+base::Result<bool> ProcFs::read_dir(FsNode node, unsigned long index, FsDirent& entry) const {
+    if (node.type != InodeType::kDirectory) {
+        return base::KernelError::kNotADirectory;
+    }
+    entry      = FsDirent{};
+    entry.type = InodeType::kDirectory;
+    if (node.ino == kRootIno) {
+        if (index == 0) {
+            entry.name[0] = '.';
+            entry.ino     = kRootIno;
+            return true;
+        }
+        if (index == 1) {
+            entry.name[0] = '.';
+            entry.name[1] = '.';
+            entry.ino     = kRootIno;
+            return true;
+        }
+        if (serve_fixed(kRootNames, kRootIno, index, entry)) {
+            return true;
+        }
+        unsigned long tgid = 0;
+        if (source_.nth_tgid == nullptr ||
+            !source_.nth_tgid(source_.context, index - 2 - std::size(kRootNames), tgid)) {
+            return false;
+        }
+        const base::format::Arg kName[] = {
+            base::format::NumU(tgid),
+        };
+        base::format::FormatToBuf(entry.name, kFsNameMax, "%lu", base::format::ArgsView::of(kName));
+        entry.ino = kProcPidBase + (tgid * kPidStride);
+        return true;
+    }
+    if (index == 0) {
+        entry.name[0] = '.';
+        entry.ino     = node.ino;
+        return true;
+    }
+    if (index == 1) {
+        entry.name[0] = '.';
+        entry.name[1] = '.';
+        entry.ino     = kRootIno;
+        return true;
+    }
+    return serve_fixed(kPidDirNames, node.ino, index, entry);
+}
+
+base::Result<void> ProcFs::stat(FsNode node, FsStat& probed) {
+    probed       = FsStat{};
+    probed.ino   = node.ino;
+    probed.links = 1;
+    if (node.type == InodeType::kDirectory) {
+        probed.mode = kFsDirMode;
         return {};
     }
-
-    root_dir_ops_     = new ProcRootDirOps();
-    pid_dir_ops_      = new ProcPidDirOps();
-    stat_file_ops_    = new ProcStatFileOps();
-    cmdline_file_ops_ = new ProcCmdlineFileOps();
-    meminfo_file_ops_ = procfs_new_meminfo_ops();
-    cpuinfo_file_ops_ = procfs_new_cpuinfo_ops();
-
-    // Root directory inode: readdir snapshots the live PID registry.
-    root_inode_.ino        = 1;
-    root_inode_.type       = InodeType::Directory;
-    root_inode_.ops        = root_dir_ops_;
-    root_inode_.fs_private = this;
-    root_inode_.mode       = kProcSIfDir | 0555;
-    root_inode_.nlink      = 2;
-
-    // /proc/meminfo pseudo-file inode (F-ECO busybox).  Fixed ino (not a PID);
-    // read regenerates content from g_pmm via ProcMeminfoFileOps.
-    meminfo_inode_.ino        = 0xF6;  // arbitrary, distinct from PID inos
-    meminfo_inode_.type       = InodeType::Regular;
-    meminfo_inode_.ops        = meminfo_file_ops_;
-    meminfo_inode_.fs_private = this;
-    meminfo_inode_.mode       = kProcSIfReg | 0444;
-    meminfo_inode_.nlink      = 1;
-
-    // /proc/cpuinfo pseudo-file inode (F4 SMP).  Fixed ino (distinct from
-    // meminfo/PID); read regenerates content from g_acpi_info.
-    cpuinfo_inode_.ino        = 0xF7;
-    cpuinfo_inode_.type       = InodeType::Regular;
-    cpuinfo_inode_.ops        = cpuinfo_file_ops_;
-    cpuinfo_inode_.fs_private = this;
-    cpuinfo_inode_.mode       = kProcSIfReg | 0444;
-    cpuinfo_inode_.nlink      = 1;
-
-    // Per-PID inodes, stamped eagerly.  Existing as an inode does not imply the
-    // PID is live -- lookup() gates every hand-out on signal_find_task_by_pid,
-    // so /proc only ever exposes live tasks.
-    for (int pid = 1; pid <= kProcPidMax; ++pid) {
-        Inode& d     = pid_dir_inodes_[pid];
-        d.ino        = static_cast<uint64_t>(pid);
-        d.type       = InodeType::Directory;
-        d.ops        = pid_dir_ops_;
-        d.fs_private = this;
-        d.mode       = kProcSIfDir | 0555;
-        d.nlink      = 2;
-
-        Inode& s     = stat_inodes_[pid];
-        s.ino        = static_cast<uint64_t>(pid);
-        s.type       = InodeType::Regular;
-        s.ops        = stat_file_ops_;
-        s.fs_private = this;
-        s.mode       = kProcSIfReg | 0444;
-        s.nlink      = 1;
-
-        Inode& c     = cmdline_inodes_[pid];
-        c.ino        = static_cast<uint64_t>(pid);
-        c.type       = InodeType::Regular;
-        c.ops        = cmdline_file_ops_;
-        c.fs_private = this;
-        c.mode       = kProcSIfReg | 0444;
-        c.nlink      = 1;
+    probed.mode = kFsFileMode;
+    if (node.ino == kCpuinfoIno) {
+        probed.size = cpuinfo_size(source_);
+        return {};
     }
-
-    mounted_ = true;
+    if (node.ino == kProcExeIno) {
+        probed.size = source_.exe_size != nullptr ? source_.exe_size(source_.context) : 0;
+        return {};
+    }
+    char          scratch[512] = {};
+    unsigned long bytes        = 0;
+    if (generate(source_, node.ino, scratch, sizeof(scratch), bytes)) {
+        probed.size = bytes;
+    }
     return {};
 }
 
-ErrorOr<Inode*> ProcFs::lookup(const char* path) {
-    if (path == nullptr) {
-        return Error::InvalidArgument;
-    }
+void ProcFs::retain(FsNode /*node*/) {}
 
-    // Root directory: empty path or "/".
-    if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
-        return take_ref(&root_inode_);
-    }
-    const char* p = path;
-    if (p[0] == '/') {
-        ++p;
-    }
-    if (p[0] == '\0') {
-        return take_ref(&root_inode_);  // trailing slash on the mount root
-    }
+void ProcFs::release(FsNode /*node*/) {}
 
-    if (strcmp(p, "meminfo") == 0) {
-        return take_ref(&meminfo_inode_);
-    }
-    if (strcmp(p, "cpuinfo") == 0) {
-        return take_ref(&cpuinfo_inode_);
-    }
-
-    int         pid;
-    const char* rest;
-    if (!parse_pid(p, &pid, &rest)) {
-        return Error::NotFound;
-    }
-    if (pid < 1 || pid > kProcPidMax) {
-        return Error::NotFound;
-    }
-
-    // "<pid>" -- the per-process directory.  The PID must be live.
-    if (rest[0] == '\0') {
-        if (signal_find_task_by_pid(pid) == nullptr) {
-            return Error::NotFound;  // no such live task
-        }
-        return take_ref(&pid_dir_inodes_[pid]);
-    }
-
-    // "<pid>/<leaf>" -- per-process pseudo-files; re-check liveness.
-    if (rest[0] != '/') {
-        return Error::NotFound;  // "<pid>junk" -- not a path separator
-    }
-    const char* leaf = rest + 1;
-    if (signal_find_task_by_pid(pid) == nullptr) {
-        return Error::NotFound;
-    }
-    if (strcmp(leaf, "stat") == 0) {
-        return take_ref(&stat_inodes_[pid]);
-    }
-    if (strcmp(leaf, "cmdline") == 0) {
-        return take_ref(&cmdline_inodes_[pid]);
-    }
-    return Error::NotFound;
+bool ProcFs::readable(FsNode /*node*/) {
+    return true;
 }
 
-ErrorOr<Inode*> ProcFs::lookup_child(const Inode* parent, const char* name, uint32_t namelen) {
-    if (parent == nullptr || name == nullptr || namelen == 0) {
-        return Error::InvalidArgument;
-    }
-    // parse_pid/strcmp need NUL termination; the resolver passes a slice.
-    char buf[64];
-    if (namelen >= sizeof(buf)) {
-        return Error::NotFound;
-    }
-    for (uint32_t i = 0; i < namelen; ++i) {
-        buf[i] = name[i];
-    }
-    buf[namelen] = '\0';
+long long ProcFs::ioctl(FsNode /*node*/, unsigned long long /*word*/,
+                        unsigned long long /*argument*/) {
+    return -syscall::kEnotty;
+}
 
-    if (parent == &root_inode_) {
-        if (strcmp(buf, "meminfo") == 0) {
-            return take_ref(&meminfo_inode_);
-        }
-        if (strcmp(buf, "cpuinfo") == 0) {
-            return take_ref(&cpuinfo_inode_);
-        }
-        int         pid;
-        const char* rest;
-        if (parse_pid(buf, &pid, &rest) && rest[0] == '\0' && pid >= 1 && pid <= kProcPidMax) {
-            if (signal_find_task_by_pid(pid) == nullptr) {
-                return Error::NotFound;
-            }
-            return take_ref(&pid_dir_inodes_[pid]);
-        }
-        return Error::NotFound;
-    }
-
-    // /proc/<pid>/ : parent->ino is the pid; name is stat/cmdline.
-    uint32_t pid = parent->ino;
-    if (pid >= 1 && pid <= kProcPidMax && parent == &pid_dir_inodes_[pid]) {
-        if (signal_find_task_by_pid(static_cast<int>(pid)) == nullptr) {
-            return Error::NotFound;
-        }
-        if (strcmp(buf, "stat") == 0) {
-            return take_ref(&stat_inodes_[pid]);
-        }
-        if (strcmp(buf, "cmdline") == 0) {
-            return take_ref(&cmdline_inodes_[pid]);
-        }
-    }
-    return Error::NotFound;
+base::Result<FsNode> ProcFs::adopt_open(FsNode node, std::string_view /*path*/) {
+    retain(node);
+    return node;
 }
 
 }  // namespace cinux::fs

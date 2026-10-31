@@ -1,61 +1,58 @@
-/**
- * @file kernel/syscall/sys_lseek.cpp
- * @brief sys_lseek handler implementation (F10-M1 batch 4)
- *
- * Updates the File offset under its lock for SEEK_SET / SEEK_CUR / SEEK_END
- * and returns the resulting offset.  Legacy fds (stdin/stdout without a
- * VFS entry) are not seekable and return -ESPIPE.
- */
-
 #include "kernel/syscall/sys_lseek.hpp"
 
-#include <stdint.h>
-
-#include "kernel/errno.hpp"
-#include "kernel/fs/file.hpp"
-#include "kernel/fs/vfs_mount.hpp"
+#include "cinux/result.hpp"
+#include "cinux/shared.hpp"
+#include "kernel/fs/file_table.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
 
 namespace cinux::syscall {
 
 namespace {
 
-constexpr uint64_t kSeekSet = 0;  ///< offset from start of file
-constexpr uint64_t kSeekCur = 1;  ///< offset relative to current position
-constexpr uint64_t kSeekEnd = 2;  ///< offset relative to end of file
+/// The whence codes the ABI defines: one anchors at the cursor, two past
+/// the final byte, and zero — the default anchor — at the first byte; a
+/// fourth or higher value is not a position question and the call
+/// refuses it.
+constexpr unsigned long long kSeekCur = 1;
+constexpr unsigned long long kSeekEnd = 2;
 
-}  // anonymous namespace
+}  // namespace
 
-int64_t sys_lseek(uint64_t fd, uint64_t offset, uint64_t whence, uint64_t, uint64_t, uint64_t) {
-    cinux::fs::File* file = cinux::fs::current_fd_table().get(static_cast<int>(fd));
-    if (file == nullptr || file->inode == nullptr) {
-        return -cinux::kEbadf;
+long long HandleLseek(const SyscallFrame& frame) {
+    if (frame.rdi >= fs::kFileTableMax) {
+        return -kEbadf;
     }
-
-    auto g = file->offset_lock_.guard();
-
-    int64_t signed_offset = static_cast<int64_t>(offset);
-    int64_t base          = 0;
-    switch (whence) {
-    case kSeekSet:
-        base = 0;
-        break;
-    case kSeekCur:
-        base = static_cast<int64_t>(file->offset);
-        break;
-    case kSeekEnd:
-        base = static_cast<int64_t>(file->inode->size);
-        break;
-    default:
-        return -cinux::kEinval;
+    if (frame.rdx > kSeekEnd) {
+        return -kEinval;
     }
-
-    int64_t new_offset = base + signed_offset;
-    if (new_offset < 0) {
-        return -cinux::kEinval;
+    const base::Result<base::Shared<fs::OpenFile>> kSlot = CurrentTask()->files->shared(frame.rdi);
+    if (!kSlot.ok()) {
+        return -kEbadf;
     }
-
-    file->offset = static_cast<uint64_t>(new_offset);
-    return new_offset;
+    auto* const kFile  = kSlot.value().get();
+    long long   anchor = 0;
+    if (frame.rdx == kSeekCur) {
+        anchor = static_cast<long long>(kFile->offset);
+    } else if (frame.rdx == kSeekEnd) {
+        if (kFile->ops->stat == nullptr) {
+            return -kEspipe;
+        }
+        fs::FsStat probed{};
+        if (!kFile->ops->stat(kFile->backend, kFile->node, probed).ok()) {
+            return -kEio;
+        }
+        anchor = static_cast<long long>(probed.size);
+    }
+    const long long kTarget = anchor + static_cast<long long>(frame.rsi);
+    if (kTarget < 0) {
+        return -kEinval;
+    }
+    kFile->offset = static_cast<unsigned long>(kTarget);
+    return kTarget;
 }
 
 }  // namespace cinux::syscall

@@ -1,70 +1,50 @@
 /**
- * @file kernel/syscall/sys_stat.hpp
- * @brief sys_stat and sys_fstat handler declarations
+ * @file    sys_stat.hpp
+ * @brief   stat(path, out): one node's metadata for ring 3.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-11
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
-#include "kernel/fs/stat.hpp"  // P0a: do_*_kernel takes cinux::fs::stat*
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
 /**
- * @brief Get file status by path
- *
- * Resolves the path through the VFS and fills a struct stat.
- *
- * @param path_virt  User virtual address of the null-terminated path string
- * @param st_virt    User virtual address of the struct stat output buffer
- * @return 0 on success, or -1 on error
+ * @brief         stat(path, out).
+ * @param[in]     frame   The trap frame; rdi carries the path address,
+ *                        relative or absolute, rsi the user address
+ *                        receiving a SyscallStat.
+ * @return        Zero, or a negative errno.
+ * @since         0.1.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_stat(uint64_t path_virt, uint64_t st_virt, uint64_t, uint64_t, uint64_t, uint64_t);
+long long HandleStat(const SyscallFrame& frame);
 
 /**
- * @brief Get file status by file descriptor
- *
- * Looks up the FD in the global FD table and fills a struct stat.
- *
- * @param fd         File descriptor index
- * @param st_virt    User virtual address of the struct stat output buffer
- * @return 0 on success, or -1 on error
+ * @brief         Copy metadata for a folded kernel path to user storage.
+ * @return        Zero, or a negative errno.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_fstat(uint64_t fd, uint64_t st_virt, uint64_t, uint64_t, uint64_t, uint64_t);
-
+long long StatPath(const char* path, unsigned long long destination);
 /**
- * @brief Get file status relative to a directory fd (F10-M1 batch 4)
- *
- * musl's stat()/fstat()/lstat() all route through newfstatat.  AT_FDCWD
- * resolves cwd-relative (the common case); AT_EMPTY_PATH stats @p dirfd
- * itself.  AT_SYMLINK_NOFOLLOW selects lstat semantics (do not follow).
+ * @brief         Stats one relative name through a held directory's backend.
+ * @param[in]     descriptor  The held directory's open descriptor.
+ * @param[in]     relative    The name relative to that descriptor.
+ * @param[out]    destination The user stat record.
+ * @return        Zero, or a negative errno; kEopnotsupp asks the caller
+ *                to fall back to string folding.
+ * @since         0.9.0
+ * @ingroup       kernel_syscall
  */
-int64_t sys_newfstatat(uint64_t dirfd, uint64_t path_virt, uint64_t st_virt, uint64_t flags,
-                       uint64_t, uint64_t);
-
-/**
- * @brief lstat(2) -- stat without following a trailing symlink
- *
- * Equivalent to sys_stat except the path is resolved NoFollow, so a symlink
- * at the tail reports its own metadata, not the target's.
- */
-int64_t sys_lstat(uint64_t path_virt, uint64_t st_virt, uint64_t, uint64_t, uint64_t, uint64_t);
-
-// ============================================================
-// P0a (SMAP): pure kernel-to-kernel stat logic (no user memory).
-// Kernel-internal callers and tests use these; sys_* are the user boundaries.
-// ============================================================
-
-/// Stat a resolved path (already canonicalised, e.g. from path_resolve) into a
-/// kernel stat buffer.  When @p follow is false (lstat semantics) a trailing
-/// symlink is not followed.  Returns 0 or -errno.
-int64_t do_stat_kernel(const char* resolved_path, cinux::fs::stat* kst, bool follow = true);
-
-/// Stat an open fd into a kernel stat buffer. Returns 0 or -errno.
-int64_t do_fstat_kernel(int fd, cinux::fs::stat* kst);
+long long StatPathAt(unsigned long long descriptor, const char* relative,
+                     unsigned long long destination);
 
 }  // namespace cinux::syscall

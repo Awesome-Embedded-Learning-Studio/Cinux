@@ -1,216 +1,265 @@
-/**
- * @file kernel/mm/vmm.cpp
- * @brief Virtual Memory Manager implementation
- */
-
 #include "kernel/mm/vmm.hpp"
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstdint>
 
-#include "kernel/arch/x86_64/paging.hpp"
-#include "kernel/arch/x86_64/paging_config.hpp"
-#include "kernel/arch/x86_64/phys_virt.hpp"
-#include "kernel/lib/kprintf.hpp"
+#include "cinux/addr.hpp"
+#include "cinux/memory.hpp"
+#include "cinux/ptr.hpp"
+#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/boot/boot_info.hpp"
+#include "kernel/mm/layout.hpp"
+#include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
+#include "kernel/mm/pmm_config.hpp"
+#include "kernel/mm/vmm_config.hpp"
 
 namespace cinux::mm {
 
-// ============================================================
-// Global instance
-// ============================================================
-
-VMM g_vmm;
-
-// ============================================================
-// Internal helpers
-// ============================================================
-using namespace cinux::arch;
-
 namespace {
 
-/**
- * @brief Walk one level of the page table, allocating if needed
- *
- * @param table   Pointer to the current-level table (virtual address)
- * @param index   Index into this table
- * @param should_alloc  Whether to allocate a new table if the entry is absent
- * @return Pointer to the next-level table, or nullptr on allocation failure
- */
-PageEntry* walk_level(PageEntry* table, uint64_t index, bool should_alloc, uint64_t user_flag = 0) {
-    PageEntry& entry = table[index];
+using cinux::arch::page::Entry;
+using cinux::arch::page::HugeWindowBase;
+using cinux::arch::page::LargePageBase;
+using cinux::arch::page::MakeLargePageEntry;
+using cinux::arch::page::MakeTableEntry;
+using cinux::arch::page::kHugePageSize;
+using cinux::arch::page::kLargePageSize;
+using cinux::arch::page::kWritable;
+using walk::EntryTarget;
+using walk::SlotIndex;
+using walk::WalkLevel;
 
-    if (entry.is_present()) {
-        if (entry.huge) {
-            if (!should_alloc) {
-                return nullptr;
-            }
+constexpr unsigned int kEntriesPerTable = 512;
 
-            uint64_t big_phys  = entry.phys_addr();
-            uint64_t big_flags = entry.raw & ~ADDR_MASK;
+class SeedPantry {
+public:
+    static SeedPantry& self() {
+        static SeedPantry local_pantry;
+        return local_pantry;
+    }
 
-            uint64_t new_page = cinux::mm::g_pmm.alloc_page();
-            if (new_page == 0) {
-                return nullptr;
-            }
-
-            auto* new_table = phys_to_virt(new_page);
-            for (uint32_t i = 0; i < PT_ENTRIES; i++) {
-                new_table[i].raw =
-                    (big_phys + static_cast<uint64_t>(i) * PAGE_SIZE) | (big_flags & ~FLAG_HUGE);
-            }
-
-            entry.raw = new_page | FLAG_PRESENT | FLAG_WRITABLE | user_flag;
+    unsigned long take_page() {
+        if (cursor_ + cinux::arch::page::kSize > kSeedTablesSpan.top) {
+            return 0;
         }
-        return phys_to_virt(entry.phys_addr());
+        unsigned long const kPhysical = cursor_;
+        cursor_ += cinux::arch::page::kSize;
+        cinux::base::SetBytes(cinux::base::PtrAt<void>(kPhysical), 0,
+                              sizeof(Entry) * kEntriesPerTable);
+        return kPhysical;
     }
 
-    if (!should_alloc) {
-        return nullptr;
+private:
+    unsigned long cursor_ = kSeedTablesSpan.base;
+};
+
+Entry* table_at(unsigned long physical) {
+    return cinux::base::PtrAt<Entry>(physical);
+}
+
+Entry* direct_table_at(unsigned long physical) {
+    return cinux::base::PtrAt<Entry>(DirectMapVirt(physical));
+}
+
+bool window_touches_usable(const cinux::boot::BootInfo& info, unsigned long window) {
+    unsigned long const kWindowTop = window + kHugePageSize;
+    for (uint32_t index = 0; index < info.e820_count; ++index) {
+        if (info.e820[index].type != cinux::boot::kE820Usable) {
+            continue;
+        }
+        auto const kBase = static_cast<unsigned long>(info.e820[index].base);
+        auto const kTop  = kBase + static_cast<unsigned long>(info.e820[index].length);
+        if (kBase < kWindowTop && window < kTop) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void fill_window_pages(Entry* page_directory, unsigned long window) {
+    unsigned long const kWindowTop = window + kHugePageSize;
+    for (unsigned long base = window; base < kWindowTop; base += kLargePageSize) {
+        page_directory[SlotIndex(base, WalkLevel::kPageDirectory)] =
+            MakeLargePageEntry(base, kWritable);
+    }
+}
+
+unsigned long highest_usable_top(const cinux::boot::BootInfo& info) {
+    unsigned long top = 0;
+    for (uint32_t index = 0; index < info.e820_count; ++index) {
+        if (info.e820[index].type != cinux::boot::kE820Usable) {
+            continue;
+        }
+        auto const          kEntryTop = static_cast<unsigned long>(info.e820[index].base) +
+                                        static_cast<unsigned long>(info.e820[index].length);
+        unsigned long const kClamped  = kEntryTop < kPmmMaxPhys ? kEntryTop : kPmmMaxPhys;
+        top                           = kClamped > top ? kClamped : top;
+    }
+    return top;
+}
+
+class HandoffArchive {
+public:
+    static HandoffArchive& self() {
+        static HandoffArchive local_archive;
+        return local_archive;
     }
 
-    uint64_t new_page = cinux::mm::g_pmm.alloc_page();
-    if (new_page == 0) {
-        return nullptr;
+    void store(const cinux::boot::BootInfo& handoff) {
+        cinux::base::CopyBytes(&record_, &handoff, sizeof(cinux::boot::BootInfo));
     }
 
-    auto* new_table = phys_to_virt(new_page);
-    for (uint32_t i = 0; i < PT_ENTRIES; i++) {
-        new_table[i].raw = 0;
+    [[nodiscard]] const cinux::boot::BootInfo& record() const { return record_; }
+
+private:
+    alignas(16) cinux::boot::BootInfo record_ = {};
+};
+
+class KernelRoot {
+public:
+    static KernelRoot& self() {
+        static KernelRoot local_root;
+        return local_root;
     }
 
-    entry.raw = new_page | FLAG_PRESENT | FLAG_WRITABLE | user_flag;
-    return new_table;
+    void capture(unsigned long root) { value_ = root; }
+
+    [[nodiscard]] unsigned long value() const { return value_; }
+
+private:
+    unsigned long value_ = 0;
+};
+
+}  // namespace
+
+Entry* KernelTables::table(unsigned long physical) {
+    return cinux::base::PtrAt<Entry>(DirectMapVirt(physical));
 }
 
-}  // anonymous namespace
-
-// ============================================================
-// VMM implementation
-// ============================================================
-
-void VMM::init() {
-    kernel_pml4_ = cinux::arch::read_cr3();
-    cinux::lib::kprintf("[VMM] Initialised, kernel PML4 at phys %p\n",
-                        reinterpret_cast<void*>(kernel_pml4_));
+unsigned long KernelTables::take_page() {
+    base::PhysAddr const kFresh = Pmm::self().allocate_page();
+    if (kFresh == base::PhysAddr{}) {
+        return 0;
+    }
+    cinux::base::SetBytes(cinux::base::PtrAt<void>(DirectMapVirt(kFresh.raw)), 0,
+                          sizeof(Entry) * kEntriesPerTable);
+    return kFresh.raw;
 }
 
-bool VMM::split_2mb_page(uint64_t virt) {
-    auto g = lock_.guard();
-
-    uint64_t pml4_phys  = kernel_pml4_;
-    auto*    pml4_table = phys_to_virt(pml4_phys);
-
-    auto* pdpt = walk_level(pml4_table, PML4_INDEX(virt), true, 0);
-    if (!pdpt)
-        return false;
-
-    auto* pd = walk_level(pdpt, PDPT_INDEX(virt), true, 0);
-    if (!pd)
-        return false;
-
-    auto* pt = walk_level(pd, PD_INDEX(virt), true, 0);
-    return pt != nullptr;
+void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
+    unsigned long const kFrameBytes = static_cast<unsigned long>(info.framebuffer.pitch) *
+                                      static_cast<unsigned long>(info.framebuffer.height);
+    if (kFrameBytes == 0 || info.framebuffer.physical == 0) {
+        return;
+    }
+    Entry* const        kPml4     = table_at(cinux::arch::ReadCr3());
+    unsigned long const kPdptPhys = SeedPantry::self().take_page();
+    if (kPdptPhys == 0) {
+        return;
+    }
+    Entry* const        kPdpt    = table_at(kPdptPhys);
+    unsigned long const kSpanTop = info.framebuffer.physical + kFrameBytes;
+    for (unsigned long window = HugeWindowBase(info.framebuffer.physical); window < kSpanTop;
+         window += kHugePageSize) {
+        unsigned long const kDirectoryPhys = SeedPantry::self().take_page();
+        if (kDirectoryPhys == 0) {
+            return;
+        }
+        Entry* const        kDirectory = table_at(kDirectoryPhys);
+        unsigned long const kLo =
+            info.framebuffer.physical > window ? info.framebuffer.physical : window;
+        unsigned long const kHi =
+            kSpanTop < window + kHugePageSize ? kSpanTop : window + kHugePageSize;
+        for (unsigned long base = LargePageBase(kLo); base < kHi; base += kLargePageSize) {
+            kDirectory[SlotIndex(base, WalkLevel::kPageDirectory)] =
+                MakeLargePageEntry(base, kWritable);
+        }
+        kPdpt[SlotIndex(window, WalkLevel::kPdpt)] = MakeTableEntry(kDirectoryPhys, kWritable);
+    }
+    kPml4[kIoremapPml4] = MakeTableEntry(kPdptPhys, kWritable);
 }
 
-bool VMM::map(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4) {
-    auto g = lock_.guard();
-    return map_nolock(virt, phys, flags, pml4);
-}
-
-bool VMM::map_nolock(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4) {
-    uint64_t pml4_phys  = pml4 ? *pml4 : kernel_pml4_;
-    auto*    pml4_table = phys_to_virt(pml4_phys);
-    uint64_t user_flag  = flags & FLAG_USER;
-
-    auto* pdpt = walk_level(pml4_table, PML4_INDEX(virt), true, user_flag);
-    if (!pdpt)
+bool MapDeviceWindow(uint64_t physical, unsigned long bytes) {
+    if (physical == 0 || bytes == 0) {
         return false;
+    }
+    KernelTables  world;
+    Entry* const  kPml4       = world.table(KernelPageRoot());
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.FixedAddressDereference)
+    Entry&        k_pdpt_slot = kPml4[kIoremapPml4];
+    unsigned long pdpt_phys   = 0;
+    if (!k_pdpt_slot.has(cinux::arch::page::kPresent)) {
+        pdpt_phys = world.take_page();
+        if (pdpt_phys == 0) {
+            return false;
+        }
+        kPml4[kIoremapPml4] = MakeTableEntry(pdpt_phys, kWritable);
+    } else {
+        pdpt_phys = walk::EntryTarget(k_pdpt_slot);
+    }
+    Entry* const kPdpt = world.table(pdpt_phys);
 
-    auto* pd = walk_level(pdpt, PDPT_INDEX(virt), true, user_flag);
-    if (!pd)
-        return false;
-
-    auto* pt = walk_level(pd, PD_INDEX(virt), true, user_flag);
-    if (!pt)
-        return false;
-
-    uint64_t pt_idx = PT_INDEX(virt);
-    pt[pt_idx].raw  = (phys & ADDR_MASK) | (flags & ~ADDR_MASK);
-
-    cinux::arch::flush_tlb(virt);
+    const uint64_t kSpanTop = physical + bytes;
+    for (uint64_t base = LargePageBase(physical); base < kSpanTop; base += kLargePageSize) {
+        Entry&        k_directory_slot = kPdpt[SlotIndex(base, WalkLevel::kPdpt)];
+        unsigned long directory_phys   = 0;
+        if (!k_directory_slot.has(cinux::arch::page::kPresent)) {
+            directory_phys = world.take_page();
+            if (directory_phys == 0) {
+                return false;
+            }
+            kPdpt[SlotIndex(base, WalkLevel::kPdpt)] = MakeTableEntry(directory_phys, kWritable);
+        } else {
+            directory_phys = walk::EntryTarget(k_directory_slot);
+        }
+        world.table(directory_phys)[SlotIndex(base, WalkLevel::kPageDirectory)] =
+            MakeLargePageEntry(base, kWritable | cinux::arch::page::kCacheDisable);
+    }
     return true;
 }
 
-bool VMM::map_2mb(uint64_t virt, uint64_t phys, uint64_t flags, uint64_t* pml4) {
-    auto g = lock_.guard();
+const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& handoff) {
+    HandoffArchive::self().store(handoff);
+    Entry* const kPml4 = table_at(cinux::arch::ReadCr3());
 
-    uint64_t pml4_phys  = pml4 ? *pml4 : kernel_pml4_;
-    auto*    pml4_table = phys_to_virt(pml4_phys);
+    unsigned long const kPdptPhys = SeedPantry::self().take_page();
+    if (kPdptPhys == 0) {
+        return nullptr;
+    }
+    unsigned long const kRamTop = highest_usable_top(HandoffArchive::self().record());
+    for (unsigned long window = 0; window < kRamTop; window += kHugePageSize) {
+        if (!window_touches_usable(HandoffArchive::self().record(), window)) {
+            continue;
+        }
+        unsigned long const kDirectoryPhys = SeedPantry::self().take_page();
+        if (kDirectoryPhys == 0) {
+            return nullptr;
+        }
+        fill_window_pages(table_at(kDirectoryPhys), window);
+        table_at(kPdptPhys)[SlotIndex(window, WalkLevel::kPdpt)] =
+            MakeTableEntry(kDirectoryPhys, kWritable);
+    }
+    kPml4[kDirectMapPml4] = MakeTableEntry(kPdptPhys, kWritable);
 
-    auto* pdpt = walk_level(pml4_table, PML4_INDEX(virt), true, 0);
-    if (!pdpt)
-        return false;
+    MapFramebufferDoor(HandoffArchive::self().record());
 
-    auto* pd = walk_level(pdpt, PDPT_INDEX(virt), true, 0);
-    if (!pd)
-        return false;
+    Entry* const kSharedPdpt = direct_table_at(EntryTarget(kPml4[kKernelPml4]));
+    for (unsigned int i = 0; i < kEntriesPerTable; ++i) {
+        if (i != kKernelImagePdpt) {
+            kSharedPdpt[i] = Entry{};
+        }
+    }
 
-    uint64_t pd_idx = PD_INDEX(virt);
-    pd[pd_idx].raw  = (phys & ADDR_MASK) | (flags & ~ADDR_MASK) | FLAG_HUGE;
-
-    cinux::arch::flush_tlb(virt);
-    return true;
+    direct_table_at(cinux::arch::ReadCr3())[0] = Entry{};
+    cinux::arch::ReloadCr3();
+    KernelRoot::self().capture(cinux::arch::ReadCr3());
+    return &HandoffArchive::self().record();
 }
 
-void VMM::unmap(uint64_t virt, uint64_t* pml4) {
-    auto g = lock_.guard();
-
-    uint64_t pml4_phys  = pml4 ? *pml4 : kernel_pml4_;
-    auto*    pml4_table = phys_to_virt(pml4_phys);
-    auto*    pdpt       = walk_level(pml4_table, PML4_INDEX(virt), false);
-    if (!pdpt)
-        return;
-
-    auto* pd = walk_level(pdpt, PDPT_INDEX(virt), false);
-    if (!pd)
-        return;
-
-    auto* pt = walk_level(pd, PD_INDEX(virt), false);
-    if (!pt)
-        return;
-
-    uint64_t pt_idx = PT_INDEX(virt);
-    pt[pt_idx].raw  = 0;
-
-    cinux::arch::flush_tlb(virt);
-}
-
-uint64_t VMM::translate(uint64_t virt, uint64_t* pml4) {
-    uint64_t pml4_phys  = pml4 ? *pml4 : kernel_pml4_;
-    auto*    pml4_table = phys_to_virt(pml4_phys);
-    auto*    pdpt       = walk_level(pml4_table, PML4_INDEX(virt), false);
-    if (!pdpt)
-        return 0;
-
-    auto* pd = walk_level(pdpt, PDPT_INDEX(virt), false);
-    if (!pd)
-        return 0;
-
-    auto* pt = walk_level(pd, PD_INDEX(virt), false);
-    if (!pt)
-        return 0;
-
-    PageEntry& entry = pt[PT_INDEX(virt)];
-    if (!entry.is_present())
-        return 0;
-
-    uint64_t offset = virt & (PAGE_SIZE - 1);
-    return entry.phys_addr() | offset;
-}
-
-uint64_t VMM::kernel_pml4() const {
-    return kernel_pml4_;
+unsigned long KernelPageRoot() {
+    return KernelRoot::self().value();
 }
 
 }  // namespace cinux::mm

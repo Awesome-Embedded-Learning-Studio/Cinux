@@ -1,24 +1,31 @@
 /**
- * @file kernel/syscall/sys_reboot.hpp
- * @brief sys_reboot handler (B3b busybox-init)
+ * @file    sys_reboot.hpp
+ * @brief   reboot(): power the machine off through ACPI.
  *
- * Linux reboot(2) powers off / restarts / halts the system.  Cinux does not
- * implement reboot -- it is a hobby OS that exits via isa-debug-exit, not
- * reboot.  busybox init probes reboot during startup; returning -EPERM (not
- * permitted even for root) lets init continue without depending on it.
+ * @author  Charliechen114514
+ * @date    2026-10-11
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// reboot(2) -- not supported; returns -EPERM (B3b).
-/// @p magic1 / @p magic2 are the LINUX_REBOOT_MAGIC values (ignored).
-/// @p cmd is the LINUX_REBOOT_CMD_* action (ignored).
-int64_t sys_reboot(uint64_t magic1, uint64_t magic2, uint64_t cmd, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Validate reboot authorization, synchronize, and power off.
+ * @param[in]     frame   Linux reboot magic words and power-off command.
+ * @return        Zero on success; -kEperm for a non-root caller,
+ *                -kEinval for invalid words, -kEnosys without ACPI,
+ *                or -kEio when synchronization fails.
+ * @note          A failed synchronization leaves the machine running.
+ * @since         0.1.0
+ * @ingroup kernel_syscall
+ */
+long long HandleReboot(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

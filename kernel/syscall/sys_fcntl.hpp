@@ -1,33 +1,33 @@
 /**
- * @file kernel/syscall/sys_fcntl.hpp
- * @brief sys_fcntl handler declaration (F-ECO batch 4)
+ * @file    sys_fcntl.hpp
+ * @brief   Declaration of the fcntl(fd, cmd, arg) syscall handler.
  *
- * Supported cmd subset (Linux x86_64 values):
- *   F_DUPFD (0)  -- duplicate fd to the lowest free fd >= arg (like dup w/ min)
- *   F_GETFD (1)  -- read the fd flags (FD_CLOEXEC)
- *   F_SETFD (2)  -- set the fd flags (FD_CLOEXEC)
- *   F_GETFL (3)  -- read the open status flags (access mode: O_RDONLY/WRITE/RDWR)
- *
- * Deferred (return -EINVAL): F_SETFL (4) -- runtime O_NONBLOCK would need a
- * File status-flags field + plumbing into pipe/socket ops (today nonblock is
- * baked at open via FIFO open() flags).  Unknown cmds also -EINVAL.
- *
- * FD_CLOEXEC is stored per-File (File::cloexec).  execve does not yet consult
- * it (close-on-exec enforcement is a follow-up); fcntl round-trips correctly.
- *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-17
+ * @version 0.3.0
+ * @since   0.3.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// fcntl(fd, cmd, arg) -- manipulate a file descriptor.  Returns >=0 (a value
-/// or new fd for F_DUPFD) on success, or -errno.
-int64_t sys_fcntl(uint64_t fd, uint64_t cmd, uint64_t arg, uint64_t, uint64_t, uint64_t);
+/**
+ * @brief         Descriptor knobs: close-on-exec flags and status bits.
+ *
+ * @return        The knob's answer for reads, zero for writes, or a
+ *                negative errno.
+ * @note          The hosted runtime sets FD_CLOEXEC on every open so an
+ *                exec leaves no trail; descriptors here do not survive
+ *                exec at all, so the offers are accepted and kept as
+ *                no-ops, and reads report a plain read-write status.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleFcntl(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

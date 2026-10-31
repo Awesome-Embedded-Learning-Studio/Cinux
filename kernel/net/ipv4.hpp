@@ -1,166 +1,285 @@
 /**
- * @file kernel/net/ipv4.hpp
- * @brief IPv4 wire layout + Ipv4Module (ethertype 0x0800 handler) + L4Handler.
+ * @file    ipv4.hpp
+ * @brief   The IPv4 module: verify, dispatch, and build.
  *
- * HOST-order parsed header (see net_types.hpp byte-order policy).  Ipv4Module
- * validates an inbound packet (version / IHL / header checksum via
- * internet_checksum) and dispatches the L4 payload by IP protocol number via an
- * inner L4Handler table (proto->handler, like Linux inet_protos -- ICMP=1 is
- * registered in the constructor, UDP=17 via add_l4).  send() builds an IPv4
- * header + emits on a device (resolving next-hop via ARP for Ethernet,
- * skipping L2 for loopback).
+ * Incoming datagrams are judged twice — the word book parses them, then
+ * the one's-complement sum over the header must fold to zero — and every
+ * refusal lands in its own counter, because the negative paths are the
+ * station's teaching content. Payloads that survive reach the layer-four
+ * seat registered under the header's protocol word, carrying the parsed
+ * header so a reply can answer its asker. Outgoing datagrams are built
+ * whole here: fixed five-word header, correct checksum, then handed to
+ * a sink the wiring aims at whichever port is right.
  *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-23
+ * @version 0.1
+ * @since   0.6.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/net_types.hpp"
-#include "kernel/net/protocol_handler.hpp"
+#include <concepts>
+
+#include "kernel/net/net_config.hpp"
+#include "kernel/net/net_layout.hpp"
 
 namespace cinux::net {
 
-class ArpModule;   // forward -- next-hop resolver (ipv4.cpp includes arp.hpp)
-class IcmpModule;  // forward -- L4 handler (proto 1), registered by the ctor
-class Ipv4Module;  // forward -- L4Handler::handle takes it (defined below)
-
-constexpr uint8_t kIpProtoIcmp    = 1;
-constexpr uint8_t kIpProtoTcp     = 6;
-constexpr uint8_t kIpProtoUdp     = 17;
-constexpr uint8_t kIpv4HdrWords   = 5;  // 20-byte fixed header (IHL)
-constexpr uint8_t kIpv4TtlDefault = 64;
-
-/// @brief IPv4 header, HOST-order parsed view.  20 bytes for IHL=5.
-struct Ipv4Header {
-    uint8_t  ver_ihl;  ///< version (hi) | IHL (lo)
-    uint8_t  dscp_ecn;
-    uint16_t total_len;   ///< host order (header + data)
-    uint16_t id;          ///< host order
-    uint16_t flags_frag;  ///< host order
-    uint8_t  ttl;
-    uint8_t  proto;
-    uint16_t checksum;  ///< host order
-    Ipv4Addr src;
-    Ipv4Addr dst;
-};
-static_assert(sizeof(Ipv4Header) == 20, "IPv4 fixed header is 20 bytes");
-
-inline uint8_t ipv4_version(const Ipv4Header& h) {
-    return h.ver_ihl >> 4;
-}
-inline uint8_t ipv4_ihl(const Ipv4Header& h) {
-    return h.ver_ihl & 0x0F;
+/**
+ * @brief         Picks the source address one outgoing datagram carries.
+ *
+ * @param[in]     own_address   The module's default source address.
+ * @param[in]     destination   Where the datagram goes.
+ * @return        The loopback address for loopback destinations, the
+ *                module's own otherwise.
+ * @note          Keeps loopback's source consistent in the IPv4 header and
+ *                the transport pseudo header, even after attaching a wire
+ *                replaces the module's default source address.
+ * @since         0.7.0
+ * @ingroup       kernel_net
+ */
+constexpr uint32_t SourceAddressFor(uint32_t own_address, uint32_t destination) {
+    return (destination & kLoopbackNetMask) == kLoopbackNet ? kLoopbackAddress : own_address;
 }
 
-/// @brief Parse 20 wire bytes into an Ipv4Header (host order).
-inline void parse_ipv4(const uint8_t* p, Ipv4Header& out) {
-    out.ver_ihl    = p[0];
-    out.dscp_ecn   = p[1];
-    out.total_len  = (static_cast<uint16_t>(p[2]) << 8) | p[3];
-    out.id         = (static_cast<uint16_t>(p[4]) << 8) | p[5];
-    out.flags_frag = (static_cast<uint16_t>(p[6]) << 8) | p[7];
-    out.ttl        = p[8];
-    out.proto      = p[9];
-    out.checksum   = (static_cast<uint16_t>(p[10]) << 8) | p[11];
-    for (int i = 0; i < 4; ++i) {
-        out.src.oct[i] = p[12 + i];
-        out.dst.oct[i] = p[16 + i];
-    }
-}
-
-/// @brief Serialise an Ipv4Header into 20 wire bytes (big-endian multi-byte).
-inline void build_ipv4_header(const Ipv4Header& in, uint8_t* p) {
-    p[0]  = in.ver_ihl;
-    p[1]  = in.dscp_ecn;
-    p[2]  = static_cast<uint8_t>(in.total_len >> 8);
-    p[3]  = static_cast<uint8_t>(in.total_len & 0xFF);
-    p[4]  = static_cast<uint8_t>(in.id >> 8);
-    p[5]  = static_cast<uint8_t>(in.id & 0xFF);
-    p[6]  = static_cast<uint8_t>(in.flags_frag >> 8);
-    p[7]  = static_cast<uint8_t>(in.flags_frag & 0xFF);
-    p[8]  = in.ttl;
-    p[9]  = in.proto;
-    p[10] = static_cast<uint8_t>(in.checksum >> 8);
-    p[11] = static_cast<uint8_t>(in.checksum & 0xFF);
-    for (int i = 0; i < 4; ++i) {
-        p[12 + i] = in.src.oct[i];
-        p[16 + i] = in.dst.oct[i];
-    }
-}
-
-/// @brief L4 protocol seam -- dispatched by Ipv4Module via the IP proto field.
-///
-/// Mirrors ProtocolHandler (the ethertype seam) one layer up: one handler per IP
-/// protocol number (ICMP=1, UDP=17, future TCP=6).  Ipv4Module validates the IP
-/// header + header checksum, then hands the L4 payload (PAST the IP header) to
-/// the registered handler.  Like ProtocolHandler, a handler replies or drops.
-class L4Handler {
-public:
-    virtual ~L4Handler() = default;
-
-    /// @brief Handle one inbound L4 payload (past the IP header).
-    /// @param ip      the parsed IPv4 header (src/dst for replies / checksums).
-    /// @param payload L4 bytes (ICMP message / UDP datagram / ...).  Borrowed:
-    ///                valid ONLY for this call -- copy to retain.
-    /// @param dev     device the packet arrived on -- reply on THIS one.
-    /// @param ipv4    for sending replies (ipv4.send(dev, ..., proto, ...)).
-    /// @param stack   for L3 TX + device config lookup (config_for).
-    virtual void handle(const Ipv4Header& ip, FrameView payload, NetDevice& dev, Ipv4Module& ipv4,
-                        NetStack& stack) = 0;
+/**
+ * @brief   One datagram on its way out, all its facts together.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct OutboundDatagram {
+    /// Address the header names.
+    uint32_t             destination = 0;
+    /// Protocol word the header carries.
+    unsigned char        protocol    = 0;
+    /// First payload byte.
+    const unsigned char* payload     = nullptr;
+    /// Payload bytes, zero allowed.
+    size_t               length      = 0;
 };
 
-class Ipv4Module : public ProtocolHandler {
-public:
-    static constexpr uint32_t kMaxL4 = 4;  ///< inner proto slots (ICMP + UDP + headroom)
+/**
+ * @brief   Where a finished datagram goes, injected by the wiring.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct DatagramSink {
+    /// The wiring's context, opaque here.
+    void* context                                                 = nullptr;
+    /// Hands one datagram to the port path the wiring chose.
+    void (*send)(void* context, const OutboundDatagram& datagram) = nullptr;
 
-    /// @param icmp  the ICMP handler (proto 1) -- auto-registered into the L4
-    ///              table by the ctor (so existing call sites stay unchanged).
-    /// @param arp   the next-hop resolver (may be null when no L2 / no ARP).
-    /// @note Defined in ipv4.cpp (the IcmpModule->L4Handler conversion needs the
-    ///       complete IcmpModule type, which the header only forward-declares).
-    Ipv4Module(IcmpModule& icmp, ArpModule* arp);
+    /**
+     * @brief         Whether the sink can deliver.
+     * @return        True when both parts are set.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool assigned() const { return context != nullptr && send != nullptr; }
+};
 
-    /// @brief Register an L4 handler for an IP protocol number.  Called at boot
-    ///        before RX.  Re-registering a proto replaces the handler.
-    void add_l4(uint8_t proto, L4Handler& h) {
-        for (uint32_t i = 0; i < kMaxL4; ++i) {
-            if (l4_[i].h != nullptr && l4_[i].proto == proto) {
-                l4_[i].h = &h;  // replace existing handler for this proto
-                return;
-            }
-        }
-        for (uint32_t i = 0; i < kMaxL4; ++i) {
-            if (l4_[i].h == nullptr) {
-                l4_[i].proto = proto;
-                l4_[i].h     = &h;
-                return;
-            }
-        }
-        // table full -- ignore (kMaxL4 covers ICMP + UDP + headroom)
-    }
-
-    /// @brief Validate + dispatch an inbound IPv4 packet (proto -> L4 table).
-    void on_frame(const L2Info& l2, FrameView payload, NetDevice& dev, NetStack& stack) override;
-
-    /// @brief Build an IPv4 header (src from the device's InDevice) + send on
-    ///        @p dev.  Loopback skips L2; Ethernet resolves @p dst via ARP
-    ///        (async -- if unresolved, an ARP request is sent and the IP packet
-    ///        is deferred to the next poll; not an error).
-    cinux::lib::ErrorOr<void> send(NetDevice& dev, Ipv4Addr dst, uint8_t proto, const uint8_t* l4,
-                                   uint32_t len, NetStack& stack);
-
-private:
-    struct L4Slot {
-        uint8_t    proto = 0;
-        L4Handler* h     = nullptr;
+/**
+ * @brief   What a layer-four protocol offers, checked at compile time.
+ * @tparam  Handler   The protocol type being checked.
+ * @note    handle receives the payload plus the header it travelled in.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+template <typename Handler>
+concept L4Handler =
+    requires(Handler& handler, const unsigned char* bytes, size_t length, const Ipv4View& header) {
+        { handler.handle(bytes, length, header) } -> std::same_as<void>;
     };
 
-    ArpModule* arp_;  ///< nullable (null when no L2 / ARP unavailable)
-    uint16_t   next_id_ = 0;
-    L4Slot     l4_[kMaxL4]{};
+/**
+ * @brief   The erased layer-four face: one entry point.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct L4Ops {
+    /// Hand one payload and its header to the seated protocol.
+    void (*handle)(void* self, const unsigned char* bytes, size_t length, const Ipv4View& header);
+};
+
+/**
+ * @brief   One layer-four protocol behind the face, ready to call.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+class L4Seat {
+public:
+    L4Seat() = default;
+
+    /**
+     * @brief         Seats one concept-checked protocol.
+     *
+     * @param[in,out] protocol  The protocol instance taking the seat.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    template <L4Handler Handler>
+    void adopt(Handler& protocol) {
+        static constexpr L4Ops kOps = {
+            [](void* self, const unsigned char* bytes, size_t length, const Ipv4View& header) {
+                static_cast<Handler*>(self)->handle(bytes, length, header);
+            },
+        };
+        ops_  = &kOps;
+        self_ = &protocol;
+    }
+
+    /**
+     * @brief         Hands one payload and its header to the protocol.
+     *
+     * @param[in]     bytes   First payload byte.
+     * @param[in]     length  Payload length.
+     * @param[in]     header  The IPv4 header this payload travelled in.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length, const Ipv4View& header) const {
+        if (ops_ != nullptr) {
+            ops_->handle(self_, bytes, length, header);
+        }
+    }
+
+    /**
+     * @brief         Whether a protocol sits in this seat.
+     * @return        True once adopt() has run.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool seated() const { return ops_ != nullptr; }
+
+private:
+    const L4Ops* ops_  = nullptr;
+    void*        self_ = nullptr;
+};
+
+/**
+ * @brief   Every refusal reason, counted separately.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct Ipv4Stats {
+    /// Datagrams handed to a seated protocol.
+    unsigned long delivered            = 0;
+    /// Datagrams the word book refused as too short.
+    unsigned long refused_short        = 0;
+    /// Datagrams whose version nibble was not four.
+    unsigned long refused_version      = 0;
+    /// Datagrams whose header promised fewer than five words.
+    unsigned long refused_header_words = 0;
+    /// Datagrams whose total fell short of their own header.
+    unsigned long refused_total_length = 0;
+    /// Datagrams whose header checksum did not fold to zero.
+    unsigned long refused_checksum     = 0;
+    /// Datagrams naming a protocol nobody seated.
+    unsigned long unknown_protocol     = 0;
+    /// Datagrams this module built and handed to the sink.
+    unsigned long sent                 = 0;
+};
+
+/**
+ * @brief   The IPv4 module, a plain instance the wiring owns.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+class Ipv4Module {
+public:
+    /**
+     * @brief         Aims the module at its sink and address.
+     *
+     * @param[in]     sink          Where built datagrams go.
+     * @param[in]     own_address   Source address outgoing headers carry.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void init(const DatagramSink& sink, uint32_t own_address);
+
+    /**
+     * @brief         Re-aims the module without forgetting anything.
+     *
+     * @param[in]     sink          The new outgoing path.
+     * @param[in]     own_address   The new source address.
+     * @return        None
+     * @note          For the boot wiring's reroute: the loopback world
+     *                runs first, a wire joins later, and counters and
+     *                seats survive the aim.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void aim(const DatagramSink& sink, uint32_t own_address);
+
+    /**
+     * @brief         Registers one layer-four protocol.
+     *
+     * @param[in]     protocol  The protocol word the header carries.
+     * @param[in,out] seat      The protocol taking the seat.
+     * @return        True when seated; false when the table is full or
+     *                the word is already taken.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    bool seat_protocol(unsigned char protocol, L4Seat seat);
+
+    /**
+     * @brief         Judges and dispatches one incoming datagram.
+     *
+     * @param[in]     bytes   First datagram byte.
+     * @param[in]     length  Bytes the datagram holds.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length);
+
+    /**
+     * @brief         Builds and sends one datagram.
+     *
+     * @param[in]     datagram  The destination, protocol, and payload.
+     * @return        True when built and handed to the sink; false for
+     *                an oversized payload or an unassigned sink.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    bool send(const OutboundDatagram& datagram);
+
+    /**
+     * @brief         The delivery and refusal counters so far.
+     * @return        A reference to the current statistics.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] const Ipv4Stats& stats() const;
+
+    /** @brief Observes validated IPv4 datagrams before protocol dispatch; configured at boot. */
+    void observe(void* context,
+                 void (*receive)(void*, const unsigned char*, size_t, const Ipv4View&));
+
+
+private:
+    struct SeatedProtocol {
+        unsigned char protocol = 0;
+        L4Seat        seat;
+    };
+
+    DatagramSink   sink_                                                    = {};
+    uint32_t       own_address_                                             = 0;
+    SeatedProtocol protocols_[kMaxL4Seats]                                  = {};
+    unsigned long  protocol_count_                                          = 0;
+    Ipv4Stats      stats_                                                   = {};
+    void*          observer_context_                                        = nullptr;
+    void (*observer_)(void*, const unsigned char*, size_t, const Ipv4View&) = nullptr;
 };
 
 }  // namespace cinux::net

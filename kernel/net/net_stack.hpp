@@ -1,84 +1,207 @@
 /**
- * @file kernel/net/net_stack.hpp
- * @brief NetStack -- the front-end: device list + ethertype dispatch table +
- *        RX pump.  The ONLY object L3 protocols see; they NEVER see a driver.
+ * @file    net_stack.hpp
+ * @brief   The protocol stack: ports, protocol seats, and a budgeted
+ *          poll.
  *
- * Holds a SMALL FIXED DEVICE LIST (FOLD-B: coexistence from day one -- a 2nd
- * NIC attaches instead of retrofitting a single-device stack) and a small
- * ethertype->ProtocolHandler table.  poll() drains one frame from each
- * attached device, parses L2, dispatches by ethertype, and recycles the buffer
- * via a scope guard on every exit path.  Exposed as an instance (NOT a process
- * global) so multi-NIC and tests can spin their own.
+ * The stack owns no protocol. Devices arrive as ports from the device
+ * family, protocols arrive as seats registered by ethertype, and poll
+ * moves frames from the former to the latter under a frame budget that
+ * also guards re-entry — a handler that sends lands its frame in a
+ * queue the same drain picks up, and the budget is the loop's leash.
+ * A port without an Ethernet header — the loopback — delivers its bytes
+ * straight to the IPv4 seat: there is no wire to frame for. Refusals
+ * are counted, not printed: the counters are the negative tests'
+ * handles.
  *
- * The QEMU "sti+hlt so the main loop runs SLIRP replies" timing hack lives in
- * the CALLER of poll() (test sync loop / production tick / future ISR
- * bottom-half) -- NEVER inside this class.  kernel/net/ includes no irq header.
- *
- * Namespace: cinux::net
+ * @author  Charliechen114514
+ * @date    2026-10-23
+ * @version 0.1
+ * @since   0.6.0
+ * @ingroup kernel_net
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <cinux/expected.hpp>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "kernel/net/net_device.hpp"
-#include "kernel/net/net_types.hpp"
+#include <concepts>
+
+#include "kernel/driver/net/net_device.hpp"
+#include "kernel/net/net_config.hpp"
 
 namespace cinux::net {
 
-class ProtocolHandler;  // forward -- see protocol_handler.hpp
-
-/// @brief Per-device IP configuration (Linux in_device/ip_ifaddr, one address).
-///
-/// Carried on the device handle (FOLD-B: per-device, not a global tuple).  The
-/// MAC is read from the device at attach() time and cached here so ARP sources
-/// it without re-querying.
-struct InDevice {
-    EthAddr  hw{};       ///< our MAC (meaningful only if has_ethernet)
-    Ipv4Addr local{};    ///< our address (10.0.2.15 on SLIRP, 127.0.0.1 loopback)
-    Ipv4Addr gateway{};  ///< default gateway (10.0.2.2 on SLIRP)
+/**
+ * @brief   What a layer-three protocol offers, checked at compile time.
+ * @tparam  Handler   The protocol type being checked.
+ * @note    handle receives the payload after any Ethernet header, or
+ *          the whole frame when the port carries none.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+template <typename Handler>
+concept L3Handler = requires(Handler& handler, const unsigned char* bytes, size_t length) {
+    { handler.handle(bytes, length) } -> std::same_as<void>;
 };
 
-class NetStack {
+/**
+ * @brief   The erased protocol face: one entry point.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct ProtocolOps {
+    /// Hand one payload to the seated protocol.
+    void (*handle)(void* self, const unsigned char* bytes, size_t length);
+};
+
+/**
+ * @brief   One protocol behind the face, ready to call.
+ * @note    adopt() erases exactly once per protocol; an unadopted seat
+ *          refuses every call.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+class ProtocolSeat {
 public:
-    static constexpr uint32_t kMaxDevs   = 3;  ///< e1000 + virtio-net + loopback (F5-M2 task 2)
-    static constexpr uint32_t kMaxProtos = 8;
+    ProtocolSeat() = default;
 
-    /// @brief Register a NIC with its IP config.  Idempotent per device pointer
-    ///        (re-attach updates the config).  Returns false if the device list
-    ///        is full.
-    bool attach(NetDevice& dev, const InDevice& cfg);
+    /**
+     * @brief         Seats one concept-checked protocol.
+     *
+     * @param[in,out] protocol  The protocol instance taking the seat.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    template <L3Handler Handler>
+    void adopt(Handler& protocol) {
+        static constexpr ProtocolOps kOps = {
+            [](void* self, const unsigned char* bytes, size_t length) {
+                static_cast<Handler*>(self)->handle(bytes, length);
+            },
+        };
+        ops_  = &kOps;
+        self_ = &protocol;
+    }
 
-    /// @brief Register a protocol handler for an ethertype (HOST order).  Called
-    ///        at boot before RX.  Re-registering an ethertype replaces the handler.
-    void add_protocol(uint16_t ethertype, ProtocolHandler& h);
+    /**
+     * @brief         Hands one payload to the seated protocol.
+     *
+     * @param[in]     bytes   First payload byte.
+     * @param[in]     length  Payload length.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void handle(const unsigned char* bytes, size_t length) const {
+        if (ops_ != nullptr) {
+            ops_->handle(self_, bytes, length);
+        }
+    }
 
-    /// @brief Drain ONE frame from EACH attached device and dispatch by
-    ///        ethertype.  The buffer is recycled via scope guard on every exit
-    ///        path (handle / drop / runt).  Caller owns the QEMU timing.
-    void poll();
-
-    /// @brief L3 TX helper protocols call to emit a built payload on a SPECIFIC
-    ///        device.  The caller passes the resolved @p next_hop MAC.  The
-    ///        device does the L2 framing (or skips it for loopback).  (FOLD-A/B.)
-    cinux::lib::ErrorOr<void> send_l3(NetDevice& dev, const EthAddr& next_hop, uint16_t ethertype,
-                                      const uint8_t* l3, uint32_t len);
-
-    /// @brief Lookup a device's IP config by device reference.  (FOLD-B.)
-    const InDevice* config_for(const NetDevice& dev) const;
+    /**
+     * @brief         Whether a protocol sits in this seat.
+     * @return        True once adopt() has run.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] bool seated() const { return ops_ != nullptr; }
 
 private:
-    struct DevSlot {
-        NetDevice* dev;
-        InDevice   cfg;
+    const ProtocolOps* ops_  = nullptr;
+    void*              self_ = nullptr;
+};
+
+/**
+ * @brief   What one poll delivered and what it refused.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+struct NetStackStats {
+    /// Frames handed to a seated protocol.
+    unsigned long delivered        = 0;
+    /// Frames naming an ethertype nobody seated.
+    unsigned long unknown_protocol = 0;
+    /// Frames whose Ethernet header the word book refused.
+    unsigned long refused_ethernet = 0;
+};
+
+/**
+ * @brief   Ports plus protocol seats plus the budgeted drain.
+ * @note    A plain instance, not a singleton: the wiring owns it, the
+ *          tests build their own, and nothing here reaches for hardware.
+ * @since   0.6.0
+ * @ingroup kernel_net
+ */
+class NetStack {
+public:
+    /**
+     * @brief         Returns the counters to zero.
+     * @return        None
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void init();
+
+    /**
+     * @brief         Attaches one device port.
+     *
+     * @param[in,out] port  The port to drain on every poll.
+     * @return        True when attached; false when the table is full.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    bool attach_port(driver::net::NetPort& port);
+
+    /**
+     * @brief         Registers one protocol under an ethertype.
+     *
+     * @param[in]     ethertype  The protocol word the frame carries.
+     * @param[in,out] seat       The protocol taking the seat.
+     * @return        True when seated; false when the table is full or
+     *                the word is already taken.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    bool seat_protocol(uint16_t ethertype, ProtocolSeat seat);
+
+    /**
+     * @brief         Drains every port under one frame budget.
+     *
+     * @param[in]     budget  How many frames this call may deliver.
+     * @return        None
+     * @note          The budget spans all ports and is the re-entry
+     *                leash: a handler whose send lands a frame in a
+     *                queue sees it drained only while budget remains.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    void poll(unsigned long budget);
+
+    /**
+     * @brief         The delivery and refusal counters so far.
+     * @return        A copy of the current statistics.
+     * @since         0.6.0
+     * @ingroup       kernel_net
+     */
+    [[nodiscard]] const NetStackStats& stats() const;
+
+private:
+    void dispatch(const driver::net::NetPort& port, const driver::net::RxFrame& frame);
+
+    driver::net::NetPort* ports_[kMaxPorts] = {};
+    unsigned long         port_count_       = 0;
+
+    struct SeatedProtocol {
+        uint16_t     ethertype = 0;
+        ProtocolSeat seat;
     };
-    struct ProtoSlot {
-        uint16_t         ethertype;
-        ProtocolHandler* h;
-    };
-    DevSlot   devs_[kMaxDevs]{};
-    ProtoSlot protos_[kMaxProtos]{};
+    SeatedProtocol protocols_[kMaxProtocolSeats] = {};
+    unsigned long  protocol_count_               = 0;
+
+    NetStackStats stats_ = {};
 };
 
 }  // namespace cinux::net

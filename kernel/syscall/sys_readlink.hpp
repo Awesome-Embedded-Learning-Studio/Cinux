@@ -1,25 +1,42 @@
 /**
- * @file kernel/syscall/sys_readlink.hpp
- * @brief sys_readlink handler declaration (F-ECO batch 2)
+ * @file    sys_readlink.hpp
+ * @brief   readlink(2): what a link name stands for.
  *
- * Namespace: cinux::syscall
+ * @author  Charliechen114514
+ * @date    2026-10-19
+ * @version 0.1
+ * @since   0.5.0
+ * @ingroup kernel_syscall
+ * @copyright Copyright (c) 2026
  */
 
 #pragma once
 
-#include <stdint.h>
-
-#include "kernel/arch/x86_64/syscall.hpp"
+#include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
 
-/// Read the target of the symlink at @p resolved_path into @p buf (at most
-/// @p buf_size bytes, not NUL-terminated). Returns bytes written (>=0) or -errno.
-int64_t do_readlink_kernel(const char* resolved_path, char* buf, uint64_t buf_size);
+/**
+ * @brief         Answers one link's target path.
+ *
+ * @param[in]     frame   rdi the link path, rsi the buffer, rdx its
+ *                        size.
+ * @return        Bytes written, or a negative errno.
+ * @note          One link exists in this kernel, the procfs magic
+ *                name /proc/self/exe, whose target is the current
+ *                task's own program; every other path answers EINVAL,
+ *                the honest word for a file system without links.
+ * @since         0.5.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleReadlink(const SyscallFrame& frame);
 
-/// Linux readlink(2): read symlink target of @p path_virt into @p buf_virt.
-/// Returns the number of bytes placed in the buffer (no NUL terminator).
-int64_t sys_readlink(uint64_t path_virt, uint64_t buf_virt, uint64_t buf_size, uint64_t, uint64_t,
-                     uint64_t);
+/**
+ * @brief         Answer a link relative to an open directory or AT_FDCWD.
+ * @return        Bytes written, or a negative errno.
+ * @since         0.5.0
+ * @ingroup       kernel_syscall
+ */
+long long HandleReadlinkat(const SyscallFrame& frame);
 
 }  // namespace cinux::syscall

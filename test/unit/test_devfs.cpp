@@ -1,291 +1,276 @@
-/**
- * @file test/unit/test_devfs.cpp
- * @brief Host-side unit tests for DevFS (F6-M3)
- *
- * Links the real kernel/fs/devfs.cpp -- which is pure logic (no kprintf, no
- * kernel-only I/O) -- and exercises every device node.  /dev/console writes
- * go through a capturing MockSink, proving the CharSink dispatch is correct
- * without touching real hardware.
- *
- * Compile condition: -DCINUX_HOST_TEST
- */
+#include <string_view>
 
-#define TEST_FRAMEWORK_IMPL
-#include "test_framework.h"
+#include "../framework/framework.hpp"
+#include "cinux/result.hpp"
+#include "kernel/fs/devfs/devfs.hpp"
+#include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/vfs.hpp"
+#include "test_assert.hpp"
 
-#ifdef CINUX_HOST_TEST
+namespace {
 
-#    include <cstdint>
-#    include <cstring>
+unsigned long g_source_calls = 0;
 
-#    include "fs/devfs/devfs.hpp"
-
-using namespace cinux::fs;
-
-// ============================================================
-// MockSink -- captures bytes written through a CharSink
-// ============================================================
-
-class MockSink : public CharSink {
-public:
-    cinux::lib::ErrorOr<int64_t> write(const void* buf, uint64_t count) override {
-        const auto* b = static_cast<const uint8_t*>(buf);
-        uint64_t    n = 0;
-        for (; n < count && len_ < sizeof(buf_); ++n, ++len_) {
-            buf_[len_] = b[n];
-        }
-        return static_cast<int64_t>(n);
+cinux::base::Result<unsigned long> echo_sink(void* /*context*/, void* sink, unsigned long count) {
+    auto* const kOut = static_cast<unsigned char*>(sink);
+    for (unsigned long index = 0; index < count; ++index) {
+        kOut[index] = static_cast<unsigned char>(0xA5U ^ index);
     }
+    return count;
+}
 
-    uint8_t  buf_[256]{};
-    uint64_t len_{0};
+cinux::base::Result<unsigned long> eat_source(void* /*context*/, const void* /*source*/,
+                                              unsigned long count) {
+    ++g_source_calls;
+    return count;
+}
+
+const cinux::fs::DeviceOps kEchoOps{
+    .read      = echo_sink,
+    .write     = eat_source,
+    .has_input = nullptr,
+    .ioctl     = nullptr,
+    .release   = nullptr,
+    .context   = nullptr,
 };
 
-// ============================================================
-// 1. mount -- standard nodes registered
-// ============================================================
-
-TEST("devfs: mount registers null/zero/console") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    ASSERT_EQ(devfs.node_count(), 3u);
+cinux::base::Result<unsigned long> stock_null_read(void* /*context*/, void* /*sink*/,
+                                                   unsigned long /*count*/) {
+    return 0;
 }
 
-TEST("devfs: mount is idempotent (re-mount does not duplicate)") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    ASSERT_TRUE(devfs.mount().ok());
-    // Re-mount re-allocates ops but the node table stays bounded at 3.
-    ASSERT_EQ(devfs.node_count(), 3u);
+cinux::base::Result<unsigned long> stock_null_write(void* /*context*/, const void* /*source*/,
+                                                    unsigned long count) {
+    return count;
 }
 
-// ============================================================
-// 2. lookup -- nodes, root, missing
-// ============================================================
-
-TEST("devfs: lookup finds each device node") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    ASSERT_NOT_NULL(devfs.lookup("null").value());
-    ASSERT_NOT_NULL(devfs.lookup("zero").value());
-    ASSERT_NOT_NULL(devfs.lookup("console").value());
-}
-
-TEST("devfs: lookup accepts a leading slash") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    // vfs_resolve may pass "/null" (mount prefix without trailing slash).
-    ASSERT_NOT_NULL(devfs.lookup("/null").value());
-}
-
-TEST("devfs: lookup empty or slash returns the root directory") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode* a = devfs.lookup("").value();
-    Inode* b = devfs.lookup("/").value();
-    ASSERT_NOT_NULL(a);
-    ASSERT_TRUE(a == b);  // same root inode
-    ASSERT_EQ(static_cast<int>(a->type), static_cast<int>(InodeType::Directory));
-}
-
-TEST("devfs: lookup unknown name returns NotFound") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    auto r = devfs.lookup("nope");
-    ASSERT_FALSE(r.ok());
-}
-
-TEST("devfs: lookup nullptr is InvalidArgument") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    auto r = devfs.lookup(nullptr);
-    ASSERT_FALSE(r.ok());
-}
-
-// ============================================================
-// 3. /dev/null -- read EOF, write discards
-// ============================================================
-
-TEST("devfs: /dev/null read returns EOF") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode* n = devfs.lookup("null").value();
-    char   buf[8];
-    auto   r = n->ops->read(n, 0, buf, sizeof(buf));
-    ASSERT_TRUE(r.ok());
-    ASSERT_EQ(r.value(), 0);
-}
-
-TEST("devfs: /dev/null write discards and claims all bytes") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*     n     = devfs.lookup("null").value();
-    const char msg[] = "discard me";
-    auto       w     = n->ops->write(n, 0, msg, sizeof(msg) - 1);
-    ASSERT_TRUE(w.ok());
-    ASSERT_EQ(w.value(), static_cast<int64_t>(sizeof(msg) - 1));
-}
-
-// ============================================================
-// 4. /dev/zero -- read yields zeros, write discards
-// ============================================================
-
-TEST("devfs: /dev/zero read fills buffer with zeros") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*        z = devfs.lookup("zero").value();
-    unsigned char buf[16];
-    std::memset(buf, 0xFF, sizeof(buf));
-    auto r = z->ops->read(z, 0, buf, 8);
-    ASSERT_TRUE(r.ok());
-    ASSERT_EQ(r.value(), 8);
-    for (int i = 0; i < 8; ++i) {
-        ASSERT_EQ(static_cast<int>(buf[i]), 0);
+cinux::base::Result<unsigned long> stock_zero_read(void* /*context*/, void* sink,
+                                                   unsigned long count) {
+    auto* const kOut = static_cast<unsigned char*>(sink);
+    for (unsigned long index = 0; index < count; ++index) {
+        kOut[index] = 0;
     }
-    // Beyond the requested count the buffer is untouched.
-    ASSERT_EQ(static_cast<int>(buf[8]), static_cast<int>(0xFF));
+    return count;
 }
 
-TEST("devfs: /dev/zero write discards") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*     z     = devfs.lookup("zero").value();
-    const char msg[] = "x";
-    auto       w     = z->ops->write(z, 0, msg, 1);
-    ASSERT_TRUE(w.ok());
-    ASSERT_EQ(w.value(), 1);
+const cinux::fs::DeviceOps kStockNullOps{
+    .read      = stock_null_read,
+    .write     = stock_null_write,
+    .has_input = nullptr,
+    .ioctl     = nullptr,
+    .release   = nullptr,
+    .context   = nullptr,
+};
+
+const cinux::fs::DeviceOps kStockZeroOps{
+    .read      = stock_zero_read,
+    .write     = stock_null_write,
+    .has_input = nullptr,
+    .ioctl     = nullptr,
+    .release   = nullptr,
+    .context   = nullptr,
+};
+
+/// One devfs with the builtin pair seated, the shape every mount shows.
+cinux::fs::DevFs& stocked(cinux::fs::DevFs& devfs) {
+    const cinux::base::Result<void> kNull =
+        devfs.register_device("null", cinux::fs::MakeDeviceId(1, 3), kStockNullOps);
+    if (!kNull.ok()) {
+        return devfs;
+    }
+    const cinux::base::Result<void> kZero =
+        devfs.register_device("zero", cinux::fs::MakeDeviceId(1, 5), kStockZeroOps);
+    if (!kZero.ok()) {
+        return devfs;
+    }
+    return devfs;
 }
 
-// ============================================================
-// 5. /dev/console -- writes route through the sink; read unsupported
-// ============================================================
+}  // namespace
 
-TEST("devfs: /dev/console write routes bytes through the sink") {
-    MockSink sink;
-    DevFs    devfs(&sink);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*     con   = devfs.lookup("console").value();
-    const char msg[] = "hi";
-    auto       w     = con->ops->write(con, 0, msg, 2);
-    ASSERT_TRUE(w.ok());
-    ASSERT_EQ(w.value(), 2);
-    ASSERT_EQ(sink.len_, 2u);
-    ASSERT_EQ(static_cast<int>(sink.buf_[0]), 'h');
-    ASSERT_EQ(static_cast<int>(sink.buf_[1]), 'i');
+TEST("devfs: the root is inode one and a directory") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
+    ASSERT_TRUE(kRoot.ok());
+    ASSERT_EQ(kRoot.value().type, cinux::fs::InodeType::kDirectory);
+    ASSERT_EQ(kRoot.value().ino, 1UL);
 }
 
-TEST("devfs: /dev/console write with no sink discards") {
-    DevFs devfs(nullptr);  // no sink
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*     con   = devfs.lookup("console").value();
-    const char msg[] = "x";
-    auto       w     = con->ops->write(con, 0, msg, 1);
-    ASSERT_TRUE(w.ok());
-    ASSERT_EQ(w.value(), 1);
+TEST("devfs: enumeration opens with dot and dot-dot") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
+
+    cinux::fs::FsDirent entry;
+    ASSERT_TRUE(stock.read_dir(kRoot.value(), 0, entry).value());
+    ASSERT_STREQ(entry.name, ".");
+    ASSERT_TRUE(stock.read_dir(kRoot.value(), 1, entry).value());
+    ASSERT_STREQ(entry.name, "..");
 }
 
-TEST("devfs: /dev/console read is unsupported") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode* con = devfs.lookup("console").value();
-    char   buf[4];
-    auto   r = con->ops->read(con, 0, buf, sizeof(buf));
-    ASSERT_FALSE(r.ok());
+TEST("devfs: the builtin pair enumerates in seating order") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
+
+    cinux::fs::FsDirent entry;
+    ASSERT_TRUE(stock.read_dir(kRoot.value(), 2, entry).value());
+    ASSERT_STREQ(entry.name, "null");
+    ASSERT_EQ(entry.type, cinux::fs::InodeType::kCharDevice);
 }
 
-// ============================================================
-// 6. readdir -- root directory lists . .. null zero console
-// ============================================================
+TEST("devfs: enumeration stops past the last device") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
 
-TEST("devfs: readdir lists dot, dotdot, then nodes in order") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode* root = devfs.lookup("").value();
-
-    char name[DEVFS_NAME_MAX];
-
-    auto e0 = root->ops->readdir(root, 0, name, sizeof(name));
-    ASSERT_TRUE(e0.ok());
-    ASSERT_EQ(e0.value(), 1);
-    ASSERT_EQ(std::strcmp(name, "."), 0);
-
-    auto e1 = root->ops->readdir(root, 1, name, sizeof(name));
-    ASSERT_TRUE(e1.ok());
-    ASSERT_EQ(e1.value(), 1);
-    ASSERT_EQ(std::strcmp(name, ".."), 0);
-
-    auto e2 = root->ops->readdir(root, 2, name, sizeof(name));
-    ASSERT_TRUE(e2.ok());
-    ASSERT_EQ(e2.value(), 1);
-    ASSERT_EQ(std::strcmp(name, "null"), 0);
-
-    auto e3 = root->ops->readdir(root, 3, name, sizeof(name));
-    ASSERT_TRUE(e3.ok());
-    ASSERT_EQ(e3.value(), 1);
-    ASSERT_EQ(std::strcmp(name, "zero"), 0);
-
-    auto e4 = root->ops->readdir(root, 4, name, sizeof(name));
-    ASSERT_TRUE(e4.ok());
-    ASSERT_EQ(e4.value(), 1);
-    ASSERT_EQ(std::strcmp(name, "console"), 0);
-
-    // Past the last node readdir signals end-of-directory (0).
-    auto e5 = root->ops->readdir(root, 5, name, sizeof(name));
-    ASSERT_TRUE(e5.ok());
-    ASSERT_EQ(e5.value(), 0);
+    cinux::fs::FsDirent entry;
+    ASSERT_TRUE(stock.read_dir(kRoot.value(), 3, entry).value());
+    ASSERT_STREQ(entry.name, "zero");
+    ASSERT_FALSE(stock.read_dir(kRoot.value(), 4, entry).value());
 }
 
-// ============================================================
-// 7. stat -- device nodes report S_IFCHR + distinguishable st_rdev
-// ============================================================
+TEST("devfs: null reads a clean zero") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kNull = stocked(stock).lookup("null");
+    ASSERT_TRUE(kNull.ok());
 
-TEST("devfs: null stat reports character device 1:3") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*      n = devfs.lookup("null").value();
-    struct stat st;
-    auto        r = n->ops->stat(n, &st);
-    ASSERT_TRUE(r.ok());
-    ASSERT_EQ(st.st_mode, static_cast<uint32_t>(kSIfChr | 0666));
-    ASSERT_EQ(st.st_rdev, devfs_makedev(1, 3));
-    ASSERT_EQ(st.st_nlink, 1u);
+    unsigned char                            buffer[4] = {1, 2, 3, 4};
+    const cinux::base::Result<unsigned long> kPulled =
+        stock.read(kNull.value(), 0, buffer, sizeof(buffer));
+    ASSERT_TRUE(kPulled.ok());
+    ASSERT_EQ(kPulled.value(), 0UL);
 }
 
-TEST("devfs: zero stat reports character device 1:5") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*      z = devfs.lookup("zero").value();
-    struct stat st;
-    ASSERT_TRUE(z->ops->stat(z, &st).ok());
-    ASSERT_EQ(st.st_rdev, devfs_makedev(1, 5));
+TEST("devfs: null swallows every write") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kNull      = stocked(stock).lookup("null");
+    const unsigned char                          kBuffer[4] = {1, 2, 3, 4};
+    const cinux::base::Result<unsigned long>     kPushed =
+        stock.write(kNull.value(), 0, kBuffer, sizeof(kBuffer));
+    ASSERT_TRUE(kPushed.ok());
+    ASSERT_EQ(kPushed.value(), 4UL);
 }
 
-TEST("devfs: console stat reports character device 5:1") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*      c = devfs.lookup("console").value();
-    struct stat st;
-    ASSERT_TRUE(c->ops->stat(c, &st).ok());
-    ASSERT_EQ(st.st_rdev, devfs_makedev(5, 1));
+TEST("devfs: zero reads zero bytes") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kZero = stocked(stock).lookup("zero");
+    ASSERT_TRUE(kZero.ok());
+
+    unsigned char buffer[8] = {};
+    for (unsigned char& byte : buffer) {
+        byte = 0xFF;
+    }
+    const cinux::base::Result<unsigned long> kPulled =
+        stock.read(kZero.value(), 0, buffer, sizeof(buffer));
+    ASSERT_TRUE(kPulled.ok());
+    ASSERT_EQ(kPulled.value(), 8UL);
+    for (const unsigned char kByte : buffer) {
+        ASSERT_EQ(static_cast<unsigned>(kByte), 0U);
+    }
 }
 
-TEST("devfs: root stat reports a directory") {
-    DevFs devfs(nullptr);
-    ASSERT_TRUE(devfs.mount().ok());
-    Inode*      root = devfs.lookup("").value();
-    struct stat st;
-    ASSERT_TRUE(root->ops->stat(root, &st).ok());
-    ASSERT_EQ(st.st_mode, static_cast<uint32_t>(kSIfDir | 0755));
-    ASSERT_EQ(st.st_nlink, 2u);
+TEST("devfs: stat answers the device mode and identity") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kNull = stocked(stock).lookup("null");
+    ASSERT_TRUE(kNull.ok());
+    cinux::fs::FsStat probed{};
+    ASSERT_TRUE(stock.stat(kNull.value(), probed).ok());
+    ASSERT_EQ(probed.mode, cinux::fs::kFsCharDevMode);
+    ASSERT_EQ(probed.rdev, cinux::fs::MakeDeviceId(1, 3));
 }
 
-// ============================================================
-// Main
-// ============================================================
+TEST("devfs: stat answers the directory mode for the root") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
+    cinux::fs::FsStat                            probed{};
+    ASSERT_TRUE(stock.stat(kRoot.value(), probed).ok());
+    ASSERT_EQ(probed.mode, cinux::fs::kFsDirMode);
+    ASSERT_EQ(probed.rdev, 0UL);
+}
+
+TEST("devfs: a registered device sees reads") {
+    cinux::fs::DevFs stock;
+    stocked(stock);
+    ASSERT_TRUE(stock.register_device("echo", cinux::fs::MakeDeviceId(9, 9), kEchoOps).ok());
+
+    const cinux::base::Result<cinux::fs::FsNode> kEcho = stock.lookup("echo");
+    ASSERT_TRUE(kEcho.ok());
+    ASSERT_EQ(kEcho.value().ino, 4UL);
+
+    unsigned char                            buffer[3] = {};
+    const cinux::base::Result<unsigned long> kPulled =
+        stock.read(kEcho.value(), 0, buffer, sizeof(buffer));
+    ASSERT_TRUE(kPulled.ok());
+    ASSERT_EQ(kPulled.value(), 3UL);
+    ASSERT_EQ(static_cast<unsigned>(buffer[0]), 0xA5U);
+}
+
+TEST("devfs: a registered device sees writes") {
+    cinux::fs::DevFs stock;
+    ASSERT_TRUE(stock.register_device("echo", cinux::fs::MakeDeviceId(9, 9), kEchoOps).ok());
+    const cinux::base::Result<cinux::fs::FsNode> kEcho      = stock.lookup("echo");
+    const unsigned char                          kBuffer[3] = {};
+
+    const unsigned long                      kBefore = g_source_calls;
+    const cinux::base::Result<unsigned long> kPushed =
+        stock.write(kEcho.value(), 0, kBuffer, sizeof(kBuffer));
+    ASSERT_TRUE(kPushed.ok());
+    ASSERT_EQ(kPushed.value(), 3UL);
+    ASSERT_EQ(g_source_calls, kBefore + 1);
+}
+
+TEST("devfs: registration refuses repeats and bad shapes") {
+    cinux::fs::DevFs stock;
+    ASSERT_TRUE(stock.register_device("echo", 0, kEchoOps).ok());
+    ASSERT_EQ(stock.register_device("echo", 0, kEchoOps).error(),
+              cinux::base::KernelError::kAlreadyExists);
+    ASSERT_EQ(stock.register_device("bad/name", 0, kEchoOps).error(),
+              cinux::base::KernelError::kInvalidArgument);
+}
+
+TEST("devfs: the flat namespace refuses walking and creating") {
+    cinux::fs::DevFs stock;
+    ASSERT_EQ(stocked(stock).lookup("null/extra").error(), cinux::base::KernelError::kNotFound);
+    ASSERT_EQ(stock.lookup("missing").error(), cinux::base::KernelError::kNotFound);
+    ASSERT_EQ(stock.make_file("x").error(), cinux::base::KernelError::kNotSupported);
+    ASSERT_EQ(stock.unlink("null").error(), cinux::base::KernelError::kNotSupported);
+}
+
+TEST("devfs: nodes refuse their wrong operations") {
+    cinux::fs::DevFs                             stock;
+    const cinux::base::Result<cinux::fs::FsNode> kRoot = stocked(stock).lookup("");
+    ASSERT_EQ(stock.read(kRoot.value(), 0, nullptr, 0).error(),
+              cinux::base::KernelError::kIsADirectory);
+
+    const cinux::base::Result<cinux::fs::FsNode> kNull = stock.lookup("null");
+    cinux::fs::FsDirent                          entry;
+    ASSERT_EQ(stock.read_dir(kNull.value(), 0, entry).error(),
+              cinux::base::KernelError::kNotADirectory);
+}
+
+TEST("devfs: a mount hands the prefix to the table") {
+    cinux::fs::DevFs stock;
+    cinux::fs::Vfs   table;
+    ASSERT_TRUE(table.mount("/dev", stocked(stock)).ok());
+
+    const cinux::base::Result<cinux::fs::FsView> kDevice = table.resolve("/dev/null");
+    ASSERT_TRUE(kDevice.ok());
+    ASSERT_EQ(kDevice.value().rest, std::string_view("null"));
+    const cinux::base::Result<cinux::fs::FsNode> kNode =
+        kDevice.value().ops->lookup(kDevice.value().self, kDevice.value().rest);
+    ASSERT_TRUE(kNode.ok());
+    ASSERT_EQ(kNode.value().type, cinux::fs::InodeType::kCharDevice);
+}
+
+TEST("devfs: the mount root resolves with empty rest") {
+    cinux::fs::DevFs stock;
+    cinux::fs::Vfs   table;
+    ASSERT_TRUE(table.mount("/dev", stocked(stock)).ok());
+
+    const cinux::base::Result<cinux::fs::FsView> kRoot = table.resolve("/dev");
+    ASSERT_TRUE(kRoot.ok());
+    ASSERT_TRUE(kRoot.value().rest.empty());
+    ASSERT_EQ(table.resolve("/nobody").error(), cinux::base::KernelError::kNotFound);
+}
 
 int main() {
-    RUN_ALL_TESTS();
-    return _tests_failed > 0 ? 1 : 0;
+    return cinux::test::RunAll();
 }
-
-#endif  // CINUX_HOST_TEST
