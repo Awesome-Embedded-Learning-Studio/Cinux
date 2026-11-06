@@ -30,8 +30,11 @@ void send_to_loopback(void* context, const OutboundDatagram& datagram) {
     auto&                         device    = *static_cast<driver::net::Loopback*>(context);
     const driver::net::MacAddress kNobody   = {};
     const driver::net::EtherType  kIpv4Type = {kEtherTypeIpv4};
-    base::safety::Check(device.send_l3(kNobody, kIpv4Type, datagram.payload, datagram.length),
-                        "loopback queue refused a send");
+    // A full ring means the pump is behind this sender. The frame drops
+    // and counts in Loopback::dropped(); congestion is a diagnosis, not
+    // a halt. Losses recover at the transport layer or surface to the
+    // application, the way a real congested interface answers.
+    static_cast<void>(device.send_l3(kNobody, kIpv4Type, datagram.payload, datagram.length));
 }
 
 void send_via_ipv4(void* context, const OutboundDatagram& datagram) {
@@ -135,9 +138,10 @@ void NetWorld::route_send(const OutboundDatagram& datagram) {
         datagram.destination == own_address_ || wire_port_ == nullptr) {
         const driver::net::MacAddress kNobody   = {};
         const driver::net::EtherType  kIpv4Type = {kEtherTypeIpv4};
-        base::safety::Check(driver::net::Loopback::self().send_l3(
-                                kNobody, kIpv4Type, datagram.payload, datagram.length),
-                            "loopback queue refused a send");
+        // Same terms as send_to_loopback: a full ring drops and counts
+        // rather than halting the whole machine over one datagram.
+        static_cast<void>(driver::net::Loopback::self().send_l3(
+            kNobody, kIpv4Type, datagram.payload, datagram.length));
         return;
     }
 

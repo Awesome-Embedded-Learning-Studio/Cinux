@@ -77,6 +77,25 @@ TEST("loopback: the queue answers full and oversize honestly") {
     ASSERT_FALSE(cinux::driver::net::Loopback::self().poll_frame(frame));
 }
 
+TEST("loopback: a full ring counts the dropped frame and still drains in order") {
+    cinux::driver::net::Loopback::self().init();
+    const cinux::driver::net::MacAddress kAny{};
+    const cinux::driver::net::EtherType  kType{.value = 0x0800};
+    ASSERT_EQ(cinux::driver::net::Loopback::self().dropped(), 0UL);
+    for (unsigned long index = 0; index < cinux::driver::net::kLoopbackQueueFrames; ++index) {
+        ASSERT_TRUE(
+            cinux::driver::net::Loopback::self().send_l3(kAny, kType, kFirst, sizeof(kFirst)));
+    }
+    ASSERT_FALSE(
+        cinux::driver::net::Loopback::self().send_l3(kAny, kType, kFirst, sizeof(kFirst)));
+    ASSERT_EQ(cinux::driver::net::Loopback::self().dropped(), 1UL);
+    cinux::driver::net::RxFrame frame{};
+    ASSERT_TRUE(cinux::driver::net::Loopback::self().poll_frame(frame));
+    ASSERT_EQ(frame.size, sizeof(kFirst));
+    cinux::driver::net::Loopback::self().init();
+    ASSERT_EQ(cinux::driver::net::Loopback::self().dropped(), 0UL);
+}
+
 TEST("loopback: the honest answers are no address and no header") {
     ASSERT_FALSE(cinux::driver::net::Loopback::self().has_mac());
     ASSERT_FALSE(cinux::driver::net::Loopback::self().has_ethernet_header());

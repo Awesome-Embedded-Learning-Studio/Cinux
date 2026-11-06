@@ -70,6 +70,9 @@ long long HandleGetdents(const SyscallFrame& frame) {
         return -kEbadf;
     }
     auto* const   kDir   = kSlot.value().get();
+    if (kDir->ops == nullptr || kDir->ops->read_dir == nullptr) {
+        return -kEnotdir;
+    }
     unsigned long filled = 0;
     fs::FsDirent  entry{};
     for (;;) {

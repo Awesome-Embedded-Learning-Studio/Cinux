@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "cinux/addr.hpp"
 #include "cinux/byte_order.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "kernel/arch/x86_64/page.hpp"
+#include "kernel/boot/print.hpp"
 #include "kernel/driver/net/e1000_config.hpp"
 #include "kernel/driver/net/e1000_layout.hpp"
 #include "kernel/driver/net/net_config.hpp"
@@ -71,14 +73,10 @@ bool E1000::init() {
     reg_write(regs_, e1000::kRegRal, address_low);
     reg_write(regs_, e1000::kRegRah, address_high | e1000::kRahAddressValid);
 
-    ring_page_ = mm::Pmm::self().allocate_page();
+    if (!take_ring_pages()) {
+        return false;
+    }
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(ring_page_.raw)), 0, arch::page::kSize);
-    for (auto& buffer : rx_buffers_) {
-        buffer = mm::Pmm::self().allocate_page();
-    }
-    for (auto& buffer : tx_buffers_) {
-        buffer = mm::Pmm::self().allocate_page();
-    }
 
     auto* const kRxRing = base::PtrAt<e1000::RxDescriptor>(mm::DirectMapVirt(ring_page_.raw));
     for (unsigned long index = 0; index < kE1000RxRingSize; ++index) {
@@ -107,6 +105,45 @@ bool E1000::init() {
 
     seat_.adopt(*this);
     present_ = true;
+    return true;
+}
+
+bool E1000::take_ring_pages() {
+    ring_page_ = mm::Pmm::self().allocate_page();
+    if (ring_page_ == base::PhysAddr{}) {
+        return false;
+    }
+    unsigned long got = 0;
+    for (; got < kE1000RxRingSize; ++got) {
+        rx_buffers_[got] = mm::Pmm::self().allocate_page();
+        if (rx_buffers_[got] == base::PhysAddr{}) {
+            break;
+        }
+    }
+    if (got == kE1000RxRingSize) {
+        for (; got < kE1000RxRingSize + kE1000TxRingSize; ++got) {
+            tx_buffers_[got - kE1000RxRingSize] = mm::Pmm::self().allocate_page();
+            if (tx_buffers_[got - kE1000RxRingSize] == base::PhysAddr{}) {
+                break;
+            }
+        }
+    }
+    if (got != kE1000RxRingSize + kE1000TxRingSize) {
+        mm::Pmm::self().free_page(ring_page_);
+        ring_page_ = base::PhysAddr{};
+        for (const auto& buffer : rx_buffers_) {
+            if (buffer != base::PhysAddr{}) {
+                mm::Pmm::self().free_page(buffer);
+            }
+        }
+        for (const auto& buffer : tx_buffers_) {
+            if (buffer != base::PhysAddr{}) {
+                mm::Pmm::self().free_page(buffer);
+            }
+        }
+        print::Println("[kern] e1000 ring pages unavailable, card stays down");
+        return false;
+    }
     return true;
 }
 

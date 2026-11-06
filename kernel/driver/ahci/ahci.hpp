@@ -166,6 +166,19 @@ private:
      */
     bool wait_for_completion();
 
+    /**
+     * @brief         Takes the port's three working pages, or none.
+     * @return        True with the three members filled; false with
+     *                every member back at the zero address and the
+     *                taken frames returned to the ledger.
+     * @note          All-or-nothing: the command list, the received-FIS
+     *                area and the bounce page arrive as one group, a
+     *                partial take would leave the port half-armed.
+     * @since         0.6.0
+     * @ingroup       kernel_driver
+     */
+    bool take_port_pages();
+
     volatile HbaMem*      regs_       = nullptr;  ///< Controller window, unmapped means absent.
     unsigned long         port_index_ = 0;        ///< The one port this driver drives.
     interrupt::IrqLine    line_{};                ///< Line the controller signals on.

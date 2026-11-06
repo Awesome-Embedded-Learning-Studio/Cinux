@@ -219,6 +219,20 @@ bool XhciHost::arm_rings() {
     const base::PhysAddr kCommand = mm::Pmm::self().allocate_page();
     const base::PhysAddr kEvent   = mm::Pmm::self().allocate_page();
     const base::PhysAddr kDevices = mm::Pmm::self().allocate_page();
+    if (kCommand == base::PhysAddr{} || kEvent == base::PhysAddr{} ||
+        kDevices == base::PhysAddr{}) {
+        if (kCommand != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kCommand);
+        }
+        if (kEvent != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kEvent);
+        }
+        if (kDevices != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kDevices);
+        }
+        print::Println("[kern] xhci ring pages unavailable, controller stays down");
+        return false;
+    }
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kCommand.raw)), 0, kPageBytes);
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEvent.raw)), 0, kPageBytes);
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kDevices.raw)), 0, kPageBytes);

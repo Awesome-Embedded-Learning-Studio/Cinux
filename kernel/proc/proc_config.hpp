@@ -6,9 +6,9 @@
  * one kernel-thread stack spans, the marker written at its bottom as
  * a post-mortem overflow probe, how many tasks may wait in one
  * scheduling class's ready row, and how the scheduler's slice and
- * class registry are sized. Overflow of a ready row is a Check
- * failure, not a silent drop — losing a wakeup is undebuggable,
- * failing loudly is one serial line.
+ * class registry are sized. Overflow of a ready row refuses the
+ * transition and counts in Scheduler::ready_refusals() — load that
+ * outruns a row is a diagnosis, not a halt.
  *
  * @author  Charliechen114514
  * @date    2026-10-07
@@ -39,8 +39,10 @@ inline constexpr int kStackOrder = 2;
 inline constexpr unsigned long long kStackMagic = 0xDEADC0DEULL;
 
 /// Tasks that may wait in one class's ready row at once; every
-/// scheduling class owns a row of this size.
-inline constexpr unsigned int kReadyQueueCapacity = 16;
+/// scheduling class owns a row of this size. A full row refuses new
+/// arrivals (counted in Scheduler::ready_refusals()) rather than
+/// halting, so this word sizes a burst buffer, not a fuse.
+inline constexpr unsigned int kReadyQueueCapacity = 64;
 
 /// Timer ticks one task may run before the scheduler asks for a
 /// rotation; two at 100 Hz is 20 ms per slice.

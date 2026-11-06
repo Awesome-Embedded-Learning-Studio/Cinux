@@ -150,7 +150,10 @@ public:
      * @param[in,out] task   Armed task, state and pid get assigned.
      * @param[in] runnable Queue immediately when true.
      * @param[in] initial_process Reserve PID 1 for the user init process.
-     * @return        None.
+     * @return        True when the task is scheduled as asked; false when
+     *                a runnable seat found its class's ready row full —
+     *                the task then stays kBlocked (refused, not halting),
+     *                and the refusal counts in ready_refusals().
      * @note          The seam tests drive directly: seat a hand-made
      *                task, install a recording sink, and the decision
      *                stream is observable without any machine. The
@@ -161,7 +164,18 @@ public:
      * @since         0.2.0
      * @ingroup       kernel_proc
      */
-    void seat(Task& task, bool runnable = true, bool initial_process = false);
+    bool seat(Task& task, bool runnable = true, bool initial_process = false);
+
+    /**
+     * @brief   Ready-row refusals since boot.
+     * @return  How many enqueue attempts a full ready row refused across
+     *          seat, yield, preemption, unblock, and resume. A nonzero
+     *          count is the diagnosis that a class's row is too small
+     *          for the load; the machine kept running either way.
+     * @since   0.7.0
+     * @ingroup kernel_proc
+     */
+    [[nodiscard]] unsigned long long ready_refusals() const;
 
     /**
      * @brief         Register a scheduling class; pick order follows
@@ -571,6 +585,7 @@ private:
     cinux::base::container::SelfList<Task>                                       waiters_;
     cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
     unsigned long long                                                           next_pid_ = 1;
+    unsigned long long                                                           ready_refusals_ = 0;
     std::atomic<bool>                                                            preemption_{false};
 };
 
