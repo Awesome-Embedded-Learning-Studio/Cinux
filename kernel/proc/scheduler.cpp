@@ -88,7 +88,7 @@ SchedulingClass* Scheduler::class_at(unsigned int index) const {
     return index < classes_.size() ? classes_.view()[index] : nullptr;
 }
 
-void Scheduler::seat(Task& task, bool runnable, bool initial_process) {
+bool Scheduler::seat(Task& task, bool runnable, bool initial_process) {
     const QueueGuard kGuard(*this);
     base::safety::Check(sink_ready(), "scheduler has no sink installed");
     base::safety::Check(!classes_.empty(), "no scheduling class installed");
@@ -112,15 +112,27 @@ void Scheduler::seat(Task& task, bool runnable, bool initial_process) {
         task.pid = next_pid_++;
     }
     task.tgid  = task.pid;
-    task.state = runnable ? TaskState::kReady : TaskState::kBlocked;
+    task.state = TaskState::kBlocked;
     tasks_.push_back(task);
     if (task.parent != nullptr) {
         offspring_.push_back(task);
     }
     if (runnable) {
-        base::safety::Check(task.sched_class->enqueue(task), "ready queue full at seat");
+        if (!task.sched_class->enqueue(task)) {
+            // Row full: the newcomer stays blocked and the caller learns
+            // through the return; a full row is load, not a halt.
+            ++ready_refusals_;
+            return false;
+        }
+        task.state = TaskState::kReady;
         local().notify_pending = true;
     }
+    return true;
+}
+
+unsigned long long Scheduler::ready_refusals() const {
+    const QueueGuard kGuard(*this);
+    return ready_refusals_;
 }
 
 Task* Scheduler::pick_next() {
@@ -184,12 +196,21 @@ void Scheduler::yield() {
     const arch::IrqGuard kGuard;
     Task* const          kPrev = current();
     base::safety::Check(kPrev != nullptr, "yield called outside any task");
+    bool rotated = false;
     {
         const QueueGuard kQueue(*this);
-        kPrev->state = TaskState::kReady;
-        base::safety::Check(kPrev->sched_class->enqueue(*kPrev), "ready queue full at yield");
+        if (kPrev->sched_class->enqueue(*kPrev)) {
+            kPrev->state = TaskState::kReady;
+            rotated = true;
+        } else {
+            // Row full: keep running instead of rotating away from a task
+            // the row cannot hold; the next slice offers the slot again.
+            ++ready_refusals_;
+        }
     }
-    rotate_from_interrupt();
+    if (rotated) {
+        rotate_from_interrupt();
+    }
 }
 
 void Scheduler::rotate_from_interrupt() {
@@ -287,13 +308,23 @@ void Scheduler::maybe_preempt() {
     }
     const arch::IrqGuard kGuard;
     local().rotate_due = false;
+    bool rotated = false;
     {
         const QueueGuard kQueue(*this);
-        current()->state = TaskState::kReady;
-        base::safety::Check(current()->sched_class->enqueue(*current()),
-                            "ready queue full at preemption");
+        Task* const      kSelf = current();
+        if (kSelf->sched_class->enqueue(*kSelf)) {
+            kSelf->state = TaskState::kReady;
+            rotated = true;
+        } else {
+            // Row full: the current task keeps the CPU rather than
+            // switching away from a task no row will hold; the next
+            // tick retries once a pick frees a slot.
+            ++ready_refusals_;
+        }
     }
-    rotate_from_interrupt();
+    if (rotated) {
+        rotate_from_interrupt();
+    }
 }
 
 void Scheduler::set_preemption(bool enabled) {
@@ -511,8 +542,15 @@ void Scheduler::unblock(Task& task) {
     if (task.state != TaskState::kBlocked) {
         return;
     }
+    if (!task.sched_class->enqueue(task)) {
+        // Row full: this wakeup is dropped and counted, the sleeper
+        // stays blocked and consistent, and the next wakeup event
+        // lands once a pick frees a slot. A dropped beat, not a dead
+        // machine.
+        ++ready_refusals_;
+        return;
+    }
     task.state = TaskState::kReady;
-    base::safety::Check(task.sched_class->enqueue(task), "ready queue full at unblock");
     local().notify_pending = true;
 }
 
@@ -530,8 +568,13 @@ void Scheduler::stop_current() {
 void Scheduler::resume(Task& task) {
     const QueueGuard kGuard(*this);
     base::safety::Check(task.state == TaskState::kStopped, "resume of a task that is not stopped");
+    if (!task.sched_class->enqueue(task)) {
+        // Same terms as unblock: a full row defers the resume, the task
+        // stays stopped and consistent, and the refusal is counted.
+        ++ready_refusals_;
+        return;
+    }
     task.state = TaskState::kReady;
-    base::safety::Check(task.sched_class->enqueue(task), "ready queue full at resume");
     local().notify_pending = true;
 }
 

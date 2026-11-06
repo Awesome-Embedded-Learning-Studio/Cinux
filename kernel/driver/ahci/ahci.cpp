@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 
+#include "cinux/addr.hpp"
 #include "cinux/assert.hpp"
 #include "cinux/bit_ops/bitmask.hpp"
 #include "cinux/memory.hpp"
@@ -218,9 +219,10 @@ bool Ahci::init() {
     wait_clear_observed(&port.command, kCmdFisReceiveRunning, kStopBudgetTicks,
                         "receive engine stop");
 
-    command_page_ = mm::Pmm::self().allocate_page();
-    fis_page_     = mm::Pmm::self().allocate_page();
-    data_page_    = mm::Pmm::self().allocate_page();
+    if (!take_port_pages()) {
+        print::Println("[kern] ahci port pages unavailable, drive stays down");
+        return false;
+    }
     cinux::base::SetBytes(cinux::base::PtrAt<void>(mm::DirectMapVirt(command_page_.raw)), 0,
                           cinux::arch::page::kSize);
     port.command_list_base       = static_cast<uint32_t>(command_page_.raw);
@@ -427,6 +429,23 @@ bool Ahci::wait_for_completion() {
         }
         cinux::arch::EnableIrqAndHalt();
     }
+}
+
+bool Ahci::take_port_pages() {
+    base::PhysAddr* const kSlots[3] = {&command_page_, &fis_page_, &data_page_};
+    unsigned long got = 0;
+    for (; got < 3; ++got) {
+        *kSlots[got] = mm::Pmm::self().allocate_page();
+        if (*kSlots[got] == cinux::base::PhysAddr{}) {
+            while (got > 0) {
+                --got;
+                mm::Pmm::self().free_page(*kSlots[got]);
+                *kSlots[got] = cinux::base::PhysAddr{};
+            }
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace cinux::driver

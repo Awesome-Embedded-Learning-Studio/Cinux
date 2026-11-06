@@ -169,6 +169,8 @@ jobs:
 
   docs:
     # VitePress 分卷并发构建 + dead-link 隐式检查(build 报断链即失败)。
+    # 站点工具链(package.json + pnpm-lock.yaml + site/)尚未迁入本仓库,
+    # 缺 toolchain 时除 checkout 与探测步外的各步跳过,迁入后自动恢复。
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -176,18 +178,31 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0   # getBuildInfo 需要 git tag 取页脚版本号
+      - name: Detect site toolchain
+        id: toolchain
+        run: |
+          if [ -f package.json ] && [ -f pnpm-lock.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "site toolchain not in this repo, docs job skipped"
+          fi
       - name: Setup pnpm
+        if: steps.toolchain.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 10.33.3
       - name: Setup Node.js
+        if: steps.toolchain.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: pnpm
       - name: Install dependencies
+        if: steps.toolchain.outputs.present == 'true'
         run: pnpm install --frozen-lockfile
       - name: Restore build cache
+        if: steps.toolchain.outputs.present == 'true'
         uses: actions/cache@v4
         with:
           path: site/.vitepress/.build-cache
@@ -195,6 +210,7 @@ jobs:
           restore-keys: |
             cinux-build-${{ runner.os }}-
       - name: Build docs
+        if: steps.toolchain.outputs.present == 'true'
         run: pnpm build
         env:
           BUILD_CONCURRENCY: '3'

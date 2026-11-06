@@ -24,6 +24,7 @@ void Loopback::init() {
     RxFrame drained{};
     while (queue_.pop(drained)) {
     }
+    dropped_ = 0;
 }
 
 bool Loopback::has_mac() const {
@@ -46,6 +47,10 @@ bool Loopback::poll_frame(RxFrame& into) {
     return queue_.pop(into);
 }
 
+unsigned long Loopback::dropped() const {
+    return dropped_;
+}
+
 bool Loopback::send_l3(const MacAddress& /*destination*/, EtherType /*type*/,
                        const std::uint8_t* payload, unsigned long length) {
     if (payload == nullptr || length == 0 || length > kMaxEthernetFrame) {
@@ -54,7 +59,11 @@ bool Loopback::send_l3(const MacAddress& /*destination*/, EtherType /*type*/,
     RxFrame frame{};
     base::CopyBytes(frame.bytes, payload, length);
     frame.size = length;
-    return queue_.push(frame);
+    if (!queue_.push(frame)) {
+        ++dropped_;
+        return false;
+    }
+    return true;
 }
 
 }  // namespace cinux::driver::net

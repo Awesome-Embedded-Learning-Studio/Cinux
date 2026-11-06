@@ -102,17 +102,28 @@ public:
      * @param[in]     payload      The payload bytes to queue.
      * @param[in]     length       How many payload bytes, one upward.
      * @return        True when the payload queued; false for an empty or
-     *                oversized payload, or a full queue.
+     *                oversized payload, or a full queue. A full-queue
+     *                refusal also counts in dropped().
      * @since         0.6.0
      * @ingroup       kernel_driver
      */
     [[nodiscard]] bool send_l3(const MacAddress& destination, EtherType type,
                                const std::uint8_t* payload, unsigned long length);
 
+    /**
+     * @brief   Frames this device refused because the ring was full.
+     * @return  How many sends arrived at a full queue since the last
+     *          init(); the congestion tally a diagnosis reads.
+     * @since   0.7.0
+     * @ingroup kernel_driver
+     */
+    [[nodiscard]] unsigned long dropped() const;
+
 private:
     Loopback() = default;
 
     cinux::base::container::RingQueue<RxFrame, kLoopbackQueueFrames + 1> queue_ = {};
+    unsigned long dropped_ = 0;  ///< Full-queue refusals since init().
 };
 
 }  // namespace cinux::driver::net

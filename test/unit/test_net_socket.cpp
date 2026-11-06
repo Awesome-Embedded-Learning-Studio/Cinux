@@ -358,6 +358,34 @@ TEST("stream socket: attaching Ethernet preserves loopback handshake and payload
     ASSERT_EQ(wire.sent, 0UL);
 }
 
+TEST("loopback routing: a full loopback drops the datagram and keeps the world alive") {
+    using namespace cinux;
+    auto&                   world = net::NetWorld::self();
+    world.init();
+    driver::net::Loopback&  loop = driver::net::Loopback::self();
+    const driver::net::MacAddress kAny{};
+    const driver::net::EtherType  kIpv4{net::kEtherTypeIpv4};
+    const unsigned char     kByte = 42;
+    for (unsigned long index = 0; index < driver::net::kLoopbackQueueFrames; ++index) {
+        ASSERT_TRUE(loop.send_l3(kAny, kIpv4, &kByte, 1));
+    }
+    const unsigned long kBefore = loop.dropped();
+    // The sink path that used to halt the whole machine on a full ring.
+    ASSERT_TRUE(world.ipv4().send({
+        .destination = net::kLoopbackAddress,
+        .protocol    = net::kIpv4ProtocolUdp,
+        .payload     = &kByte,
+        .length      = 1,
+    }));
+    ASSERT_EQ(loop.dropped(), kBefore + 1UL);
+    driver::net::RxFrame frame{};
+    unsigned long        drained = 0;
+    while (loop.poll_frame(frame)) {
+        ++drained;
+    }
+    ASSERT_EQ(drained, driver::net::kLoopbackQueueFrames);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
 TEST("stream socket: writer exit before accept preserves queued bytes and EOF") {
     using namespace cinux;

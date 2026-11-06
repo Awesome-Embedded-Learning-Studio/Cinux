@@ -95,12 +95,29 @@ bool UsbDevice<Owner>::address(XhciHost& host, uint8_t port) {
         return false;
     }
     slot_ = slot;
-    host.seat_device(slot, this, &UsbDevice::deliver);
 
     const base::PhysAddr kInput  = mm::Pmm::self().allocate_page();
     const base::PhysAddr kOutput = mm::Pmm::self().allocate_page();
     const base::PhysAddr kEp0    = mm::Pmm::self().allocate_page();
     const base::PhysAddr kEp1    = mm::Pmm::self().allocate_page();
+    if (kInput == base::PhysAddr{} || kOutput == base::PhysAddr{} ||
+        kEp0 == base::PhysAddr{} || kEp1 == base::PhysAddr{}) {
+        if (kInput != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kInput);
+        }
+        if (kOutput != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kOutput);
+        }
+        if (kEp0 != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kEp0);
+        }
+        if (kEp1 != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kEp1);
+        }
+        return false;
+    }
+
+    host.seat_device(slot, this, &UsbDevice::deliver);
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kInput.raw)), 0, kPageBytes);
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kOutput.raw)), 0, kPageBytes);
     base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEp0.raw)), 0, kPageBytes);

@@ -50,10 +50,14 @@ inline constexpr unsigned long kEthernetHeaderBytes = 14;
 inline constexpr unsigned char kBroadcastMacBytes[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 /**
- * @brief   How many frames the loopback holds before sends refuse.
+ * @brief   How many frames the loopback holds before sends drop.
+ * @note    Deep enough that a sender bursting ahead of the pump loses
+ *          nothing in the common case; a full ring drops the newcomer
+ *          by name (see Loopback::dropped) instead of halting the
+ *          machine, so the ceiling stays a diagnosis aid, not a fuse.
  * @since   0.6.0
  * @ingroup kernel_driver
  */
-inline constexpr unsigned long kLoopbackQueueFrames = 4;
+inline constexpr unsigned long kLoopbackQueueFrames = 32;
 
 }  // namespace cinux::driver::net

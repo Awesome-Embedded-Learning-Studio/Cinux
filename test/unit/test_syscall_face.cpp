@@ -26,6 +26,7 @@
 #include "kernel/syscall/sys_epoll.hpp"
 #include "kernel/syscall/sys_eventfd.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
+#include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_getrandom.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
@@ -902,6 +903,58 @@ void run_pipe_flags_body() {
 TEST("syscall face: pipe2 cloexec and close_range unshare preserve the other table") {
     FaceWorld world;
     world.run(run_pipe_flags_body);
+}
+
+void run_getdents_refusals_body() {
+    using namespace cinux::syscall;
+    SyscallFrame frame{};
+
+    // Four non-directory opens: both pipe ends, an eventfd, an epoll loop.
+    unsigned int descriptors[2]{};
+    frame.rdi = reinterpret_cast<Word>(descriptors);
+    frame.rsi = 0;
+    ASSERT_EQ(HandlePipe2(frame), 0);
+    frame.rdi             = 0;
+    frame.rsi             = kOpenNonblock;
+    const long long kDoor = HandleEventfd2(frame);
+    ASSERT_TRUE(kDoor >= 0);
+    frame.rdi              = 0;
+    const long long kLoop  = HandleEpollCreate1(frame);
+    ASSERT_TRUE(kLoop >= 0);
+
+    // None of them carries read_dir, so the walk must refuse each with
+    // ENOTDIR instead of calling through the empty slot.
+    unsigned char room[64] = {};
+    for (const Word kSeat : {static_cast<Word>(descriptors[0]), static_cast<Word>(descriptors[1]),
+                             static_cast<Word>(kDoor), static_cast<Word>(kLoop)}) {
+        frame.rdi = kSeat;
+        frame.rsi = reinterpret_cast<Word>(room);
+        frame.rdx = sizeof(room);
+        ASSERT_EQ(HandleGetdents(frame), -kEnotdir);
+    }
+
+    // A number outside the table stays EBADF, and a real directory open
+    // still walks: the refusal must not swallow genuine seats.
+    frame.rdi = cinux::fs::kFileTableMax;
+    ASSERT_EQ(HandleGetdents(frame), -kEbadf);
+    cinux::fs::RamFs                 pool;
+    constexpr cinux::fs::FsOps       kPoolOps = cinux::fs::EraseFs<cinux::fs::RamFs>();
+    const cinux::fs::FsNode          kDirNode = pool.lookup("/").value();
+    const cinux::proc::Task* const   kSelf    = cinux::proc::Scheduler::self().current();
+    const cinux::base::Result<unsigned long> kSeat =
+        kSelf->files->alloc(&kPoolOps, &pool, kDirNode);
+    ASSERT_TRUE(kSeat.ok());
+    frame.rdi = kSeat.value();
+    frame.rsi = reinterpret_cast<Word>(room);
+    frame.rdx = sizeof(room);
+    ASSERT_EQ(HandleGetdents(frame), 0);
+    ASSERT_TRUE(kSelf->files->free(kSeat.value()).ok());
+    cinux::proc::Scheduler::self().exit_current();
+}
+
+TEST("syscall face: getdents refuses non-directory opens and still walks directories") {
+    FaceWorld world;
+    world.run(run_getdents_refusals_body);
 }
 
 void run_thread_signal_body() {

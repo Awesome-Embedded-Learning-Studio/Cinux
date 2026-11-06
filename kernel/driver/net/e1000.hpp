@@ -153,6 +153,19 @@ private:
 
     void read_mac();
 
+    /**
+     * @brief         Takes the ring page and every buffer page, or none.
+     * @return        True with ring_page_ and both buffer arrays
+     *                filled; false with the taken frames returned to
+     *                the ledger and every member back at the zero
+     *                address.
+     * @note          All-or-nothing: the descriptors need buffers to
+     *                point at, a half-armed ring would corrupt frames.
+     * @since         0.6.0
+     * @ingroup       kernel_driver
+     */
+    bool take_ring_pages();
+
     unsigned long regs_    = 0;
     bool          present_ = false;
     MacAddress    mac_     = {};
