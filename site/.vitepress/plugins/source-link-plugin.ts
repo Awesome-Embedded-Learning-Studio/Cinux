@@ -51,15 +51,30 @@ export function sourceLinkPlugin(md: MarkdownIt, opts: SourceLinkOptions): void 
     if (!envRel) return
     if (!envRel.startsWith('notes/')) return   // 只处理日志卷,其他卷无此问题
 
-    // 源文件在仓库内的绝对坐标:document/<relativePath>
     const srcFileAbs = resolve(process.cwd(), opts.documentsDir, normalizeSlashes(envRel))
 
     for (const token of state.tokens) {
-      // 块级链接(段落里的行内链接在 children 里)
-      const targets: { attrs: [string, string][] | null, children?: any[] }[] = [token as any]
-      if (token.children) targets.push(...token.children)
+      if (!token.children) continue
+      // 伪链接剥壳时的配对 depth:link_open 置 >0,直到配对的 link_close
+      let stripDepth = 0
+      for (let i = 0; i < token.children.length; i++) {
+        const t: any = token.children[i]
 
-      for (const t of targets as any[]) {
+        if (stripDepth > 0 && t.type === 'link_close') {
+          stripDepth--
+          t.type = 'html_inline'
+          t.content = '</span>'
+          continue
+        }
+        if (stripDepth > 0 && t.type === 'link_open') {
+          // 嵌套链接(罕见):同样剥壳
+          stripDepth++
+          t.type = 'html_inline'
+          t.content = '<span>'
+          t.attrs = null
+          continue
+        }
+
         if (!t.attrs) continue
         const hrefIdx = t.attrs.findIndex((a: string[]) => a[0] === 'href')
         if (hrefIdx < 0) continue
@@ -68,7 +83,6 @@ export function sourceLinkPlugin(md: MarkdownIt, opts: SourceLinkOptions): void 
         // (涵盖 ./x、../x 和裸相对 x 三种写法)
         if (/^([#a-zA-Z][a-zA-Z0-9+.-]*:|\/)/.test(href)) continue
 
-        // 拆锚点:#L85 / #anchor
         const hashIdx = href.indexOf('#')
         const pathPart = hashIdx >= 0 ? href.slice(0, hashIdx) : href
         const hashPart = hashIdx >= 0 ? href.slice(hashIdx) : ''
@@ -81,21 +95,32 @@ export function sourceLinkPlugin(md: MarkdownIt, opts: SourceLinkOptions): void 
           const fromRoot = resolve(process.cwd(), decodeURIComponent(pathPart))
           if (fileExists(fromRoot)) {
             resolvedAbs = fromRoot
+          } else {
+            // 两坐标都解析不到:这是「术语(注释)」被 markdown 误吃的伪链接
+            // (如 base_[4](0x10/4)、字段(未初始化))。剥掉链接壳保留文字。
+            stripDepth = 1
+            t.type = 'html_inline'
+            t.content = '<span>'
+            t.attrs = null
+            continue
           }
         }
         const repoRel = normalizeSlashes(relative(process.cwd(), resolvedAbs))
-        if (repoRel.startsWith('..')) continue // 仓库外,交给链接检查报错
+        if (repoRel.startsWith('..')) {
+          // 仓库外目标同样按伪链接剥壳
+          stripDepth = 1
+          t.type = 'html_inline'
+          t.content = '<span>'
+          t.attrs = null
+          continue
+        }
 
         const inDocuments = repoRel.startsWith(`${opts.documentsDir}/`)
         const docSub = inDocuments ? repoRel.slice(opts.documentsDir.length + 1) : ''
         const firstSeg = docSub.split('/')[0] ?? ''
-        const targetExistsInNotes = inDocuments && firstSeg === 'notes'
-          ? fileExists(resolve(process.cwd(), repoRel))
-          : true
-        const published = inDocuments && PUBLISHED_DIRS.includes(firstSeg) && targetExistsInNotes
+        const published = inDocuments && PUBLISHED_DIRS.includes(firstSeg)
 
         if (!published) {
-          // 行号锚统一转 GitHub 格式(#L85 已是,普通 #anchor 不带)
           t.attrs[hrefIdx][1] = `${githubBase}/${repoRel}${hashPart}`
         }
       }
@@ -103,3 +128,4 @@ export function sourceLinkPlugin(md: MarkdownIt, opts: SourceLinkOptions): void 
     return true
   })
 }
+

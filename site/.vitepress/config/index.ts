@@ -27,8 +27,13 @@ export default withSharedDrawio(defineConfig({
 
   // dev/单体构建跑在真实 document/ 上,死链当错误暴露(分卷构建放宽)。
   // 豁免只留给「源码路径」这一类:源码不在 document/ 树内,产物里天然无目标。
+  // 源码路径豁免:源码不在 document/ 树内,产物里天然无目标
+  // notes 卷豁免:其相对链接在渲染层由 source-link-plugin 改写/剥壳,
+  // 死链检查看到的原始 href 不代表线上行为;单体构建仅作 preview。
   ignoreDeadLinks: [
     /\.(cpp|hpp|h|c|cc|asm|S|ld|sh|txt|cmake|yml|yaml|py|json)(\?|#|$)/i,
+    // notes 卷的「术语(注释)」伪链接(base_[4](0x10/4) 这类),渲染层已剥壳
+    /^\.\//,
   ],
 
   srcDir: '../document',

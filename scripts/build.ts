@@ -558,6 +558,10 @@ function unifyCrossVolumeData(distDir: string) {
 
   const hmJsLiteral = JSON.stringify(JSON.stringify(mergedHashMap))
 
+  // dist/hashmap.json 也会被各卷构建各自产出、cpSync 叠加时互相覆盖成
+  // 最后一卷的残缺版;vitepress preview 与运行时都读它,必须写回合并版
+  writeFileSync(join(distDir, 'hashmap.json'), JSON.stringify(mergedHashMap))
+
   let patched = 0
   for (const f of htmlFiles) {
     let c = readFileSync(f, 'utf-8')

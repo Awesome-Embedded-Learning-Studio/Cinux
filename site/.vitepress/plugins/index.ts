@@ -17,12 +17,12 @@ export function resolvePlugins(md: MarkdownIt, config: ProjectConfig): void {
   // 日志卷:C++ 花括号初始化会撞 Vue 插值,先转义再进渲染链
   md.use(escapeVueInterpolation)
   // 日志卷:指向源码/内部目录的相对链接改写为 GitHub URL
-  md.use(sourceLinkPlugin, {
+  /* md.use(sourceLinkPlugin, {
     owner: config.github.owner,
     repo: config.github.repo,
     branch: config.github.branch,
     documentsDir: config.documentsDir,
-  })
+  }) */
   if (config.plugins.cppTemplateEscape) {
     cppTemplateEscapePlugin(md)
   }
