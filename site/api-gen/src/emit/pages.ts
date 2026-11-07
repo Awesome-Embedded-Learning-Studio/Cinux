@@ -144,6 +144,7 @@ function groupPage(
   symbols: ApiSymbol[],
   coverage: ApiBundle['coverage'],
   repo: { owner: string, repo: string, branch: string },
+  neighbors?: { prev?: { title: string, name: string }, next?: { title: string, name: string } },
 ): string {
   const byId = new Map(symbols.map(s => [s.id, s]))
   const members = group.symbolIds.map(id => byId.get(id)).filter((s): s is ApiSymbol => !!s)
@@ -198,6 +199,21 @@ function groupPage(
     for (const s of rest) {
       lines.push(symbolSection(s, repo))
     }
+  }
+  // 分组间导航:上一组/下一组(组序与首页一致,按组名字母序)
+  if (neighbors?.prev || neighbors?.next) {
+    lines.push('---')
+    lines.push('')
+    const prev = neighbors.prev
+      ? `← [${neighbors.prev.title}](/api/${neighbors.prev.name}/)`
+      : '　'
+    const next = neighbors.next
+      ? `[${neighbors.next.title}](/api/${neighbors.next.name}/) →`
+      : '　'
+    lines.push(`| 上一组 | 下一组 |`)
+    lines.push(`|---|---|`)
+    lines.push(`| ${prev} | ${next} |`)
+    lines.push('')
   }
   return lines.join('\n')
 }
@@ -323,13 +339,16 @@ export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
   mkdirSync(opts.outDir, { recursive: true })
 
   const written: string[] = []
-  for (const group of bundle.groups) {
+  const ordered = bundle.groups
+  ordered.forEach((group, i) => {
     const dir = join(opts.outDir, group.name)
     mkdirSync(dir, { recursive: true })
     const file = join(dir, 'index.md')
-    writeFileSync(file, groupPage(group, bundle.symbols, bundle.coverage, opts.repo))
+    const prev = i > 0 ? { title: ordered[i - 1].title, name: ordered[i - 1].name } : undefined
+    const next = i < ordered.length - 1 ? { title: ordered[i + 1].title, name: ordered[i + 1].name } : undefined
+    writeFileSync(file, groupPage(group, bundle.symbols, bundle.coverage, opts.repo, { prev, next }))
     written.push(file)
-  }
+  })
   const home = join(opts.outDir, 'index.md')
   writeFileSync(home, homePage(bundle))
   written.push(home)
