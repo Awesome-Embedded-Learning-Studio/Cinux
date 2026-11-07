@@ -1,0 +1,85 @@
+name: Deploy Docs
+
+# 文档站发布:构建 VitePress 分卷产物并推 GitHub Pages。
+# 首次启用需要在仓库 Settings → Pages → Source 选择 "GitHub Actions"。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'document/**'
+      - 'site/**'
+      - 'scripts/build.ts'
+      - 'scripts/check-links.ts'
+      - 'project.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # getBuildInfo 需要 git tag 取页脚版本号
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: site/.vitepress/.build-cache
+          key: cinux-pages-${{ runner.os }}-${{ hashFiles('document/**', 'site/.vitepress/config/**', 'site/.vitepress/plugins/**', 'site/.vitepress/public/**', 'site/.vitepress/theme/**', 'project.config.ts', 'scripts/build.ts', 'package.json', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            cinux-pages-${{ runner.os }}-
+
+      - name: Check internal links
+        run: pnpm check:links
+
+      - name: Build docs
+        run: pnpm build
+        env:
+          BUILD_CONCURRENCY: '3'
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
