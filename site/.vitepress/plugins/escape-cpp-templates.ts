@@ -36,7 +36,7 @@ const VUE_COMPONENTS = new Set([
   // @dhlx/vitepress-plugin-drawio 注入
   'DrawioViewer',
   // theme/index.ts enhanceApp 中注册
-  'HomeFeatureGrid',
+  'HomeFeatureGrid', 'ApiGroupExplorer',
   'ReferenceCard', 'ReferenceItem', 'RefLink',
 ])
 

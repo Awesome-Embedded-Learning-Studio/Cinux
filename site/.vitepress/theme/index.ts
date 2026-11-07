@@ -20,6 +20,7 @@ import HomeShowcase from './components/HomeShowcase.vue'
 import HomeFeatureGrid from './components/HomeFeatureGrid.vue'
 // 文档页
 import DocNavCards from './components/DocNavCards.vue'
+import ApiGroupExplorer from './components/ApiGroupExplorer.vue'
 
 import { setupMermaid } from './mermaid-client'
 import { setupFigureZoom } from './figure-zoom'
@@ -56,6 +57,7 @@ export default {
     // md 正文中可全局使用的组件(escape-cpp-templates 的 VUE_COMPONENTS
     // 白名单与之保持同步)
     app.component('HomeFeatureGrid', HomeFeatureGrid)
+    app.component('ApiGroupExplorer', ApiGroupExplorer)
     app.component('ReferenceCard', defineAsyncComponent(() => import('./components/ReferenceCard.vue')))
     app.component('ReferenceItem', defineAsyncComponent(() => import('./components/ReferenceItem.vue')))
     app.component('RefLink', defineAsyncComponent(() => import('./components/RefLink.vue')))

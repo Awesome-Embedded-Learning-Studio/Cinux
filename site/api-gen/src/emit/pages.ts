@@ -229,7 +229,9 @@ function homePage(bundle: ApiBundle): string {
   lines.push('按 `@ingroup` 分组的接口参考,数据由源码注释生成。每个分组页内含函数签名、参数表与源码位置。接口是哪个版本引入的,见[版本时间线](/api/versions)。')
   lines.push('')
 
-  // 每组只归第一个匹配的分区;兜底 section(()=> true)只收前面没接住的组
+  // 每组只归第一个匹配的分区;分区说明保留为 md 文字,分组列表交给
+  // ApiGroupExplorer 组件(卡片矩阵 + 即时筛选),数据内联 props
+  const byId = new Map(bundle.symbols.map(s => [s.id, s]))
   const sectionOf = new Map(bundle.groups.map(g => [g.name, SECTIONS.find(sec => sec.match(g.name))!]))
   for (const section of SECTIONS) {
     const groups = bundle.groups.filter(g => sectionOf.get(g.name) === section)
@@ -240,24 +242,25 @@ function homePage(bundle: ApiBundle): string {
       lines.push(section.blurb)
       lines.push('')
     }
-    const byId = new Map(bundle.symbols.map(s => [s.id, s]))
-    const rows = groups
-      .map(g => {
-        const n = g.symbolIds.length
-        const sample = g.symbolIds
-          .map(id => byId.get(id))
-          .filter((s): s is ApiSymbol => !!s && s.kind === 'function' && s.documented)
-          .slice(0, 3)
-          .map(s => '`' + s.name + '`')
-          .join(' ')
-        return `| [${esc(g.title)}](/api/${g.name}/) | ${n} | ${sample} |`
-      })
-      .join('\n')
-    lines.push(`| 分组 | 符号 | 代表接口 |`)
-    lines.push(`|---|---|---|`)
-    lines.push(rows)
-    lines.push('')
   }
+  const cards = bundle.groups.map(g => {
+    const samples = g.symbolIds
+      .map(id => byId.get(id))
+      .filter((s): s is ApiSymbol => !!s && s.kind === 'function' && s.documented)
+      .slice(0, 3)
+      .map(s => s.name)
+    const cov = bundle.coverage.find(c => c.group === g.name)
+    return {
+      name: g.name,
+      title: g.title,
+      section: sectionOf.get(g.name)!.title,
+      total: g.symbolIds.length,
+      withBrief: cov?.withBrief ?? 0,
+      samples,
+    }
+  })
+  lines.push(`<ApiGroupExplorer :groups='${JSON.stringify(cards).replace(/'/g, "&#39;")}' />`)
+  lines.push('')
   return lines.join('\n')
 }
 
