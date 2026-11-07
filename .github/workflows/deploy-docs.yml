@@ -62,6 +62,8 @@ jobs:
           restore-keys: |
             cinux-pages-${{ runner.os }}-
 
+      - name: Regenerate notes index
+        run: pnpm docs:notes
       - name: Check internal links
         run: pnpm check:links
 

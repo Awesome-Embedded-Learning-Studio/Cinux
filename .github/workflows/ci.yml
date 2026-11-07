@@ -220,6 +220,9 @@ jobs:
           else
             echo "doxygen not found on runner, skipping API data generation"
           fi
+      - name: Regenerate notes index
+        if: steps.toolchain.outputs.present == 'true'
+        run: pnpm docs:notes
       - name: Check internal links
         if: steps.toolchain.outputs.present == 'true'
         run: pnpm check:links

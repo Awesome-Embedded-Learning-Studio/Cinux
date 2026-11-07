@@ -2,6 +2,7 @@ import type { DefaultTheme } from 'vitepress'
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { ProjectConfig, VolumeConfig } from './schema'
+import { NOTE_DOMAINS, TOPIC_GROUP_TITLE, domainOf, noteTitle } from './notes-domains'
 
 type SidebarItem = DefaultTheme.SidebarItem
 
@@ -116,12 +117,55 @@ function scanDir(dir: string, urlPrefix: string, depth = 0): SidebarItem[] {
   return items
 }
 
+/** 日志卷的虚拟分组:源文件平铺在 notes/ 下,侧栏按文件名里的域编号
+ * 聚合(f1..f13 + 专题组),不依赖目录结构。 */
+function notesSidebar(dir: string, urlPrefix: string): DefaultTheme.SidebarItem[] {
+  let files: string[]
+  try {
+    files = readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'index.md').sort()
+  } catch { return [] }
+
+  const buckets = new Map<string, { title: string, files: string[] }>()
+  for (const d of NOTE_DOMAINS) buckets.set(d.id, { title: d.title, files: [] })
+  const topic = { title: TOPIC_GROUP_TITLE, files: [] as string[] }
+  buckets.set('topic', topic)
+
+  for (const f of files) {
+    const dom = domainOf(f)
+    if (dom) buckets.get(dom.id)!.files.push(f)
+    else topic.files.push(f)
+  }
+
+  const items: DefaultTheme.SidebarItem[] = []
+  for (const [id, b] of buckets) {
+    if (b.files.length === 0) continue
+    items.push({
+      text: `${b.title}(${b.files.length})`,
+      collapsed: true,
+      items: b.files.map(f => ({
+        text: noteTitle(f, extractTitle(join(dir, f))),
+        link: `${urlPrefix}/${f.replace(/\.md$/, '')}`,
+      })),
+    })
+  }
+  return items
+}
+
 export function volumeSidebar(
   docsRoot: string,
   vol: VolumeConfig
 ): DefaultTheme.SidebarItem[] {
   const dir = join(docsRoot, vol.srcDir)
   const indexPath = join(dir, 'index.md')
+  // 日志卷走域分组,不用目录扫描
+  if (vol.name === 'notes') {
+    return [
+      ...(existsSync(indexPath)
+        ? [{ text: extractTitle(indexPath) || '开发日志', link: `${vol.urlPrefix}/` }]
+        : []),
+      ...notesSidebar(dir, vol.urlPrefix),
+    ]
+  }
   const items = scanDir(dir, vol.urlPrefix)
 
   // 卷首页可能存在也可能不存在:存在才挂总览项,避免侧栏出现 404 链接

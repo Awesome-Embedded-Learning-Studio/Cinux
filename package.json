@@ -11,7 +11,8 @@
     "preview": "vitepress preview site",
     "check:links": "tsx scripts/check-links.ts",
     "docs:api": "tsx site/api-gen/src/generate-groups.ts && if command -v doxygen >/dev/null 2>&1; then doxygen site/api-gen/Doxyfile && tsx site/api-gen/src/cli.ts; else echo 'doxygen 未安装,跳过 API 数据生成'; fi",
-    "test:api": "vitest run --root site/api-gen"
+    "test:api": "vitest run --root site/api-gen",
+    "docs:notes": "tsx scripts/gen-notes-index.ts"
   },
   "devDependencies": {
     "@dhlx/vitepress-plugin-drawio": "^0.0.10",
