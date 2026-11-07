@@ -97,6 +97,10 @@ export function memberToSymbol(
     warning: detail.warning,
     since: detail.since,
     groups: groupName ? [groupName] : [],
+    referencedBy: asArray(member.referencedby as XmlNode).map((r: XmlNode) => ({
+      id: typeof r['@refid'] === 'string' ? r['@refid'] : '',
+      name: textOf(r['#text'] ?? r),
+    })).filter(r => r.id && r.name),
     location: loc,
     documented: brief !== '',
   }

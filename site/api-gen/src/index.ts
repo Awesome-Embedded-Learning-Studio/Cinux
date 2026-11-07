@@ -47,6 +47,22 @@ export function runPipeline(input: PipelineInput): ApiBundle {
     s.groups.sort()
   }
 
+  // referencedBy 归一:refid 命中符号表的显示限定名,并按名排序去重
+  const byIdAll = new Map(symbols.map(s => [s.id, s]))
+  for (const s of symbols) {
+    const seen = new Set<string>()
+    const resolved: { id: string, name: string }[] = []
+    for (const r of s.referencedBy) {
+      const target = byIdAll.get(r.id)
+      const name = target?.qualifiedName ?? r.name
+      if (seen.has(name)) continue
+      seen.add(name)
+      resolved.push({ id: r.id, name })
+    }
+    resolved.sort((a, b) => a.name.localeCompare(b.name))
+    s.referencedBy = resolved
+  }
+
   const coverage = computeCoverage(groups, symbols)
 
   const groupOf = new Map<string, string>()

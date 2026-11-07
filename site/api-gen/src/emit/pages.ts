@@ -107,6 +107,14 @@ function symbolSection(s: ApiSymbol, repo: { owner: string, repo: string, branch
     parts.push(`> **警告** ${esc(s.warning)}`)
     parts.push('')
   }
+  if (s.referencedBy.length > 0) {
+    const MAX_SHOW = 8
+    const shown = s.referencedBy.slice(0, MAX_SHOW).map(r => `\`${esc(r.name)}\``)
+    const rest = s.referencedBy.length - MAX_SHOW
+    const suffix = rest > 0 ? ` 等共 ${s.referencedBy.length} 处` : ''
+    parts.push(`**被调用** ${shown.join(' ')}${suffix}`)
+    parts.push('')
+  }
   const meta: string[] = []
   if (s.since) meta.push(`自 \`${s.since}\``)
   const link = githubLink(s, repo)

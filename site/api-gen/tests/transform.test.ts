@@ -90,6 +90,20 @@ describe('边角:重载 / since 写法 / 占位值', () => {
   })
 })
 
+describe('调用关系(referencedby)', () => {
+  it('命中符号表的引用方显示限定名,未命中的保留原始名', () => {
+    const b = bundle()
+    const m = b.symbols.find(s => s.qualifiedName === 'cinux::edge::Measure' && s.params[0]?.name === 'count')
+    expect(m).toBeDefined()
+    expect(m!.referencedBy).toHaveLength(2)
+    const names = m!.referencedBy.map(r => r.name)
+    // refid 指向同 fixture 的重载二 → 限定名
+    expect(names).toContain('cinux::edge::Measure')
+    // refid 不在符号表 → 原始名
+    expect(names).toContain('ExternalCaller')
+  })
+})
+
 describe('稳定性', () => {
   it('同一输入两次转换,除 generatedAt 外逐字节一致', () => {
     const strip = (o: unknown): string =>

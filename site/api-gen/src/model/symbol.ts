@@ -42,6 +42,8 @@ export interface ApiSymbol {
   since: string
   /** 所属 @ingroup 组名列表 */
   groups: string[]
+  /** 被谁调用:静态分析到的引用方,refid + 显示名(doxygen referencedby) */
+  referencedBy: { id: string, name: string }[]
   /** 源码位置,file 是仓库相对路径(保证跨机构建产物一致) */
   location: { file: string, line: number }
   /** 文档完备度标记,coverage 统计与展示分层用 */
