@@ -8,3 +8,4 @@
 - [Tag & Release / 标签与发版](/guide/04-tag-and-release)
 - [CI Pipeline / 持续集成流水线](/guide/05-ci-pipeline)
 - [Local CI with act / 本地 CI 复现手册](/guide/06-local-act)
+- [Docs Site Maintenance / 文档站维护手册](/guide/07-docs-site)
