@@ -68,9 +68,12 @@ export interface DetailFields {
   tparams: { name: string, description: string }[]
 }
 
-/** @since 写法归一:v0.3.0 / 0.3.0 → 0.3.0 */
+/** @since 写法归一:v0.3.0 / 0.3.0 → 0.3.0。
+ *  有些注释把说明文字接在同一行(@since 0.3.0 Where the...),只取开头的
+ *  版本号,最多三段数字。 */
 export function normalizeSince(raw: string): string {
-  return raw.trim().replace(/^v(?=\d)/i, '')
+  const m = raw.trim().match(/^v?(\d+(?:\.\d+){0,3})/i)
+  return m ? m[1] : ''
 }
 
 /** 从 detaileddescription 抽结构化段落:遍历全部节点,不提前停 */

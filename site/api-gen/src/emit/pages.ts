@@ -124,7 +124,8 @@ function variablesTable(vars: ApiSymbol[], repo: { owner: string, repo: string, 
       const link = githubLink(v, repo)
       const src = link ? `[\`${v.location.file}:${v.location.line}\`](${link})` : ''
       const since = v.since ? `\`${v.since}\`` : ''
-      return `| \`${esc(v.name)}\` | \`${esc(v.returnType)}\` | ${esc(v.brief)} | ${since} | ${src} |`
+      const brief = v.brief || '—'
+      return `| \`${esc(v.name)}\` | \`${esc(v.returnType)}\` | ${esc(brief)} | ${since || '—'} | ${src} |`
     })
     .join('\n')
   return `| 名称 | 类型 | 说明 | 自 | 源码 |\n|---|---|---|---|---|\n${rows}\n`
@@ -151,13 +152,21 @@ function groupPage(
   lines.push(`# ${group.title}`)
   lines.push('')
   lines.push(`\`@ingroup ${group.name}\``)
-  const stats: string[] = [`${members.length} 个符号`]
-  if (cov) {
-    stats.push(`文档覆盖 ${cov.withBrief}/${cov.total}`)
-    if (cov.paramDocs) stats.push(`参数说明 ${cov.paramDocs.covered}/${cov.paramDocs.total}`)
-  }
+  // 统计条:数字与徽章,覆盖率按档位给语义色(>=95 tip / >=70 info / 其余 warning)
   lines.push('')
-  lines.push(stats.join(' · '))
+  lines.push(`**${members.length}** 个符号`, '')
+  if (cov) {
+    const pct = (n: number, d: number) => (d === 0 ? 100 : Math.round((n / d) * 100))
+    const briefPct = pct(cov.withBrief, cov.total)
+    const briefType = briefPct >= 95 ? 'tip' : briefPct >= 70 ? 'info' : 'warning'
+    lines.push(`<Badge type="${briefType}" text="文档覆盖 ${cov.withBrief}/${cov.total}（${briefPct}%）" />`)
+    if (cov.paramDocs) {
+      const paramPct = pct(cov.paramDocs.covered, cov.paramDocs.total)
+      const paramType = paramPct >= 95 ? 'tip' : paramPct >= 70 ? 'info' : 'warning'
+      lines.push('')
+      lines.push(`<Badge type="${paramType}" text="参数说明 ${cov.paramDocs.covered}/${cov.paramDocs.total}（${paramPct}%）" />`)
+    }
+  }
   lines.push('')
 
   for (const kind of ordered) {
@@ -193,7 +202,7 @@ function homePage(bundle: ApiBundle): string {
   lines.push('')
   lines.push('# API 参考')
   lines.push('')
-  lines.push('按 `@ingroup` 分组的接口参考,数据由源码注释生成。每个分组页内含函数签名、参数表与源码位置。')
+  lines.push('按 `@ingroup` 分组的接口参考,数据由源码注释生成。每个分组页内含函数签名、参数表与源码位置。接口是哪个版本引入的,见[版本时间线](/api/versions)。')
   lines.push('')
 
   // 每组只归第一个匹配的分区;兜底 section(()=> true)只收前面没接住的组
@@ -233,6 +242,73 @@ export interface PageEmitOptions {
   repo: { owner: string, repo: string, branch: string }
 }
 
+/** @since 版本时间线页:每个版本一节,列该版本引入的符号(按组聚合) */
+function versionsPage(bundle: ApiBundle): string {
+  const byVersion = new Map<string, ApiSymbol[]>()
+  for (const s of bundle.symbols) {
+    if (!s.since) continue
+    const list = byVersion.get(s.since) ?? []
+    list.push(s)
+    byVersion.set(s.since, list)
+  }
+  // 版本排序:语义化版本降序(新在前);非标准版本号排最后
+  const versionKey = (v: string): number[] => {
+    const parts = v.split('.').map(x => parseInt(x, 10))
+    return parts.every(n => !isNaN(n)) ? parts : [0]
+  }
+  const versions = Array.from(byVersion.keys()).sort((a, b) => {
+    const ka = versionKey(a)
+    const kb = versionKey(b)
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      const da = ka[i] ?? 0
+      const db = kb[i] ?? 0
+      if (da !== db) return db - da
+    }
+    return a.localeCompare(b)
+  })
+
+  const groupOf = new Map<string, string>()
+  for (const g of bundle.groups) {
+    for (const id of g.symbolIds) groupOf.set(id, g.title)
+  }
+
+  const lines: string[] = []
+  lines.push('---')
+  lines.push('title: 版本时间线')
+  lines.push('---')
+  lines.push('')
+  lines.push('# 版本时间线')
+  lines.push('')
+  const documented = bundle.symbols.filter(s => s.since).length
+  lines.push(
+    `${documented} 个符号标注了 \`@since\`,按引入版本从新到旧排列。版本对应关系来自源码注释的声明,与发布记录互为参照。`,
+  )
+  lines.push('')
+  lines.push('| 版本 | 符号数 |')
+  lines.push('|---|---|')
+  for (const v of versions) {
+    lines.push(`| [${v}](#${v.replace(/\./g, '')}) | ${byVersion.get(v)!.length} |`)
+  }
+  lines.push('')
+  for (const v of versions) {
+    lines.push(`## ${v} {#${v.replace(/\./g, '')}}`)
+    lines.push('')
+    // 按组聚合,组内列符号名
+    const perGroup = new Map<string, string[]>()
+    for (const s of byVersion.get(v)!) {
+      const g = groupOf.get(s.id) ?? '未分组'
+      const list = perGroup.get(g) ?? []
+      list.push(s.name)
+      perGroup.set(g, list)
+    }
+    for (const [g, names] of Array.from(perGroup.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      lines.push(`- **${g}** — ${names.sort((a, b) => a.localeCompare(b)).map(n => `\`${n}\``).join(' ')}`)
+    }
+    lines.push('')
+  }
+  return lines.join('\n')
+}
+
 export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
   // 清掉旧页(组名改名后会留孤儿)
   rmSync(opts.outDir, { recursive: true, force: true })
@@ -249,6 +325,9 @@ export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
   const home = join(opts.outDir, 'index.md')
   writeFileSync(home, homePage(bundle))
   written.push(home)
+  const versions = join(opts.outDir, 'versions.md')
+  writeFileSync(versions, versionsPage(bundle))
+  written.push(versions)
   console.log(`pages: ${written.length} 个页面 → ${opts.outDir} (现有 ${readdirSync(opts.outDir).length} 项)`)
   return written
 }

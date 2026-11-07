@@ -19,19 +19,28 @@ hero:
       link: /changelog/
 
 features:
-  - title: 系统文档
+  - icon: 📘
+    title: 系统文档
     details: 启动流程、内存管理、进程与调度、文件系统、驱动、图形栈与用户态
     link: /systems/
     linkText: 进入
-  - title: 设计文档
+  - icon: ⚙️
+    title: API 参考
+    details: 42 个分组的接口手册：签名、参数表、引入版本与源码位置，全部由源码注释生成
+    link: /api/
+    linkText: 查接口
+  - icon: 📐
+    title: 设计文档
     details: Cinux-Base 基础库的设计规范：header-only、constexpr、无堆分配
     link: /design/
     linkText: 查看
-  - title: 开发指南
+  - icon: 🛠️
+    title: 开发指南
     details: 分支策略、提交规范、PR 流程、CI 流水线与本地复现
     link: /guide/
     linkText: 查看
-  - title: 更新记录
+  - icon: 🧾
+    title: 更新记录
     details: 版本变化与主线切换的说明
     link: /changelog/
     linkText: 查看
