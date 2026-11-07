@@ -18,6 +18,7 @@ export default defineProject({
     'zh-CN': [
       { text: '首页', link: '/' },
       { text: '系统文档', link: '/systems/' },
+      { text: 'API 参考', link: '/api/' },
       { text: '设计', link: '/design/' },
       { text: '开发指南', link: '/guide/' },
       { text: '更新记录', link: '/changelog/' },
@@ -37,6 +38,9 @@ export default defineProject({
       { name: 'design', srcDir: 'design', urlPrefix: '/design' },
       { name: 'guide', srcDir: 'ci', urlPrefix: '/guide' },
       { name: 'changelog', srcDir: 'changelogs', urlPrefix: '/changelog' },
+      // api 卷是 pnpm docs:api 的生成件(document/api/),fresh clone 上
+      // 未生成时 build.ts 对不存在的卷自动跳过
+      { name: 'api', srcDir: 'api', urlPrefix: '/api' },
     ],
   },
 

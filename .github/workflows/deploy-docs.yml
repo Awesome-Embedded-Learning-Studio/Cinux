@@ -9,6 +9,11 @@ on:
     paths:
       - 'document/**'
       - 'site/**'
+      # API 数据的源头是源码注释,源码变了文档要重部署
+      - 'kernel/**'
+      - 'base/**'
+      - 'boot/**'
+      - 'user/**'
       - 'scripts/build.ts'
       - 'scripts/check-links.ts'
       - 'project.config.ts'

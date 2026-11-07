@@ -165,7 +165,9 @@ function checkFile(volume: Volume, file: string): void {
 for (const volume of volumes) {
   const dir = join(DOCS, volume.srcDir)
   if (!existsSync(dir)) {
-    failures.push({ file: dir, line: 0, target: volume.srcDir, reason: '卷目录不存在' })
+    // 生成卷(api)在未跑 docs:api 时不存在:跳过但不失败,CI 顺序保证
+    // 链接检查跑在 api 生成之后;真缺目录时这里只提示
+    console.warn(`warn: 卷目录 ${volume.srcDir} 不存在(生成卷未生成?),跳过该卷`)
     continue
   }
   for (const file of walk(dir)) {
