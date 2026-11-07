@@ -655,3 +655,217 @@ body.rs-resizing { cursor: col-resize !important; user-select: none !important; 
     columns: 2;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   质感精修层(Polish Pass)— 2026-11-07 激进样式轮
+   目标:消除默认组件的"塑料感"——方角、无 hover、无底色的出厂件
+   全部接上设计系统;所有效果带 .dark 同步。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 按钮:圆角 + 按压反馈 + active 完整态 ── */
+:root {
+  --vp-button-brand-active-border: var(--vp-c-brand-2);
+  --vp-button-brand-active-text: #fff;
+  --vp-button-brand-active-bg: var(--vp-c-brand-2);
+  --vp-button-alt-border: var(--vp-c-border);
+  --vp-button-alt-bg: var(--vp-c-bg-soft-up);
+  --vp-button-alt-hover-border: var(--vp-c-brand-3);
+  --vp-button-alt-hover-text: var(--vp-c-brand-1);
+  --vp-button-alt-hover-bg: var(--vp-c-brand-soft);
+}
+.VPButton {
+  border-radius: 10px !important;
+  font-weight: 600;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.VPButton.brand:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -6px var(--vp-c-brand-1);
+}
+.VPButton:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: none;
+}
+
+/* ── 首页 feature 卡:图标底色 + hover 抬升 ── */
+.VPFeatures .VPFeature {
+  border-radius: 14px;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.VPFeatures .VPFeature:hover {
+  border-color: color-mix(in srgb, var(--vp-c-brand-1) 45%, transparent);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -14px rgba(44, 38, 32, 0.25);
+}
+.VPFeatures .VPFeature .icon {
+  background: var(--vp-c-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 22%, transparent);
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+}
+.VPFeatures .VPFeature:hover .icon {
+  background: var(--vp-c-brand-soft-2);
+}
+.dark .VPFeatures .VPFeature:hover {
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+}
+
+/* ── 导航栏:毛玻璃 + 底边框 ── */
+.VPNav .Content {
+  backdrop-filter: saturate(1.4) blur(14px);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 82%, transparent);
+}
+.VPNav div[data-v-070de254].Content { border-bottom: 1px solid var(--vp-c-divider); }
+
+/* ── 代码块:圆角 + 纸面底 + 细边框 ── */
+.vp-doc div[class*='language-'] {
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+}
+.vp-doc div[class*='language-'] code {
+  color: var(--vp-c-text-1);
+}
+.vp-doc div[class*='language-'] .line-numbers-wrapper {
+  color: var(--vp-c-text-3);
+  opacity: 0.65;
+}
+/* 组页签名块的复制按钮易读性 */
+.vp-doc div[class*='language-'] button.copy {
+  border-radius: 6px;
+}
+
+/* ── 表格:表头底色 + 行 hover + 圆角 ── */
+.vp-doc table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.vp-doc table thead th {
+  background: var(--vp-c-bg-soft);
+  font-weight: 600;
+}
+.vp-doc table tbody tr:hover td {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 4%, transparent);
+}
+.vp-doc table td, .vp-doc table th {
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+/* ── Badge:三种 type 给底色(默认无底最塑料) ── */
+.VPBadge {
+  border-radius: 999px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.VPBadge.tip {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-2);
+  border-color: color-mix(in srgb, var(--vp-c-brand-1) 28%, transparent);
+}
+.VPBadge.info {
+  background: color-mix(in srgb, #4b9cc4 10%, transparent);
+  color: #2b7ca6;
+  border-color: color-mix(in srgb, #4b9cc4 30%, transparent);
+}
+.VPBadge.warning {
+  background: var(--vp-accent-amber-soft);
+  color: var(--vp-accent-amber);
+  border-color: color-mix(in srgb, var(--vp-accent-amber) 32%, transparent);
+}
+.dark .VPBadge.info {
+  background: rgba(77, 179, 232, 0.12);
+  color: #7cc4e8;
+  border-color: rgba(77, 179, 232, 0.3);
+}
+.dark .VPBadge.tip {
+  color: var(--vp-c-brand-2);
+}
+.dark .VPBadge.warning {
+  color: #e8a33d;
+}
+
+/* ── 首页 hero:泛光背景 + tagline 排版 ── */
+.VPHero .name, .VPHero .text {
+  letter-spacing: 0.01em;
+}
+.VPHero .tagline {
+  line-height: 1.75;
+  max-width: 32em;
+}
+.VPHero::before {
+  content: '';
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 70%;
+  background:
+    radial-gradient(42% 55% at 22% 40%, var(--vp-c-brand-soft), transparent 70%),
+    radial-gradient(38% 50% at 78% 30%, rgba(77, 179, 232, 0.08), transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ── 侧栏激活态:左侧品牌竖条 ── */
+.VPSidebarItem.level-0.is-link > .item .link, .VPSidebarItem.level-1.is-link > .item .link {
+  position: relative;
+}
+.VPSidebarItem.is-active > .item .link::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--vp-c-brand-1);
+}
+
+/* ── 自定义容器(details/tip):圆角统一 ── */
+.vp-doc .vp-custom-block {
+  border-radius: 12px;
+}
+.vp-doc details {
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+  padding: 12px 20px;
+}
+.vp-doc details summary {
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  cursor: pointer;
+}
+.vp-doc details[open] summary {
+  margin-bottom: 8px;
+}
+
+/* ── 大纲(右侧目录)当前项强调 ── */
+.VPDocAsideOutline .outline-link {
+  border-radius: 6px;
+  transition: color 0.12s ease;
+}
+.VPDocAsideOutline .outline-link:hover {
+  color: var(--vp-c-brand-1);
+}
+
+/* ── 搜索框精致化 ── */
+.VPNavBarSearch .DocSearch-Button {
+  border-radius: 10px;
+  border: 1px solid var(--vp-c-border);
+  background: var(--vp-c-bg-soft-up);
+  transition: border-color 0.15s ease;
+}
+.VPNavBarSearch .DocSearch-Button:hover,
+.VPNavBarSearch .DocSearch-Button:focus-within {
+  border-color: var(--vp-c-brand-1);
+}
+
+/* ── 页脚排印 ── */
+.VPFooter {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}

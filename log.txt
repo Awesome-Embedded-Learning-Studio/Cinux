@@ -1,0 +1,25 @@
+
+> cinux-docs@0.0.1 dev /home/charliechen/CinuxOS
+> pnpm docs:notes && pnpm docs:api && vitepress dev site --host
+
+
+> cinux-docs@0.0.1 docs:notes /home/charliechen/CinuxOS
+> tsx scripts/gen-notes-index.ts
+
+notes index: 317 篇 → document/notes/index.md
+
+> cinux-docs@0.0.1 docs:api /home/charliechen/CinuxOS
+> tsx site/api-gen/src/generate-groups.ts && if command -v doxygen >/dev/null 2>&1; then doxygen site/api-gen/Doxyfile && tsx site/api-gen/src/cli.ts; else echo 'doxygen 未安装,跳过 API 数据生成'; fi
+
+groups: 42 个组(来自 513 个源文件的 @ingroup)→ /home/charliechen/CinuxOS/site/api-gen/generated/groups.dox
+pages: 41 个页面 → /home/charliechen/CinuxOS/document/api (现有 41 项)
+api-gen: 4073 个符号、38 个组 → /home/charliechen/CinuxOS/site/api-gen/dist/api-bundle.json (2.6s)
+
+  vitepress v1.6.4
+
+  ➜  Local:   http://localhost:5173/Cinux/
+  ➜  Network: http://10.255.255.254:5173/Cinux/
+  ➜  Network: http://10.147.20.122:5173/Cinux/
+  ➜  Network: http://192.168.1.5:5173/Cinux/
+  ➜  press h to show help
+3:20:04 PM [vitepress] hmr update /@fs/home/charliechen/CinuxOS/site/.vitepress/theme/custom.css
