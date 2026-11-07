@@ -12,6 +12,9 @@ hero:
       text: 系统文档
       link: /systems/
     - theme: alt
+      text: API 参考
+      link: /api/
+    - theme: alt
       text: 开发指南
       link: /guide/
     - theme: alt

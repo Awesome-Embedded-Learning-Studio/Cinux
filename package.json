@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "dev": "vitepress dev site",
+    "dev": "pnpm docs:notes && pnpm docs:api && vitepress dev site",
     "build": "tsx scripts/build.ts",
     "build:single": "vitepress build site",
     "preview": "pnpm build:single && vitepress preview site",
