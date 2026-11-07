@@ -75,7 +75,7 @@ function formatParams(s: ApiSymbol): string {
 
 function symbolSection(s: ApiSymbol, repo: { owner: string, repo: string, branch: string }): string {
   const parts: string[] = []
-  parts.push(`### ${esc(s.qualifiedName)} {#${anchorOf(s)}}`)
+  parts.push(`#### ${esc(s.qualifiedName)} {#${anchorOf(s)}}`)
   parts.push('')
   parts.push('```cpp')
   parts.push(esc(s.signature) + (s.kind === 'function' && s.signature.includes('(') ? '' : ''))
@@ -153,6 +153,24 @@ function groupPage(
   const kinds = new Set(members.map(m => m.kind))
   const ordered = KIND_ORDER.filter(k => kinds.has(k))
 
+  // 符号索引:紧凑多列锚点列表,长组页(200+ 函数)的页内导航主力;
+  // 函数小节用 h4,不进全局 outline,避免 244 项的大纲失控
+  const indexLines: string[] = []
+  for (const kind of ordered) {
+    const pool = members.filter(m => m.kind === kind)
+    if (pool.length === 0) continue
+    indexLines.push(`**${KIND_TITLES[kind] ?? kind}**`)
+    indexLines.push('')
+    for (const m of pool) {
+      indexLines.push(`- [${esc(m.name)}](#${anchorOf(m)})`)
+    }
+    indexLines.push('')
+  }
+  // details 默认收起:长组页(200+ 函数)的索引不占首屏,展开后多列排布
+  const indexBlock = indexLines.length > 0
+    ? `::: details 符号索引(${members.length})\n\n${indexLines.join('\n')}\n:::\n`
+    : ''
+
   const lines: string[] = []
   lines.push('---')
   lines.push(`title: ${group.title}`)
@@ -178,6 +196,7 @@ function groupPage(
   }
   lines.push('')
 
+  if (indexBlock) lines.push(indexBlock)
   for (const kind of ordered) {
     const pool = members.filter(m => m.kind === kind)
     lines.push(`## ${KIND_TITLES[kind] ?? kind}`)
