@@ -861,6 +861,43 @@ async function main() {
   // ── Step 3.5: Unify hash maps and site data ─────────────
   unifyCrossVolumeData(DIST_FINAL)
 
+  // ── Step 3.6: Sitemap(全站合成) ────────────────────────
+  // 各卷构建会各自产出仅含本卷的 sitemap.xml,cpSync 叠加时互相覆盖,
+  // 与 hashmap 同款残缺问题;这里删除残卷产物,从 dist 的 HTML 全量合成。
+  {
+    const hostname = 'https://awesome-embedded-learning-studio.github.io'
+    const urls: string[] = []
+    function walkForPages(d: string) {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const full = join(d, e.name)
+        if (e.isDirectory()) { walkForPages(full); continue }
+        if (!e.name.endsWith('.html')) continue
+        let rel = relative(DIST_FINAL, full).replace(/\\/g, '/')
+        if (rel === '404.html' || rel === 'index.html') {
+          if (rel === '404.html') continue
+          rel = ''
+        } else if (rel.endsWith('/index.html')) {
+          rel = rel.slice(0, -'index.html'.length)
+        } else {
+          rel = rel.slice(0, -'.html'.length)
+        }
+        urls.push(`${hostname}${projectConfig.base}${rel}`)
+      }
+    }
+    walkForPages(DIST_FINAL)
+    rmSync(join(DIST_FINAL, 'sitemap.xml'), { force: true })
+    const today = new Date().toISOString().substring(0, 10)
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...urls.map(u => `  <url><loc>${u}</loc><lastmod>${today}</lastmod></url>`),
+      '</urlset>',
+      '',
+    ].join('\n')
+    writeFileSync(join(DIST_FINAL, 'sitemap.xml'), xml)
+    log(`  Sitemap: ${urls.length} URLs`)
+  }
+
   // ── Step 3.7: Copy checkpoint data (source outside srcDir, only copied once in final artifact) ─────
   const CHECKPOINTS_SRC = join(PROJECT_ROOT, 'checkpoints')
   if (existsSync(CHECKPOINTS_SRC)) {
