@@ -189,6 +189,27 @@ for (const volume of volumes) {
   }
 }
 
+// 防呆:document/ 下有 md 却没被任何卷引用的顶层目录(配置漏挂,如本次
+// changelog 卷被误删的事故),生成卷(api 例外,构建时才有内容)
+const coveredDirs = new Set(volumes.map(v => v.srcDir.split('/')[0]))
+const orphans: string[] = []
+for (const e of readdirSync(DOCS, { withFileTypes: true })) {
+  if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'en') continue
+  if (coveredDirs.has(e.name)) continue
+  // 只看真的有内容的目录
+  try {
+    const hasMd = readdirSync(join(DOCS, e.name)).some(f => f.endsWith('.md'))
+    if (hasMd) orphans.push(e.name)
+  } catch { /* ignore */ }
+}
+const KNOWN_INTERNAL = new Set(['todo', 'ai', 'ai_prompts'])
+const real = orphans.filter(o => !KNOWN_INTERNAL.has(o))
+if (real.length > 0) {
+  for (const o of real) {
+    failures.push({ file: `document/${o}/`, line: 0, target: o, reason: '目录有内容但未挂进任何卷(project.config sidebar.volumes)' })
+  }
+}
+
 console.log(`检查 ${checkedFiles} 个文件、${checkedLinks} 条链接`)
 
 if (failures.length > 0) {

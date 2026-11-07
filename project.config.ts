@@ -38,6 +38,7 @@ export default defineProject({
       { name: 'systems', srcDir: 'document', urlPrefix: '/systems' },
       { name: 'design', srcDir: 'design', urlPrefix: '/design' },
       { name: 'guide', srcDir: 'ci', urlPrefix: '/guide' },
+      { name: 'changelog', srcDir: 'changelogs', urlPrefix: '/changelog' },
       { name: 'notes', srcDir: 'notes', urlPrefix: '/notes' },
       // api 卷是 pnpm docs:api 的生成件(document/api/),fresh clone 上
       // 未生成时 build.ts 对不存在的卷自动跳过
