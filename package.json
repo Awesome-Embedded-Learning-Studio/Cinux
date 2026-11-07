@@ -8,7 +8,8 @@
     "dev": "vitepress dev site",
     "build": "tsx scripts/build.ts",
     "build:single": "vitepress build site",
-    "preview": "vitepress preview site"
+    "preview": "vitepress preview site",
+    "check:links": "tsx scripts/check-links.ts"
   },
   "devDependencies": {
     "@dhlx/vitepress-plugin-drawio": "^0.0.10",
