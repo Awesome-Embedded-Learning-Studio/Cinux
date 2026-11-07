@@ -9,7 +9,9 @@
     "build": "tsx scripts/build.ts",
     "build:single": "vitepress build site",
     "preview": "vitepress preview site",
-    "check:links": "tsx scripts/check-links.ts"
+    "check:links": "tsx scripts/check-links.ts",
+    "docs:api": "tsx site/api-gen/src/generate-groups.ts && if command -v doxygen >/dev/null 2>&1; then doxygen site/api-gen/Doxyfile && tsx site/api-gen/src/cli.ts; else echo 'doxygen 未安装,跳过 API 数据生成'; fi",
+    "test:api": "vitest run --root site/api-gen"
   },
   "devDependencies": {
     "@dhlx/vitepress-plugin-drawio": "^0.0.10",
@@ -17,6 +19,7 @@
     "@types/node": "^22.15.0",
     "@vueuse/core": "^12.8.2",
     "@vueuse/integrations": "^12.8.2",
+    "fast-xml-parser": "^5.12.0",
     "gray-matter": "4.0.3",
     "linkedom": "0.18.13",
     "mark.js": "8.11.1",
@@ -26,6 +29,7 @@
     "shiki": "^2.5.0",
     "tsx": "^4.21.0",
     "vitepress": "^1.6.4",
+    "vitest": "^3.2.7",
     "vue": "^3.5.34"
   },
   "dependencies": {

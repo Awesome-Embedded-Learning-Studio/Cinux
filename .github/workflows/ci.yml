@@ -212,6 +212,17 @@ jobs:
       - name: Check internal links
         if: steps.toolchain.outputs.present == 'true'
         run: pnpm check:links
+      - name: Test api-gen transformer
+        if: steps.toolchain.outputs.present == 'true'
+        run: pnpm test:api
+      - name: Generate API data (doxygen)
+        if: steps.toolchain.outputs.present == 'true'
+        run: |
+          if command -v doxygen >/dev/null 2>&1; then
+            pnpm docs:api
+          else
+            echo "doxygen not found on runner, skipping API data generation"
+          fi
       - name: Build docs
         if: steps.toolchain.outputs.present == 'true'
         run: pnpm build

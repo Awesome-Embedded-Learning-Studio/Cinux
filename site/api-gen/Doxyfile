@@ -1,0 +1,44 @@
+# Cinux API 文档数据源
+#
+# 只产 XML,不产 HTML:HTML 渲染走 VitePress(api 子站),doxygen 在这条
+# 管线里只负责把源码注释挤成结构化数据。
+#
+# 运行方式:从仓库根执行 `doxygen site/api-gen/Doxyfile`(相对路径按
+# doxygen 的 cwd 解析),或走 `pnpm docs:api` 一条龙。
+
+INPUT            = kernel \
+                   base \
+                   boot \
+                   user \
+                   site/api-gen/generated/groups.dox
+FILE_PATTERNS    = *.hpp \
+                   *.h \
+                   *.cpp \
+                   *.dox
+RECURSIVE        = YES
+EXCLUDE          = third_party
+EXCLUDE_PATTERNS = */third_party/*
+
+# 输出:XML only
+GENERATE_XML     = YES
+XML_OUTPUT       = site/api-gen/xml
+GENERATE_HTML    = NO
+GENERATE_LATEX   = NO
+
+# 提取策略:全量符号都收(coverage 统计需要总数),有没有注释由转换器
+# 按 brief 的有无分档展示。
+EXTRACT_ALL      = YES
+EXTRACT_PRIVATE  = NO
+EXTRACT_STATIC   = YES
+
+# 保持声明顺序,排序职责在转换器(稳定排序保证两次构建产物一致)
+SORT_MEMBER_DOCS = NO
+
+# 调用关系数据(XML 的 reference/referencedby 标签),给关系面板备用
+REFERENCES_RELATION     = YES
+REFERENCED_BY_RELATION  = YES
+
+OUTPUT_LANGUAGE  = English
+QUIET            = YES
+WARN_IF_UNDOCUMENTED = NO
+WARN_NO_PARAMDOC = NO
