@@ -4,10 +4,7 @@
 // 走访原则:一个对象的所有子键都要看。doxygen 的 para 常把参数表、
 // 返回段、注记段混排在同一个 para 里,遇到一种结构就停会丢其余段落。
 
-import { asArray, textOf, type XmlNode } from '../parse/xml'
-
-/** 描述节点的归一形状(由 fast-xml-parser 产出) */
-type DescNode = string | XmlNode | Array<string | XmlNode> | undefined
+import { asArray, textOf, type XmlNode, type DescNode } from '../parse/xml'
 
 function isNone(text: string): boolean {
   return /^(none|无)$/i.test(text.trim())
@@ -33,11 +30,11 @@ export function flattenDesc(node: DescNode): string {  if (node === undefined ||
       const t = textOf(obj['#text'])
       if (t) parts.push(t)
     } else if (key === 'ref' || key === 'computeroutput') {
-      const inner = flattenDesc(obj[key])
+      const inner = flattenDesc(obj[key] as DescNode)
       if (inner) parts.push(`\`${inner}\``)
     } else if (key === 'para') {
       // 段落之间换行
-      const paras = asArray(obj.para as DescNode)
+      const paras = asArray<DescNode>(obj.para as DescNode)
       const joined = paras.map(flattenDesc).filter(Boolean).join('\n')
       if (joined) parts.push(joined)
     } else if (key === 'parameterlist' || key === 'simplesect') {
@@ -103,7 +100,7 @@ export function extractDetails(detail: DescNode): DetailFields {
               for (const pn of asArray((nl as XmlNode).parametername as XmlNode)) {
                 const pname = textOf((pn as XmlNode)['#text'] ?? pn)
                 const dir = textOf((pn as XmlNode)['@direction']) as 'in' | 'out' | 'inout' | ''
-                const desc = flattenDesc((item as XmlNode).parameterdescription)
+                const desc = flattenDesc((item as XmlNode).parameterdescription as DescNode)
                 if (!pname || isNone(pname)) continue
                 if (kind === 'param') {
                   out.params.push({
@@ -125,7 +122,7 @@ export function extractDetails(detail: DescNode): DetailFields {
       if (key === 'simplesect') {
         for (const sect of asArray(obj.simplesect as XmlNode)) {
           const kind = textOf((sect as XmlNode)['@kind'])
-          const text = flattenDesc((sect as XmlNode).para)
+          const text = flattenDesc((sect as XmlNode).para as DescNode)
           if (isNone(text)) continue
           if (kind === 'return') out.returns ||= text
           else if (kind === 'note') out.note ||= text

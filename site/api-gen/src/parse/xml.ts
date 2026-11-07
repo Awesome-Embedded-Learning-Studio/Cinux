@@ -44,3 +44,6 @@ export function textOf(v: unknown): string {
   }
   return ''
 }
+
+/** 描述节点的归一形状(fast-xml-parser 产出):string / 对象 / 数组混布 */
+export type DescNode = string | XmlNode | Array<string | XmlNode> | undefined

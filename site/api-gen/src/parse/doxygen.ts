@@ -3,7 +3,7 @@
 // schema 本身见 doxygen 自带的 compound.xsd,十年稳定;这里只声明转换器
 // 实际取用的字段,声明从紧,取值从宽(经 asArray/textOf 归一)。
 
-import type { XmlNode } from './xml'
+import type { XmlNode, DescNode } from './xml'
 
 /** compounddef 的 kind 枚举(转换器关心的子集) */
 export type CompoundKind =
@@ -44,14 +44,14 @@ export interface DoxyMemberDef {
   name?: unknown
   qualifiedname?: unknown
   initializer?: unknown
-  param?: unknown
-  enumvalue?: unknown
-  briefdescription?: unknown
-  detaileddescription?: unknown
-  inbodydescription?: unknown
+  param?: XmlNode | XmlNode[]
+  enumvalue?: XmlNode | XmlNode[]
+  briefdescription?: DescNode
+  detaileddescription?: DescNode
+  inbodydescription?: DescNode
   location?: DoxyLocation
   references?: unknown
-  referencedby?: unknown
+  referencedby?: XmlNode | XmlNode[]
 }
 
 /** compounddef:namespace/class/struct/group 容器 */
@@ -61,9 +61,9 @@ export interface DoxyCompoundDef {
   '@language'?: string
   compoundname?: unknown
   title?: unknown
-  briefdescription?: unknown
-  detaileddescription?: unknown
-  sectiondef?: unknown
+  briefdescription?: DescNode
+  detaileddescription?: DescNode
+  sectiondef?: XmlNode | XmlNode[]
   innerclass?: unknown
   innernamespace?: unknown
   innergroup?: unknown

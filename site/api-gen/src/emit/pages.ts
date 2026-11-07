@@ -245,7 +245,7 @@ function homePage(bundle: ApiBundle): string {
   lines.push('')
   lines.push('# API 参考')
   lines.push('')
-  lines.push('按 `@ingroup` 分组的接口参考,数据由源码注释生成。每个分组页内含函数签名、参数表与源码位置。接口是哪个版本引入的,见[版本时间线](/api/versions)。')
+  lines.push('按 `@ingroup` 分组的接口参考,数据由源码注释生成。每个分组页内含函数签名、参数表与源码位置。接口是哪个版本引入的,见[版本时间线](/api/versions);注释覆盖情况见[覆盖率看板](/api/coverage)。')
   lines.push('')
 
   // 每组只归第一个匹配的分区;分区说明保留为 md 文字,分组列表交给
@@ -355,6 +355,37 @@ function versionsPage(bundle: ApiBundle): string {
   return lines.join('\n')
 }
 
+/** 覆盖率看板:按 brief 覆盖率升序,缺注释最多的组排最前 */
+function coveragePage(bundle: ApiBundle): string {
+  const rows = [...bundle.coverage].sort((a, b) => {
+    const pa = a.total === 0 ? 1 : a.withBrief / a.total
+    const pb = b.total === 0 ? 1 : b.withBrief / b.total
+    return pa - pb
+  })
+  const badge = (n: number, d: number): string => {
+    const pct = d === 0 ? 100 : Math.round((n / d) * 100)
+    const type = pct >= 95 ? 'tip' : pct >= 70 ? 'info' : 'warning'
+    return `<Badge type="${type}" text="${n}/${d}" />`
+  }
+  const lines: string[] = []
+  lines.push('---')
+  lines.push('title: 文档覆盖率')
+  lines.push('---')
+  lines.push('')
+  lines.push('# 文档覆盖率')
+  lines.push('')
+  lines.push('按分组统计源码注释的完备度,缺注释最多的组排最前。`lint.py` 管注释格式,这张表管注释覆盖,两边互补。数据随 `pnpm docs:api` 更新。')
+  lines.push('')
+  lines.push('| 分组 | 符号 | @brief | @since | 参数说明 |')
+  lines.push('|---|---|---|---|---|')
+  for (const c of rows) {
+    const paramCell = c.paramDocs ? badge(c.paramDocs.covered, c.paramDocs.total) : '—'
+    lines.push(`| [${esc(c.title)}](/api/${c.group}/) | ${c.total} | ${badge(c.withBrief, c.total)} | ${badge(c.withSince, c.total)} | ${paramCell} |`)
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
 export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
   // 清掉旧页(组名改名后会留孤儿)
   rmSync(opts.outDir, { recursive: true, force: true })
@@ -377,6 +408,9 @@ export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
   const versions = join(opts.outDir, 'versions.md')
   writeFileSync(versions, versionsPage(bundle))
   written.push(versions)
+  const coverage = join(opts.outDir, 'coverage.md')
+  writeFileSync(coverage, coveragePage(bundle))
+  written.push(coverage)
   console.log(`pages: ${written.length} 个页面 → ${opts.outDir} (现有 ${readdirSync(opts.outDir).length} 项)`)
   return written
 }

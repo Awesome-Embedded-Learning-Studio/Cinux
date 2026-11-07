@@ -13,7 +13,8 @@
     "docs:api": "tsx site/api-gen/src/generate-groups.ts && if command -v doxygen >/dev/null 2>&1; then doxygen site/api-gen/Doxyfile && tsx site/api-gen/src/cli.ts; else echo 'doxygen 未安装,跳过 API 数据生成'; fi",
     "test:api": "vitest run --root site/api-gen",
     "docs:notes": "tsx scripts/gen-notes-index.ts",
-    "preview:dist": "vitepress preview site"
+    "preview:dist": "vitepress preview site",
+    "typecheck:api": "tsc --noEmit -p site/api-gen/tsconfig.json"
   },
   "devDependencies": {
     "@dhlx/vitepress-plugin-drawio": "^0.0.10",
@@ -30,6 +31,7 @@
     "mermaid": "^10.9.6",
     "shiki": "^2.5.0",
     "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
     "vitepress": "^1.6.4",
     "vitest": "^3.2.7",
     "vue": "^3.5.34"

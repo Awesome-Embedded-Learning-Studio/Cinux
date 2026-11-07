@@ -9,7 +9,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { createXmlParser, asArray, textOf, type XmlNode } from '../parse/xml'
+import { createXmlParser, asArray, textOf, type XmlNode, type DescNode } from '../parse/xml'
 import type { DoxyCompound, DoxyCompoundDef, DoxyMemberDef } from '../parse/doxygen'
 import { extractBrief, extractDetails, extractDetailProse, flattenPlain } from './doc'
 import type { ApiSymbol, ApiParam } from '../model/symbol'
@@ -49,13 +49,13 @@ export function memberToSymbol(
   const qualified = textOf(member.qualifiedname) || name
   const definition = textOf(member.definition)
   const args = textOf(member.argsstring)
-  const signature = definition ? definition + args : `${flattenPlain(member.type)} ${name}${args}`
+  const signature = definition ? definition + args : `${flattenPlain(member.type as DescNode)} ${name}${args}`
 
-  const detail = extractDetails(member.detaileddescription)
+  const detail = extractDetails(member.detaileddescription as DescNode)
   const docParams = new Map(detail.params.map(p => [p.name, p]))
-  const params: ApiParam[] = asArray(member.param as XmlNode).map((p: XmlNode) => {
+  const params: ApiParam[] = asArray<XmlNode>(member.param).map((p: XmlNode) => {
     const pname = textOf(p.declname) || textOf(p.defname)
-    const ptype = flattenPlain(p.type)
+    const ptype = flattenPlain(p.type as DescNode)
     const doc = docParams.get(pname)
     return {
       name: pname,
@@ -88,7 +88,7 @@ export function memberToSymbol(
     parent: container.compoundname ? textOf(container.compoundname) : '',
     parentKind: container['@kind'],
     signature,
-    returnType: flattenPlain(member.type),
+    returnType: flattenPlain(member.type as DescNode),
     params,
     brief,
     details: extractDetailProse(member.detaileddescription),
@@ -97,7 +97,7 @@ export function memberToSymbol(
     warning: detail.warning,
     since: detail.since,
     groups: groupName ? [groupName] : [],
-    referencedBy: asArray(member.referencedby as XmlNode).map((r: XmlNode) => ({
+    referencedBy: asArray<XmlNode>(member.referencedby).map((r) => ({
       id: typeof r['@refid'] === 'string' ? r['@refid'] : '',
       name: textOf(r['#text'] ?? r),
     })).filter(r => r.id && r.name),
@@ -108,8 +108,8 @@ export function memberToSymbol(
 
 function membersOf(def: DoxyCompoundDef): DoxyMemberDef[] {
   const out: DoxyMemberDef[] = []
-  for (const section of asArray(def.sectiondef as XmlNode)) {
-    for (const member of asArray((section as XmlNode).memberdef as DoxyMemberDef)) {
+  for (const section of asArray<XmlNode>(def.sectiondef)) {
+    for (const member of asArray<DoxyMemberDef>((section as XmlNode).memberdef as DoxyMemberDef[] | DoxyMemberDef)) {
       out.push(member)
     }
   }
