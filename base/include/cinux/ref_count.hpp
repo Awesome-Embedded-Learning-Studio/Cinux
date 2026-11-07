@@ -41,7 +41,6 @@ public:
 
     /**
      * @brief Add one owning reference; invalid acquisition or overflow terminates.
-     * @return None.
      * @since 0.1.0
      * @ingroup base_ptr
      */

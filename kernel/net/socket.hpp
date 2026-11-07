@@ -271,6 +271,7 @@ protected:
     /**
      * @brief         Records the birth type and identity.
      *
+ * @param[in]     family   Address family; defaults to IPv4.
      * @param[in]     socket_type   The type word the caller asked for.
      * @since         0.7.0
      * @ingroup       kernel_net

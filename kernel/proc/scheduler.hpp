@@ -123,7 +123,6 @@ public:
     /**
      * @brief         Inject the executor that performs real switches.
      * @param[in]     sink   Any SwitchSink; stored type-erased.
-     * @return        None.
      * @note          Called once during bring-up, kernel and every
      *                test world alike — the Tick init pattern one
      *                subsystem over.
@@ -181,7 +180,6 @@ public:
      * @brief         Register a scheduling class; pick order follows
      *                registration order.
      * @param[in]     cls   The class to consult; kept by address.
-     * @return        None.
      * @note          Registering the same class twice is a no-op, so
      *                bring-up paths can stay unguarded. Overflow past
      *                kMaxSchedulingClasses is a loud Check.
@@ -212,7 +210,6 @@ public:
 
     /**
      * @brief         Let another task run; the caller comes back later.
-     * @return        None.
      * @note          Returns only when this task is picked again.
      *                Cooperative yield and preemption both land here;
      *                with preemption enabled, the clock rotates tasks
@@ -225,7 +222,6 @@ public:
     /**
      * @brief         Count one timer tick; arm a rotation request when
      *                the current task spent its slice.
-     * @return        None.
      * @note          Called from the timer interrupt handler, which
      *                only keeps books: the switch itself happens later,
      *                in the interrupt-exit hook.
@@ -240,7 +236,6 @@ public:
 
     /**
      * @brief         The interrupt-exit question: rotate now?
-     * @return        None.
      * @note          Called with interrupts off, between the dispatch
      *                and the iret of every device interrupt. Rotates
      *                when a slice expired and preemption is enabled;
@@ -254,7 +249,6 @@ public:
     /**
      * @brief         Open or close preemption.
      * @param[in]     enabled   True to let the clock rotate tasks.
-     * @return        None.
      * @note          Ships off: the heap and the PMM are shared state
      *                without protection until the sync station arms
      *                them, so only run preemption demos whose tasks
@@ -267,7 +261,6 @@ public:
 
     /**
      * @brief         Pin the current task to the CPU (one nest level).
-     * @return        None.
      * @note          While any guard lives, the exit hook declines to
      *                rotate. The first consumer is the lock family of
      *                the next station; the heap wears it the day its
@@ -279,7 +272,6 @@ public:
 
     /**
      * @brief         Drop one nest level of pinning.
-     * @return        None.
      * @note          Pairs with preempt_disable; the guard below is
      *                the way to call them so no path forgets the drop.
      * @since         0.3.0
@@ -291,7 +283,6 @@ public:
      * @brief         End the current task; never returns to it.
      * @param[in]     code   The exit word ring 3 asked for, zero when
      *                       a kernel thread's entry merely returned.
-     * @return        None.
      * @note          Reached through the trampoline's exit hook when
      *                an entry returns, or directly by choice. A task
      *                with a parent turns zombie and stays for that
@@ -348,7 +339,6 @@ public:
      * @brief         Walk every task on the roll, caller's visit in hand.
      * @tparam        Visit   Callable taking Task&.
      * @param[in]     visit   What to do with each task.
-     * @return        None.
      * @note          The kill-a-group face: an interrupt-guarded sweep
      *                of the one task roll the scheduler keeps, safe
      *                because a single core serializes reclaims behind
@@ -370,7 +360,6 @@ public:
     /**
      * @brief         Park the current task off the ready queue and
      *                switch away; returns only after a wake.
-     * @return        None.
      * @note          The blocking half of every lock: the caller is
      *                already linked onto the lock's wait queue when
      *                this runs. A spinlock held across this call
@@ -398,7 +387,6 @@ public:
     /**
      * @brief         Wake one parked task into the ready queue.
      * @param[in,out] task   A blocked task, linked by its wait queue.
-     * @return        None.
      * @note          The waking half; the lock transfers ownership
      *                before calling this so the woken task resumes
      *                already holding what it waited for.
@@ -410,7 +398,6 @@ public:
     /**
      * @brief         Halt the current task off every queue until a
      *                continue names it.
-     * @return        None.
      * @note          The SIGSTOP landing: the task keeps its kernel
      *                stack exactly as a parked one does, but no wait
      *                queue links it — nothing wakes it but another
@@ -424,7 +411,6 @@ public:
     /**
      * @brief         Put one stopped task back into the ready queue.
      * @param[in,out] task   A task in TaskState::kStopped.
-     * @return        None.
      * @note          The SIGCONT landing, and the SIGKILL one — a
      *                stopped task is never scheduled, so it could
      *                never deliver its own death; the sender's send
@@ -452,7 +438,6 @@ public:
 
     /**
      * @brief         Hand the CPU to the ready queue until it drains.
-     * @return        None.
      * @note          Back on kernel Main's stack when the last task
      *                has exited.
      * @since         0.1.0
@@ -585,7 +570,7 @@ private:
     cinux::base::container::SelfList<Task>                                       waiters_;
     cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
     unsigned long long                                                           next_pid_ = 1;
-    unsigned long long                                                           ready_refusals_ = 0;
+    unsigned long long ready_refusals_ = 0;
     std::atomic<bool>                                                            preemption_{false};
 };
 

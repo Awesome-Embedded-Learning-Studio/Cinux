@@ -68,7 +68,7 @@ inline CpuIdWords ReadCpuId(unsigned int leaf, unsigned int subleaf) {
  *
  * @return        True when CPUID leaf 7 names CR4 bit 20 available.
  * @note          Writing the bit into CR4 on a processor without it
- *                fails the whole write with #GP, so the enable step
+ *                fails the whole write with \#GP, so the enable step
  *                asks here first and skips cleanly when the answer is
  *                no.
  * @warning       None

@@ -51,7 +51,6 @@ inline uint64_t SplitMix64(uint64_t& value) {
  * @param[out]    generator   The generator to arm.
  * @param[in]     seed        Any word; four scrambles spread it over
  *                            the state.
- * @return        None.
  * @since         0.3.0
  * @ingroup       base_random
  */

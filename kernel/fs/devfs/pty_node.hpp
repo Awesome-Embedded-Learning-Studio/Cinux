@@ -26,7 +26,6 @@ namespace cinux::fs {
 /**
  * @brief         Seats ptmx and the pair resolvers with the device model.
  *
- * @return  None
  * @note    Bring-up wiring, single-threaded, before the mount goes
  *          live. The ptmx seat travels through the device model; the
  *          pair table lives here, eight seats, and a pair is minted on

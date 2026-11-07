@@ -84,6 +84,7 @@ struct FileTable : cinux::base::RefCount<> {
      * @brief         Opens a fresh description and reserves the lowest
      *                free slot at or above 3 for it.
      *
+ * @param[in]     options   Open flags carried by the new description.
      * @param[in]     ops      The backend's erased face for the open.
      * @param[in]     backend  The backend instance for the open.
      * @param[in]     node     The node handle for the open.
@@ -103,6 +104,7 @@ struct FileTable : cinux::base::RefCount<> {
     /**
      * @brief         Seats one open another table already owns.
      *
+ * @param[in]     limit   Resource ceiling for the adoption.
      * @param[in]     file   The shared open to adopt; this table takes
      *                       one more owner count over it.
      * @return        The descriptor number, or kOutOfMemory when every
@@ -137,9 +139,10 @@ struct FileTable : cinux::base::RefCount<> {
     /**
      * @brief         Seats one open at the lowest free descriptor at or
      *                above the floor the caller names.
-     *
      * @param[in]     file   The shared open to seat.
      * @param[in]     floor  The lowest number the new seat may take.
+     * @param[in]     cloexec   Mark the copy close-on-exec when true.
+     * @param[in]     limit   Resource ceiling for the copy.
      * @return        The descriptor number, or kInvalidArgument when
      *                nothing is held, kTooManyOpenFiles when no seat at or
      *                above the floor is free.

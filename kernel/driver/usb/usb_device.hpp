@@ -50,6 +50,7 @@ public:
      * @brief         Takes a free slot and the device's bus address.
      *
      * @param[in,out] host   The controller that owns the slot.
+     * @param[in]     port   Root-hub port number the device occupies.
      * @return        True when the slot is seated and addressed.
      * @note          The whole v1 sequence: port scan and reset, input
      *                context with slot and endpoint zero, Address
@@ -142,7 +143,6 @@ public:
      * @param[in,out] host      The controller that owns the rings.
      * @param[in]     handler   The word to call when the report lands.
      * @param[in]     owner     The class driver the handler serves.
-     * @return        None
      * @note          The report rides the device's own buffer; the
      *                handler reads it through report(). Completion
      *                consumes this submission and disarms its callback.

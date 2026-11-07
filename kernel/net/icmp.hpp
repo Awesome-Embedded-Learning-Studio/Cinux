@@ -63,7 +63,6 @@ public:
      *
      * @param[in]     reply_sink  Where echo replies go; the wiring
      *                            points this at the IPv4 module.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -75,7 +74,6 @@ public:
      * @param[in]     bytes   First message byte.
      * @param[in]     length  Bytes the message holds.
      * @param[in]     header  The IPv4 header it travelled in.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -102,7 +100,6 @@ private:
  * @param[in]     length          Whole message length, payload included.
  * @param[in]     identifier      Pairing word for this conversation.
  * @param[in]     sequence        Ordering word for this message.
- * @return        None
  * @note          The payload bytes are filled with an index pattern and
  *                the checksum is computed over the zeroed field, so the
  *                receiver's fold-to-zero property holds as sent.

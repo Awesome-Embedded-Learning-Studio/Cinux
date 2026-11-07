@@ -75,7 +75,6 @@ public:
      *
      * @param[in,out] device  Device instance; its lifetime must cover
      *                        every later call.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */

@@ -67,7 +67,6 @@ public:
     /**
      * @brief         Walks configuration space and reports what answered.
      *
-     * @return        None
      * @note          One serial line per answered device; a full table
      *                      stops the walk and says so. Runs once, inside
      *                      the bring-up ladder, before interrupts open.
@@ -114,7 +113,6 @@ public:
      * @brief         Wakes one device for driving.
      *
      * @param[in]     device  The device the driver is about to command.
-     * @return        None
      * @note          Memory decoding, bus mastering and interrupt
      *                      assertion come on together: a device holding
      *                      all three can answer register reads, DMA and

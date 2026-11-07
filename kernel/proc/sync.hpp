@@ -127,7 +127,6 @@ public:
     /**
      * @brief   Acquire the supplied lock for this scope.
      * @param[in,out] lock Lock released when the scope ends.
-     * @return  None.
      * @since   0.1.0
      * @ingroup kernel_proc
      */
@@ -182,7 +181,6 @@ public:
 
     /**
      * @brief   Forget a temporary lock before its address is reused.
-     * @return  None.
      * @note    Requires no holder; permanent locks need no retirement.
      * @since   0.1.0
      * @ingroup kernel_proc
@@ -275,7 +273,6 @@ public:
 
     /**
      * @brief Release the idle mutex's lock identity before storage reuse.
-     * @return None.
      * @since 0.8.0
      * @ingroup kernel_proc
      */
@@ -297,19 +294,18 @@ private:
  */
 class Semaphore {
 public:
+    constexpr Semaphore() = default;
+
     /**
      * @brief         Start the count here.
      * @param[in]     initial   Units available before anyone waits.
      * @since         0.1.0
      * @ingroup       kernel_proc
      */
-    constexpr Semaphore() = default;
-
     explicit Semaphore(long long initial);
 
     /**
      * @brief Forget this semaphore's lock after all users have left.
-     * @return None.
      * @since 0.3.0
      * @ingroup kernel_proc
      */
@@ -386,7 +382,6 @@ public:
 
     /**
      * @brief Releases the completed rendezvous's lock identity.
-     * @return None.
      * @since 0.8.0
      * @ingroup kernel_proc
      */

@@ -32,6 +32,7 @@ namespace cinux::proc::futex {
 /**
  * @brief         Park the caller while a user word holds a value.
  * @param[in]     uaddr      The user word's address, four-byte aligned.
+ * @param[in]     present    Bit pattern observed at the word.
  * @param[in]     expected   The value to hold the caller for.
  * @return        kOk once another side woke the caller, kWouldBlock
  *                when the word moved on before the park.
@@ -75,7 +76,6 @@ long long WakeUserWord(unsigned long long uaddr, unsigned long long count);
 /**
  * @brief         Release a dying task's join word: zero it, wake one.
  * @param[in]     dying   The task on its way out of the machine.
- * @return        None.
  * @note          Runs while the dying task's own address space is
  *                still the active one, so the store lands in the world
  *                its joiner shares. A word the task never named, one

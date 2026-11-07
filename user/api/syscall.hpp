@@ -228,7 +228,7 @@ inline long long Gettid() {
 
 /**
  * @brief         arch_prctl(op, addr): move a thread-pointer base.
- * @param[in]     op     One of the ARCH_SET_FS/ARCH_GET_FS/ARCH_SET_GS/
+ * @param[in]     operation   One of the ARCH_SET_FS/ARCH_GET_FS/ARCH_SET_GS/
  *                       ARCH_GET_GS operations.
  * @param[in]     addr   The new base, or the quadword that receives
  *                       the old one.

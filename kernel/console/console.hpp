@@ -29,7 +29,6 @@ namespace cinux::console {
  *                boot record carries a usable framebuffer.
  *
  * @param[in]     info   The boot handoff record.
- * @return        None
  * @note          Safe to call again; a screen that refused init stays
  *                silent and serial keeps carrying the whole output.
  * @warning       None
@@ -43,7 +42,6 @@ void InitConsole(const cinux::boot::BootInfo& info);
  * @brief         Sends one character to every console sink.
  *
  * @param[in]     character   Byte to emit.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -56,7 +54,7 @@ void PutChar(char character);
  * @brief         Sends a NUL-terminated string, one character at a time.
  *
  * @param[in]     text   String to emit.
- * @return        None
+ * @param[in]     newline   Append a trailing newline when true.
  * @note          None
  * @warning       None
  * @throws        None
@@ -68,7 +66,6 @@ void PutString(const char* text, bool newline = false);
 /**
  * @brief         Waits until every console sink has finished sending.
  *
- * @return        None
  * @note          The screen paints at once; the serial line keeps the
  *                last bytes in its shift register. This drain belongs
  *                in front of anything as final as power off, so the

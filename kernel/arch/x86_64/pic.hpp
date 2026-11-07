@@ -39,7 +39,6 @@ public:
     /**
      * @brief         Remaps both chips onto vectors 0x20/0x28, all lines off.
      *
-     * @return        None
      * @note          After this call every device may knock, but no
      *                door is open until unmask says so. Bring-up
      *                territory, called by the composition root.
@@ -52,7 +51,6 @@ public:
      * @brief         Opens one IRQ line.
      *
      * @param[in]     line   0..7 for the master chip, 8..15 for the slave.
-     * @return        None
      * @note          Slave lines also unmask the cascade line 2 on the
      *                master — a slave's knock travels through it.
      * @since         0.1.0
@@ -64,7 +62,6 @@ public:
      * @brief         Acknowledges the line currently being serviced.
      *
      * @param[in]     line   Device line that fired.
-     * @return        None
      * @note          Slave lines thank both chips. A missing
      *                acknowledge silences the line after its first
      *                interrupt — the classic one-shot failure the tick

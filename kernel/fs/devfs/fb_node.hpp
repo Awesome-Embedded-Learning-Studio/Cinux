@@ -23,7 +23,6 @@ namespace cinux::fs {
 /**
  * @brief         Seats /dev/fb0 and reserves its frames as hardware-owned.
  *
- * @return  None
  * @note    Bring-up wiring, single-threaded, before the devfs mount goes
  *          live. A dead framebuffer (no usable boot geometry) refuses
  *          loudly: a GUI lane that reaches this station with no pixels

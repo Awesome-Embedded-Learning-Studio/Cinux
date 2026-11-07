@@ -23,7 +23,6 @@ namespace cinux::arch {
 
 /**
  * @brief         The spin-wait hint: tell the CPU this loop is waiting.
- * @return        None.
  * @note          Pauses the pipeline a beat, saves power, and lets a
  *                hyperthread sibling make progress — the polite thing
  *                to do inside a spin loop. No memory semantics.
@@ -38,7 +37,7 @@ inline void CpuRelax() {
  * @brief         Read one model-specific register.
  * @param[in]     index  The MSR index the CPU expects in ECX.
  * @return        The full 64-bit value, assembled from EDX:EAX.
- * @note          Reading a reserved or unsupported index raises #GP,
+ * @note          Reading a reserved or unsupported index raises \#GP,
  *                so callers name the index they mean and own that
  *                contract. The QEMU caveat: not every MSR survives a
  *                write-read round trip even when the write is accepted.
@@ -58,8 +57,7 @@ inline unsigned long long ReadMsr(unsigned int index) {
  * @brief         Write one model-specific register.
  * @param[in]     index  The MSR index the CPU expects in ECX.
  * @param[in]     value  The full 64-bit value, split into EDX:EAX.
- * @return        None.
- * @note          Writing a reserved or unsupported value raises #GP.
+ * @note          Writing a reserved or unsupported value raises \#GP.
  *                The instruction only consumes the low 32 bits of each
  *                half, so the split here is the whole story — shifting
  *                a 64-bit register and hoping the top survives was the
@@ -76,13 +74,12 @@ inline void WriteMsr(unsigned int index, unsigned long long value) {
 /**
  * @brief         Opens the SMAP window for the current instruction.
  *
- * @return        None.
  * @note          Sets RFLAGS.AC, the one bit that lets ring 0 touch user
  *                pages while CR4.SMAP is on. The window must close before
  *                anything blocks or schedules — AC belongs to the CPU that
  *                opened it, and a context switch would drop it mid-copy.
  *                Executing the instruction on a processor without SMAP in
- *                its CPUID answer faults with #UD, so the accessor keeps
+ *                its CPUID answer faults with \#UD, so the accessor keeps
  *                the arm bit and only reaches for the window on machines
  *                that promised one.
  * @since         0.3.0
@@ -95,7 +92,6 @@ inline void Stac() {
 /**
  * @brief         Closes the SMAP window the current instruction opened.
  *
- * @return        None.
  * @note          Clears RFLAGS.AC. Every open has exactly one close on
  *                every path out of the window, including the fault path,
  *                where the fixup closes it before reporting the copy

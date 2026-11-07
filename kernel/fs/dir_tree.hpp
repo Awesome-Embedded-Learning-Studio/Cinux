@@ -87,7 +87,6 @@ struct DirNode {
      *
      * @param[in,out] child   The node to adopt; the caller has already
      *                        filled its name.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_fs
      */

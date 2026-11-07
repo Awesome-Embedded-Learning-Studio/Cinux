@@ -15,7 +15,7 @@ extern "C" [[gnu::section(".text.lm_entry")]] [[noreturn]] void LmEntry() {
         : [data] "n"(cinux::boot::gdt::kSelectorData64), [stack] "n"(static_cast<unsigned int>(
                                                              cinux::boot::kPmStackTop))
         : "ax");
-    cinux::console::PutString("[lm] 64-bit world alive\n");
+    cinux::boot_early::PutString("[lm] 64-bit world alive\n");
     unsigned long const kEntryTarget =
         cinux::boot::kHighHalfBase + cinux::boot::LoadWord(cinux::boot::kHandoffMailboxEntry);
     unsigned long const kInfoAddress =

@@ -65,7 +65,6 @@ public:
      * @brief         Removes one subscriber before its receive ring dies.
      *
      * @param[in]     context   The context the subscriber registered with.
-     * @return        None
      * @note          Waits for any borrowed delivery still running, so the
      *                ring may be destroyed on return.
      * @since         0.7.0
@@ -79,7 +78,6 @@ public:
      * @param[in]     bytes   First byte of the whole datagram, header included.
      * @param[in]     length  Bytes the datagram holds.
      * @param[in]     header  The parsed IPv4 header it travelled in.
-     * @return        None
      * @since         0.7.0
      * @ingroup       kernel_net
      */

@@ -97,7 +97,6 @@ public:
     /**
      * @brief         Drains every finished event on the ring.
      *
-     * @return        None
      * @note          Command completions land in the waiter that asked,
      *                transfer events route to the seated device that
      *                owns the TRB. Readers poll this, the armed message

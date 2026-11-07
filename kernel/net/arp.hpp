@@ -37,7 +37,6 @@ class ArpCache {
 public:
     /**
      * @brief         Returns the cache to empty.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -76,7 +75,6 @@ public:
      * @param[in]     sender_hardware  The sender's hardware address, the kernel's own.
      * @param[in]     sender_protocol  The sender's IPv4 address, the kernel's own.
      * @param[in]     target_protocol  The address being resolved.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */

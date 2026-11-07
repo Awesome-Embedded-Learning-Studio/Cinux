@@ -62,7 +62,6 @@ public:
      * @brief         Registers a backend and starts the heartbeat.
      *
      * @param[in]     backend   Device to drive, any TickSource type.
-     * @return        None
      * @note          Type erasure in full: a captureless lambda becomes
      *                the stored starter function, the backend pointer
      *                rides along as its context. Registering resets the
@@ -85,7 +84,6 @@ public:
     /**
      * @brief         Records one heartbeat; called from the IRQ entry.
      *
-     * @return        None
      * @note          Inline so it instantiates inside the no-SSE
      *                interrupt island of its caller; the gate has
      *                interrupts off on entry. Atomic access makes the

@@ -63,7 +63,6 @@ public:
      * @brief   Plants the queue and volume, mounts ext2 at the root and
      *          the device table at /dev.
      *
-     * @return  None
      * @note    Runs exactly once, from inside the kernel_init task:
      *          every block ask sleeps on the queue, so the caller must
      *          already be schedulable. A volume refusing to mount is

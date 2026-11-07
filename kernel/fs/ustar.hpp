@@ -55,7 +55,6 @@ public:
      *
      * @param[in]     base   First byte of the archive.
      * @param[in]     limit  Bytes the image actually holds.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_fs
      */

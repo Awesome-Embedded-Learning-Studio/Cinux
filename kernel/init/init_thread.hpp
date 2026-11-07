@@ -23,7 +23,6 @@ namespace cinux::init {
 /**
  * @brief         Builds and seats the init thread.
  *
- * @return        None
  * @note          Call exactly once, after the scheduler's switch sink is
  *                installed: the thread sleeps on the block queue for its
  *                very first mount, so it needs the full machinery alive.

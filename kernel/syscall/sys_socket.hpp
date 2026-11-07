@@ -63,9 +63,19 @@ long long HandleSendto(const SyscallFrame& frame);
  */
 long long HandleRecvfrom(const SyscallFrame& frame);
 
-/** @brief Scatter a received socket message and its ancillary data. */
+/**
+ * @brief         Scatter a received socket message and its ancillary data.
+ * @return        The byte count, or a negative errno.
+ * @since         0.9.0
+ * @ingroup       kernel_syscall
+ */
 long long HandleRecvmsg(const SyscallFrame& frame);
-/** @brief Gather and transmit a socket message. */
+/**
+ * @brief         Gather and transmit a socket message.
+ * @return        The byte count sent, or a negative errno.
+ * @since         0.9.0
+ * @ingroup       kernel_syscall
+ */
 long long HandleSendmsg(const SyscallFrame& frame);
 
 /**

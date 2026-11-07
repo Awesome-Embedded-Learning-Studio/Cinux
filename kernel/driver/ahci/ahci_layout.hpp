@@ -211,7 +211,6 @@ static_assert(kCommandTableOffset == 32 * sizeof(CommandHeader),
  * @param[in]     command ATA opcode, one of the kAta constants.
  * @param[in]     lba     First sector, 48-bit.
  * @param[in]     count   Sectors to move.
- * @return        None
  * @note          The command flag is bit seven of the flags byte; the
  *                      scouting note that placed it at bit six left the
  *                      drive silent, and bit six alone commands nothing.

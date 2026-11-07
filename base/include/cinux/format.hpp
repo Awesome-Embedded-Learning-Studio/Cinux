@@ -115,7 +115,6 @@ struct ArgsView {
  * @param[in]     buffer_size  Capacity of the destination buffer, in bytes.
  * @param[in]     format       printf-style format string.
  * @param[in]     args         Arguments in consumption order (see ArgsView).
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -134,7 +133,6 @@ void FormatToBuf(char* out_buffer, size_t buffer_size, const char* format, ArgsV
  * @param[in]     buffer_size  Capacity of the destination buffer, in bytes.
  * @param[in]     format       printf-style format string.
  * @param[in]     ...          Format arguments.
- * @return        None
  * @note          Host world only: C variadic slots disagree between caller
  *                and callee under -m16, so -m16 code must call FormatToBuf.
  * @warning       None

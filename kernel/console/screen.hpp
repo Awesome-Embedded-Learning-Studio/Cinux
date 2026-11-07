@@ -79,7 +79,6 @@ public:
      *                scroll at the bottom. Control characters move the
      *                caret without painting.
      * @param[in]     glyph_char   Character to place.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */
@@ -88,7 +87,6 @@ public:
     /**
      * @brief         Step aside for whoever holds the frame.
      *
-     * @return        None
      * @note          The pixel door closes while a memory device's
      *                mapping owns the screen: painting requests turn
      *                quiet, the caret stands still, and the serial half
@@ -101,7 +99,6 @@ public:
     /**
      * @brief         Take the pixels back.
      *
-     * @return        None
      * @note          The framebuffer node's last close: the text screen
      *                resumes where its caret stood.
      * @since         0.9.0

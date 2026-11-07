@@ -78,7 +78,6 @@ constexpr base::format::Arg Argify(const void* value) {
  *
  * @param[in]     newline   Append a trailing newline when true.
  * @param[in]     fmt       printf-style format string.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -89,9 +88,9 @@ inline void Emit(bool newline, const char* fmt) {
     char                         buf[kPrintBufferSize];
     base::format::ArgsView const kNone{.data = nullptr, .count = 0};
     base::format::FormatToBuf(buf, sizeof(buf), fmt, kNone);
-    console::PutString(buf);
+    boot_early::PutString(buf);
     if (newline) {
-        console::PutChar('\n');
+        boot_early::PutChar('\n');
     }
 }
 
@@ -101,7 +100,6 @@ inline void Emit(bool newline, const char* fmt) {
  * @param[in]     newline   Append a trailing newline when true.
  * @param[in]     fmt       printf-style format string.
  * @param[in]     args      Arguments to interpolate, one per specifier.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -114,9 +112,9 @@ void Emit(bool newline, const char* fmt, Args... args) {
     // NOLINTNEXTLINE(readability-identifier-naming)
     base::format::Arg const kArgs[] = {Argify(args)...};
     base::format::FormatToBuf(buf, sizeof(buf), fmt, base::format::ArgsView::of(kArgs));
-    console::PutString(buf);
+    boot_early::PutString(buf);
     if (newline) {
-        console::PutChar('\n');
+        boot_early::PutChar('\n');
     }
 }
 
@@ -127,7 +125,6 @@ void Emit(bool newline, const char* fmt, Args... args) {
  *
  * @param[in]     fmt     printf-style format string.
  * @param[in]     args    Arguments to interpolate.
- * @return        None
  * @note          Truncates at kPrintBufferSize, never overflows.
  * @warning       None
  * @throws        None
@@ -144,7 +141,6 @@ void Print(const char* fmt, Args... args) {
  *
  * @param[in]     fmt     printf-style format string.
  * @param[in]     args    Arguments to interpolate.
- * @return        None
  * @note          Truncates at kPrintBufferSize, never overflows.
  * @warning       None
  * @throws        None
