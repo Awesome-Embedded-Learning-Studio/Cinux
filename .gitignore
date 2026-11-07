@@ -53,6 +53,7 @@ coverage/
 *.gcov
 
 node_modules/
+.pnpm-store/
 site/.vitepress/dist/
 site/.vitepress/cache/
 site/.vitepress/.temp/

@@ -220,6 +220,16 @@ function generateVolumeConfig(
   const desc = projectConfig.description[code] ?? ''
   const localeDirPart = view.locale.default ? '' : `/${view.locale.dir ?? view.localeKey}`
 
+  // 卷的源码目录名与线上 URL 前缀不一定相同(document → /systems/:path* 或
+  // changelogs → /changelog)。不同则生成 rewrites,让产物落到 urlPrefix 上,
+  // 与 sidebar 里 volumeSidebar 生成的链接一致。
+  const urlSeg = prefix.replace(/^\//, '')
+  const srcSeg = localeDirPart ? `${localeDirPart.replace(/^\//, '')}/${vol.srcDir}` : vol.srcDir
+  const rewritesEntry =
+    srcSeg === urlSeg
+      ? ''
+      : `  rewrites: { ${JSON.stringify(`${srcSeg}/:path*`)}: ${JSON.stringify(`${urlSeg}/:path*`)} },\n`
+
   return `import { defineConfig } from 'vitepress'
 import { resolve } from 'path'
 import { volumeSidebar } from '${relSidebar}'
@@ -246,7 +256,7 @@ export default withSharedDrawio(defineConfig({
   srcDir: '${relSrc}',
   outDir: '${relOut}',
   ignoreDeadLinks: true,
-  title: ${JSON.stringify(title)},
+${rewritesEntry}  title: ${JSON.stringify(title)},
   description: ${JSON.stringify(desc)},
   lang: '${code}',
   locales: {
@@ -265,7 +275,7 @@ export default withSharedDrawio(defineConfig({
     },
   },
   head: [
-    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.ico\` }],
+    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.svg\` }],
     ['meta', { name: 'theme-color', content: '#F5FAF8' }],
     ['meta', { name: 'theme-color', content: '#0B1512', media: '(prefers-color-scheme: dark)' }],
     ['script', {}, ${JSON.stringify(FONT_SIZE_SCRIPT)}],
@@ -355,7 +365,7 @@ export default withSharedDrawio(defineConfig({
     },
   },
   head: [
-    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.ico\` }],
+    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.svg\` }],
     ['meta', { name: 'theme-color', content: '#F5FAF8' }],
     ['meta', { name: 'theme-color', content: '#0B1512', media: '(prefers-color-scheme: dark)' }],
     ['script', {}, ${JSON.stringify(FONT_SIZE_SCRIPT)}],

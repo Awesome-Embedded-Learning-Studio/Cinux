@@ -1,0 +1,38 @@
+{
+  "name": "cinux-docs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.3",
+  "scripts": {
+    "dev": "vitepress dev site",
+    "build": "tsx scripts/build.ts",
+    "build:single": "vitepress build site",
+    "preview": "vitepress preview site"
+  },
+  "devDependencies": {
+    "@dhlx/vitepress-plugin-drawio": "^0.0.10",
+    "@panzoom/panzoom": "^4.6.2",
+    "@types/node": "^22.15.0",
+    "@vueuse/core": "^12.8.2",
+    "@vueuse/integrations": "^12.8.2",
+    "gray-matter": "4.0.3",
+    "linkedom": "0.18.13",
+    "mark.js": "8.11.1",
+    "markdown-it": "^15.0.2",
+    "markdown-it-mathjax3": "^4.3.2",
+    "mermaid": "^10.9.6",
+    "shiki": "^2.5.0",
+    "tsx": "^4.21.0",
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.34"
+  },
+  "dependencies": {
+    "minisearch": "^7.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
