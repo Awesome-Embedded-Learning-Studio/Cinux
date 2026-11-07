@@ -37,6 +37,13 @@ export function runPipeline(input: PipelineInput): ApiBundle {
     }
   }
   groups.sort((a, b) => a.name.localeCompare(b.name))
+  // 空组过滤:组名被 @ingroup 引用但符号未被收录(如宏/file 级成员,
+  // 管线不收 file compound 的已知边界)。空组不出页面不进导航,
+  // generate-groups 的扫描仍会列出组名,符号收录扩展后自然回来。
+  const emptyGroups = groups.filter(g => g.symbolIds.length === 0).map(g => g.name)
+  if (emptyGroups.length > 0) {
+    console.warn(`groups: 空组过滤(符号未收录): ${emptyGroups.join(', ')}`)
+  }
   for (const s of symbols) {
     const memberships = extraMembership.get(s.id)
     if (memberships) {
@@ -63,10 +70,11 @@ export function runPipeline(input: PipelineInput): ApiBundle {
     s.referencedBy = resolved
   }
 
-  const coverage = computeCoverage(groups, symbols)
+  const liveGroups = groups.filter(g => g.symbolIds.length > 0)
+  const coverage = computeCoverage(liveGroups, symbols)
 
   const groupOf = new Map<string, string>()
-  for (const g of groups) {
+  for (const g of liveGroups) {
     for (const id of g.symbolIds) groupOf.set(id, g.name)
   }
   const searchIndex: SearchEntry[] = symbols.map(s => ({
@@ -80,13 +88,13 @@ export function runPipeline(input: PipelineInput): ApiBundle {
 
   return {
     symbols,
-    groups,
+    groups: liveGroups,
     coverage,
     searchIndex,
     meta: {
       generatedAt: new Date().toISOString(),
       symbolCount: symbols.length,
-      groupCount: groups.length,
+      groupCount: liveGroups.length,
     },
   }
 }
