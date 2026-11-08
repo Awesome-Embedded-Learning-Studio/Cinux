@@ -318,6 +318,7 @@ add_cinux_test(block ${CMAKE_SOURCE_DIR}/kernel/driver/block/block_queue.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/lockdep.cpp ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp)
 add_cinux_test(vma ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp)
+add_cinux_test(fs_context)
 add_cinux_test(signal ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_signal.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp

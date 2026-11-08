@@ -26,6 +26,7 @@
 #include "kernel/arch/x86_64/context.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/fs_context.hpp"
 #include "kernel/proc/signals.hpp"
 
 namespace cinux::mm {
@@ -129,7 +130,12 @@ struct Task : cinux::base::container::SelfNode<Task> {
     /// the maker's instead.
     cinux::base::Shared<cinux::fs::FileTable>    files =
         cinux::base::MakeShared<cinux::fs::FileTable>();
-    char  cwd[cinux::fs::kFsPathMax] = {'/'};  ///< Working directory, absolute, NUL-terminated.
+    /// Where the task stands in the file-system tree. Every task is
+    /// born with a context of its own; fork copies it, a CLONE_FS
+    /// clone keeps pointing at the maker's, so a chdir in one thread
+    /// moves the whole group.
+    cinux::base::Shared<cinux::fs::FsContext> fs_ctx =
+        cinux::base::MakeShared<cinux::fs::FsContext>();
     /// The program path this task runs, absolute and NUL-terminated:
     /// exec writes it, fork copies it, the boot shell is born with
     /// its own. procfs reads it for self/exe — the one place a task

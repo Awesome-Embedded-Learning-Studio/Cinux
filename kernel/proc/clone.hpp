@@ -7,7 +7,8 @@
  * table over adopted opens, a frame copy on a fresh kernel stack —
  * and then the flags overlay replaces whole limbs with references to
  * the parent's: CLONE_VM points the child at the maker's address
- * space, CLONE_FILES at the maker's descriptor table, CLONE_SETTLS
+ * space, CLONE_FS at the maker's working directory, CLONE_FILES at the
+ * maker's descriptor table, CLONE_SETTLS
  * arms the thread pointer before the first instruction of ring 3 ever
  * runs. One more override belongs to the caller, not the builder: the
  * user stack rides in the plan because the frame copy still names the

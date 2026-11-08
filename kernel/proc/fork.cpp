@@ -113,7 +113,11 @@ Task* BuildForkChild(unsigned long long frame_address) {
     kBorn->signals.blocked = kParent->signals.blocked;
     kBorn->pgid            = kParent->pgid;
     kBorn->sid             = kParent->sid;
-    cinux::base::CopyBytes(kBorn->cwd, kParent->cwd, fs::kFsPathMax);
+    kBorn->fs_ctx          = fs::CloneFsContext(*kParent->fs_ctx);
+    if (!kBorn->fs_ctx.holds()) {
+        mm::Pmm::self().free_pages(kStack, kStackOrder);
+        return nullptr;
+    }
     cinux::base::CopyBytes(kBorn->exe, kParent->exe, fs::kFsPathMax);
     kBorn->controlling_tty = kParent->controlling_tty;
     cinux::base::CopyBytes(kBorn->comm, kParent->comm, sizeof(kBorn->comm));

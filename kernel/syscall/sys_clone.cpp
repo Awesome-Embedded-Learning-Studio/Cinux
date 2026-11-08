@@ -20,7 +20,7 @@ namespace {
 /// undo list is shared or copied. Revisit this comment when semaphores
 /// land; the flag then has to mean something.
 constexpr unsigned long long kServedFlags =
-    kCloneVfork | kCloneVm | kCloneFiles | kCloneThread | kCloneSysVsem | kCloneSetTls |
+    kCloneVfork | kCloneVm | kCloneFs | kCloneFiles | kCloneThread | kCloneSysVsem | kCloneSetTls |
     kCloneParentSetTid | kCloneChildClearTid | kCloneChildSetTid | 0xFFULL;
 
 }  // namespace
