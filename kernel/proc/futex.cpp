@@ -60,7 +60,8 @@ FutexTable& shared_table() {
 
 }  // namespace
 
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected) {
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
+                             unsigned int bitset) {
     const cinux::arch::IrqGuard kQuiet;
     Task* const                 kSelf = Scheduler::self().current();
     FutexTable&                 table = shared_table();
@@ -73,7 +74,8 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected) {
         if (present != expected) {
             return base::KernelError::kWouldBlock;
         }
-        kSelf->futex_uaddr = uaddr;
+        kSelf->futex_uaddr   = uaddr;
+        kSelf->futex_bitset  = bitset;
         table.buckets[FutexTable::bucket_for(uaddr)].push_back(*kSelf);
         Scheduler::self().prepare_to_wait();
     }
@@ -81,11 +83,12 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected) {
     return base::KernelError::kOk;
 }
 
-base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected) {
-    return ParkOnWord(uaddr, expected);
+base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected,
+                                 unsigned int bitset) {
+    return ParkOnWord(uaddr, expected, bitset);
 }
 
-long long WakeUserWord(unsigned long long uaddr, unsigned long long count) {
+long long WakeUserWord(unsigned long long uaddr, unsigned long long count, unsigned int bitset) {
     FutexTable&                 table = shared_table();
     long long                   woken = 0;
     const cinux::arch::IrqGuard kQuiet;
@@ -94,7 +97,7 @@ long long WakeUserWord(unsigned long long uaddr, unsigned long long count) {
     Task*                       node   = bucket.head();
     while (node != nullptr && std::cmp_less(woken, count)) {
         Task* const kNext = bucket.after(*node);
-        if (node->futex_uaddr == uaddr) {
+        if (node->futex_uaddr == uaddr && (node->futex_bitset & bitset) != 0) {
             bucket.remove(*node);
             Scheduler::self().unblock(*node);
             woken++;

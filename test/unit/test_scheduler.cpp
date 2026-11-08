@@ -120,6 +120,10 @@ struct World {
             check_early_wake(
                 task, [&] { cinux::proc::futex::WaitOnUserWord(kAddress, 7); },
                 [&] { cinux::proc::futex::WakeUserWord(kAddress, 1); });
+            unsigned int       bits_word    = 9;
+            const unsigned long long kBits = reinterpret_cast<unsigned long long>(&bits_word);
+            check_bitset_wake(task, kBits);
+            ASSERT_TRUE(scheduler.withdraw(task));
         }
         scheduler.schedule_blocked();
         ASSERT_TRUE(task.state == cinux::proc::TaskState::kRunning);
@@ -146,6 +150,21 @@ struct World {
         std::jthread other([&] {
             cinux::arch::per_cpu::PerCpu::self().cpu_id = 1;
             wake();
+        });
+        other.join();
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kReady);
+        ASSERT_EQ(sink.played, 1U);
+    }
+
+    void check_bitset_wake(cinux::proc::Task& task, unsigned long long address) const {
+        const auto kWaitResult = cinux::proc::futex::WaitOnUserWord(address, 9, 0x4U);
+        ASSERT_TRUE(kWaitResult == cinux::base::KernelError::kOk);
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kBlocked);
+        ASSERT_EQ(cinux::proc::futex::WakeUserWord(address, 1, 0x2U), 0LL);
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kBlocked);
+        std::jthread other([&] {
+            cinux::arch::per_cpu::PerCpu::self().cpu_id = 1;
+            ASSERT_EQ(cinux::proc::futex::WakeUserWord(address, 1, 0x4U), 1LL);
         });
         other.join();
         ASSERT_TRUE(task.state == cinux::proc::TaskState::kReady);

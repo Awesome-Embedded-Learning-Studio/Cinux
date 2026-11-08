@@ -183,6 +183,9 @@ struct Task : cinux::base::container::SelfNode<Task> {
     /// The exact word this task parks on in the futex table; the
     /// bucket only narrows the search, this key decides the match.
     unsigned long long futex_uaddr{};
+    /// The bitset this park watches. Plain FUTEX_WAIT plants every bit;
+    /// FUTEX_WAIT_BITSET narrows it, and a waker must intersect it.
+    unsigned int       futex_bitset = ~0U;
 
     /**
      * @brief         The parent's pid, zero when nobody waits above.

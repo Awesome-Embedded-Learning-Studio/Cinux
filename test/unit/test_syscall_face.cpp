@@ -26,6 +26,7 @@
 #include "kernel/syscall/sys_epoll.hpp"
 #include "kernel/syscall/sys_eventfd.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
+#include "kernel/syscall/sys_futex.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_getrandom.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
@@ -1193,6 +1194,40 @@ void run_eventfd_door_body() {
 TEST("syscall face: eventfd refuses the all-ones write and honours the semaphore") {
     FaceWorld world;
     world.run(run_eventfd_door_body);
+}
+
+void run_futex_bitset_body() {
+    using namespace cinux::syscall;
+    unsigned int word  = 5;
+    SyscallFrame frame = plain_frame();
+    frame.rdi          = reinterpret_cast<Word>(&word);
+
+    frame.rsi = 9;  // FUTEX_WAIT_BITSET, word already moved on
+    frame.rdx = 6;
+    frame.r9  = 0x4;
+    ASSERT_EQ(HandleFutex(frame), -kEagain);
+
+    frame.r9 = 0;  // a waiter watching nothing would never wake
+    ASSERT_EQ(HandleFutex(frame), -kEinval);
+
+    frame.rsi = 10;  // FUTEX_WAKE_BITSET refuses an empty offer too
+    frame.rdx = 1;
+    ASSERT_EQ(HandleFutex(frame), -kEinval);
+
+    frame.r9 = 0x4;
+    ASSERT_EQ(HandleFutex(frame), 0);  // nobody parked on this word
+
+    frame.rsi = 128 + 10;  // the private bit is stripped, still the same call
+    ASSERT_EQ(HandleFutex(frame), 0);
+
+    frame.rsi = 8;  // unknown op
+    ASSERT_EQ(HandleFutex(frame), -kEnosys);
+    cinux::proc::Scheduler::self().exit_current();
+}
+
+TEST("syscall face: futex bitset ops vet their bitset and their op") {
+    FaceWorld world;
+    world.run(run_futex_bitset_body);
 }
 
 }  // namespace

@@ -153,6 +153,7 @@ add_cinux_test(syscall_face ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/wait_time.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_prlimit.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fcntl.cpp
+                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_futex.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getdents.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getrandom.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_openat.cpp
