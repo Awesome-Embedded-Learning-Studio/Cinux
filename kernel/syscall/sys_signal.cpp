@@ -68,8 +68,8 @@ long long HandleRtSigpending(const SyscallFrame& frame) {
     SigSet pending;
     {
         const arch::IrqGuard kIrq;
-        const auto           kGuard = self->signals.gate.guard();
-        pending                     = self->signals.pending & self->signals.blocked;
+        const auto           kGuard = self->signals->gate.guard();
+        pending                     = self->signals->pending & self->signals->blocked;
     }
     return uaccess::CopyToUser(frame.rdi, &pending, sizeof(pending)) ? 0 : -kEfault;
 }
@@ -95,16 +95,16 @@ long long HandleRtSigaction(const SyscallFrame& frame) {
     SigAction   before{};
     {
         const arch::IrqGuard kIrq;
-        const auto           kGate = self.signals.gate.guard();
-        before                     = self.signals.actions[kNumber - 1];
+        const auto           kGate = self.signals->gate.guard();
+        before                     = self.signals->actions[kNumber - 1];
     }
     if (frame.rdx != 0 && !uaccess::CopyToUser(frame.rdx, &before, kActionBytes)) {
         return -kEfault;
     }
     if (install) {
         const arch::IrqGuard kIrq;
-        const auto           kGate        = self.signals.gate.guard();
-        self.signals.actions[kNumber - 1] = wanted;
+        const auto           kGate        = self.signals->gate.guard();
+        self.signals->actions[kNumber - 1] = wanted;
     }
     return 0;
 }
@@ -127,7 +127,7 @@ long long HandleRtSigprocmask(const SyscallFrame& frame) {
     }
     proc::Task& self = *CurrentTask();
     if (frame.rdx != 0) {
-        const SigSet kNow = self.signals.blocked;
+        const SigSet kNow = self.signals->blocked;
         if (!uaccess::CopyToUser(frame.rdx, &kNow, kSetBytes)) {
             return -kEfault;
         }
@@ -137,13 +137,13 @@ long long HandleRtSigprocmask(const SyscallFrame& frame) {
     }
     switch (frame.rdi) {
     case kSigBlock:
-        self.signals.blocked = self.signals.blocked | wanted;
+        self.signals->blocked = self.signals->blocked | wanted;
         break;
     case kSigUnblock:
-        self.signals.blocked = self.signals.blocked & ~wanted;
+        self.signals->blocked = self.signals->blocked & ~wanted;
         break;
     default:
-        self.signals.blocked = wanted;
+        self.signals->blocked = wanted;
         break;
     }
     return 0;
@@ -177,7 +177,7 @@ long long HandleRtSigreturn(const SyscallFrame& frame) {
     mutable_frame.r13              = image.r13;
     mutable_frame.r14              = image.r14;
     mutable_frame.r15              = image.r15;
-    CurrentTask()->signals.blocked = image.old_blocked;
+    CurrentTask()->signals->blocked = image.old_blocked;
     return static_cast<long long>(image.rax);
 }
 

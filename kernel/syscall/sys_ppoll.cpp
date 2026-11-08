@@ -134,14 +134,14 @@ long long HandlePpoll(const SyscallFrame& frame) {
     }
 
     proc::Task* const kSelf    = CurrentTask();
-    const SigSet      kRestore = kSelf->signals.blocked;
+    const SigSet      kRestore = kSelf->signals->blocked;
     bool              armed    = false;
     if (frame.r10 != 0) {
         unsigned long long words[1] = {};
         if (!uaccess::CopyFromUser(words, frame.r10, sizeof(SigSet))) {
             return -kEfault;
         }
-        kSelf->signals.blocked = MaskableSignals(SigSet{words[0]});
+        kSelf->signals->blocked = MaskableSignals(SigSet{words[0]});
         armed                  = true;
     }
 

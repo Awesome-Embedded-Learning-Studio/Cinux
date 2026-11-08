@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include "cinux/ref_count.hpp"
+#include "cinux/shared.hpp"
 #include "cinux/spin_mutex.hpp"
 #include "kernel/syscall/signal.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -52,11 +54,14 @@ enum class SignalDisposition : unsigned char {
  *                blocked, nothing pending — which is exactly what a
  *                fresh task should carry. fork copies the table and the
  *                blocked set but never the pending set; exec resets the
- *                whole thing.
+ *                whole thing. Counted because a CLONE_SIGHAND group
+ *                holds one table: a sigaction in one thread is seen by
+ *                every member, and the last member out returns the
+ *                storage.
  * @since         0.1.0
  * @ingroup       kernel_proc
  */
-struct SignalState {
+struct SignalState : cinux::base::RefCount<> {
     cinux::syscall::SigAction actions[cinux::syscall::kSignalCount] =
         {};                                  ///< Per-signal disposition.
     cinux::syscall::SigSet         blocked;  ///< Held back until unblocked.
@@ -72,6 +77,29 @@ struct SignalState {
     /// reset should touch.
     void reset();
 };
+
+/**
+ * @brief         Make an independent signal world for a forked child.
+ * @param[in]     source   The parent's signal state.
+ * @return        A fresh counted state carrying the same actions and
+ *                blocked mask; an empty Shared when allocation failed.
+ * @note          The pending set and the wait-restore scratch are not
+ *                inherited: a signal that arrived for the parent was
+ *                never addressed to the child.
+ * @since         0.9.0
+ * @ingroup       kernel_proc
+ */
+[[nodiscard]] inline cinux::base::Shared<SignalState> CloneSignalState(const SignalState& source) {
+    cinux::base::Shared<SignalState> copy = cinux::base::MakeShared<SignalState>();
+    if (!copy.holds()) {
+        return copy;
+    }
+    for (unsigned long slot = 0; slot < cinux::syscall::kSignalCount; ++slot) {
+        copy->actions[slot] = source.actions[slot];
+    }
+    copy->blocked = source.blocked;
+    return copy;
+}
 
 /**
  * @brief         The image sigreturn restores, laid on the user stack.

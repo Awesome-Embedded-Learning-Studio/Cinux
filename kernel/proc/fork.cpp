@@ -107,10 +107,11 @@ Task* BuildForkChild(unsigned long long frame_address) {
     kBorn->space      = std::move(space);
     kBorn->vmas       = std::move(vmas);
     kBorn->parent     = kParent;
-    for (unsigned long slot = 0; slot < syscall::kSignalCount; ++slot) {
-        kBorn->signals.actions[slot] = kParent->signals.actions[slot];
+    kBorn->signals = CloneSignalState(*kParent->signals);
+    if (!kBorn->signals.holds()) {
+        mm::Pmm::self().free_pages(kStack, kStackOrder);
+        return nullptr;
     }
-    kBorn->signals.blocked = kParent->signals.blocked;
     kBorn->pgid            = kParent->pgid;
     kBorn->sid             = kParent->sid;
     kBorn->fs_ctx          = fs::CloneFsContext(*kParent->fs_ctx);

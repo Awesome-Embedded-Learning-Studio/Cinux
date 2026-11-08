@@ -32,6 +32,9 @@ Task* BuildCloneChild(unsigned long long frame_address, const ClonePlan& plan) {
     if ((plan.flags & syscall::kCloneFs) != 0) {
         kBorn->fs_ctx = kParent->fs_ctx;
     }
+    if ((plan.flags & syscall::kCloneSighand) != 0) {
+        kBorn->signals = kParent->signals;
+    }
     if ((plan.flags & syscall::kCloneSetTls) != 0) {
         kBorn->ctx.fs_base = plan.tls;
     }

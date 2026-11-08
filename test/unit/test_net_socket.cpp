@@ -751,7 +751,7 @@ void run_accept_flags_body() {
     ASSERT_EQ(syscall::HandleAccept4(frame), -syscall::kEinval);
     syscall::g_test_monotonic_step_ns = 0;
     syscall::g_test_monotonic_ns      = 0;
-    task.signals.reset();
+    task.signals->reset();
 
     auto&                world = net::NetWorld::self();
     const net::TcpEvents kNoNews{};
@@ -818,7 +818,7 @@ void run_timer_body() {
     scheduler.on_timer_tick(7'000'000'000);
     ASSERT_TRUE(proc::HasPendingSignal(task));
     ASSERT_EQ(task.state, proc::TaskState::kRunning);
-    task.signals.reset();
+    task.signals->reset();
     TimerImage image{.interval_microseconds = 1000, .value_microseconds = 500};
     frame     = plain_frame();
     frame.rsi = reinterpret_cast<Word>(&image);
@@ -861,14 +861,14 @@ void run_blocked_alarm_body() {
     scheduler.seat(waiter, false);
     proc::RealTimerValue timer{.value_ns = 100};
     scheduler.real_timer(waiter, 0, timer, true);
-    waiter.signals.blocked = syscall::SigSet{1ULL << static_cast<unsigned>(syscall::kSigAlrm - 1)};
+    waiter.signals->blocked = syscall::SigSet{1ULL << static_cast<unsigned>(syscall::kSigAlrm - 1)};
     scheduler.on_timer_tick(100);
     ASSERT_EQ(waiter.state, proc::TaskState::kBlocked);
     ASSERT_FALSE(proc::HasPendingSignal(waiter));
-    waiter.signals.blocked = {};
+    waiter.signals->blocked = {};
     ASSERT_TRUE(proc::HasPendingSignal(waiter));
-    waiter.signals.reset();
-    waiter.signals.actions[syscall::kSigAlrm - 1].handler = syscall::kSignalIgnore;
+    waiter.signals->reset();
+    waiter.signals->actions[syscall::kSigAlrm - 1].handler = syscall::kSignalIgnore;
     timer.value_ns                                        = 100;
     scheduler.real_timer(waiter, 100, timer, true);
     scheduler.on_timer_tick(200);
@@ -920,7 +920,7 @@ void run_raw_body() {
     ASSERT_EQ(base::ReadWord32Be(address, 4), net::kLoopbackAddress);
     ASSERT_TRUE(proc::SendSignal(*proc::Scheduler::self().current(), syscall::kSigInt));
     ASSERT_EQ(syscall::HandleRecvfrom(frame), -syscall::kEintr);
-    proc::Scheduler::self().current()->signals.reset();
+    proc::Scheduler::self().current()->signals->reset();
     frame                   = plain_frame();
     frame.rdi               = net::kAfInet;
     frame.rsi               = static_cast<Word>(net::kSockDgram) | 0x800ULL;

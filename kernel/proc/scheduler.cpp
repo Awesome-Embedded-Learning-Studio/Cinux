@@ -273,10 +273,10 @@ void Scheduler::expire_real_timers(unsigned long long now_ns) {
                 const auto kDelay      = scan->real_interval_ns - kTail;
                 scan->real_deadline_ns = kDelay > ~0ULL - now_ns ? 0 : now_ns + kDelay;
             }
-            const auto kGate = scan->signals.gate.guard();
-            if (scan->signals.actions[syscall::kSigAlrm - 1].handler != syscall::kSignalIgnore) {
-                scan->signals.pending =
-                    scan->signals.pending |
+            const auto kGate = scan->signals->gate.guard();
+            if (scan->signals->actions[syscall::kSigAlrm - 1].handler != syscall::kSignalIgnore) {
+                scan->signals->pending =
+                    scan->signals->pending |
                     syscall::SigSet{1ULL << static_cast<unsigned>(syscall::kSigAlrm - 1)};
             }
         }

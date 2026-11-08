@@ -341,7 +341,7 @@ long long HandleEpollWait(const SyscallFrame& frame) {
 }
 long long HandleEpollPwait(const SyscallFrame& frame) {
     auto*      self     = CurrentTask();
-    const auto kRestore = self->signals.blocked;
+    const auto kRestore = self->signals->blocked;
     if (frame.r8 != 0) {
         if (frame.r9 != sizeof(SigSet)) {
             return -kEinval;
@@ -350,7 +350,7 @@ long long HandleEpollPwait(const SyscallFrame& frame) {
         if (!uaccess::CopyFromUser(&wanted, frame.r8, sizeof(wanted))) {
             return -kEfault;
         }
-        self->signals.blocked = MaskableSignals(wanted);
+        self->signals->blocked = MaskableSignals(wanted);
     }
     const auto kResult = HandleEpollWait(frame);
     if (frame.r8 != 0) {

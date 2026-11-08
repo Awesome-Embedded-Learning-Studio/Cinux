@@ -664,16 +664,16 @@ void run_signal_wait_body() {
     frame.rsi                      = reinterpret_cast<Word>(info);
     frame.rdx                      = reinterpret_cast<Word>(kZeroTimeout);
     frame.r10                      = sizeof(SigSet);
-    self.signals.blocked           = kWanted | kOther;
-    self.signals.pending           = kWanted | kOther;
+    self.signals->blocked           = kWanted | kOther;
+    self.signals->pending           = kWanted | kOther;
     ASSERT_EQ(HandleRtSigtimedwait(frame), kSigUsr2);
     ASSERT_EQ(info[0], kSigUsr2);
-    ASSERT_EQ(self.signals.pending.raw, kOther.raw);
-    ASSERT_EQ(self.signals.blocked.raw, (kWanted | kOther).raw);
+    ASSERT_EQ(self.signals->pending.raw, kOther.raw);
+    ASSERT_EQ(self.signals->blocked.raw, (kWanted | kOther).raw);
     ASSERT_EQ(HandleRtSigtimedwait(frame), -11);
-    self.signals.blocked = {};
+    self.signals->blocked = {};
     ASSERT_EQ(HandleRtSigtimedwait(frame), -4);
-    self.signals.pending = {};
+    self.signals->pending = {};
     check_signal_wait_arguments(frame);
     cinux::proc::Scheduler::self().exit_current();
 }
@@ -1096,7 +1096,7 @@ void run_masked_wait_body() {
     ASSERT_TRUE(kLoop >= 0);
 
     const cinux::proc::Task& self    = *cinux::proc::Scheduler::self().current();
-    const auto               kBefore = self.signals.blocked;
+    const auto               kBefore = self.signals->blocked;
     SigSet                   wanted{};
     wanted = wanted | bit_for(kSigKill) | bit_for(kSigStop) | bit_for(kSigUsr1);
 
@@ -1108,14 +1108,14 @@ void run_masked_wait_body() {
     frame.r8  = reinterpret_cast<Word>(&wanted);
     frame.r9  = sizeof(wanted);
     ASSERT_EQ(HandleEpollPwait(frame), 0);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
 
     frame.r9 = 4;
     ASSERT_EQ(HandleEpollPwait(frame), -kEinval);
     frame.r9 = sizeof(wanted);
     frame.r8 = kUserAddressLimit;
     ASSERT_EQ(HandleEpollPwait(frame), -kEfault);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
 
     unsigned long long timeout[2] = {0, 0};
     frame.rdi                     = 0;
@@ -1123,10 +1123,10 @@ void run_masked_wait_body() {
     frame.rdx                     = reinterpret_cast<Word>(timeout);
     frame.r10                     = reinterpret_cast<Word>(&wanted);
     ASSERT_EQ(HandlePpoll(frame), 0);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
     frame.r10 = kUserAddressLimit;
     ASSERT_EQ(HandlePpoll(frame), -kEfault);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
     cinux::proc::Scheduler::self().exit_current();
 }
 

@@ -29,9 +29,9 @@ constexpr SigSet bit_for(int number) {
 /// The mask a delivered handler runs under: the action's own mask,
 /// plus the delivered signal itself unless it asked to stay open.
 void apply_handler_mask(Task& self, const SigAction& action, int number) {
-    self.signals.blocked = syscall::MaskableSignals(self.signals.blocked | action.mask);
+    self.signals->blocked = syscall::MaskableSignals(self.signals->blocked | action.mask);
     if ((action.flags & syscall::kSaNodefer) == 0) {
-        self.signals.blocked = self.signals.blocked | bit_for(number);
+        self.signals->blocked = self.signals->blocked | bit_for(number);
     }
 }
 
@@ -211,8 +211,8 @@ void SendToGroup(unsigned long long pgid, int number) {
 
 bool HasPendingSignal(const Task& task) {
     const arch::IrqGuard kIrq;
-    const auto           kGate = task.signals.gate.guard();
-    return task.signals.pending.has(~task.signals.blocked);
+    const auto           kGate = task.signals->gate.guard();
+    return task.signals->pending.has(~task.signals->blocked);
 }
 
 bool SendSignal(Task& target, int number) {
@@ -225,15 +225,15 @@ bool SendSignal(Task& target, int number) {
     SigAction action{};
     {
         const arch::IrqGuard kIrq;
-        const auto           kGate = target.signals.gate.guard();
-        action                     = target.signals.actions[number - 1];
+        const auto           kGate = target.signals->gate.guard();
+        action                     = target.signals->actions[number - 1];
         if (action.handler == kSignalIgnore) {
             return true;
         }
         if (number == cinux::syscall::kSigCont) {
-            target.signals.pending = target.signals.pending & ~stop_class_mask();
+            target.signals->pending = target.signals->pending & ~stop_class_mask();
         }
-        target.signals.pending = target.signals.pending | bit_for(number);
+        target.signals->pending = target.signals->pending | bit_for(number);
     }
     if (target.state == TaskState::kStopped &&
         (number == cinux::syscall::kSigCont || number == cinux::syscall::kSigKill)) {
@@ -250,10 +250,10 @@ bool SendSignal(Task& target, int number) {
 
 void FinishSignalWait(Task& task, SigSet restore) {
     if (HasPendingSignal(task)) {
-        task.signals.wait_restore         = restore;
-        task.signals.wait_restore_pending = true;
+        task.signals->wait_restore         = restore;
+        task.signals->wait_restore_pending = true;
     } else {
-        task.signals.blocked = restore;
+        task.signals->blocked = restore;
     }
 }
 bool DeliverPendingSignals(SyscallFrame& frame) {
@@ -261,22 +261,22 @@ bool DeliverPendingSignals(SyscallFrame& frame) {
     if (kSelf == nullptr) {
         return false;
     }
-    const bool   kRestoreWait = kSelf->signals.wait_restore_pending;
-    const SigSet kReturnMask  = kRestoreWait ? kSelf->signals.wait_restore : kSelf->signals.blocked;
-    kSelf->signals.wait_restore_pending = false;
+    const bool   kRestoreWait = kSelf->signals->wait_restore_pending;
+    const SigSet kReturnMask  = kRestoreWait ? kSelf->signals->wait_restore : kSelf->signals->blocked;
+    kSelf->signals->wait_restore_pending = false;
     bool rewrote                        = false;
     for (;;) {
         int       number = 0;
         SigAction action{};
         {
             const arch::IrqGuard kIrq;
-            const auto           kGate = kSelf->signals.gate.guard();
-            number                     = lowest_runnable(kSelf->signals);
+            const auto           kGate = kSelf->signals->gate.guard();
+            number                     = lowest_runnable(*kSelf->signals);
             if (number != 0) {
-                action                 = kSelf->signals.actions[number - 1];
-                kSelf->signals.pending = kSelf->signals.pending & ~bit_for(number);
+                action                 = kSelf->signals->actions[number - 1];
+                kSelf->signals->pending = kSelf->signals->pending & ~bit_for(number);
                 if ((action.flags & cinux::syscall::kSaResethand) != 0) {
-                    kSelf->signals.actions[number - 1] = SigAction{};
+                    kSelf->signals->actions[number - 1] = SigAction{};
                 }
             }
         }
@@ -307,7 +307,7 @@ bool DeliverPendingSignals(SyscallFrame& frame) {
         break;
     }
     if (!rewrote) {
-        kSelf->signals.blocked = kReturnMask;
+        kSelf->signals->blocked = kReturnMask;
     }
     return rewrote;
 }

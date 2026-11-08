@@ -163,8 +163,9 @@ struct Task : cinux::base::container::SelfNode<Task> {
     SchedulingClass*   sched_class{};
     /// The task's action table, blocked set and pending set; zeroed is
     /// the valid fresh-task state, fork copies the first two and exec
-    /// resets all three.
-    SignalState        signals{};
+    /// resets all three. A CLONE_SIGHAND clone shares the whole object
+    /// with its maker, so the group answers one handler table.
+    cinux::base::Shared<SignalState> signals = cinux::base::MakeShared<SignalState>();
     unsigned long long real_deadline_ns{};
     unsigned long long real_interval_ns{};
     /// User address the task asked the kernel to zero when it dies

@@ -261,6 +261,7 @@ inline constexpr unsigned long long kCloneVfork  = 0x4000;
 inline constexpr unsigned long long kCloneVm     = 0x100;    ///< Share the address space.
 inline constexpr unsigned long long kCloneFs     = 0x200;    ///< Share the working directory.
 inline constexpr unsigned long long kCloneFiles  = 0x400;    ///< Share the descriptor table.
+inline constexpr unsigned long long kCloneSighand = 0x800;   ///< Share the signal table.
 inline constexpr unsigned long long kCloneThread = 0x10000;  ///< Join the maker's thread group.
 /// Share the SysV semaphore undo table. No semaphore implementation
 /// exists yet, so the flag is accepted without a table to share.
