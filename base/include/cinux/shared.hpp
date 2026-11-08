@@ -384,4 +384,23 @@ template <typename Stuff, typename... Args>
     return Shared<Stuff>(new Stuff(std::forward<Args>(args)...));
 }
 
+/**
+ * @brief         Retains one borrowed object and hands back its hold.
+ * @tparam        Stuff   The shared type; derives RefCount.
+ * @param[in]     object  A live object the caller only borrows.
+ * @return        A Shared holding the object, one more owner than before.
+ * @note          The borrow-then-own pair written once: callers that
+ *                keep a raw counted pointer in a slot (Vfs mount
+ *                lifetimes, for one) no longer spell retain() next to
+ *                a Shared constructor, where forgetting the retain
+ *                would hand the destructor an uncounted object.
+ * @since         0.9.0
+ * @ingroup       base_ptr
+ */
+template <typename Stuff>
+[[nodiscard]] Shared<Stuff> AdoptShared(Stuff& object) {
+    object.retain();
+    return Shared<Stuff>(&object);
+}
+
 }  // namespace cinux::base

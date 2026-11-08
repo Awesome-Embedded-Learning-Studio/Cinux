@@ -99,6 +99,18 @@ TEST("weak: many watchers all vacate together") {
     ASSERT_TRUE(!third.watching());
 }
 
+TEST("shared: adopting a borrow retains it and the hold releases it") {
+    cinux::base::Shared<Node> owner = cinux::base::MakeShared<Node>();
+    ASSERT_TRUE(owner->use_count() == 1);
+    {
+        cinux::base::Shared<Node> borrowed = cinux::base::AdoptShared(*owner);
+        ASSERT_TRUE(borrowed.holds());
+        ASSERT_TRUE(owner->use_count() == 2);
+        ASSERT_TRUE(borrowed.get() == owner.get());
+    }
+    ASSERT_TRUE(owner->use_count() == 1);
+}
+
 }  // namespace
 
 int main() {
