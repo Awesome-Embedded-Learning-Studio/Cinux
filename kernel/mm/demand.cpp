@@ -72,11 +72,11 @@ using arch::page::Entry;
 
 }  // namespace
 
-bool FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned long long address,
-              unsigned long long error_code) {
+FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges,
+                     unsigned long long address, unsigned long long error_code) {
     if ((error_code & (arch::isr::kFaultProtection | arch::isr::kFaultReserved)) != 0 ||
         address >= kUserTop) {
-        return false;
+        return FillOutcome::kUnhandled;
     }
     // The hold keeps the range alive across the fill: without it a
     // concurrent munmap could free the region between the lookup and
@@ -84,44 +84,45 @@ bool FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned long l
     const VmaStore::Hold   kHold(ranges);
     const VmaRegion* const kRegion = ranges.find_locked(address);
     if (kRegion == nullptr) {
-        return false;
+        return FillOutcome::kUnhandled;
     }
     const bool kWrite       = (error_code & arch::isr::kFaultWasWrite) != 0;
     const bool kInstruction = (error_code & arch::isr::kFaultInstruction) != 0;
     if ((kWrite && !kRegion->writable) || (kInstruction && !kRegion->executable) ||
         (!kWrite && !kInstruction && !kRegion->readable)) {
-        return false;
+        return FillOutcome::kUnhandled;
     }
     const unsigned long kPage = cinux::base::math::AlignDown(address, kSize);
     if (kRegion->kind == VmaKind::kStack && kPage < kRegion->stack_floor) {
-        return false;
+        return FillOutcome::kUnhandled;
     }
     KernelTables       world;
     const walk::SlotAt kSlot = walk::FindSlot(world, space.root(), kPage);
     if (kSlot.entry != nullptr && kSlot.entry->has(cinux::arch::page::kPresent)) {
-        return false;
+        return FillOutcome::kRetry;
     }
     if (kRegion->shared.holds()) {
         const auto& pages  = kRegion->shared->pages;
         const auto  kIndex = (kPage - kRegion->shared->start) / kSize;
         if (kIndex >= pages->count) {
-            return false;
+            return FillOutcome::kUnhandled;
         }
         const auto kPhysical = pages->frames[kIndex];
         if (!space.map_user(kPage, kPhysical,
                             arch::page::UserLeafTerms(kRegion->writable, false))) {
-            return false;
+            return FillOutcome::kUnhandled;
         }
         Pmm::self().retain_frame(base::PhysAddr{kPhysical});
         arch::InvalidatePage(kPage);
-        return true;
+        return FillOutcome::kFilled;
     }
     if (kRegion->kind == VmaKind::kDevice) {
-        return map_device_page(space, *kRegion, kPage);
+        return map_device_page(space, *kRegion, kPage) ? FillOutcome::kFilled
+                                                       : FillOutcome::kUnhandled;
     }
     const base::PhysAddr kFrame = Pmm::self().allocate_page();
     if (kFrame == base::PhysAddr{}) {
-        return false;
+        return FillOutcome::kUnhandled;
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto* const kBytes = cinux::base::PtrAt<unsigned char>(DirectMapVirt(kFrame.raw));
@@ -129,15 +130,15 @@ bool FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned long l
     if (kRegion->kind == VmaKind::kFile &&
         (kRegion->file_ops == nullptr || !read_backing_page(*kRegion, kPage, kFrame))) {
         Pmm::self().free_page(kFrame);
-        return false;
+        return FillOutcome::kUnhandled;
     }
     Entry bits = cinux::arch::page::UserLeafTerms(kRegion->writable, kRegion->executable);
     if (!space.map_user(kPage, kFrame.raw, bits)) {
         Pmm::self().free_page(kFrame);
-        return false;
+        return FillOutcome::kUnhandled;
     }
     cinux::arch::InvalidatePage(kPage);
-    return true;
+    return FillOutcome::kFilled;
 }
 
 }  // namespace cinux::mm::demand

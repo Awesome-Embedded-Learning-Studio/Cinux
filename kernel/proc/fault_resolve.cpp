@@ -42,14 +42,29 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
                           (!kInstruction || kRegion->executable) &&
                           (kWrite || kInstruction || kRegion->readable) &&
                           (kRegion->kind != mm::VmaKind::kStack || address >= kRegion->stack_floor);
-    if (!kAllowed || (!mm::cow::TryResolvePageFault(address, error_code) &&
-                      !mm::demand::FillPage(*kSelf->space, *kSelf->vmas, address, error_code))) {
+    if (!kAllowed) {
         if ((error_code & arch::isr::kFaultFromUser) != 0) {
             Scheduler::self().exit_current(cinux::syscall::kSigSegv);
         }
         return false;
     }
-    return true;
+    if (mm::cow::TryResolvePageFault(address, error_code)) {
+        return true;
+    }
+    // kRetry counts as resolved: the page already stands mapped and the
+    // fault was the CPU's spurious one, so the instruction just runs
+    // again. Treating it as fatal is what killed tasks on their own
+    // pages.
+    const mm::demand::FillOutcome kFill =
+        mm::demand::FillPage(*kSelf->space, *kSelf->vmas, address, error_code);
+    if (kFill == mm::demand::FillOutcome::kFilled ||
+        kFill == mm::demand::FillOutcome::kRetry) {
+        return true;
+    }
+    if ((error_code & arch::isr::kFaultFromUser) != 0) {
+        Scheduler::self().exit_current(cinux::syscall::kSigSegv);
+    }
+    return false;
 }
 
 }  // namespace
