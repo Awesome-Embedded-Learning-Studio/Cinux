@@ -179,13 +179,19 @@ inline void LoadCr3(unsigned long root) {
 }
 
 /**
- * @brief         Invalidates the TLB entry for one page.
+ * @brief         Invalidates the local TLB entry for one page.
  *
  * @param[in]     virtual_address   Any address inside the page to drop.
  * @return        None
  * @note          Required after unmapping or tightening permissions;
  *                  skipping it leaves stale translations in play.
- * @warning       None
+ *                Local CPU only: another processor running the same
+ *                  address space through CLONE_VM keeps its own entry.
+ *                  Cross-CPU invalidation needs a shootdown, which the
+ *                  kernel does not have yet; the design and the reason
+ *                  it is deferred live in
+ *                  document/notes/2026-11-08-tlb-shootdown-design.md.
+ * @warning       Not sufficient on SMP when a shared world is edited.
  * @throws        None
  * @since         0.1.0
  * @ingroup       kernel_arch
