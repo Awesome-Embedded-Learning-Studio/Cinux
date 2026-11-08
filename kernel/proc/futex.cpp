@@ -64,6 +64,12 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, un
     const cinux::arch::IrqGuard kQuiet;
     Task* const                 kSelf = Scheduler::self().current();
     FutexTable&                 table = shared_table();
+    // First touch outside the gate: a page that has never been made
+    // present faults here, where demand::FillPage is allowed to sleep.
+    unsigned int probe = 0;
+    if (!cinux::syscall::uaccess::CopyFromUser(&probe, uaddr, sizeof(probe))) {
+        return base::KernelError::kInvalidArgument;
+    }
     {
         const SpinGuard kGuard(table.gate);
         unsigned int    present = 0;
@@ -71,6 +77,21 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, un
             return base::KernelError::kInvalidArgument;
         }
         if (present != expected) {
+            return base::KernelError::kWouldBlock;
+        }
+        // About to park, so the task pointer is needed now. The read
+        // that closes the lost-wakeup window runs under the gate, so it
+        // must never fault: a resolver running inside the gate could
+        // schedule or exit while this guard is still held. The touch
+        // above made the page present; the range check keeps a
+        // concurrent unmap from turning the locked read into a fault.
+        // The SMAP window must never span a spin.
+        if (kSelf == nullptr) {
+            return base::KernelError::kInvalidArgument;
+        }
+        mm::VmaRegion region{};
+        if (kSelf->vmas.holds() &&
+            (!kSelf->vmas->lookup(uaddr, region) || !region.readable)) {
             return base::KernelError::kWouldBlock;
         }
         kSelf->futex_uaddr  = uaddr;
@@ -89,19 +110,35 @@ base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected
 
 long long WakeUserWord(unsigned long long uaddr, unsigned long long count, unsigned int bitset) {
     FutexTable&                 table = shared_table();
-    long long                   woken = 0;
     const cinux::arch::IrqGuard kQuiet;
-    const SpinGuard             kGuard(table.gate);
-    auto&                       bucket = table.buckets[FutexTable::bucket_for(uaddr)];
-    Task*                       node   = bucket.head();
-    while (node != nullptr && std::cmp_less(woken, count)) {
-        Task* const kNext = bucket.after(*node);
-        if (node->futex_uaddr == uaddr && (node->futex_bitset & bitset) != 0) {
-            bucket.remove(*node);
-            Scheduler::self().unblock(*node);
-            woken++;
+    long long                   woken = 0;
+    // Detach under the gate, wake after it drops: unblock may retire a
+    // group member, whose join-word clear re-enters WakeUserWord, and
+    // the futex gate is not recursive.
+    constexpr unsigned kWakeBatch = 16;
+    Task*              batch[kWakeBatch];
+    while (std::cmp_less(woken, count)) {
+        unsigned taken = 0;
+        {
+            const SpinGuard kGuard(table.gate);
+            auto&           bucket = table.buckets[FutexTable::bucket_for(uaddr)];
+            Task*           node   = bucket.head();
+            while (node != nullptr && taken < kWakeBatch && std::cmp_less(woken, count)) {
+                Task* const kNext = bucket.after(*node);
+                if (node->futex_uaddr == uaddr && (node->futex_bitset & bitset) != 0) {
+                    bucket.remove(*node);
+                    batch[taken++] = node;
+                    ++woken;
+                }
+                node = kNext;
+            }
         }
-        node = kNext;
+        for (unsigned i = 0; i < taken; ++i) {
+            Scheduler::self().unblock(*batch[i]);
+        }
+        if (taken < kWakeBatch) {
+            break;
+        }
     }
     return woken;
 }
