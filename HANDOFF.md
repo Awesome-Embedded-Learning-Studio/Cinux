@@ -97,3 +97,15 @@
 验证：`test_thread_exit` 6/6、`test_scheduler` 7/7、`test_sync` 9/9、`test_signal` 33/33、`test_net_socket` 25/25、`test_syscall_face` 23/23、`test_fs_context` 3/3、`test_vfs` 15/15、`test_procfs` 18/18、`test_sched_class` 9/9，全量编译绿。
 
 仍留：futex 锁内读依赖「VMA 在则页在」（Cinux 没有 madvise），munmap 后同址重映射的竞赛窗口记在这里；TLB shootdown 仍未实现。
+
+## 第二次复审后的修复（2026-11-08）
+
+复审指出第一版修复把清 join 字和 files.reset 挪到了设 Zombie 之后：父进程 wait4 认领 zombie 后可以 reclaim Task，退休路径再碰它就是释放后使用。已改：
+
+- 认领（标记 pending、摘就绪队列、detach）在队列门内完成，成员此时还不是 zombie。
+- `retire_claimed` 先清 join 字、放文件表，再进队列门设 Zombie 并投递 SIGCHLD；父进程认领只能发生在 Zombie 之后，那时副作用已经做完。
+- exit_group 摘表前保存 next，修掉 `tasks_.remove` 清空 next_ 导致每轮只处理一个成员、退化成 O(n²) 重扫的问题。
+
+验证：test_thread_exit 6/6、test_scheduler 7/7、test_sync 9/9、test_signal 33/33、test_net_socket 25/25、test_syscall_face 23/23，host 测试 84/84，全量编译绿。
+
+仍留：parent 裸指针在「设 Zombie 通知父进程」的门内使用，父进程若在同一门序列里被回收仍有一个理论窗口；blocked 成员的退休依赖唤醒方；TLB shootdown 未实现。

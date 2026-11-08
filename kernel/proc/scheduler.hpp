@@ -607,7 +607,7 @@ private:
     /// Retires one thread-group member that is not the current task.
     void                retire_group_member(Task& member, long long code);
     /// Runs the side effects of a retirement after the queue gate drops.
-    void retire_member_effects(Task& member, Task* self, bool became_zombie, Task* parent);
+    void retire_claimed(Task& member, Task* self);
 
     void (*switch_tasks_)(void*, Task&, Task&) = nullptr;
     void (*enter_from_main_)(void*, Task&)     = nullptr;

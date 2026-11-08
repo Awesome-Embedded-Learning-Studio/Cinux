@@ -392,9 +392,7 @@ void Scheduler::exit_current(long long code) {
 }
 
 void Scheduler::retire_group_member(Task& member, long long code) {
-    Task* const kSelf         = current();
-    bool        became_zombie = false;
-    Task*       parent        = nullptr;
+    Task* const kSelf = current();
     {
         const QueueGuard kQueue(*this);
         if (member.state == TaskState::kDead || member.state == TaskState::kZombie) {
@@ -408,48 +406,51 @@ void Scheduler::retire_group_member(Task& member, long long code) {
             member.group_exit_code    = code;
             return;
         }
+        if (member.group_exit_pending && member.state != TaskState::kBlocked) {
+            // Claimed by exit_group and already on its way out.
+            return;
+        }
         if (member.state == TaskState::kReady) {
             base::safety::Check(member.sched_class->remove(member), "ready queue lost a group member");
         }
-        member.exit_code = code;
+        member.group_exit_pending = true;
+        member.group_exit_code    = code;
+        member.exit_code          = code;
         detach_offspring(member);
-        const bool kLeader = member.pid == member.tgid;
-        if (kLeader && member.parent != nullptr) {
-            member.state  = TaskState::kZombie;
-            became_zombie = true;
-            parent        = member.parent;
-        } else {
-            tasks_.remove(member);
-            if (member.parent != nullptr) {
-                offspring_.remove(member);
-            }
-            member.state = TaskState::kDead;
-        }
     }
-    retire_member_effects(member, kSelf, became_zombie, parent);
+    retire_claimed(member, kSelf);
 }
 
-void Scheduler::retire_member_effects(Task& member, Task* self, bool became_zombie,
-                                      Task* parent) {
-    // Outside the queue gate: clearing the join word may take the futex
-    // gate, and reclaim may take the heap gate. The join word is only
-    // cleared once the member is known not to run any more.
+void Scheduler::retire_claimed(Task& member, Task* self) {
+    // Side effects run before the member turns zombie: the parent can
+    // only reap a zombie, so clearing the join word and dropping the
+    // file table here keeps it out of the reap path's reach.
     if (self != nullptr && member.space.get() == self->space.get()) {
         futex::ClearTidWord(member);
     } else {
         member.clear_child_tid = 0;
     }
     member.files.reset();
-    if (became_zombie) {
-        SendSignal(*parent, cinux::syscall::kSigChld);
-        bool wake = false;
-        {
-            const QueueGuard kQueue(*this);
-            wake = waiters_.remove(*parent);
+    bool zombie = false;
+    {
+        const QueueGuard kQueue(*this);
+        Task* const     kParent = member.parent;
+        if (member.pid == member.tgid && kParent != nullptr) {
+            member.state = TaskState::kZombie;
+            zombie       = true;
+            SendSignal(*kParent, cinux::syscall::kSigChld);
+            if (waiters_.remove(*kParent)) {
+                unblock(*kParent);
+            }
+        } else {
+            tasks_.remove(member);
+            if (kParent != nullptr) {
+                offspring_.remove(member);
+            }
+            member.state = TaskState::kDead;
         }
-        if (wake) {
-            unblock(*parent);
-        }
+    }
+    if (zombie) {
         return;
     }
     if (__atomic_load_n(&member.on_cpu, __ATOMIC_ACQUIRE) == -1) {
@@ -466,17 +467,18 @@ void Scheduler::exit_group(long long code) {
     base::safety::Check(kSelf != nullptr, "exit_group called outside any task");
     const unsigned long long kGroup = kSelf->tgid;
     // Claim members while the registry walk holds the queue gate, then
-    // run the side effects outside it. A victim pointer held across the
-    // gate would be a use-after-free once another CPU reaps it.
+    // retire them outside it. A claimed member is not a zombie yet, so
+    // the reap path cannot free it while the pointer is in flight.
     for (;;) {
         Task*    batch[8];
         unsigned taken = 0;
         {
             const QueueGuard kQueue(*this);
-            for (Task* scan = tasks_.head(); scan != nullptr && taken < 8;
-                 scan = tasks_.after(*scan)) {
+            for (Task* scan = tasks_.head(); scan != nullptr && taken < 8;) {
+                Task* const kNext = tasks_.after(*scan);
                 if (scan == kSelf || scan->tgid != kGroup || scan->group_exit_pending ||
                     scan->state == TaskState::kZombie || scan->state == TaskState::kDead) {
+                    scan = kNext;
                     continue;
                 }
                 if (scan->state == TaskState::kRunning || scan->state == TaskState::kBlocked) {
@@ -492,25 +494,19 @@ void Scheduler::exit_group(long long code) {
                     if (scan->state == TaskState::kBlocked && waiters_.remove(*scan)) {
                         batch[taken++] = scan;
                     }
+                    scan = kNext;
                     continue;
                 }
                 if (scan->state == TaskState::kReady) {
                     base::safety::Check(scan->sched_class->remove(*scan),
                                         "ready queue lost a group member");
                 }
-                scan->exit_code = code;
+                scan->group_exit_pending = true;
+                scan->group_exit_code    = code;
+                scan->exit_code          = code;
                 detach_offspring(*scan);
-                const bool kLeader = scan->pid == scan->tgid;
-                if (kLeader && scan->parent != nullptr) {
-                    scan->state = TaskState::kZombie;
-                } else {
-                    tasks_.remove(*scan);
-                    if (scan->parent != nullptr) {
-                        offspring_.remove(*scan);
-                    }
-                    scan->state = TaskState::kDead;
-                }
                 batch[taken++] = scan;
+                scan           = kNext;
             }
         }
         if (taken == 0) {
@@ -524,8 +520,7 @@ void Scheduler::exit_group(long long code) {
                 unblock(member);
                 continue;
             }
-            const bool kZombie = member.state == TaskState::kZombie;
-            retire_member_effects(member, kSelf, kZombie, kZombie ? member.parent : nullptr);
+            retire_claimed(member, kSelf);
         }
     }
     exit_current(code);
