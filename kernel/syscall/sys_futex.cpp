@@ -11,9 +11,9 @@ namespace cinux::syscall {
 namespace {
 
 /// futex op: park while the word holds the expected value.
-inline constexpr Word kFutexWait = 0;
+inline constexpr Word kFutexWait       = 0;
 /// futex op: wake up to val waiters of the word.
-inline constexpr Word kFutexWake = 1;
+inline constexpr Word kFutexWake       = 1;
 /// futex op: park while the word holds the expected value, watching a
 /// subset of the word's wakeup channels.
 inline constexpr Word kFutexWaitBitset = 9;
@@ -29,7 +29,7 @@ long long HandleFutex(const SyscallFrame& frame) {
     const Word     kVal     = frame.rdx;
     // val3: the bitset for the WAIT_BITSET/WAKE_BITSET pair; unused by
     // the plain calls, which watch and offer every bit.
-    const auto kBitset = static_cast<unsigned int>(frame.r9);
+    const auto     kBitset  = static_cast<unsigned int>(frame.r9);
     if ((kUaddr & 3ULL) != 0ULL) {
         return -kEinval;
     }
@@ -41,8 +41,8 @@ long long HandleFutex(const SyscallFrame& frame) {
             return -kEinval;
         }
         const unsigned int kWatch = kOp == kFutexWaitBitset ? kBitset : ~0U;
-        const auto         kWait = cinux::proc::futex::WaitOnUserWord(
-            kUaddr, static_cast<unsigned int>(kVal), kWatch);
+        const auto         kWait =
+            cinux::proc::futex::WaitOnUserWord(kUaddr, static_cast<unsigned int>(kVal), kWatch);
         if (kWait != base::KernelError::kOk) {
             return kWait == base::KernelError::kWouldBlock ? -kEagain : -kEfault;
         }

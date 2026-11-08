@@ -46,7 +46,7 @@ long long HandleMprotect(const SyscallFrame& frame) {
     mm::KernelTables tables;
     // Same gate the fault path's map_user takes: leaf rewrites here and
     // a concurrent fill must not interleave on one page table.
-    const auto kTablesGuard = kSelf->space->guard();
+    const auto       kTablesGuard = kSelf->space->guard();
     for (unsigned long spot = kStart; spot < kEnd; spot += cinux::arch::page::kSize) {
         const mm::walk::SlotAt kSlot = mm::walk::FindSlot(tables, kSelf->space->root(), spot);
         if (kSlot.entry == nullptr || kSlot.level != mm::walk::WalkLevel::kPageTable) {

@@ -72,8 +72,8 @@ using arch::page::Entry;
 
 }  // namespace
 
-FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges,
-                     unsigned long long address, unsigned long long error_code) {
+FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned long long address,
+                     unsigned long long error_code) {
     if ((error_code & (arch::isr::kFaultProtection | arch::isr::kFaultReserved)) != 0 ||
         address >= kUserTop) {
         return FillOutcome::kUnhandled;

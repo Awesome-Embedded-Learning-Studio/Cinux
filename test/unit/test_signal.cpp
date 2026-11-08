@@ -264,7 +264,7 @@ TEST("signal send: bad numbers refuse and zombies shrug") {
 
 TEST("signal send: an ignored signal drops, anything else parks a bit") {
     cinux::proc::Task target;
-    target.state                                 = TaskState::kReady;
+    target.state                                  = TaskState::kReady;
     target.signals->actions[kSigUsr1 - 1].handler = kSignalIgnore;
     ASSERT_TRUE(SendSignal(target, kSigUsr1));
     ASSERT_TRUE(target.signals->pending.raw == 0);
@@ -314,7 +314,7 @@ TEST("signal delivery: masked wait delivers before restoring the caller mask") {
     World world(990);
     world.body = [](World& site) {
         site.alpha.signals->actions[kSigInt - 1].handler = kHandlerWord;
-        site.frame.user_rsp                             = g_fake_rsp;
+        site.frame.user_rsp                              = g_fake_rsp;
         SendSignal(site.alpha, kSigInt);
         cinux::proc::FinishSignalWait(site.alpha, bit_for(kSigInt));
         site.rewrote = DeliverPendingSignals(site.frame);
@@ -403,13 +403,13 @@ TEST("signal delivery: handler return restores registers, mask and the interrupt
     World world(1050);
     world.body = [](World& site) {
         site.alpha.signals->actions[kSigChld - 1].handler = kHandlerWord;
-        site.frame.user_rsp                              = g_fake_rsp - 8;
-        site.frame.rax                                   = 7;
-        site.frame.rcx                                   = 0x401234;
-        site.frame.r11                                   = 0x202;
-        site.frame.rbx                                   = 0x12345678;
+        site.frame.user_rsp                               = g_fake_rsp - 8;
+        site.frame.rax                                    = 7;
+        site.frame.rcx                                    = 0x401234;
+        site.frame.r11                                    = 0x202;
+        site.frame.rbx                                    = 0x12345678;
         site.alpha.signals->blocked                       = bit_for(kSigUsr1);
-        const SyscallFrame kBefore                       = site.frame;
+        const SyscallFrame kBefore                        = site.frame;
         auto* const        kRedZone = cinux::base::PtrAt<unsigned char>(site.frame.user_rsp - 128);
         cinux::base::SetBytes(kRedZone, 0xA5, 128);
         SendSignal(site.alpha, kSigChld);
@@ -485,7 +485,7 @@ TEST("signal delivery: a delivery that cannot fit the stack window kills") {
     World world(1200);
     world.body = [](World& site) {
         site.alpha.signals->actions[kSigInt - 1].handler = kHandlerWord;
-        site.frame.user_rsp                             = cinux::mm::kUserStackBottom - 0x100UL;
+        site.frame.user_rsp                              = cinux::mm::kUserStackBottom - 0x100UL;
         SendSignal(site.alpha, kSigInt);
         site.rewrote = DeliverPendingSignals(site.frame);
     };
@@ -514,7 +514,7 @@ TEST("signal delivery: SIGCHLD returns through a stack slid below the old window
     world.frame.user_rsp = kShiftedRsp;
     world.body           = [](World& site) {
         site.alpha.signals->actions[kSigChld - 1].handler = kHandlerWord;
-        const auto kBefore                               = site.frame.user_rsp;
+        const auto kBefore                                = site.frame.user_rsp;
         SendSignal(site.alpha, kSigChld);
         site.rewrote = DeliverPendingSignals(site.frame);
         if (site.rewrote) {
@@ -721,7 +721,7 @@ TEST("signal tables: a forked state copies actions and mask, not pending") {
 TEST("signal tables: a CLONE_SIGHAND pair answers one action table") {
     cinux::proc::Task maker;
     cinux::proc::Task member;
-    member.signals                    = maker.signals;
+    member.signals                              = maker.signals;
     maker.signals->actions[kSigInt - 1].handler = kSignalIgnore;
     ASSERT_TRUE(member.signals->actions[kSigInt - 1].handler == kSignalIgnore);
     member.signals->blocked = bit_for(kSigUsr1);

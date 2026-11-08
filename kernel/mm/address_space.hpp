@@ -190,7 +190,7 @@ public:
     ~AddressSpace() { teardown(); }
 
 private:
-    unsigned long root_ = 0;
+    unsigned long                  root_ = 0;
     /// Serializes table edits; every mutating face takes it, and the
     /// direct-walk callers hold guard(). Mutable because the const
     /// faces (map_user, translate) still serialize against writers.

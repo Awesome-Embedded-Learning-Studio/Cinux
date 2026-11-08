@@ -375,7 +375,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     }
     kSelf->signals->reset();
     kSelf->keep_capabilities = false;
-    kSelf->clear_child_tid = 0;
+    kSelf->clear_child_tid   = 0;
     kSelf->files->close_on_exec();
     note_program_identity(*kSelf, path);
     // The dying worlds must not come apart while CR3 still walks them:

@@ -120,8 +120,8 @@ struct World {
             check_early_wake(
                 task, [&] { cinux::proc::futex::WaitOnUserWord(kAddress, 7); },
                 [&] { cinux::proc::futex::WakeUserWord(kAddress, 1); });
-            unsigned int       bits_word    = 9;
-            const unsigned long long kBits = reinterpret_cast<unsigned long long>(&bits_word);
+            unsigned int             bits_word = 9;
+            const unsigned long long kBits     = reinterpret_cast<unsigned long long>(&bits_word);
             check_bitset_wake(task, kBits);
             ASSERT_TRUE(scheduler.withdraw(task));
         }

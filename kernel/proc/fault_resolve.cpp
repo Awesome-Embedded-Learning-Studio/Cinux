@@ -32,9 +32,9 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     // Work on a copy: the region could be unregistered and freed by a
     // sibling thread the moment find() returns, so the terms are read
     // from a snapshot that owns its shared attachments.
-    mm::VmaRegion             region{};
-    const bool                kCovered = kSelf->vmas->lookup(address, region);
-    const mm::VmaRegion* const kRegion = kCovered ? &region : nullptr;
+    mm::VmaRegion              region{};
+    const bool                 kCovered     = kSelf->vmas->lookup(address, region);
+    const mm::VmaRegion* const kRegion      = kCovered ? &region : nullptr;
     const bool                 kWrite       = (error_code & arch::isr::kFaultWasWrite) != 0;
     const bool                 kInstruction = (error_code & arch::isr::kFaultInstruction) != 0;
     const bool kAllowed = kRegion != nullptr && (error_code & arch::isr::kFaultReserved) == 0 &&
@@ -57,8 +57,7 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     // pages.
     const mm::demand::FillOutcome kFill =
         mm::demand::FillPage(*kSelf->space, *kSelf->vmas, address, error_code);
-    if (kFill == mm::demand::FillOutcome::kFilled ||
-        kFill == mm::demand::FillOutcome::kRetry) {
+    if (kFill == mm::demand::FillOutcome::kFilled || kFill == mm::demand::FillOutcome::kRetry) {
         return true;
     }
     if ((error_code & arch::isr::kFaultFromUser) != 0) {

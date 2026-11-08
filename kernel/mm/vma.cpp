@@ -125,9 +125,9 @@ const VmaRegion* VmaStore::find_locked(unsigned long address) const {
 }
 
 bool VmaStore::lookup(unsigned long address, VmaRegion& out) const {
-    const arch::IrqGuard      kIrq;
-    const auto                kGate = gate_.guard();
-    const VmaRegion* const    kHit  = find_locked(address);
+    const arch::IrqGuard   kIrq;
+    const auto             kGate = gate_.guard();
+    const VmaRegion* const kHit  = find_locked(address);
     if (kHit == nullptr) {
         return false;
     }
@@ -158,7 +158,7 @@ bool VmaStore::stack_contains_locked(unsigned long start, unsigned long bytes) c
 }
 
 VmaStore* VmaStore::clone() const {
-    const Hold kHold(*this);
+    const Hold          kHold(*this);
     base::Own<VmaStore> copy(new VmaStore{});
     if (!copy.holds()) {
         return nullptr;
@@ -207,17 +207,17 @@ void VmaStore::teardown() {
 void VmaStore::seed_heap(unsigned long base, unsigned long max) {
     const arch::IrqGuard kIrq;
     const auto           kGate = gate_.guard();
-    heap_.start       = base;
-    heap_.end         = base;
-    heap_.kind        = VmaKind::kAnonymous;
-    heap_.readable    = true;
-    heap_.writable    = true;
-    heap_.executable  = false;
-    heap_.backing     = {};
-    heap_.file_offset = 0;
-    heap_break_       = base;
-    heap_max_         = max;
-    heap_recorded_    = false;
+    heap_.start                = base;
+    heap_.end                  = base;
+    heap_.kind                 = VmaKind::kAnonymous;
+    heap_.readable             = true;
+    heap_.writable             = true;
+    heap_.executable           = false;
+    heap_.backing              = {};
+    heap_.file_offset          = 0;
+    heap_break_                = base;
+    heap_max_                  = max;
+    heap_recorded_             = false;
 }
 
 base::Result<unsigned long> VmaStore::move_heap_end(unsigned long target) {
@@ -304,8 +304,8 @@ base::Result<unsigned long> VmaStore::reserve(unsigned long ceiling, unsigned lo
     if (!kSpot.ok()) {
         return kSpot.error();
     }
-    spec.start = kSpot.value();
-    spec.end   = spec.start + bytes;
+    spec.start        = kSpot.value();
+    spec.end          = spec.start + bytes;
     const auto kFiled = register_range_locked(spec);
     if (!kFiled.ok()) {
         return kFiled.error();
@@ -431,7 +431,7 @@ bool VmaStore::span_known_locked(unsigned long start, unsigned long end) const {
 
 unsigned long VmaStore::max_end() const {
     const arch::IrqGuard kIrq;
-    const auto           kGate = gate_.guard();
+    const auto           kGate   = gate_.guard();
     unsigned long        highest = heap_.end;
     for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
         highest = cinux::base::math::Max(highest, scan->end);

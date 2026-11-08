@@ -39,12 +39,12 @@ namespace cinux::fs {
  */
 struct FsContext : cinux::base::RefCount<> {
     /// Working directory, absolute, NUL-terminated.
-    char cwd[kFsPathMax] = {'/', '\0'};
+    char         cwd[kFsPathMax]  = {'/', '\0'};
     /// Root the path walk stops at, absolute, NUL-terminated. No
     /// syscall writes it yet; chroot will.
-    char root[kFsPathMax] = {'/', '\0'};
+    char         root[kFsPathMax] = {'/', '\0'};
     /// Creation-mask default; no syscall consults it yet.
-    unsigned int umask = 0022U;
+    unsigned int umask            = 0022U;
 };
 
 /**

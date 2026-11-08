@@ -4,10 +4,10 @@
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
 #include "kernel/arch/x86_64/page.hpp"
 #include "kernel/arch/x86_64/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -51,7 +51,7 @@ void release_user_tables(Entry* table, int levels_below) {
 
 bool AddressSpace::init() {
     const arch::IrqGuard kIrq;
-    const auto           kGate = gate_.guard();
+    const auto           kGate  = gate_.guard();
     base::PhysAddr const kFrame = Pmm::self().allocate_page();
     if (kFrame == base::PhysAddr{}) {
         return false;

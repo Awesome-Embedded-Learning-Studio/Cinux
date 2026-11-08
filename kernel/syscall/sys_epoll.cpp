@@ -39,23 +39,23 @@ struct [[gnu::packed]] EpollEvent {
 static_assert(sizeof(EpollEvent) == 12);
 static_assert(offsetof(EpollEvent, data) == 4);
 struct Watch {
-    fs::OpenFile* file       = nullptr;
-    unsigned long descriptor = 0;
-    EpollEvent    event{};
+    fs::OpenFile*      file       = nullptr;
+    unsigned long      descriptor = 0;
+    EpollEvent         event{};
     unsigned long long version        = 0;
     unsigned long long write_sequence = 0;
     bool               edge_pending   = true;
 };
 struct Epoll : base::RefCount<> {
     base::container::SlotTable<Watch, kWatchLimit> watches{};
-    unsigned long                                  cursor = 0;
+    unsigned long                                  cursor       = 0;
     unsigned long long                             next_version = 0;
     ~Epoll();
 };
 struct Snapshot {
     base::Shared<fs::OpenFile> file;
     EpollEvent                 event;
-    unsigned long              index = 0;
+    unsigned long              index   = 0;
     unsigned long long         version = 0;
 };
 class EpollRegistry {
@@ -94,9 +94,9 @@ public:
             const auto* watch  = instance.watches.get(kIndex);
             if (watch != nullptr && watch->file->try_retain()) {
                 out[count++] = {
-                    .file  = base::Shared<fs::OpenFile>(watch->file),
-                    .event = watch->event,
-                    .index = kIndex,
+                    .file    = base::Shared<fs::OpenFile>(watch->file),
+                    .event   = watch->event,
+                    .index   = kIndex,
                     .version = watch->version,
                 };
             }
@@ -109,7 +109,7 @@ public:
     }
     bool claim(Epoll& instance, const Snapshot& item, unsigned long long sequence) {
         const proc::SpinGuard kGuard(gate_);
-        auto* watch = instance.watches.get(item.index);
+        auto*                 watch = instance.watches.get(item.index);
         if (watch == nullptr || watch->version != item.version) {
             return false;
         }
@@ -124,7 +124,7 @@ public:
     }
     void retry(Epoll& instance, const Snapshot& item) {
         const proc::SpinGuard kGuard(gate_);
-        auto* watch = instance.watches.get(item.index);
+        auto*                 watch = instance.watches.get(item.index);
         if (watch != nullptr && watch->version == item.version) {
             watch->edge_pending = true;
         }
@@ -153,8 +153,8 @@ long long EpollRegistry::control_add(Epoll& instance, fs::OpenFile* file, unsign
     if (kFound != kWatchLimit) {
         return -kEexist;
     }
-    const Watch kWatch{.file = file, .descriptor = descriptor, .event = event,
-                        .version = ++instance.next_version};
+    const Watch kWatch{
+        .file = file, .descriptor = descriptor, .event = event, .version = ++instance.next_version};
     if (instance.watches.insert(kWatch) == kWatchLimit) {
         return -kEnomem;
     }
@@ -232,8 +232,8 @@ long long scan_events(Epoll& instance, Word address, unsigned long capacity) {
     const auto                        kSize = EpollRegistry::self().snapshot(instance, snapshot);
     unsigned long                     count = 0;
     for (unsigned long index = 0; index < kSize; ++index) {
-        const auto& item = snapshot[index];
-        unsigned short ready = 0;
+        const auto&        item     = snapshot[index];
+        unsigned short     ready    = 0;
         unsigned long long sequence = 0;
         if ((item.event.events & kEdgeTriggered) != 0) {
             PollEventCounter(item.file.get(), item.event.events, ready, &sequence);

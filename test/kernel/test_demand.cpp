@@ -315,8 +315,7 @@ TEST("demand: the guard page and the sky above the stack decline") {
         .kind     = cinux::mm::VmaKind::kStack,
     };
     ASSERT_TRUE(store.register_range(make_region(kPlan)).ok());
-    ASSERT_TRUE(
-        !demand_fills(space, store, cinux::mm::kUserStackBottom, kUserWrite));
+    ASSERT_TRUE(!demand_fills(space, store, cinux::mm::kUserStackBottom, kUserWrite));
     ASSERT_TRUE(space.translate(cinux::mm::kUserStackBottom) == 0);
     ASSERT_TRUE(!demand_fills(space, store, cinux::mm::kUserStackTop, kUserWrite));
     space.teardown();
@@ -328,10 +327,9 @@ TEST("demand: faults nobody promised are declined, kernel-side included") {
     const cinux::mm::VmaStore kEmptyStore;
     const unsigned long       kOutside = cinux::mm::kUserNullTop + 384_KiB;
     ASSERT_TRUE(!demand_fills(space, kEmptyStore, kOutside, kUserWrite));
+    ASSERT_TRUE(!demand_fills(space, kEmptyStore, kOutside, cinux::arch::isr::kFaultWasWrite));
     ASSERT_TRUE(!demand_fills(space, kEmptyStore, kOutside,
-                                             cinux::arch::isr::kFaultWasWrite));
-    ASSERT_TRUE(!demand_fills(space, kEmptyStore, kOutside,
-                                             kUserWrite | cinux::arch::isr::kFaultProtection));
+                              kUserWrite | cinux::arch::isr::kFaultProtection));
     ASSERT_TRUE(!demand_fills(space, kEmptyStore, 0x100000000000ULL, kUserWrite));
     space.teardown();
 }
@@ -403,8 +401,7 @@ TEST("demand: a device offset outside the span declines") {
     };
     ASSERT_TRUE(store.register_range(make_region(kPlan)).ok());
     ASSERT_TRUE(demand_fills(space, store, kSpot, kUserWrite));
-    ASSERT_TRUE(!demand_fills(space, store, kSpot + (2 * cinux::arch::page::kSize),
-                                             kUserWrite));
+    ASSERT_TRUE(!demand_fills(space, store, kSpot + (2 * cinux::arch::page::kSize), kUserWrite));
     space.teardown();
     g_device_frame = 0;
 }

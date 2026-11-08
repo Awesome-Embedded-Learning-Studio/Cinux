@@ -60,8 +60,7 @@ FutexTable& shared_table() {
 
 }  // namespace
 
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
-                             unsigned int bitset) {
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, unsigned int bitset) {
     const cinux::arch::IrqGuard kQuiet;
     Task* const                 kSelf = Scheduler::self().current();
     FutexTable&                 table = shared_table();
@@ -74,8 +73,8 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
         if (present != expected) {
             return base::KernelError::kWouldBlock;
         }
-        kSelf->futex_uaddr   = uaddr;
-        kSelf->futex_bitset  = bitset;
+        kSelf->futex_uaddr  = uaddr;
+        kSelf->futex_bitset = bitset;
         table.buckets[FutexTable::bucket_for(uaddr)].push_back(*kSelf);
         Scheduler::self().prepare_to_wait();
     }
@@ -115,8 +114,8 @@ void ClearTidWord(Task& dying) {
         !arch::IsCanonicalAddress(kWord) || !dying.vmas.holds()) {
         return;
     }
-    mm::VmaRegion             region{};
-    const bool                kCovered = dying.vmas->lookup(static_cast<unsigned long>(kWord), region);
+    mm::VmaRegion region{};
+    const bool    kCovered = dying.vmas->lookup(static_cast<unsigned long>(kWord), region);
     const mm::VmaRegion* const kRegion = kCovered ? &region : nullptr;
     if (kRegion == nullptr || !kRegion->writable ||
         kRegion->end < static_cast<unsigned long>(kWord + kWordBytes)) {

@@ -142,7 +142,7 @@ long long HandlePpoll(const SyscallFrame& frame) {
             return -kEfault;
         }
         kSelf->signals->blocked = MaskableSignals(SigSet{words[0]});
-        armed                  = true;
+        armed                   = true;
     }
 
     for (;;) {

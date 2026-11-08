@@ -21,8 +21,8 @@
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/signal.hpp"
-#include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_capability.hpp"
+#include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_epoll.hpp"
 #include "kernel/syscall/sys_eventfd.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
@@ -265,11 +265,14 @@ TEST("syscall face: capability queries are empty and cannot grant privileges") {
     FaceWorld world;
     world.run([] {
         using namespace cinux::syscall;
-        struct Header { unsigned int version; int pid; } header{0, 0};
+        struct Header {
+            unsigned int version;
+            int          pid;
+        } header{0, 0};
         unsigned int data[7]{};
-        auto frame = plain_frame();
-        frame.rdi = reinterpret_cast<Word>(&header);
-        frame.rsi = reinterpret_cast<Word>(data);
+        auto         frame = plain_frame();
+        frame.rdi          = reinterpret_cast<Word>(&header);
+        frame.rsi          = reinterpret_cast<Word>(data);
         ASSERT_EQ(HandleCapget(frame), -kEinval);
         ASSERT_EQ(header.version, 0x20080522U);
         data[0] = ~0U;
@@ -280,14 +283,14 @@ TEST("syscall face: capability queries are empty and cannot grant privileges") {
         ASSERT_EQ(HandleCapset(frame), 0);
         data[1] = 1U << 13;  // A caller cannot mint CAP_NET_RAW.
         ASSERT_EQ(HandleCapset(frame), -kEperm);
-        data[1] = 0;
+        data[1]        = 0;
         header.version = 0x19980330;
-        data[3] = 456;
+        data[3]        = 456;
         ASSERT_EQ(HandleCapget(frame), 0);
         ASSERT_EQ(data[3], 456U);
         frame.rsi = kUserAddressLimit;
         ASSERT_EQ(HandleCapget(frame), -kEfault);
-        frame = plain_frame();
+        frame     = plain_frame();
         frame.rdi = 8;
         frame.rsi = 1;
         ASSERT_EQ(HandlePrctl(frame), 0);
@@ -316,10 +319,10 @@ TEST("syscall face: wait4 decodes signed 32-bit process selectors") {
             child.parent = scheduler.current();
             child.pgid   = 7;
             scheduler.seat(child, false);
-            const auto kPid = static_cast<long long>(child.pid);
-            auto       frame = plain_frame();
-            frame.rdi        = kSelector;
-            frame.rdx        = 1;  // WNOHANG: an eligible live child is not ECHILD.
+            const auto kPid        = static_cast<long long>(child.pid);
+            auto       frame       = plain_frame();
+            frame.rdi              = kSelector;
+            frame.rdx              = 1;  // WNOHANG: an eligible live child is not ECHILD.
             const auto kLiveResult = HandleWait4(frame);
             child.state            = cinux::proc::TaskState::kZombie;
             child.exit_code        = 23 << 8;
@@ -665,8 +668,8 @@ void run_signal_wait_body() {
     frame.rsi                      = reinterpret_cast<Word>(info);
     frame.rdx                      = reinterpret_cast<Word>(kZeroTimeout);
     frame.r10                      = sizeof(SigSet);
-    self.signals->blocked           = kWanted | kOther;
-    self.signals->pending           = kWanted | kOther;
+    self.signals->blocked          = kWanted | kOther;
+    self.signals->pending          = kWanted | kOther;
     ASSERT_EQ(HandleRtSigtimedwait(frame), kSigUsr2);
     ASSERT_EQ(info[0], kSigUsr2);
     ASSERT_EQ(self.signals->pending.raw, kOther.raw);
@@ -919,8 +922,8 @@ void run_getdents_refusals_body() {
     frame.rsi             = kOpenNonblock;
     const long long kDoor = HandleEventfd2(frame);
     ASSERT_TRUE(kDoor >= 0);
-    frame.rdi              = 0;
-    const long long kLoop  = HandleEpollCreate1(frame);
+    frame.rdi             = 0;
+    const long long kLoop = HandleEpollCreate1(frame);
     ASSERT_TRUE(kLoop >= 0);
 
     // None of them carries read_dir, so the walk must refuse each with
@@ -938,10 +941,10 @@ void run_getdents_refusals_body() {
     // still walks: the refusal must not swallow genuine seats.
     frame.rdi = cinux::fs::kFileTableMax;
     ASSERT_EQ(HandleGetdents(frame), -kEbadf);
-    cinux::fs::RamFs                 pool;
-    constexpr cinux::fs::FsOps       kPoolOps = cinux::fs::EraseFs<cinux::fs::RamFs>();
-    const cinux::fs::FsNode          kDirNode = pool.lookup("/").value();
-    const cinux::proc::Task* const   kSelf    = cinux::proc::Scheduler::self().current();
+    cinux::fs::RamFs                         pool;
+    constexpr cinux::fs::FsOps               kPoolOps = cinux::fs::EraseFs<cinux::fs::RamFs>();
+    const cinux::fs::FsNode                  kDirNode = pool.lookup("/").value();
+    const cinux::proc::Task* const           kSelf    = cinux::proc::Scheduler::self().current();
     const cinux::base::Result<unsigned long> kSeat =
         kSelf->files->alloc(&kPoolOps, &pool, kDirNode);
     ASSERT_TRUE(kSeat.ok());

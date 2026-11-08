@@ -447,11 +447,11 @@ private:
     [[nodiscard]] bool span_known(unsigned long start, unsigned long end) const;
 
     /// The bodies below assume the gate is already held.
-    [[nodiscard]] base::Result<void> register_range_locked(const VmaRegion& spec);
-    [[nodiscard]] base::Result<void> unregister_range_locked(unsigned long start,
-                                                             unsigned long end);
-    [[nodiscard]] base::Result<void> protect_locked(unsigned long start, unsigned long end,
-                                                    VmaProtection terms);
+    [[nodiscard]] base::Result<void>          register_range_locked(const VmaRegion& spec);
+    [[nodiscard]] base::Result<void>          unregister_range_locked(unsigned long start,
+                                                                      unsigned long end);
+    [[nodiscard]] base::Result<void>          protect_locked(unsigned long start, unsigned long end,
+                                                             VmaProtection terms);
     [[nodiscard]] base::Result<unsigned long> find_free_spot_locked(unsigned long ceiling,
                                                                     unsigned long bytes) const;
     [[nodiscard]] bool stack_contains_locked(unsigned long start, unsigned long bytes) const;

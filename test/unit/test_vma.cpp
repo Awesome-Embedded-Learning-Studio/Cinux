@@ -362,11 +362,11 @@ TEST("vma: lookup hands back terms that outlive the original range") {
 }
 
 TEST("vma: reserve picks a gap and records it under one hold") {
-    cinux::mm::VmaStore store;
+    cinux::mm::VmaStore  store;
     cinux::mm::VmaRegion spec{};
-    spec.kind     = cinux::mm::VmaKind::kAnonymous;
-    spec.readable = true;
-    spec.writable = true;
+    spec.kind         = cinux::mm::VmaKind::kAnonymous;
+    spec.readable     = true;
+    spec.writable     = true;
     const auto kFirst = store.reserve(0x100000, 0x2000, spec);
     ASSERT_TRUE(kFirst.ok());
     ASSERT_EQ(kFirst.value(), 0xFE000UL);

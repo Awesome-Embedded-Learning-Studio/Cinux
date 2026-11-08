@@ -124,7 +124,7 @@ bool Scheduler::seat(Task& task, bool runnable, bool initial_process) {
             ++ready_refusals_;
             return false;
         }
-        task.state = TaskState::kReady;
+        task.state             = TaskState::kReady;
         local().notify_pending = true;
     }
     return true;
@@ -201,7 +201,7 @@ void Scheduler::yield() {
         const QueueGuard kQueue(*this);
         if (kPrev->sched_class->enqueue(*kPrev)) {
             kPrev->state = TaskState::kReady;
-            rotated = true;
+            rotated      = true;
         } else {
             // Row full: keep running instead of rotating away from a task
             // the row cannot hold; the next slice offers the slot again.
@@ -308,13 +308,13 @@ void Scheduler::maybe_preempt() {
     }
     const arch::IrqGuard kGuard;
     local().rotate_due = false;
-    bool rotated = false;
+    bool rotated       = false;
     {
         const QueueGuard kQueue(*this);
         Task* const      kSelf = current();
         if (kSelf->sched_class->enqueue(*kSelf)) {
             kSelf->state = TaskState::kReady;
-            rotated = true;
+            rotated      = true;
         } else {
             // Row full: the current task keeps the CPU rather than
             // switching away from a task no row will hold; the next
@@ -392,6 +392,10 @@ void Scheduler::exit_current(long long code) {
 }
 
 void Scheduler::retire_group_member(Task& member, long long code) {
+    // Release the join word first, before the queue gate: clearing it
+    // may wake a futex waiter, and the futex gate is taken before the
+    // queue gate on the wake path. Taking them the other way round
+    // here would give two CPUs a cycle to deadlock on.
     Task* const kSelf = current();
     if (kSelf != nullptr && member.space.get() == kSelf->space.get()) {
         futex::ClearTidWord(member);
@@ -399,6 +403,20 @@ void Scheduler::retire_group_member(Task& member, long long code) {
         member.clear_child_tid = 0;
     }
     member.files.reset();
+    const QueueGuard kQueue(*this);
+    if (member.state == TaskState::kDead || member.state == TaskState::kZombie) {
+        return;
+    }
+    if (member.state == TaskState::kRunning && &member != kSelf) {
+        // Running on another processor: mark it and let its own syscall
+        // return or wake end it.
+        member.group_exit_pending = true;
+        member.group_exit_code    = code;
+        return;
+    }
+    if (member.state == TaskState::kReady) {
+        base::safety::Check(member.sched_class->remove(member), "ready queue lost a group member");
+    }
     member.exit_code = code;
     detach_offspring(member);
     const bool kLeader = member.pid == member.tgid;
@@ -427,7 +445,6 @@ void Scheduler::exit_group(long long code) {
     Task* const          kSelf = current();
     base::safety::Check(kSelf != nullptr, "exit_group called outside any task");
     const unsigned long long kGroup = kSelf->tgid;
-    const QueueGuard         kQueue(*this);
     for (;;) {
         Task* victim = nullptr;
         for_each_task([&](Task& scan) {
@@ -442,20 +459,22 @@ void Scheduler::exit_group(long long code) {
             break;
         }
         if (victim->state == TaskState::kBlocked) {
-            victim->group_exit_pending = true;
-            victim->group_exit_code    = code;
-            // A task parked for a child sits on the scheduler's own
-            // wait list; that one this code may unlink, and the shared
-            // unblock path retires it. Other wait queues (locks, futex)
-            // keep the member until their owner wakes it.
-            if (waiters_.remove(*victim)) {
+            bool parked_for_child = false;
+            {
+                const QueueGuard kQueue(*this);
+                victim->group_exit_pending = true;
+                victim->group_exit_code    = code;
+                // A task parked for a child sits on the scheduler's own
+                // wait list; that one this code may unlink, and the
+                // shared unblock path retires it. Other wait queues
+                // (locks, futex) keep the member until their owner
+                // wakes it.
+                parked_for_child           = waiters_.remove(*victim);
+            }
+            if (parked_for_child) {
                 unblock(*victim);
             }
             continue;
-        }
-        if (victim->state == TaskState::kReady) {
-            base::safety::Check(victim->sched_class->remove(*victim),
-                                "ready queue lost a group member");
         }
         retire_group_member(*victim, code);
     }
@@ -618,27 +637,38 @@ void Scheduler::schedule_blocked() {
 }
 
 void Scheduler::unblock(Task& task) {
-    const QueueGuard kGuard(*this);
-    if (task.state != TaskState::kBlocked) {
-        return;
+    bool      dying = false;
+    long long code  = 0;
+    {
+        const QueueGuard kGuard(*this);
+        if (task.state != TaskState::kBlocked) {
+            return;
+        }
+        if (task.group_exit_pending) {
+            // The group died while this member was parked; the wakeup
+            // that pulled it off its wait queue is its exit, not a
+            // resume. The retirement itself runs outside this gate: it
+            // may wake a joiner through the futex table, and the futex
+            // gate is taken before the queue gate on that path.
+            task.group_exit_pending = false;
+            dying                   = true;
+            code                    = task.group_exit_code;
+        } else if (!task.sched_class->enqueue(task)) {
+            // Row full: this wakeup is dropped and counted, the sleeper
+            // stays blocked and consistent, and the next wakeup event
+            // lands once a pick frees a slot. A dropped beat, not a dead
+            // machine.
+            ++ready_refusals_;
+            return;
+        } else {
+            task.state             = TaskState::kReady;
+            local().notify_pending = true;
+            return;
+        }
     }
-    if (task.group_exit_pending) {
-        // The group died while this member was parked; the wakeup that
-        // pulled it off its wait queue is its exit, not a resume.
-        task.group_exit_pending = false;
-        retire_group_member(task, task.group_exit_code);
-        return;
+    if (dying) {
+        retire_group_member(task, code);
     }
-    if (!task.sched_class->enqueue(task)) {
-        // Row full: this wakeup is dropped and counted, the sleeper
-        // stays blocked and consistent, and the next wakeup event
-        // lands once a pick frees a slot. A dropped beat, not a dead
-        // machine.
-        ++ready_refusals_;
-        return;
-    }
-    task.state = TaskState::kReady;
-    local().notify_pending = true;
 }
 
 void Scheduler::stop_current() {
@@ -661,7 +691,7 @@ void Scheduler::resume(Task& task) {
         ++ready_refusals_;
         return;
     }
-    task.state = TaskState::kReady;
+    task.state             = TaskState::kReady;
     local().notify_pending = true;
 }
 

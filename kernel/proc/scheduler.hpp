@@ -619,8 +619,8 @@ private:
     cinux::base::container::SelfList<Task>                                       waiters_;
     cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
     unsigned long long                                                           next_pid_ = 1;
-    unsigned long long                                                           ready_refusals_ = 0;
-    std::atomic<bool>                                                            preemption_{false};
+    unsigned long long ready_refusals_                                                     = 0;
+    std::atomic<bool>  preemption_{false};
 };
 
 /**

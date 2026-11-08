@@ -262,9 +262,10 @@ bool DeliverPendingSignals(SyscallFrame& frame) {
         return false;
     }
     const bool   kRestoreWait = kSelf->signals->wait_restore_pending;
-    const SigSet kReturnMask  = kRestoreWait ? kSelf->signals->wait_restore : kSelf->signals->blocked;
+    const SigSet kReturnMask =
+        kRestoreWait ? kSelf->signals->wait_restore : kSelf->signals->blocked;
     kSelf->signals->wait_restore_pending = false;
-    bool rewrote                        = false;
+    bool rewrote                         = false;
     for (;;) {
         int       number = 0;
         SigAction action{};
@@ -273,7 +274,7 @@ bool DeliverPendingSignals(SyscallFrame& frame) {
             const auto           kGate = kSelf->signals->gate.guard();
             number                     = lowest_runnable(*kSelf->signals);
             if (number != 0) {
-                action                 = kSelf->signals->actions[number - 1];
+                action                  = kSelf->signals->actions[number - 1];
                 kSelf->signals->pending = kSelf->signals->pending & ~bit_for(number);
                 if ((action.flags & cinux::syscall::kSaResethand) != 0) {
                     kSelf->signals->actions[number - 1] = SigAction{};

@@ -331,15 +331,15 @@ void check_lazy_tail(const cinux::mm::AddressSpace& space) {
 
 void check_demanded_contents(const cinux::mm::AddressSpace& space,
                              const cinux::mm::VmaStore&     copy) {
-    ASSERT_TRUE(cinux::mm::demand::FillPage(space, copy, 0x401000,
-                                            cinux::arch::isr::kFaultFromUser) ==
-                cinux::mm::demand::FillOutcome::kFilled);
+    ASSERT_TRUE(
+        cinux::mm::demand::FillPage(space, copy, 0x401000, cinux::arch::isr::kFaultFromUser) ==
+        cinux::mm::demand::FillOutcome::kFilled);
     ASSERT_EQ(
         *cinux::base::PtrAt<std::uint32_t>(cinux::mm::DirectMapVirt(space.translate(0x401000))),
         0x464C457FU);
-    ASSERT_TRUE(cinux::mm::demand::FillPage(space, copy, 0x403000,
-                                            cinux::arch::isr::kFaultFromUser) ==
-                cinux::mm::demand::FillOutcome::kFilled);
+    ASSERT_TRUE(
+        cinux::mm::demand::FillPage(space, copy, 0x403000, cinux::arch::isr::kFaultFromUser) ==
+        cinux::mm::demand::FillOutcome::kFilled);
     ASSERT_EQ(*cinux::base::PtrAt<unsigned long long>(
                   cinux::mm::DirectMapVirt(space.translate(0x403000))),
               0ULL);

@@ -19,7 +19,7 @@ TEST("fs context: a forked copy carries its own paths and mask") {
     cinux::base::Shared<cinux::fs::FsContext> parent =
         cinux::base::MakeShared<cinux::fs::FsContext>();
     cinux::base::CopyBytes(parent->cwd, "/home/guest", sizeof("/home/guest"));
-    parent->umask = 0077U;
+    parent->umask                                   = 0077U;
     cinux::base::Shared<cinux::fs::FsContext> child = cinux::fs::CloneFsContext(*parent);
     ASSERT_TRUE(child.holds());
     ASSERT_TRUE(child.get() != parent.get());

@@ -38,9 +38,9 @@ void PrintFaultVerdict(const VmaStore* store, unsigned long address,
         print::Println("[kern]  vma: addr=%X, but this task keeps no range register", address);
         return;
     }
-    mm::VmaRegion      region{};
-    const bool         kCovered = store->lookup(address, region);
-    const VmaRegion* const kHit = kCovered ? &region : nullptr;
+    mm::VmaRegion          region{};
+    const bool             kCovered = store->lookup(address, region);
+    const VmaRegion* const kHit     = kCovered ? &region : nullptr;
     if (kHit == nullptr) {
         print::Println("[kern]  vma: addr=%X sits in no registered range; a true segfault",
                        address);

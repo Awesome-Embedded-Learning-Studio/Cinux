@@ -107,14 +107,14 @@ Task* BuildForkChild(unsigned long long frame_address) {
     kBorn->space      = std::move(space);
     kBorn->vmas       = std::move(vmas);
     kBorn->parent     = kParent;
-    kBorn->signals = CloneSignalState(*kParent->signals);
+    kBorn->signals    = CloneSignalState(*kParent->signals);
     if (!kBorn->signals.holds()) {
         mm::Pmm::self().free_pages(kStack, kStackOrder);
         return nullptr;
     }
-    kBorn->pgid            = kParent->pgid;
-    kBorn->sid             = kParent->sid;
-    kBorn->fs_ctx          = fs::CloneFsContext(*kParent->fs_ctx);
+    kBorn->pgid   = kParent->pgid;
+    kBorn->sid    = kParent->sid;
+    kBorn->fs_ctx = fs::CloneFsContext(*kParent->fs_ctx);
     if (!kBorn->fs_ctx.holds()) {
         mm::Pmm::self().free_pages(kStack, kStackOrder);
         return nullptr;
@@ -123,10 +123,10 @@ Task* BuildForkChild(unsigned long long frame_address) {
     kBorn->controlling_tty = kParent->controlling_tty;
     cinux::base::CopyBytes(kBorn->comm, kParent->comm, sizeof(kBorn->comm));
     cinux::base::CopyBytes(kBorn->limits, kParent->limits, sizeof(kBorn->limits));
-    kBorn->uid  = kParent->uid;
-    kBorn->euid = kParent->euid;
-    kBorn->gid  = kParent->gid;
-    kBorn->egid = kParent->egid;
+    kBorn->uid               = kParent->uid;
+    kBorn->euid              = kParent->euid;
+    kBorn->gid               = kParent->gid;
+    kBorn->egid              = kParent->egid;
     kBorn->keep_capabilities = kParent->keep_capabilities;
     base::CopyBytes(kBorn->supplementary_groups, kParent->supplementary_groups,
                     sizeof(kBorn->supplementary_groups));
