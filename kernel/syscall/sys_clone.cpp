@@ -15,10 +15,13 @@ namespace cinux::syscall {
 namespace {
 
 /// Every flag bit this handler understands; anything outside the mask
-/// is refused whole rather than half-served.
-constexpr unsigned long long kServedFlags = kCloneVfork | kCloneVm | kCloneFiles | kCloneThread |
-                                            kCloneSetTls | kCloneParentSetTid |
-                                            kCloneChildClearTid | kCloneChildSetTid | 0xFFULL;
+/// is refused whole rather than half-served. CLONE_SYSVSEM is accepted
+/// as a declaration only: there is no SysV semaphore table yet, so no
+/// undo list is shared or copied. Revisit this comment when semaphores
+/// land; the flag then has to mean something.
+constexpr unsigned long long kServedFlags =
+    kCloneVfork | kCloneVm | kCloneFiles | kCloneThread | kCloneSysVsem | kCloneSetTls |
+    kCloneParentSetTid | kCloneChildClearTid | kCloneChildSetTid | 0xFFULL;
 
 }  // namespace
 
