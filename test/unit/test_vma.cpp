@@ -345,6 +345,39 @@ TEST("vma: splitting stack protection preserves the original guard floor") {
     ASSERT_FALSE(store.stack_contains(0x3000, 1));
 }
 
+TEST("vma: lookup hands back terms that outlive the original range") {
+    cinux::mm::VmaStore store;
+    auto                region = range_at(0x1000, 0x3000);
+    region.writable            = false;
+    region.executable          = true;
+    ASSERT_TRUE(store.register_range(region).ok());
+    cinux::mm::VmaRegion copy{};
+    ASSERT_TRUE(store.lookup(0x2000, copy));
+    ASSERT_EQ(copy.start, 0x1000UL);
+    ASSERT_EQ(copy.end, 0x3000UL);
+    ASSERT_FALSE(copy.writable);
+    ASSERT_TRUE(copy.executable);
+    ASSERT_TRUE(store.unregister_range(0x1000, 0x3000).ok());
+    ASSERT_FALSE(store.lookup(0x2000, copy));
+}
+
+TEST("vma: reserve picks a gap and records it under one hold") {
+    cinux::mm::VmaStore store;
+    cinux::mm::VmaRegion spec{};
+    spec.kind     = cinux::mm::VmaKind::kAnonymous;
+    spec.readable = true;
+    spec.writable = true;
+    const auto kFirst = store.reserve(0x100000, 0x2000, spec);
+    ASSERT_TRUE(kFirst.ok());
+    ASSERT_EQ(kFirst.value(), 0xFE000UL);
+    ASSERT_TRUE(store.find(0xFE000) != nullptr);
+    ASSERT_EQ(store.find(0xFE000)->end, 0x100000UL);
+    const auto kSecond = store.reserve(0x100000, 0x1000, spec);
+    ASSERT_TRUE(kSecond.ok());
+    ASSERT_EQ(kSecond.value(), 0xFD000UL);
+    ASSERT_TRUE(store.find(0xFD000) != nullptr);
+}
+
 int main() {
     return cinux::test::RunAll();
 }

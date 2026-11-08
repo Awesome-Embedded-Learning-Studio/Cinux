@@ -25,6 +25,9 @@ base::Result<void> ReclaimUserSpan(const proc::Task& self, unsigned long start,
     if (!self.space.holds()) {
         return {};
     }
+    // Hold the table gate across the walk: a fault filling a page in
+    // this stretch must not slip an entry in after the unmap read it.
+    const auto kTablesGuard = self.space->guard();
     mm::KernelTables tables;
     for (unsigned long spot = start; spot < start + bytes; spot += cinux::arch::page::kSize) {
         const mm::walk::Entry kOld = mm::walk::UnmapPage(tables, self.space->root(), spot);

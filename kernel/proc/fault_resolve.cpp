@@ -29,7 +29,12 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     if (kSelf == nullptr || !kSelf->space.holds() || !kSelf->vmas.holds()) {
         return false;
     }
-    const mm::VmaRegion* const kRegion      = kSelf->vmas->find(address);
+    // Work on a copy: the region could be unregistered and freed by a
+    // sibling thread the moment find() returns, so the terms are read
+    // from a snapshot that owns its shared attachments.
+    mm::VmaRegion             region{};
+    const bool                kCovered = kSelf->vmas->lookup(address, region);
+    const mm::VmaRegion* const kRegion = kCovered ? &region : nullptr;
     const bool                 kWrite       = (error_code & arch::isr::kFaultWasWrite) != 0;
     const bool                 kInstruction = (error_code & arch::isr::kFaultInstruction) != 0;
     const bool kAllowed = kRegion != nullptr && (error_code & arch::isr::kFaultReserved) == 0 &&

@@ -78,7 +78,11 @@ bool FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned long l
         address >= kUserTop) {
         return false;
     }
-    const VmaRegion* const kRegion = ranges.find(address);
+    // The hold keeps the range alive across the fill: without it a
+    // concurrent munmap could free the region between the lookup and
+    // the field reads below — the use-after-free this station closes.
+    const VmaStore::Hold   kHold(ranges);
+    const VmaRegion* const kRegion = ranges.find_locked(address);
     if (kRegion == nullptr) {
         return false;
     }

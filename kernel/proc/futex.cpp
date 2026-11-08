@@ -115,7 +115,9 @@ void ClearTidWord(Task& dying) {
         !arch::IsCanonicalAddress(kWord) || !dying.vmas.holds()) {
         return;
     }
-    const mm::VmaRegion* const kRegion = dying.vmas->find(static_cast<unsigned long>(kWord));
+    mm::VmaRegion             region{};
+    const bool                kCovered = dying.vmas->lookup(static_cast<unsigned long>(kWord), region);
+    const mm::VmaRegion* const kRegion = kCovered ? &region : nullptr;
     if (kRegion == nullptr || !kRegion->writable ||
         kRegion->end < static_cast<unsigned long>(kWord + kWordBytes)) {
         return;
