@@ -84,3 +84,16 @@
 6. `futex_bitset` 挂在 Task 上，同一任务连续两次 park 会覆盖，但 park 期间任务不可能再 park，语义没问题。
 7. exec 在共享信号表的线程组里调用 `signals->reset()` 会把整组表一起清掉；没有 de_thread 之前这是“整组重置”而不是 Linux 的“先拆组再重置”。单线程 exec 不受影响。
 8. 剩余 retain/release 手写点（ramfs、pipe、socket、eventfd、epoll、input_node）都是 FileOps 的 open/release 回调配对，不是作用域生命周期，RAII 化需要改 VFS 协议，这次没动。
+
+## 对抗验证后的修复（2026-11-08）
+
+验证 agent 报了三处，前两处是真缺陷，已修（commit `566c45c`）：
+
+- 唤醒自锁：`WakeUserWord` 原先持桶锁调 `unblock`，组员退休时 `ClearTidWord` 再进 futex 门，非递归锁同核自旋。改成锁内摘链、锁外 `unblock`，每批 16 个。
+- 组员提前释放：`retire_group_member` 原先在判断 running 之前就 `files.reset()`，别的 CPU 上的组员会拿到空表。现在先持队列门确认状态，running 只打 pending，锁外再清 files 与 join 字。
+- exit_group 裸指针：先持门认领并摘表，副作用在锁外；victim 不再跨锁使用，避免另一 CPU 回收后的释放后使用。
+- futex 锁内读：锁外先 touch 页，锁内确认 VMA 仍在，首触页的 `FillPage` 不会在自旋里跑。表项已 present 的 spurious fault 走重试，不再 SIGSEGV。
+
+验证：`test_thread_exit` 6/6、`test_scheduler` 7/7、`test_sync` 9/9、`test_signal` 33/33、`test_net_socket` 25/25、`test_syscall_face` 23/23、`test_fs_context` 3/3、`test_vfs` 15/15、`test_procfs` 18/18、`test_sched_class` 9/9，全量编译绿。
+
+仍留：futex 锁内读依赖「VMA 在则页在」（Cinux 没有 madvise），munmap 后同址重映射的竞赛窗口记在这里；TLB shootdown 仍未实现。
