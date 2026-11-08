@@ -114,6 +114,12 @@ struct Task : cinux::base::container::SelfNode<Task> {
     unsigned int                           supplementary_group_count{};  ///< Populated group IDs.
     Task*              parent{};      ///< Who may wait for this task; null when nobody can.
     long long          exit_code{};   ///< What a zombie has to hand its parent.
+    /// Set on a thread-group member a sibling's exit_group named but
+    /// could not retire on the spot (a parked member whose wait queue
+    /// this code must not unlink, or a member running elsewhere).
+    /// The next syscall return or wakeup ends the task with the code.
+    bool               group_exit_pending = false;
+    long long          group_exit_code{};  ///< The exit word the group asked for.
     const char*        name{};        ///< Label for dumps, caller-owned storage.
     unsigned long long stack_base{};  ///< Direct-map base of the owned stack.
     unsigned long long user_root{};   ///< PML4 of the user world, 0 while kernel-only.

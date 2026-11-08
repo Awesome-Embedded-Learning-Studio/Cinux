@@ -391,6 +391,86 @@ void Scheduler::exit_current(long long code) {
     }
 }
 
+void Scheduler::retire_group_member(Task& member, long long code) {
+    Task* const kSelf = current();
+    if (kSelf != nullptr && member.space.get() == kSelf->space.get()) {
+        futex::ClearTidWord(member);
+    } else {
+        member.clear_child_tid = 0;
+    }
+    member.files.reset();
+    member.exit_code = code;
+    detach_offspring(member);
+    const bool kLeader = member.pid == member.tgid;
+    if (kLeader && member.parent != nullptr) {
+        member.state = TaskState::kZombie;
+        SendSignal(*member.parent, cinux::syscall::kSigChld);
+        if (waiters_.remove(*member.parent)) {
+            unblock(*member.parent);
+        }
+        return;
+    }
+    tasks_.remove(member);
+    if (member.parent != nullptr) {
+        offspring_.remove(member);
+    }
+    member.state = TaskState::kDead;
+    if (__atomic_load_n(&member.on_cpu, __ATOMIC_ACQUIRE) == -1) {
+        reclaim_(sink_, member);
+    } else {
+        retired_.push_back(member);
+    }
+}
+
+void Scheduler::exit_group(long long code) {
+    const arch::IrqGuard kGuard;
+    Task* const          kSelf = current();
+    base::safety::Check(kSelf != nullptr, "exit_group called outside any task");
+    const unsigned long long kGroup = kSelf->tgid;
+    const QueueGuard         kQueue(*this);
+    for (;;) {
+        Task* victim = nullptr;
+        for_each_task([&](Task& scan) {
+            if (victim != nullptr || &scan == kSelf || scan.tgid != kGroup ||
+                scan.group_exit_pending || scan.state == TaskState::kZombie ||
+                scan.state == TaskState::kDead) {
+                return;
+            }
+            victim = &scan;
+        });
+        if (victim == nullptr) {
+            break;
+        }
+        if (victim->state == TaskState::kBlocked) {
+            victim->group_exit_pending = true;
+            victim->group_exit_code    = code;
+            // A task parked for a child sits on the scheduler's own
+            // wait list; that one this code may unlink, and the shared
+            // unblock path retires it. Other wait queues (locks, futex)
+            // keep the member until their owner wakes it.
+            if (waiters_.remove(*victim)) {
+                unblock(*victim);
+            }
+            continue;
+        }
+        if (victim->state == TaskState::kReady) {
+            base::safety::Check(victim->sched_class->remove(*victim),
+                                "ready queue lost a group member");
+        }
+        retire_group_member(*victim, code);
+    }
+    exit_current(code);
+}
+
+void Scheduler::exit_if_group_pending() {
+    Task* const kSelf = current();
+    if (kSelf == nullptr || !kSelf->group_exit_pending) {
+        return;
+    }
+    kSelf->group_exit_pending = false;
+    exit_current(kSelf->group_exit_code);
+}
+
 Task* Scheduler::take_zombie_child(Task& watcher, long long wanted, bool& has_eligible) {
     has_eligible        = false;
     const bool kAny     = wanted == -1;
@@ -540,6 +620,13 @@ void Scheduler::schedule_blocked() {
 void Scheduler::unblock(Task& task) {
     const QueueGuard kGuard(*this);
     if (task.state != TaskState::kBlocked) {
+        return;
+    }
+    if (task.group_exit_pending) {
+        // The group died while this member was parked; the wakeup that
+        // pulled it off its wait queue is its exit, not a resume.
+        task.group_exit_pending = false;
+        retire_group_member(task, task.group_exit_code);
         return;
     }
     if (!task.sched_class->enqueue(task)) {

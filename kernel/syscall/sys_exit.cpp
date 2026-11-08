@@ -11,4 +11,9 @@ namespace cinux::syscall {
     arch::Halt();
 }
 
+[[noreturn]] long long HandleExitGroup(const SyscallFrame& frame) {
+    proc::Scheduler::self().exit_group(static_cast<long long>((frame.rdi & 0xFFULL) << 8ULL));
+    arch::Halt();
+}
+
 }  // namespace cinux::syscall

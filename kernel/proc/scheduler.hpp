@@ -317,6 +317,38 @@ public:
     void exit_current(long long code = 0);
 
     /**
+     * @brief         End every task in the caller's thread group.
+     * @param[in]     code   The exit word the whole group dies with.
+     * @return        None; the caller does not come back.
+     * @note          Walks the whole task roll for members of the
+     *                caller's group. A member that is not running can
+     *                be taken off its ready queue and retired on the
+     *                spot — its join word released, its offspring
+     *                settled, its seat on the roll dropped. A parked
+     *                member is only marked: its wait queue belongs to
+     *                the lock or futex it waits on and must not be
+     *                unlinked from here, so it dies at its next wake or
+     *                syscall return. The last act is exit_current, which
+     *                turns a leader with a parent into a zombie for
+     *                that parent to reap.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void exit_group(long long code);
+
+    /**
+     * @brief         End the current task when a group exit marked it.
+     * @return        None; when the task was marked, this never
+     *                returns to the caller's flow.
+     * @note          The syscall return tail calls it: a thread woken
+     *                out of a wait after its group exited leaves here
+     *                instead of resuming ring 3 in a dead group.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void exit_if_group_pending();
+
+    /**
      * @brief         Wait for one child to exit and retire it.
      * @param[in]     wanted    Child pid, -1 for any child, 0 for any
      *                          child in the caller's own group, below
@@ -572,6 +604,8 @@ private:
     /** @brief Finds a living user init other than the retiring task. */
     [[nodiscard]] Task* find_adopter(const Task& dying);
     void                detach_offspring(Task& dying);
+    /// Retires one thread-group member that is not the current task.
+    void                retire_group_member(Task& member, long long code);
 
     void (*switch_tasks_)(void*, Task&, Task&) = nullptr;
     void (*enter_from_main_)(void*, Task&)     = nullptr;
