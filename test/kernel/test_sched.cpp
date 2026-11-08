@@ -955,14 +955,14 @@ cinux::base::KernelError g_futex_mismatch = cinux::base::KernelError::kOk;
 
 void futex_mismatch_task() {
     g_futex_mismatch = cinux::proc::futex::ParkOnWord(
-        reinterpret_cast<unsigned long long>(&g_futex_word_a), g_futex_word_a, 999);
+        reinterpret_cast<unsigned long long>(&g_futex_word_a), 999);
     cinux::proc::Scheduler::self().exit_current();
 }
 
 void futex_waiter_a_task() {
     cinux::base::safety::Check(
         cinux::proc::futex::ParkOnWord(reinterpret_cast<unsigned long long>(&g_futex_word_a),
-                                       g_futex_word_a, 1) == cinux::base::KernelError::kOk,
+                                       1) == cinux::base::KernelError::kOk,
         "waiter a did not return ok");
     g_futex_a_awake = true;
     cinux::proc::Scheduler::self().exit_current();
@@ -971,7 +971,7 @@ void futex_waiter_a_task() {
 void futex_waiter_b_task() {
     cinux::base::safety::Check(
         cinux::proc::futex::ParkOnWord(reinterpret_cast<unsigned long long>(&g_futex_word_b),
-                                       g_futex_word_b, 1) == cinux::base::KernelError::kOk,
+                                       1) == cinux::base::KernelError::kOk,
         "waiter b did not return ok");
     g_futex_b_awake = true;
     cinux::proc::Scheduler::self().exit_current();

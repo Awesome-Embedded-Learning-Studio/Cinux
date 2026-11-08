@@ -282,6 +282,16 @@ TEST("scheduler: parentless tasks stay visible until they are reclaimed") {
     ASSERT_FALSE(scheduler.nth_group_leader(0, pid));
 }
 
+TEST("futex: ParkOnWord compares the word as it stands under the bucket lock") {
+    unsigned int word    = 5;
+    const auto   address = reinterpret_cast<unsigned long long>(&word);
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(address, 4) ==
+                cinux::base::KernelError::kWouldBlock);
+    word = 6;
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(address, 4) ==
+                cinux::base::KernelError::kWouldBlock);
+}
+
 }  // namespace
 
 int main() {

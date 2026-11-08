@@ -34,15 +34,19 @@ namespace cinux::proc::futex {
  * @param[in]     uaddr      The user word's address, four-byte aligned.
  * @param[in]     expected   The value to hold the caller for.
  * @return        kOk once another side woke the caller, kWouldBlock
- *                when the word moved on before the park.
- * @note          The word is read under the table lock; a faulting
- *                address reaches the page-fault path from there, the
- *                bounds check stays the caller's (the syscall
- *                corridor's, in practice).
+ *                when the word moved on before the park,
+ *                kInvalidArgument when the read through the door
+ *                failed.
+ * @note          The word is re-read through the accessor door while
+ *                the bucket lock is held, not taken on trust from a
+ *                read the caller made before the lock: a wake that
+ *                lands between the caller's read and the lock would
+ *                otherwise be lost, and the waiter would sleep on a
+ *                word that already moved.
  * @since         0.8.0
  * @ingroup       kernel_proc
  */
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int present, unsigned int expected);
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected);
 /**
  * @brief         Parks the caller on a user word after reading it through
  *                the accessor door.
@@ -51,10 +55,10 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int present, uns
  * @param[in]     expected  The value the caller believes the word holds.
  * @return        Ok when woken; WouldBlock when the word already moved;
  *                InvalidArgument when the door refuses the address.
- * @note          The read happens before the engine takes its lock: the
- *                SMAP window may never span a spin, so the word crosses
- *                the door first and the engine parks on the address and
- *                the value it brought.
+ * @note          The comparison happens inside ParkOnWord, under the
+ *                bucket lock, against a fresh read. The SMAP window
+ *                stays a single annotated move around that read; the
+ *                bucket lock is held across it for a few instructions.
  * @since         0.3.0
  * @ingroup       kernel_proc
  */

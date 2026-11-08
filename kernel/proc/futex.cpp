@@ -60,13 +60,16 @@ FutexTable& shared_table() {
 
 }  // namespace
 
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int present,
-                             unsigned int expected) {
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected) {
     const cinux::arch::IrqGuard kQuiet;
     Task* const                 kSelf = Scheduler::self().current();
     FutexTable&                 table = shared_table();
     {
         const SpinGuard kGuard(table.gate);
+        unsigned int    present = 0;
+        if (!cinux::syscall::uaccess::CopyFromUser(&present, uaddr, sizeof(present))) {
+            return base::KernelError::kInvalidArgument;
+        }
         if (present != expected) {
             return base::KernelError::kWouldBlock;
         }
@@ -79,11 +82,7 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int present,
 }
 
 base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected) {
-    unsigned int word = 0;
-    if (!cinux::syscall::uaccess::CopyFromUser(&word, uaddr, sizeof(word))) {
-        return base::KernelError::kInvalidArgument;
-    }
-    return ParkOnWord(uaddr, word, expected);
+    return ParkOnWord(uaddr, expected);
 }
 
 long long WakeUserWord(unsigned long long uaddr, unsigned long long count) {
