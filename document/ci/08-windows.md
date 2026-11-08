@@ -197,7 +197,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCINUX_QEMU_ACCEL=auto
 
 CPU 参数跟着加速器走：KVM 和 HVF 用 `-cpu host`，WHPX 和 TCG 用 `-cpu max`。
 
-检测方式是在配置阶段执行 `qemu-system-x86_64 -accel help`，再对 KVM 额外检查 `/dev/kvm` 是否存在且可读写。这份结果是配置时的快照，升级 QEMU 或换了加速器之后要重新跑一次 `cmake`。配置输出会打印一行最终选择，例如：
+检测方式是在配置阶段执行 `qemu-system-x86_64 -accel help`，再对 KVM 额外检查 `/dev/kvm` 是否存在且可读写。这份结果是配置时的快照，升级 QEMU 或换了加速器之后要重新跑一次 `cmake`。`-accel help` 只能说明这个 QEMU 构建带了 WHPX，不能说明 Windows 的虚拟机监控程序平台已经启用：在 Windows 上用 `auto` 配置出来的命令行可能仍起不来，这时用 `run-windows.ps1`（它会先探测）或显式传 `-DCINUX_QEMU_ACCEL=tcg`。配置输出会打印一行最终选择，例如：
 
 ```text
 -- QEMU acceleration: no hardware accelerator usable on Linux; falling back to tcg (emulated, slow)
