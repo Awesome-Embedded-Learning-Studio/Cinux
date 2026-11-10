@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     在 Windows 上启动 Cinux。
 
@@ -167,8 +167,14 @@ elseif ($Accel -eq 'whpx') {
     }
 }
 
-# WHPX 和 TCG 都不能借用宿主 CPU 型号，统一用 max。
-$cpu = 'max'
+# WHPX 和 TCG 都不能借用宿主 CPU 型号。WHPX 在真 Windows 11 上用 max
+# 会触发 "Unexpected VP exit code 4"，实测换 qemu64 正常，TCG 继续用 max。
+if ($accelerator -eq 'whpx') {
+    $cpu = 'qemu64'
+}
+else {
+    $cpu = 'max'
+}
 
 $qemuArgs = @(
     '-accel', $accelerator,

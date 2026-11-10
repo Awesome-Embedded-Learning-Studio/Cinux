@@ -195,7 +195,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCINUX_QEMU_ACCEL=auto
 | `hvf` | 强制 HVF，不可用就回退 TCG 并警告 |
 | `tcg` | 强制软件模拟 |
 
-CPU 参数跟着加速器走：KVM 和 HVF 用 `-cpu host`，WHPX 和 TCG 用 `-cpu max`。
+CPU 参数跟着加速器走：KVM 和 HVF 用 `-cpu host`，TCG 用 `-cpu max`，WHPX 用保守的 `-cpu qemu64`（实测 `max` 会让 QEMU 以 `WHPX: Unexpected VP exit code 4` 退出）。
 
 检测方式是在配置阶段执行 `qemu-system-x86_64 -accel help`，再对 KVM 额外检查 `/dev/kvm` 是否存在且可读写。这份结果是配置时的快照，升级 QEMU 或换了加速器之后要重新跑一次 `cmake`。`-accel help` 只能说明这个 QEMU 构建带了 WHPX，不能说明 Windows 的虚拟机监控程序平台已经启用：在 Windows 上用 `auto` 配置出来的命令行可能仍起不来，这时用 `run-windows.ps1`（它会先探测）或显式传 `-DCINUX_QEMU_ACCEL=tcg`。配置输出会打印一行最终选择，例如：
 
@@ -205,7 +205,7 @@ CPU 参数跟着加速器走：KVM 和 HVF 用 `-cpu host`，WHPX 和 TCG 用 `-
 
 ## 限制与已知问题
 
-- WHPX 路径没有在真实 Windows 机器上跑过。本次施工在 Linux 上完成，`run-windows.ps1` 只做了语法自查。探测逻辑本身在 Linux 上用 KVM/TCG 验证过（KVM 缺设备会立刻退出，TCG 会正常起机器）。第一次在 Windows 上跑如果 WHPX 起不来，先加 `-Accel tcg`，能起来就说明是加速器问题，不是镜像问题。
+- WHPX 已在真实 Windows 11（build 26100）上实测通过。QEMU 11.0.1（msys2 构建）在 WHPX 下用 `-cpu max` 会以 `WHPX: Unexpected VP exit code 4` 退出，换成 `-cpu qemu64` 后正常启动到 `/ #` 提示符，`run-windows.ps1` 和 CMake 都按这个选择。退出码 4 后经排查与镜像无关：空机器只跑 SeaBIOS 配 `-cpu max` 也能复现（SeaBIOS 死在 VGA 初始化附近），属于 QEMU WHPX 后端把无法恢复异常退出当崩溃处理的上游问题，qemu-devel 2026 年 8 月的 "target/i386/whpx: handle processor reset" 补丁描述了同一报错，修复未进 11.0.1。官方安装器版本没有实测。
 - WHPX 需要 Windows 11、BIOS 里开启虚拟化、启用「Windows 虚拟机监控程序平台」，并且 QEMU 8.0 以上。四条缺一条都会退 TCG。
 - TCG 是逐条指令模拟，比 KVM 慢一到两个数量级。全套内核测试在 TCG 下会非常久，部分用例可能顶到超时。
 - 运行层只有串口控制台。`run_gui` 依赖 GTK，Windows 原生 QEMU 没有这条显示路径，图形界面仍然留在 Linux。
@@ -220,6 +220,7 @@ CPU 参数跟着加速器走：KVM 和 HVF 用 `-cpu host`，WHPX 和 TCG 用 `-
 |------|------|------|
 | `找不到 qemu-system-x86_64` | QEMU 没装或没进 PATH | 重装并勾选加入 PATH，或把 `C:\Program Files\qemu` 加进 PATH |
 | `WHPX is not available` | Windows 功能没开或虚拟化没开 | 启用「Windows 虚拟机监控程序平台」，重启，或 `-Accel tcg` |
+| `WHPX: Unexpected VP exit code 4` | QEMU WHPX 后端问题：退出码 4 是 Windows 虚拟化平台报告的客户机无法恢复异常（如三重故障），QEMU 按客户机崩溃直接退出。空机器只跑 SeaBIOS 配 `-cpu max` 同样复现，与镜像无关 | 用 `-cpu qemu64`，脚本和 CMake 已按加速器自动选 |
 | 启动后黑屏、没有串口输出 | 镜像路径不对，或 `-Kernel` 指到了 ext2 盘 | 确认 `cinux.img` 和 `ext2.img` 没对调 |
 | TCG 下测试超时 | 软件模拟太慢 | 挑单个测试，或在 WSL2 里开嵌套虚拟化用 KVM |
 | WSL 里 `ls /dev/kvm` 不存在 | 没开嵌套虚拟化 | 按上面 `.wslconfig` 配置后 `wsl --shutdown` |

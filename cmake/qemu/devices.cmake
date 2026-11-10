@@ -93,10 +93,14 @@ else()
 endif()
 
 # Hardware accelerators execute the guest on the real CPU; WHPX and TCG must
-# describe a CPU model instead of borrowing the host one.
+# describe a CPU model instead of borrowing the host one. WHPX on real Windows
+# aborts with "Unexpected VP exit code 4" when the guest runs with -cpu max
+# (seen with QEMU 11.0.1, msys2 build), so keep a conservative model there.
 if(CINUX_QEMU_ACCEL_SELECTED STREQUAL "kvm" OR
    CINUX_QEMU_ACCEL_SELECTED STREQUAL "hvf")
     set(CINUX_QEMU_CPU host)
+elseif(CINUX_QEMU_ACCEL_SELECTED STREQUAL "whpx")
+    set(CINUX_QEMU_CPU qemu64)
 else()
     set(CINUX_QEMU_CPU max)
 endif()
