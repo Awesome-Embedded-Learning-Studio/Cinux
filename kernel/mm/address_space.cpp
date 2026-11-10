@@ -4,6 +4,7 @@
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
 #include "kernel/arch/x86_64/page.hpp"
 #include "kernel/arch/x86_64/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
@@ -49,6 +50,8 @@ void release_user_tables(Entry* table, int levels_below) {
 }  // namespace
 
 bool AddressSpace::init() {
+    const arch::IrqGuard kIrq;
+    const auto           kGate  = gate_.guard();
     base::PhysAddr const kFrame = Pmm::self().allocate_page();
     if (kFrame == base::PhysAddr{}) {
         return false;
@@ -67,6 +70,8 @@ unsigned long AddressSpace::root() const {
 }
 
 bool AddressSpace::map(unsigned long virtual_address, unsigned long physical) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     if (root_ == 0) {
         return false;
     }
@@ -76,6 +81,8 @@ bool AddressSpace::map(unsigned long virtual_address, unsigned long physical) co
 
 bool AddressSpace::map_user(unsigned long virtual_address, unsigned long physical,
                             cinux::arch::page::Entry leaf_bits) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     if (root_ == 0) {
         return false;
     }
@@ -85,6 +92,8 @@ bool AddressSpace::map_user(unsigned long virtual_address, unsigned long physica
 }
 
 unsigned long AddressSpace::translate(unsigned long virtual_address) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     if (root_ == 0) {
         return 0;
     }
@@ -99,6 +108,8 @@ void AddressSpace::activate() const {
 }
 
 void AddressSpace::teardown() {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     if (root_ == 0) {
         return;
     }

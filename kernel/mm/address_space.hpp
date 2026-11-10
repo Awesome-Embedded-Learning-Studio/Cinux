@@ -22,6 +22,7 @@
 #pragma once
 
 #include "cinux/ref_count.hpp"
+#include "cinux/spin_mutex.hpp"
 #include "kernel/arch/x86_64/page_entry.hpp"
 
 namespace cinux::mm {
@@ -38,6 +39,30 @@ namespace cinux::mm {
  */
 class AddressSpace : public cinux::base::RefCount<> {
 public:
+    /**
+     * @brief         Borrowed hold for callers that walk the tables
+     *                themselves.
+     * @note          map, map_user and translate take the gate on
+     *                their own, so a guard holder must not call them;
+     *                the guard exists for the syscalls that edit leaf
+     *                entries through page_walk directly (munmap,
+     *                mprotect). Lock order is the VMA register first,
+     *                this gate second: the fault path looks its range
+     *                up, then fills a page through map_user. No path
+     *                may schedule while holding it.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    using Guard = cinux::base::SpinMutex::Guard;
+
+    /**
+     * @brief         Acquires the page-table gate.
+     * @return        The owning scope guard.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] Guard guard() const { return const_cast<AddressSpace*>(this)->gate_.guard(); }
+
     /**
      * @brief         Builds the root table: one ledger page, zeroed,
      *                kernel half mirrored from the live root.
@@ -162,7 +187,11 @@ public:
     ~AddressSpace() { teardown(); }
 
 private:
-    unsigned long root_ = 0;
+    unsigned long                  root_ = 0;
+    /// Serializes table edits; every mutating face takes it, and the
+    /// direct-walk callers hold guard(). Mutable because the const
+    /// faces (map_user, translate) still serialize against writers.
+    mutable cinux::base::SpinMutex gate_;
 };
 
 }  // namespace cinux::mm

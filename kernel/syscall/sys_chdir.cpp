@@ -31,7 +31,7 @@ long long HandleChdir(const SyscallFrame& frame) {
     if (kNode.value().type != fs::InodeType::kDirectory) {
         return -kEnotdir;
     }
-    base::CopyBytes(CurrentTask()->cwd, storage, static_cast<unsigned long>(kLength) + 1UL);
+    base::CopyBytes(CurrentTask()->fs_ctx->cwd, storage, static_cast<unsigned long>(kLength) + 1UL);
     return 0;
 }
 

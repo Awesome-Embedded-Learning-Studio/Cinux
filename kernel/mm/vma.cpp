@@ -67,7 +67,23 @@ bool stage_protection(RegionBatch& batch, const VmaRegion& source, const VmaRegi
 
 }  // namespace
 
+VmaStore::Hold::Hold(const VmaStore& store) : store_(store) {
+    irq_ = arch::SaveAndDisableIrq();
+    store_.gate_.lock();
+}
+
+VmaStore::Hold::~Hold() {
+    store_.gate_.unlock();
+    arch::RestoreIrq(irq_);
+}
+
 base::Result<void> VmaStore::register_range(const VmaRegion& spec) {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return register_range_locked(spec);
+}
+
+base::Result<void> VmaStore::register_range_locked(const VmaRegion& spec) {
     if (spec.start >= spec.end) {
         return base::KernelError::kInvalidArgument;
     }
@@ -91,6 +107,12 @@ base::Result<void> VmaStore::register_range(const VmaRegion& spec) {
 }
 
 const VmaRegion* VmaStore::find(unsigned long address) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return find_locked(address);
+}
+
+const VmaRegion* VmaStore::find_locked(unsigned long address) const {
     if (!heap_recorded_ && covers(heap_, address)) {
         return &heap_;
     }
@@ -102,13 +124,30 @@ const VmaRegion* VmaStore::find(unsigned long address) const {
     return nullptr;
 }
 
+bool VmaStore::lookup(unsigned long address, VmaRegion& out) const {
+    const arch::IrqGuard   kIrq;
+    const auto             kGate = gate_.guard();
+    const VmaRegion* const kHit  = find_locked(address);
+    if (kHit == nullptr) {
+        return false;
+    }
+    out = *kHit;
+    return true;
+}
+
 bool VmaStore::stack_contains(unsigned long start, unsigned long bytes) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return stack_contains_locked(start, bytes);
+}
+
+bool VmaStore::stack_contains_locked(unsigned long start, unsigned long bytes) const {
     if (bytes == 0 || bytes > ~0UL - start) {
         return false;
     }
     const auto kEnd = start + bytes;
     for (unsigned long cursor = start; cursor < kEnd;) {
-        const VmaRegion* const kRegion = find(cursor);
+        const VmaRegion* const kRegion = find_locked(cursor);
         if (kRegion == nullptr || kRegion->kind != VmaKind::kStack || !kRegion->readable ||
             !kRegion->writable || cursor < kRegion->stack_floor) {
             return false;
@@ -119,6 +158,7 @@ bool VmaStore::stack_contains(unsigned long start, unsigned long bytes) const {
 }
 
 VmaStore* VmaStore::clone() const {
+    const Hold          kHold(*this);
     base::Own<VmaStore> copy(new VmaStore{});
     if (!copy.holds()) {
         return nullptr;
@@ -157,26 +197,32 @@ VmaStore* VmaStore::clone() const {
 }
 
 void VmaStore::teardown() {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     while (const VmaRegion* const kRegion = regions_.pop_head()) {
         delete kRegion;
     }
 }
 
 void VmaStore::seed_heap(unsigned long base, unsigned long max) {
-    heap_.start       = base;
-    heap_.end         = base;
-    heap_.kind        = VmaKind::kAnonymous;
-    heap_.readable    = true;
-    heap_.writable    = true;
-    heap_.executable  = false;
-    heap_.backing     = {};
-    heap_.file_offset = 0;
-    heap_break_       = base;
-    heap_max_         = max;
-    heap_recorded_    = false;
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    heap_.start                = base;
+    heap_.end                  = base;
+    heap_.kind                 = VmaKind::kAnonymous;
+    heap_.readable             = true;
+    heap_.writable             = true;
+    heap_.executable           = false;
+    heap_.backing              = {};
+    heap_.file_offset          = 0;
+    heap_break_                = base;
+    heap_max_                  = max;
+    heap_recorded_             = false;
 }
 
 base::Result<unsigned long> VmaStore::move_heap_end(unsigned long target) {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
     if (heap_.start == 0 && heap_.end == 0) {
         return base::KernelError::kNotFound;
     }
@@ -202,12 +248,12 @@ base::Result<unsigned long> VmaStore::move_heap_end(unsigned long target) {
         extension.kind     = VmaKind::kAnonymous;
         extension.readable = true;
         extension.writable = true;
-        const auto kAdded  = register_range(extension);
+        const auto kAdded  = register_range_locked(extension);
         if (!kAdded.ok()) {
             return kAdded.error();
         }
     } else if (heap_recorded_ && kWanted < heap_.end) {
-        const auto kRemoved = unregister_range(kWanted, heap_.end);
+        const auto kRemoved = unregister_range_locked(kWanted, heap_.end);
         if (!kRemoved.ok()) {
             return kRemoved.error();
         }
@@ -219,6 +265,13 @@ base::Result<unsigned long> VmaStore::move_heap_end(unsigned long target) {
 
 base::Result<unsigned long> VmaStore::find_free_spot(unsigned long ceiling,
                                                      unsigned long bytes) const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return find_free_spot_locked(ceiling, bytes);
+}
+
+base::Result<unsigned long> VmaStore::find_free_spot_locked(unsigned long ceiling,
+                                                            unsigned long bytes) const {
     if (bytes == 0 || ceiling < bytes) {
         return base::KernelError::kOutOfMemory;
     }
@@ -243,7 +296,30 @@ base::Result<unsigned long> VmaStore::find_free_spot(unsigned long ceiling,
     return spot_end - bytes;
 }
 
+base::Result<unsigned long> VmaStore::reserve(unsigned long ceiling, unsigned long bytes,
+                                              VmaRegion spec) {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    const auto           kSpot = find_free_spot_locked(ceiling, bytes);
+    if (!kSpot.ok()) {
+        return kSpot.error();
+    }
+    spec.start        = kSpot.value();
+    spec.end          = spec.start + bytes;
+    const auto kFiled = register_range_locked(spec);
+    if (!kFiled.ok()) {
+        return kFiled.error();
+    }
+    return kSpot.value();
+}
+
 base::Result<void> VmaStore::unregister_range(unsigned long start, unsigned long end) {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return unregister_range_locked(start, end);
+}
+
+base::Result<void> VmaStore::unregister_range_locked(unsigned long start, unsigned long end) {
     if (start >= end) {
         return base::KernelError::kInvalidArgument;
     }
@@ -286,7 +362,14 @@ base::Result<void> VmaStore::unregister_range(unsigned long start, unsigned long
 }
 
 base::Result<void> VmaStore::protect(unsigned long start, unsigned long end, VmaProtection terms) {
-    if (start >= end || !span_known(start, end)) {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return protect_locked(start, end, terms);
+}
+
+base::Result<void> VmaStore::protect_locked(unsigned long start, unsigned long end,
+                                            VmaProtection terms) {
+    if (start >= end || !span_known_locked(start, end)) {
         return base::KernelError::kInvalidArgument;
     }
     RegionBatch batch;
@@ -325,7 +408,7 @@ base::Result<void> VmaStore::protect(unsigned long start, unsigned long end, Vma
     return base::Result<void>{};
 }
 
-bool VmaStore::span_known(unsigned long start, unsigned long end) const {
+bool VmaStore::span_known_locked(unsigned long start, unsigned long end) const {
     unsigned long spot = start;
     while (spot < end) {
         unsigned long reach = spot;
@@ -347,11 +430,37 @@ bool VmaStore::span_known(unsigned long start, unsigned long end) const {
 }
 
 unsigned long VmaStore::max_end() const {
-    unsigned long highest = heap_.end;
+    const arch::IrqGuard kIrq;
+    const auto           kGate   = gate_.guard();
+    unsigned long        highest = heap_.end;
     for (const VmaRegion* scan = regions_.head(); scan != nullptr; scan = regions_.after(*scan)) {
         highest = cinux::base::math::Max(highest, scan->end);
     }
     return highest;
+}
+
+bool VmaStore::empty() const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return regions_.empty();
+}
+
+unsigned long long VmaStore::region_count() const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return regions_.size();
+}
+
+unsigned long VmaStore::heap_end() const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return heap_break_;
+}
+
+unsigned long VmaStore::mmap_ceiling() const {
+    const arch::IrqGuard kIrq;
+    const auto           kGate = gate_.guard();
+    return mmap_ceiling_;
 }
 
 }  // namespace cinux::mm

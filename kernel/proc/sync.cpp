@@ -127,12 +127,12 @@ void Spinlock::set_name(const char* label) {
     ledger.name_lock(this, label);
 }
 
-SpinGuard::SpinGuard(Spinlock& lock) : lock_(lock) {
-    lock_.lock();
+void SpinLockPolicy::enter(State& state) {
+    state.lock.lock();
 }
 
-SpinGuard::~SpinGuard() {
-    lock_.unlock();
+void SpinLockPolicy::exit(State& state) {
+    state.lock.unlock();
 }
 
 SpinGuard Spinlock::guard() {
@@ -174,12 +174,12 @@ void Mutex::unlock() {
     owner_ = nullptr;
 }
 
-MutexGuard::MutexGuard(Mutex& mutex) : mutex_(mutex) {
-    mutex_.lock();
+void MutexLockPolicy::enter(State& state) {
+    state.mutex.lock();
 }
 
-MutexGuard::~MutexGuard() {
-    mutex_.unlock();
+void MutexLockPolicy::exit(State& state) {
+    state.mutex.unlock();
 }
 
 MutexGuard Mutex::guard() {

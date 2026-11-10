@@ -46,7 +46,7 @@ long long FoldUserPath(unsigned long long source, char* out, unsigned long cap) 
     if (kRaw < 0) {
         return kRaw;
     }
-    const char* const  kBase = kRawPath[0] == '/' ? "/" : CurrentTask()->cwd;
+    const char* const  kBase = kRawPath[0] == '/' ? "/" : CurrentTask()->fs_ctx->cwd;
     const base::Folded kFold = base::FoldOntoPath(kBase, kRawPath.get(), out, cap);
     if (!kFold.ok) {
         return -kEnametoolong;

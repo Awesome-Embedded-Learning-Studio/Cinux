@@ -154,10 +154,10 @@ void read_nonblock_body() {
     ASSERT_EQ(cinux::syscall::HandleRead(frame), 0);
     frame.rdx           = sizeof(heard);
     kOpen->status_flags = 0;
-    kTask->signals.pending =
+    kTask->signals->pending =
         cinux::syscall::SigSet{1ULL << static_cast<unsigned int>(cinux::syscall::kSigChld - 1)};
     ASSERT_EQ(cinux::syscall::HandleRead(frame), -cinux::syscall::kEintr);
-    kTask->signals.pending = {};
+    kTask->signals->pending = {};
     ASSERT_TRUE(world.files.free(1).ok());
     ASSERT_EQ(cinux::syscall::HandleRead(frame), 0);
 }

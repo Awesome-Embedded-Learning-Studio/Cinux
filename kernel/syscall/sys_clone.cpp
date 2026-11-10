@@ -15,16 +15,32 @@ namespace cinux::syscall {
 namespace {
 
 /// Every flag bit this handler understands; anything outside the mask
-/// is refused whole rather than half-served.
-constexpr unsigned long long kServedFlags = kCloneVfork | kCloneVm | kCloneFiles | kCloneThread |
-                                            kCloneSetTls | kCloneParentSetTid |
-                                            kCloneChildClearTid | kCloneChildSetTid | 0xFFULL;
+/// is refused whole rather than half-served. CLONE_SYSVSEM is accepted
+/// as a declaration only: there is no SysV semaphore table yet, so no
+/// undo list is shared or copied. Revisit this comment when semaphores
+/// land; the flag then has to mean something.
+constexpr unsigned long long kServedFlags =
+    kCloneVfork | kCloneVm | kCloneFs | kCloneFiles | kCloneSighand | kCloneThread | kCloneSysVsem |
+    kCloneSetTls | kCloneParentSetTid | kCloneChildClearTid | kCloneChildSetTid | 0xFFULL;
 
 }  // namespace
 
 long long HandleClone(const SyscallFrame& frame) {
     const unsigned long long kFlags = frame.rdi;
     if ((kFlags & ~kServedFlags) != 0) {
+        return -kEinval;
+    }
+    // Shared hands need a shared world: Linux rejects these mixes with
+    // EINVAL, and the retire paths below lean on the promise they make.
+    // A CLONE_THREAD member without CLONE_VM would exit through the
+    // "different address space" branch and lose its join word's wake;
+    // a CLONE_SIGHAND without CLONE_VM would share signal actions with
+    // a world the table's words cannot reach.
+    if ((kFlags & kCloneSighand) != 0 && (kFlags & kCloneVm) == 0) {
+        return -kEinval;
+    }
+    if ((kFlags & kCloneThread) != 0 &&
+        (kFlags & (kCloneVm | kCloneSighand)) != (kCloneVm | kCloneSighand)) {
         return -kEinval;
     }
     const auto kExitSignal = kFlags & 0xFFULL;

@@ -99,16 +99,18 @@ long long HandleMmap(const SyscallFrame& frame) {
         }
     } else {
         const base::Result<unsigned long> kSpot =
-            kSelf->vmas->find_free_spot(kSelf->vmas->mmap_ceiling(), kBytes);
+            kSelf->vmas->reserve(kSelf->vmas->mmap_ceiling(), kBytes, region);
         if (!kSpot.ok()) {
             return -kEnomem;
         }
         start = kSpot.value();
     }
-    region.start = start;
-    region.end   = start + kBytes;
-    if (!kSelf->vmas->register_range(region).ok()) {
-        return -kEnomem;
+    if (kFixed) {
+        region.start = start;
+        region.end   = start + kBytes;
+        if (!kSelf->vmas->register_range(region).ok()) {
+            return -kEnomem;
+        }
     }
     return static_cast<long long>(start);
 }

@@ -66,8 +66,9 @@ void share_leaf(Entry& slot, unsigned long spot, const CloneWalk& context) {
     }
     cinux::base::safety::Check(context.child->map_user(spot, kTarget, terms),
                                "fork clone refused a map");
-    const VmaRegion* const kRegion =
-        context.ranges != nullptr ? context.ranges->find(spot) : nullptr;
+    VmaRegion  region{};
+    const bool kCovered = context.ranges != nullptr && context.ranges->lookup(spot, region);
+    const VmaRegion* const kRegion = kCovered ? &region : nullptr;
     if (kRegion != nullptr && kRegion->kind == VmaKind::kDevice) {
         return;
     }

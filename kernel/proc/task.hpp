@@ -26,6 +26,7 @@
 #include "kernel/arch/x86_64/context.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/fs_config.hpp"
+#include "kernel/fs/fs_context.hpp"
 #include "kernel/proc/signals.hpp"
 
 namespace cinux::mm {
@@ -82,6 +83,17 @@ struct Task : cinux::base::container::SelfNode<Task> {
     /// Seat on one futex bucket's wait list, kept apart so parking on
     /// a user word can never share a link with the sync family.
     cinux::base::container::SelfNode<Task> futex_wait_link;
+    /// Seat on the scheduler's deadline list while this task parks with
+    /// a wake-up time, kept apart so a timed futex wait can ride both
+    /// lists at once.
+    cinux::base::container::SelfNode<Task> timed_park_link;
+    /// Absolute monotonic instant the timer interrupt should force this
+    /// parked task ready again; ~0 while the task parks without one.
+    unsigned long long park_deadline_ns = ~0ULL;
+    /// Raised by the timer path when the deadline, not a queue peer,
+    /// was what woke this task; the atomic pair in scheduler.cpp keeps
+    /// the reader on this task's own CPU in step.
+    bool timed_park_fired = false;
     cinux::arch::CpuContext                ctx{};  ///< Register image the switcher moves.
     cinux::arch::FpuImage                  entry_fpu{};
     unsigned long long                     fpu_gate_depth{};
@@ -111,11 +123,21 @@ struct Task : cinux::base::container::SelfNode<Task> {
     bool                                   keep_capabilities = false;
     std::uint32_t                          supplementary_groups[16]{};   ///< Extra group IDs.
     unsigned int                           supplementary_group_count{};  ///< Populated group IDs.
-    Task*              parent{};      ///< Who may wait for this task; null when nobody can.
-    long long          exit_code{};   ///< What a zombie has to hand its parent.
-    const char*        name{};        ///< Label for dumps, caller-owned storage.
-    unsigned long long stack_base{};  ///< Direct-map base of the owned stack.
-    unsigned long long user_root{};   ///< PML4 of the user world, 0 while kernel-only.
+    Task*              parent{};     ///< Who may wait for this task; null when nobody can.
+    long long          exit_code{};  ///< What a zombie has to hand its parent.
+    /// Set on a thread-group member a sibling's exit_group named but
+    /// could not retire on the spot (a parked member whose wait queue
+    /// this code must not unlink, or a member running elsewhere). The
+    /// next syscall return or wakeup ends the task with the code. The
+    /// reader on the member's own CPU takes this without the queue
+    /// gate, so every change goes through the atomic pair in
+    /// scheduler.cpp: the code word is stored first and this flag
+    /// publishes it.
+    bool        group_exit_pending = false;
+    long long   group_exit_code{};  ///< The exit word the group asked for.
+    const char*        name{};             ///< Label for dumps, caller-owned storage.
+    unsigned long long stack_base{};       ///< Direct-map base of the owned stack.
+    unsigned long long user_root{};        ///< PML4 of the user world, 0 while kernel-only.
     /// The world this task retires with, held against a whole thread
     /// group: a CLONE_VM clone adds one owner instead of copying, and
     /// the last owner out tears the user half down. Empty while
@@ -129,47 +151,56 @@ struct Task : cinux::base::container::SelfNode<Task> {
     /// the maker's instead.
     cinux::base::Shared<cinux::fs::FileTable>    files =
         cinux::base::MakeShared<cinux::fs::FileTable>();
-    char  cwd[cinux::fs::kFsPathMax] = {'/'};  ///< Working directory, absolute, NUL-terminated.
+    /// Where the task stands in the file-system tree. Every task is
+    /// born with a context of its own; fork copies it, a CLONE_FS
+    /// clone keeps pointing at the maker's, so a chdir in one thread
+    /// moves the whole group.
+    cinux::base::Shared<cinux::fs::FsContext> fs_ctx =
+        cinux::base::MakeShared<cinux::fs::FsContext>();
     /// The program path this task runs, absolute and NUL-terminated:
     /// exec writes it, fork copies it, the boot shell is born with
     /// its own. procfs reads it for self/exe — the one place a task
     /// must be able to name the file it is.
-    char  exe[cinux::fs::kFsPathMax]{};
+    char                             exe[cinux::fs::kFsPathMax]{};
     /// The terminal this session controls, nullptr when free: a
     /// session leader claims one through TIOCSCTTY, fork copies the
     /// claim, a new session drops it. The pointer names the Tty
     /// instance, whoever owns its plumbing.
-    void* controlling_tty = nullptr;
+    void*                            controlling_tty = nullptr;
     /// The 16-byte name the ABI surface calls comm: what prctl's set
     /// and get carry, fork copies from the parent, exec refills from
     /// the program path's last segment. Always NUL-terminated.
-    char  comm[16]{};
+    char                             comm[16]{};
     /// The resource ceilings prlimit64 reports and re-arms: one
     /// {soft, hard} row per resource number, seeded at seat time,
     /// copied across fork, untouched by exec. The row order and the
     /// count are the uapi resource table's.
-    unsigned long long limits[16][2]{};
+    unsigned long long               limits[16][2]{};
     /// Scheduling weight inside its class; smaller runs earlier. Only
     /// the priority class reads it, everyone else ignores it.
-    unsigned char      priority{};
+    unsigned char                    priority{};
     /// The class this task queues on; null rides the first-registered
     /// class, decided once at seat time.
-    SchedulingClass*   sched_class{};
+    SchedulingClass*                 sched_class{};
     /// The task's action table, blocked set and pending set; zeroed is
     /// the valid fresh-task state, fork copies the first two and exec
-    /// resets all three.
-    SignalState        signals{};
-    unsigned long long real_deadline_ns{};
-    unsigned long long real_interval_ns{};
+    /// resets all three. A CLONE_SIGHAND clone shares the whole object
+    /// with its maker, so the group answers one handler table.
+    cinux::base::Shared<SignalState> signals = cinux::base::MakeShared<SignalState>();
+    unsigned long long               real_deadline_ns{};
+    unsigned long long               real_interval_ns{};
     /// User address the task asked the kernel to zero when it dies
     /// (set_tid_address), then futex-wake so a joiner's wait returns.
     /// Zero means the task asked for nothing; clone's CLEARTID flag
     /// re-arms it per thread.
-    unsigned long long clear_child_tid{};
+    unsigned long long               clear_child_tid{};
     unsigned long long set_child_tid{};  ///< Written in the child's own world before first return.
     /// The exact word this task parks on in the futex table; the
     /// bucket only narrows the search, this key decides the match.
     unsigned long long futex_uaddr{};
+    /// The bitset this park watches. Plain FUTEX_WAIT plants every bit;
+    /// FUTEX_WAIT_BITSET narrows it, and a waker must intersect it.
+    unsigned int       futex_bitset = ~0U;
 
     /**
      * @brief         The parent's pid, zero when nobody waits above.

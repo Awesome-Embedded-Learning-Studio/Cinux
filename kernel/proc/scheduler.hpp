@@ -308,6 +308,38 @@ public:
     void exit_current(long long code = 0);
 
     /**
+     * @brief         End every task in the caller's thread group.
+     * @param[in]     code   The exit word the whole group dies with.
+     * @return        None; the caller does not come back.
+     * @note          Walks the whole task roll for members of the
+     *                caller's group. A member that is not running can
+     *                be taken off its ready queue and retired on the
+     *                spot — its join word released, its offspring
+     *                settled, its seat on the roll dropped. A parked
+     *                member is only marked: its wait queue belongs to
+     *                the lock or futex it waits on and must not be
+     *                unlinked from here, so it dies at its next wake or
+     *                syscall return. The last act is exit_current, which
+     *                turns a leader with a parent into a zombie for
+     *                that parent to reap.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void exit_group(long long code);
+
+    /**
+     * @brief         End the current task when a group exit marked it.
+     * @return        None; when the task was marked, this never
+     *                returns to the caller's flow.
+     * @note          The syscall return tail calls it: a thread woken
+     *                out of a wait after its group exited leaves here
+     *                instead of resuming ring 3 in a dead group.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void exit_if_group_pending();
+
+    /**
      * @brief         Wait for one child to exit and retire it.
      * @param[in]     wanted    Child pid, -1 for any child, 0 for any
      *                          child in the caller's own group, below
@@ -394,6 +426,34 @@ public:
      * @ingroup       kernel_proc
      */
     void unblock(Task& task);
+
+    /**
+     * @brief         Arm a deadline that drags a parked task back out.
+     * @param[in,out] task          The task about to block; must still
+     *                              hold the state kBlocked.
+     * @param[in]     deadline_ns   Absolute monotonic wake instant.
+     * @return        None.
+     * @note          The wait primitive that parked the task calls this
+     *                with its own gate held, so the queue gate nests
+     *                inside it in the documented order. The timer
+     *                interrupt later fires the wake itself: the task is
+     *                enqueued, its fired flag raised, and it reports a
+     *                timeout instead of a wake when it resumes.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void arm_timed_park(Task& task, unsigned long long deadline_ns);
+
+    /**
+     * @brief         Drop a task's deadline after a normal wake won.
+     * @param[in,out] task   The task that resumed before its deadline.
+     * @return        None.
+     * @note          Harmless on a task the timer already unlinked:
+     *                the removal is a lookup that answers false.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void cancel_timed_park(Task& task);
 
     /**
      * @brief         Halt the current task off every queue until a
@@ -557,6 +617,10 @@ private:
     /** @brief Finds a living user init other than the retiring task. */
     [[nodiscard]] Task* find_adopter(const Task& dying);
     void                detach_offspring(Task& dying);
+    /// Retires one thread-group member that is not the current task.
+    void                retire_group_member(Task& member, long long code);
+    /// Runs the side effects of a retirement after the queue gate drops.
+    void retire_claimed(Task& member, Task* self);
 
     void (*switch_tasks_)(void*, Task&, Task&) = nullptr;
     void (*enter_from_main_)(void*, Task&)     = nullptr;
@@ -568,9 +632,14 @@ private:
     cinux::base::container::SelfList<Task, &Task::registry_link>                 tasks_;
     cinux::base::container::SelfList<Task, &Task::registry_link>                 retired_;
     cinux::base::container::SelfList<Task>                                       waiters_;
+    /// Parked tasks carrying a deadline, walked by the timer interrupt.
+    cinux::base::container::SelfList<Task, &Task::timed_park_link>               timed_waiters_;
+    /// Earliest deadline on that list; ~0 while nobody parks timed.
+    std::atomic<unsigned long long>                                             next_park_deadline_ns_{~0ULL};
+    void expire_timed_parks(unsigned long long now_ns);
     cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
     unsigned long long                                                           next_pid_ = 1;
-    unsigned long long ready_refusals_ = 0;
+    unsigned long long                                                           ready_refusals_ = 0;
     std::atomic<bool>                                                            preemption_{false};
 };
 

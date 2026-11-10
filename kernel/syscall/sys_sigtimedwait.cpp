@@ -26,14 +26,14 @@ static_assert(sizeof(SignalInfo) == 128);
 
 int take_pending(proc::Task& task, SigSet wanted) {
     const arch::IrqGuard kIrq;
-    const auto           kGate    = task.signals.gate.guard();
-    const auto           kPending = task.signals.pending & wanted;
+    const auto           kGate    = task.signals->gate.guard();
+    const auto           kPending = task.signals->pending & wanted;
     for (int number = 1; number <= kSignalCount; ++number) {
         const SigSet kBit{
             base::bit::MaskBit<unsigned long long>(static_cast<unsigned>(number - 1)),
         };
         if (kPending.has(kBit)) {
-            task.signals.pending = task.signals.pending & ~kBit;
+            task.signals->pending = task.signals->pending & ~kBit;
             return number;
         }
     }

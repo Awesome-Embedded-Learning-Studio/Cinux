@@ -29,6 +29,8 @@ enum class Body : unsigned char {
     kMemberMaker,
     kProperMaker,
     kLeaver,
+    kGroupLeaver,
+    kParkedMember,
 };
 
 struct World;
@@ -112,6 +114,15 @@ struct World {
             }
             alpha_closed = true;
             scheduler.exit_current();
+            return;
+        }
+        if ((body == Body::kGroupLeaver || body == Body::kParkedMember) && &task == &alpha) {
+            scheduler.exit_group(kLeaverCode);
+            return;
+        }
+        if (body == Body::kParkedMember && &task == &beta) {
+            g_join_answer = cinux::proc::futex::WaitOnUserWord(
+                reinterpret_cast<unsigned long long>(&g_join_word), kJoinSeed);
             return;
         }
         scheduler.exit_current(kLeaverCode);
@@ -213,6 +224,48 @@ TEST("thread exit: a proper child turns zombie and answers its wait") {
     ASSERT_EQ(g_receipt_code, kLeaverCode);
     ASSERT_TRUE(world.beta.state == cinux::proc::TaskState::kZombie);
     ASSERT_TRUE(world.alpha.state == cinux::proc::TaskState::kDead);
+    ASSERT_EQ(world.sink.reclaimed_count, 2U);
+}
+
+TEST("thread exit: exit_group retires a ready member before the leader") {
+    World world(740);
+    world.body = Body::kGroupLeaver;
+    world.launch();
+    world.beta.tgid = world.alpha.pid;
+    g_world         = &world;
+    cinux::proc::Scheduler::self().run_until_done();
+    g_world = nullptr;
+    ASSERT_TRUE(world.beta.state == cinux::proc::TaskState::kDead);
+    ASSERT_TRUE(world.alpha.state == cinux::proc::TaskState::kDead);
+    ASSERT_EQ(world.sink.reclaimed_count, 2U);
+}
+
+TEST("thread exit: a parked member dies at the wake its group never sent") {
+    World world(750);
+    world.body                 = Body::kParkedMember;
+    const unsigned long  kPage = cinux::arch::page::kSize;
+    const auto           kWord = reinterpret_cast<unsigned long>(&g_join_word);
+    cinux::mm::VmaRegion cover{};
+    cover.start     = kWord & ~(kPage - 1UL);
+    cover.end       = cover.start + (2UL * kPage);
+    cover.kind      = cinux::mm::VmaKind::kAnonymous;
+    cover.readable  = true;
+    cover.writable  = true;
+    world.beta.vmas = cinux::base::Shared<cinux::mm::VmaStore>(new cinux::mm::VmaStore{});
+    ASSERT_TRUE(world.beta.vmas.holds());
+    ASSERT_TRUE(world.beta.vmas->register_range(cover).ok());
+    world.launch(true);
+    world.beta.tgid = world.alpha.pid;
+    g_join_answer   = cinux::base::KernelError::kOk;
+    g_join_word     = kJoinSeed;
+    g_world         = &world;
+    cinux::proc::Scheduler::self().run_until_done();
+    g_world = nullptr;
+    ASSERT_TRUE(world.alpha.state == cinux::proc::TaskState::kDead);
+    ASSERT_TRUE(world.beta.state == cinux::proc::TaskState::kBlocked);
+    ASSERT_TRUE(world.beta.group_exit_pending);
+    ASSERT_EQ(cinux::proc::futex::WakeUserWord(static_cast<unsigned long long>(kWord), 1), 1LL);
+    ASSERT_TRUE(world.beta.state == cinux::proc::TaskState::kDead);
     ASSERT_EQ(world.sink.reclaimed_count, 2U);
 }
 

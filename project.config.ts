@@ -36,6 +36,11 @@ export default defineProject({
       { name: 'systems', srcDir: 'document', urlPrefix: '/systems' },
       { name: 'handbook', srcDir: 'handbook', urlPrefix: '/handbook' },
       { name: 'changelog', srcDir: 'changelogs', urlPrefix: '/changelog' },
+      // 设计笔记卷(TLB shootdown 等独立成篇的设计记录)
+      { name: 'notes', srcDir: 'notes', urlPrefix: '/notes' },
+      // CI 分卷构建说明;单体构建的 rewrites 已把 ci/ 映射到 /guide,
+      // 卷前缀与其保持一致,翻页邻居的链接才对得上
+      { name: 'ci', srcDir: 'ci', urlPrefix: '/guide' },
       // api 卷是 pnpm docs:api 的生成件(document/api/),fresh clone 上
       // 未生成时 build.ts 对不存在的卷自动跳过
       { name: 'api', srcDir: 'api', urlPrefix: '/api' },
