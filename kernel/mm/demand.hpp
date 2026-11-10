@@ -32,30 +32,46 @@ class VmaStore;
 namespace demand {
 
 /**
+ * @brief         What one fill attempt concluded.
+ * @note          Three answers, not two: a present page is neither a
+ *                fresh fill nor a decline. The CPU may raise a fault
+ *                for a page that is already there (the x86 spurious
+ *                fault), and the instruction only needs to run again.
+ * @since         0.9.0
+ * @ingroup       kernel_mm
+ */
+enum class FillOutcome : unsigned char {
+    kUnhandled,  ///< Nobody promised this page, or the fill failed; the caller decides.
+    kFilled,     ///< A frame was mapped; re-run the instruction.
+    kRetry,      ///< The page already stands mapped; re-run the instruction.
+};
+
+/**
  * @brief         Fill the one page a not-present fault asked for.
  *
  * @param[in]     space        The world the fault happened under.
  * @param[in]     ranges       The register naming the promises.
  * @param[in]     address      CR2, the byte the access touched.
  * @param[in]     error_code   The CPU-pushed fault code.
- * @return        true when the page now stands mapped and the faulting
- *                instruction may re-run; false when the fault belongs
- *                to nobody — outside the register, the guard page, a
- *                kernel-side fault, a protection clash, a refused read,
- *                or no free frame.
+ * @return        kFilled when a frame was just mapped, kRetry when the
+ *                page already stood mapped, kUnhandled when the fault
+ *                belongs to nobody — outside the register, the guard
+ *                page, a kernel-side fault, a protection clash, a
+ *                refused read, or no free frame.
  * @note          Declines every protection fault on sight: the CoW
  *                engine owns the repairable slice of those, and what
  *                remains is the register and the table agreeing that
- *                the access may not happen. Also declines an address
- *                whose page already stands mapped — a fill is for
- *                absent pages only.
+ *                the access may not happen. A page that already stands
+ *                mapped answers kRetry: the x86 may report a spurious
+ *                fault, and the instruction should simply run again
+ *                instead of the task dying on a page it owns.
  * @warning       None
  * @throws        None
  * @since         0.1.0
  * @ingroup       kernel_mm
  */
-[[nodiscard]] bool FillPage(const AddressSpace& space, const VmaStore& ranges,
-                            unsigned long long address, unsigned long long error_code);
+[[nodiscard]] FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges,
+                                   unsigned long long address, unsigned long long error_code);
 
 }  // namespace demand
 

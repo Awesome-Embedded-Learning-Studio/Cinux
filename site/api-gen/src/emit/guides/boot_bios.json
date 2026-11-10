@@ -1,0 +1,33 @@
+{
+  "group": "boot_bios",
+  "namespace": "cinux::boot::bios",
+  "intro": "在实模式里调 BIOS 中断，采集内存图并准备 VBE 视频",
+  "categories": [
+    "内存图采集",
+    "A20 地址线",
+    "VBE 模式探测",
+    "视频模式切换"
+  ],
+  "functions": {
+    "CollectMemoryMap": {
+      "summary": "把 E820 内存段逐条追加进映射表，成功返回真",
+      "category": "内存图采集"
+    },
+    "EnableA20AddressLine": {
+      "summary": "经 INT 15h 打开 A20 地址线，成功返回真",
+      "category": "A20 地址线"
+    },
+    "QueryControllerInfo": {
+      "summary": "经 INT 10h 取回 VBE 控制器信息块，成功返回真",
+      "category": "VBE 模式探测"
+    },
+    "QueryModeInfo": {
+      "summary": "经 INT 10h 读一个 VBE 模式的信息块，成功返回真",
+      "category": "VBE 模式探测"
+    },
+    "SetVideoMode": {
+      "summary": "切到指定 VBE 模式并置上线帧缓冲位，成功返回真",
+      "category": "视频模式切换"
+    }
+  }
+}

@@ -57,6 +57,26 @@ describe('金样本:console + kernel_boot', () => {
   })
 })
 
+describe('枚举取值', () => {
+  it('取值名、初始化值与说明都从 enumvalue 节点取出来', () => {
+    const b = bundle()
+    const mode = b.symbols.find(s => s.name === 'Mode' && s.kind === 'enum')
+    expect(mode).toBeDefined()
+    expect(mode!.values).toHaveLength(2)
+    expect(mode!.values[0].name).toBe('kIdle')
+    expect(mode!.values[0].value).toBe('= 0')
+    expect(mode!.values[0].brief).toContain('Nothing in flight')
+    expect(mode!.values[1].name).toBe('kBusy')
+    expect(mode!.values[1].value).toBe('= 2')
+  })
+
+  it('非枚举符号的 values 为空数组', () => {
+    const b = bundle()
+    const fn = b.symbols.find(s => s.name === 'Measure')
+    expect(fn!.values).toEqual([])
+  })
+})
+
 describe('边角:重载 / since 写法 / 占位值', () => {
   it('同名重载各自成页,id 不同、不互相覆盖', () => {
     const b = bundle()

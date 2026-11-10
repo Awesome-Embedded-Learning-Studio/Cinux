@@ -3,7 +3,7 @@ import { defineProject } from './site/.vitepress/config/schema'
 export default defineProject({
   name: 'cinux',
   title: { 'zh-CN': 'Cinux 文档' },
-  description: { 'zh-CN': 'Cinux OS 的系统文档、设计说明、开发指南与更新记录' },
+  description: { 'zh-CN': 'Cinux OS 的系统文档、手册与更新记录' },
   base: '/Cinux/',
   copyright: 'Copyright © 2026 Charliechen - 保留所有权利',
 
@@ -19,10 +19,8 @@ export default defineProject({
       { text: '首页', link: '/' },
       { text: '系统文档', link: '/systems/' },
       { text: 'API 参考', link: '/api/' },
-      { text: '设计', link: '/design/' },
-      { text: '开发指南', link: '/guide/' },
+      { text: '手册', link: '/handbook/' },
       { text: '更新记录', link: '/changelog/' },
-      { text: '开发日志', link: '/notes/' },
       {
         text: '相关',
         items: [
@@ -36,10 +34,13 @@ export default defineProject({
   sidebar: {
     volumes: [
       { name: 'systems', srcDir: 'document', urlPrefix: '/systems' },
-      { name: 'design', srcDir: 'design', urlPrefix: '/design' },
-      { name: 'guide', srcDir: 'ci', urlPrefix: '/guide' },
+      { name: 'handbook', srcDir: 'handbook', urlPrefix: '/handbook' },
       { name: 'changelog', srcDir: 'changelogs', urlPrefix: '/changelog' },
+      // 设计笔记卷(TLB shootdown 等独立成篇的设计记录)
       { name: 'notes', srcDir: 'notes', urlPrefix: '/notes' },
+      // CI 分卷构建说明;单体构建的 rewrites 已把 ci/ 映射到 /guide,
+      // 卷前缀与其保持一致,翻页邻居的链接才对得上
+      { name: 'ci', srcDir: 'ci', urlPrefix: '/guide' },
       // api 卷是 pnpm docs:api 的生成件(document/api/),fresh clone 上
       // 未生成时 build.ts 对不存在的卷自动跳过
       { name: 'api', srcDir: 'api', urlPrefix: '/api' },

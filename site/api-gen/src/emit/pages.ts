@@ -10,17 +10,10 @@
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ApiBundle, ApiSymbol } from '../model/symbol'
+import { richGroupPage } from './group-rich'
+import { esc } from './sections'
+import { mathGroupPage } from './math-page'
 
-const KIND_ORDER = ['function', 'variable', 'enum', 'typedef']
-const KIND_TITLES: Record<string, string> = {
-  function: '函数',
-  variable: '变量',
-  enum: '枚举',
-  typedef: '类型别名',
-  friend: '友元',
-}
-
-/** 区块前缀(base_ / boot_ / kernel_ → 中文分区) */
 const SECTIONS: { match: (g: string) => boolean, title: string, blurb: string }[] = [
   {
     match: g => g.startsWith('base_'),
@@ -44,198 +37,6 @@ const SECTIONS: { match: (g: string) => boolean, title: string, blurb: string }[
   },
 ]
 
-function esc(text: string): string {
-  // md 表格与正文里的管道符转义
-  return text.replace(/\|/g, '\\|')
-}
-
-function anchorOf(s: ApiSymbol): string {
-  const base = s.qualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-  // 重载函数 qualifiedName 相同,拼 doxygen id 的 hash 尾部消歧
-  const tail = s.id.slice(-6)
-  return `${base}-${tail}`
-}
-
-function githubLink(s: ApiSymbol, repo: { owner: string, repo: string, branch: string }): string {
-  if (!s.location.file) return ''
-  return `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.branch}/${s.location.file}#L${s.location.line}`
-}
-
-function formatParams(s: ApiSymbol): string {
-  if (s.params.length === 0) return ''
-  const hasDesc = s.params.some(p => p.description)
-  if (!hasDesc) return ''
-  const dirMark = (d?: string) =>
-    d ? `\`${d}\`` : ''
-  const rows = s.params
-    .map(p => `| \`${esc(p.name)}\` | ${dirMark(p.direction)} | ${esc(p.description)} |`)
-    .join('\n')
-  return `| 参数 | 方向 | 说明 |\n|---|---|---|\n${rows}\n`
-}
-
-function symbolSection(s: ApiSymbol, repo: { owner: string, repo: string, branch: string }): string {
-  const parts: string[] = []
-  parts.push(`#### ${esc(s.qualifiedName)} {#${anchorOf(s)}}`)
-  parts.push('')
-  parts.push('```cpp')
-  parts.push(esc(s.signature) + (s.kind === 'function' && s.signature.includes('(') ? '' : ''))
-  parts.push('```')
-  parts.push('')
-  if (s.brief) {
-    parts.push(esc(s.brief))
-    parts.push('')
-  }
-  if (s.details) {
-    parts.push(esc(s.details))
-    parts.push('')
-  }
-  const table = formatParams(s)
-  if (table) {
-    parts.push(table)
-    parts.push('')
-  }
-  if (s.returns && !/^(none|无)$/i.test(s.returns)) {
-    parts.push(`**返回** ${esc(s.returns)}`)
-    parts.push('')
-  }
-  if (s.note) {
-    parts.push(`> **注** ${esc(s.note)}`)
-    parts.push('>')
-    parts.push('')
-  }
-  if (s.warning && !/^(none|无)$/i.test(s.warning)) {
-    parts.push(`> **警告** ${esc(s.warning)}`)
-    parts.push('')
-  }
-  if (s.referencedBy.length > 0) {
-    const MAX_SHOW = 8
-    const shown = s.referencedBy.slice(0, MAX_SHOW).map(r => `\`${esc(r.name)}\``)
-    const rest = s.referencedBy.length - MAX_SHOW
-    const suffix = rest > 0 ? ` 等共 ${s.referencedBy.length} 处` : ''
-    parts.push(`**被调用** ${shown.join(' ')}${suffix}`)
-    parts.push('')
-  }
-  const meta: string[] = []
-  if (s.since) meta.push(`自 \`${s.since}\``)
-  const link = githubLink(s, repo)
-  if (link) meta.push(`[源码 ${s.location.file}:${s.location.line}](${link})`)
-  if (meta.length > 0) {
-    parts.push(meta.join(' · '))
-    parts.push('')
-  }
-  return parts.join('\n')
-}
-
-function variablesTable(vars: ApiSymbol[], repo: { owner: string, repo: string, branch: string }): string {
-  const rows = vars
-    .map(v => {
-      const link = githubLink(v, repo)
-      const src = link ? `[\`${v.location.file}:${v.location.line}\`](${link})` : ''
-      const since = v.since ? `\`${v.since}\`` : ''
-      const brief = v.brief || '—'
-      return `| \`${esc(v.name)}\` | \`${esc(v.returnType)}\` | ${esc(brief)} | ${since || '—'} | ${src} |`
-    })
-    .join('\n')
-  return `| 名称 | 类型 | 说明 | 自 | 源码 |\n|---|---|---|---|---|\n${rows}\n`
-}
-
-function groupPage(
-  group: { name: string, title: string, symbolIds: string[] },
-  symbols: ApiSymbol[],
-  coverage: ApiBundle['coverage'],
-  repo: { owner: string, repo: string, branch: string },
-  neighbors?: { prev?: { title: string, name: string }, next?: { title: string, name: string } },
-): string {
-  const byId = new Map(symbols.map(s => [s.id, s]))
-  const members = group.symbolIds.map(id => byId.get(id)).filter((s): s is ApiSymbol => !!s)
-  const cov = coverage.find(c => c.group === group.name)
-
-  const kinds = new Set(members.map(m => m.kind))
-  const ordered = KIND_ORDER.filter(k => kinds.has(k))
-
-  // 符号索引:紧凑多列锚点列表,长组页(200+ 函数)的页内导航主力;
-  // 函数小节用 h4,不进全局 outline,避免 244 项的大纲失控
-  const indexLines: string[] = []
-  for (const kind of ordered) {
-    const pool = members.filter(m => m.kind === kind)
-    if (pool.length === 0) continue
-    indexLines.push(`**${KIND_TITLES[kind] ?? kind}**`)
-    indexLines.push('')
-    for (const m of pool) {
-      indexLines.push(`- [${esc(m.name)}](#${anchorOf(m)})`)
-    }
-    indexLines.push('')
-  }
-  // details 默认收起:长组页(200+ 函数)的索引不占首屏,展开后多列排布
-  const indexBlock = indexLines.length > 0
-    ? `::: details 符号索引(${members.length})\n\n${indexLines.join('\n')}\n:::\n`
-    : ''
-
-  const lines: string[] = []
-  lines.push('---')
-  lines.push(`title: ${group.title}`)
-  lines.push('---')
-  lines.push('')
-  lines.push(`# ${group.title}`)
-  lines.push('')
-  lines.push(`\`@ingroup ${group.name}\``)
-  // 统计条:数字与徽章,覆盖率按档位给语义色(>=95 tip / >=70 info / 其余 warning)
-  lines.push('')
-  lines.push(`**${members.length}** 个符号`, '')
-  if (cov) {
-    const pct = (n: number, d: number) => (d === 0 ? 100 : Math.round((n / d) * 100))
-    const briefPct = pct(cov.withBrief, cov.total)
-    const briefType = briefPct >= 95 ? 'tip' : briefPct >= 70 ? 'info' : 'warning'
-    lines.push(`<Badge type="${briefType}" text="文档覆盖 ${cov.withBrief}/${cov.total}（${briefPct}%）" />`)
-    if (cov.paramDocs) {
-      const paramPct = pct(cov.paramDocs.covered, cov.paramDocs.total)
-      const paramType = paramPct >= 95 ? 'tip' : paramPct >= 70 ? 'info' : 'warning'
-      lines.push('')
-      lines.push(`<Badge type="${paramType}" text="参数说明 ${cov.paramDocs.covered}/${cov.paramDocs.total}（${paramPct}%）" />`)
-    }
-  }
-  lines.push('')
-
-  if (indexBlock) lines.push(indexBlock)
-  for (const kind of ordered) {
-    const pool = members.filter(m => m.kind === kind)
-    lines.push(`## ${KIND_TITLES[kind] ?? kind}`)
-    lines.push('')
-    if (kind === 'variable' || kind === 'typedef') {
-      // 紧凑表:变量/别名不占独立小节
-      lines.push(variablesTable(pool, repo))
-    } else {
-      for (const s of pool) {
-        lines.push(symbolSection(s, repo))
-      }
-    }
-  }
-  // 未归类的 kind(friend 等)
-  const rest = members.filter(m => !KIND_ORDER.includes(m.kind))
-  if (rest.length > 0) {
-    lines.push(`## 其他`)
-    lines.push('')
-    for (const s of rest) {
-      lines.push(symbolSection(s, repo))
-    }
-  }
-  // 分组间导航:上一组/下一组(组序与首页一致,按组名字母序)
-  if (neighbors?.prev || neighbors?.next) {
-    lines.push('---')
-    lines.push('')
-    const prev = neighbors.prev
-      ? `← [${neighbors.prev.title}](/api/${neighbors.prev.name}/)`
-      : '　'
-    const next = neighbors.next
-      ? `[${neighbors.next.title}](/api/${neighbors.next.name}/) →`
-      : '　'
-    lines.push(`| 上一组 | 下一组 |`)
-    lines.push(`|---|---|`)
-    lines.push(`| ${prev} | ${next} |`)
-    lines.push('')
-  }
-  return lines.join('\n')
-}
 
 function homePage(bundle: ApiBundle): string {
   const lines: string[] = []
@@ -393,13 +194,18 @@ export function emitPages(bundle: ApiBundle, opts: PageEmitOptions): string[] {
 
   const written: string[] = []
   const ordered = bundle.groups
+  const byId = new Map(bundle.symbols.map(s => [s.id, s]))
   ordered.forEach((group, i) => {
     const dir = join(opts.outDir, group.name)
     mkdirSync(dir, { recursive: true })
     const file = join(dir, 'index.md')
+    const members = group.symbolIds.map(id => byId.get(id)).filter((s): s is ApiSymbol => !!s)
     const prev = i > 0 ? { title: ordered[i - 1].title, name: ordered[i - 1].name } : undefined
     const next = i < ordered.length - 1 ? { title: ordered[i + 1].title, name: ordered[i + 1].name } : undefined
-    writeFileSync(file, groupPage(group, bundle.symbols, bundle.coverage, opts.repo, { prev, next }))
+    const page = group.name === 'base_math'
+      ? mathGroupPage(group, members, bundle.symbols, bundle.coverage.find(c => c.group === group.name), opts.repo, { prev, next })
+      : richGroupPage(group, members, bundle.symbols, bundle.coverage.find(c => c.group === group.name), opts.repo, { prev, next })
+    writeFileSync(file, page)
     written.push(file)
   })
   const home = join(opts.outDir, 'index.md')

@@ -34,44 +34,95 @@ namespace cinux::proc::futex {
  * @param[in]     uaddr      The user word's address, four-byte aligned.
  * @param[in]     present    Bit pattern observed at the word.
  * @param[in]     expected   The value to hold the caller for.
+ * @param[in]     bitset     Bits this waiter watches; a waker must
+ *                           intersect them. Defaults to every bit,
+ *                           which is what plain FUTEX_WAIT plants.
+ * @param[in]     deadline_ns Absolute monotonic instant that drags
+ *                           the caller out however the word moved; ~0
+ *                           for the untimed park. A due deadline is
+ *                           checked after the value match, so a moved
+ *                           word answers kWouldBlock first.
  * @return        kOk once another side woke the caller, kWouldBlock
- *                when the word moved on before the park.
- * @note          The word is read under the table lock; a faulting
- *                address reaches the page-fault path from there, the
- *                bounds check stays the caller's (the syscall
- *                corridor's, in practice).
+ *                when the word moved on before the park, kTimedOut
+ *                when the deadline ended the wait, kInvalidArgument
+ *                when the read through the door failed.
+ * @note          The word is re-read through the accessor door while
+ *                the bucket lock is held, not taken on trust from a
+ *                read the caller made before the lock: a wake that
+ *                lands between the caller's read and the lock would
+ *                otherwise be lost, and the waiter would sleep on a
+ *                word that already moved. The bitset is recorded on
+ *                the task before it joins the bucket, so a waker never
+ *                sees a waiter whose mask is still unset.
  * @since         0.8.0
  * @ingroup       kernel_proc
  */
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int present, unsigned int expected);
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
+                             unsigned int bitset = ~0U, unsigned long long deadline_ns = ~0ULL);
+/**
+ * @brief         Park the caller while a kernel word holds a value.
+ * @param[in]     uaddr      The kernel word's address, four-byte aligned.
+ * @param[in]     expected   The value to hold the caller for.
+ * @param[in]     bitset     Bits this waiter watches; a waker must
+ *                           intersect them. Defaults to every bit.
+ * @return        kOk once another side woke the caller, kWouldBlock
+ *                when the word moved on before the park,
+ *                kInvalidArgument on an unaligned word or a caller
+ *                outside any task.
+ * @note          The kernel-side counterpart of ParkOnWord: the word
+ *                lives in kernel memory, so the re-read under the
+ *                bucket lock is a plain volatile load. It cannot fault
+ *                and nothing can unmap it, so no accessor door and no
+ *                range-register check stand in front of it. Ring 3
+ *                never names one of these words; the waiters are
+ *                kernel tasks parking on kernel state, which is the
+ *                shape the kernel tests exercise.
+ * @since         0.9.0
+ * @ingroup       kernel_proc
+ */
+base::KernelError ParkKernelWord(unsigned long long uaddr, unsigned int expected,
+                                 unsigned int bitset = ~0U,
+                                 unsigned long long deadline_ns = ~0ULL);
+
 /**
  * @brief         Parks the caller on a user word after reading it through
  *                the accessor door.
  *
  * @param[in]     uaddr     The word's user address.
  * @param[in]     expected  The value the caller believes the word holds.
+ * @param[in]     bitset    Bits this waiter watches, every bit by default.
  * @return        Ok when woken; WouldBlock when the word already moved;
+ *                TimedOut when the deadline ended the wait;
  *                InvalidArgument when the door refuses the address.
- * @note          The read happens before the engine takes its lock: the
- *                SMAP window may never span a spin, so the word crosses
- *                the door first and the engine parks on the address and
- *                the value it brought.
+ * @note          The comparison happens inside ParkOnWord, under the
+ *                bucket lock, against a fresh read. The SMAP window
+ *                stays a single annotated move around that read; the
+ *                bucket lock is held across it for a few instructions.
  * @since         0.3.0
  * @ingroup       kernel_proc
  */
-base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected);
+base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected,
+                                 unsigned int bitset = ~0U, unsigned long long deadline_ns = ~0ULL);
 
 /**
  * @brief         Wake up to a count of waiters parked on one word.
- * @param[in]     uaddr   The word whose waiters should resume.
- * @param[in]     count   At most this many waiters wake.
+ * @param[in]     uaddr    The word whose waiters should resume.
+ * @param[in]     count    At most this many waiters wake.
+ * @param[in]     bitset   Bits the waker offers; a waiter wakes only
+ *                         when its own mask intersects these. Defaults
+ *                         to every bit, which is what plain
+ *                         FUTEX_WAKE offers.
  * @return        How many were woken; zero when nobody waits there.
  * @note          Matching is by exact address, not by bucket — two
- *                words sharing a bucket never wake each other.
+ *                words sharing a bucket never wake each other — and
+ *                now also by bitset intersection, the wait/wake
+ *                bitset pair's whole point: one word can carry several
+ *                independent wakeup channels.
  * @since         0.8.0
  * @ingroup       kernel_proc
  */
-long long WakeUserWord(unsigned long long uaddr, unsigned long long count);
+long long WakeUserWord(unsigned long long uaddr, unsigned long long count,
+                       unsigned int bitset = ~0U);
 
 /**
  * @brief         Release a dying task's join word: zero it, wake one.

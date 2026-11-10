@@ -1,0 +1,37 @@
+{
+  "group": "kernel_time",
+  "namespace": "cinux::time",
+  "intro": "管心跳计数和按截止纳秒触发的定时座位",
+  "categories": [
+    "心跳计数",
+    "座位生命周期",
+    "到期扫描",
+    "时间换算"
+  ],
+  "functions": {
+    "cinux::time::Tick::init": {
+      "summary": "注册心跳后端并启动设备，不返回值，也没有失败分支",
+      "category": "心跳计数"
+    },
+    "cinux::time::Tick::on_interrupt": {
+      "summary": "中断入口里把心跳计数加一，随即返回，不做别的",
+      "category": "心跳计数"
+    },
+    "cinux::time::Tick::since_boot": {
+      "summary": "返回启动以来累计的心跳数，没启动时读到的为零",
+      "category": "时间换算"
+    },
+    "cinux::time::TimerTable::advance": {
+      "summary": "扫一遍所有座位，到期的先撤下再回调，无返回值",
+      "category": "到期扫描"
+    },
+    "cinux::time::TimerTable::arm": {
+      "summary": "找空座位登记回调与截止时间，交回票据，没空位就拒绝",
+      "category": "座位生命周期"
+    },
+    "cinux::time::TimerTable::cancel": {
+      "summary": "取消未到期的座位并返回是否成功，过期票据给 false",
+      "category": "座位生命周期"
+    }
+  }
+}

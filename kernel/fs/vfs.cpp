@@ -60,8 +60,7 @@ base::Result<FsView> Vfs::resolve(std::string_view path) const {
     }
     base::Shared<MountLease> lifetime;
     if (best->lifetime != nullptr) {
-        best->lifetime->retain();
-        lifetime = base::Shared<MountLease>(best->lifetime);
+        lifetime = base::AdoptShared(*best->lifetime);
     }
     return FsView{
         .ops      = best->ops,

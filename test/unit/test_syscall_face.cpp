@@ -21,11 +21,12 @@
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/signal.hpp"
-#include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_capability.hpp"
+#include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_epoll.hpp"
 #include "kernel/syscall/sys_eventfd.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
+#include "kernel/syscall/sys_futex.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_getrandom.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
@@ -264,11 +265,14 @@ TEST("syscall face: capability queries are empty and cannot grant privileges") {
     FaceWorld world;
     world.run([] {
         using namespace cinux::syscall;
-        struct Header { unsigned int version; int pid; } header{0, 0};
+        struct Header {
+            unsigned int version;
+            int          pid;
+        } header{0, 0};
         unsigned int data[7]{};
-        auto frame = plain_frame();
-        frame.rdi = reinterpret_cast<Word>(&header);
-        frame.rsi = reinterpret_cast<Word>(data);
+        auto         frame = plain_frame();
+        frame.rdi          = reinterpret_cast<Word>(&header);
+        frame.rsi          = reinterpret_cast<Word>(data);
         ASSERT_EQ(HandleCapget(frame), -kEinval);
         ASSERT_EQ(header.version, 0x20080522U);
         data[0] = ~0U;
@@ -279,14 +283,14 @@ TEST("syscall face: capability queries are empty and cannot grant privileges") {
         ASSERT_EQ(HandleCapset(frame), 0);
         data[1] = 1U << 13;  // A caller cannot mint CAP_NET_RAW.
         ASSERT_EQ(HandleCapset(frame), -kEperm);
-        data[1] = 0;
+        data[1]        = 0;
         header.version = 0x19980330;
-        data[3] = 456;
+        data[3]        = 456;
         ASSERT_EQ(HandleCapget(frame), 0);
         ASSERT_EQ(data[3], 456U);
         frame.rsi = kUserAddressLimit;
         ASSERT_EQ(HandleCapget(frame), -kEfault);
-        frame = plain_frame();
+        frame     = plain_frame();
         frame.rdi = 8;
         frame.rsi = 1;
         ASSERT_EQ(HandlePrctl(frame), 0);
@@ -315,10 +319,10 @@ TEST("syscall face: wait4 decodes signed 32-bit process selectors") {
             child.parent = scheduler.current();
             child.pgid   = 7;
             scheduler.seat(child, false);
-            const auto kPid = static_cast<long long>(child.pid);
-            auto       frame = plain_frame();
-            frame.rdi        = kSelector;
-            frame.rdx        = 1;  // WNOHANG: an eligible live child is not ECHILD.
+            const auto kPid        = static_cast<long long>(child.pid);
+            auto       frame       = plain_frame();
+            frame.rdi              = kSelector;
+            frame.rdx              = 1;  // WNOHANG: an eligible live child is not ECHILD.
             const auto kLiveResult = HandleWait4(frame);
             child.state            = cinux::proc::TaskState::kZombie;
             child.exit_code        = 23 << 8;
@@ -664,16 +668,16 @@ void run_signal_wait_body() {
     frame.rsi                      = reinterpret_cast<Word>(info);
     frame.rdx                      = reinterpret_cast<Word>(kZeroTimeout);
     frame.r10                      = sizeof(SigSet);
-    self.signals.blocked           = kWanted | kOther;
-    self.signals.pending           = kWanted | kOther;
+    self.signals->blocked          = kWanted | kOther;
+    self.signals->pending          = kWanted | kOther;
     ASSERT_EQ(HandleRtSigtimedwait(frame), kSigUsr2);
     ASSERT_EQ(info[0], kSigUsr2);
-    ASSERT_EQ(self.signals.pending.raw, kOther.raw);
-    ASSERT_EQ(self.signals.blocked.raw, (kWanted | kOther).raw);
+    ASSERT_EQ(self.signals->pending.raw, kOther.raw);
+    ASSERT_EQ(self.signals->blocked.raw, (kWanted | kOther).raw);
     ASSERT_EQ(HandleRtSigtimedwait(frame), -11);
-    self.signals.blocked = {};
+    self.signals->blocked = {};
     ASSERT_EQ(HandleRtSigtimedwait(frame), -4);
-    self.signals.pending = {};
+    self.signals->pending = {};
     check_signal_wait_arguments(frame);
     cinux::proc::Scheduler::self().exit_current();
 }
@@ -918,8 +922,8 @@ void run_getdents_refusals_body() {
     frame.rsi             = kOpenNonblock;
     const long long kDoor = HandleEventfd2(frame);
     ASSERT_TRUE(kDoor >= 0);
-    frame.rdi              = 0;
-    const long long kLoop  = HandleEpollCreate1(frame);
+    frame.rdi             = 0;
+    const long long kLoop = HandleEpollCreate1(frame);
     ASSERT_TRUE(kLoop >= 0);
 
     // None of them carries read_dir, so the walk must refuse each with
@@ -937,10 +941,10 @@ void run_getdents_refusals_body() {
     // still walks: the refusal must not swallow genuine seats.
     frame.rdi = cinux::fs::kFileTableMax;
     ASSERT_EQ(HandleGetdents(frame), -kEbadf);
-    cinux::fs::RamFs                 pool;
-    constexpr cinux::fs::FsOps       kPoolOps = cinux::fs::EraseFs<cinux::fs::RamFs>();
-    const cinux::fs::FsNode          kDirNode = pool.lookup("/").value();
-    const cinux::proc::Task* const   kSelf    = cinux::proc::Scheduler::self().current();
+    cinux::fs::RamFs                         pool;
+    constexpr cinux::fs::FsOps               kPoolOps = cinux::fs::EraseFs<cinux::fs::RamFs>();
+    const cinux::fs::FsNode                  kDirNode = pool.lookup("/").value();
+    const cinux::proc::Task* const           kSelf    = cinux::proc::Scheduler::self().current();
     const cinux::base::Result<unsigned long> kSeat =
         kSelf->files->alloc(&kPoolOps, &pool, kDirNode);
     ASSERT_TRUE(kSeat.ok());
@@ -1096,7 +1100,7 @@ void run_masked_wait_body() {
     ASSERT_TRUE(kLoop >= 0);
 
     const cinux::proc::Task& self    = *cinux::proc::Scheduler::self().current();
-    const auto               kBefore = self.signals.blocked;
+    const auto               kBefore = self.signals->blocked;
     SigSet                   wanted{};
     wanted = wanted | bit_for(kSigKill) | bit_for(kSigStop) | bit_for(kSigUsr1);
 
@@ -1108,14 +1112,14 @@ void run_masked_wait_body() {
     frame.r8  = reinterpret_cast<Word>(&wanted);
     frame.r9  = sizeof(wanted);
     ASSERT_EQ(HandleEpollPwait(frame), 0);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
 
     frame.r9 = 4;
     ASSERT_EQ(HandleEpollPwait(frame), -kEinval);
     frame.r9 = sizeof(wanted);
     frame.r8 = kUserAddressLimit;
     ASSERT_EQ(HandleEpollPwait(frame), -kEfault);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
 
     unsigned long long timeout[2] = {0, 0};
     frame.rdi                     = 0;
@@ -1123,10 +1127,10 @@ void run_masked_wait_body() {
     frame.rdx                     = reinterpret_cast<Word>(timeout);
     frame.r10                     = reinterpret_cast<Word>(&wanted);
     ASSERT_EQ(HandlePpoll(frame), 0);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
     frame.r10 = kUserAddressLimit;
     ASSERT_EQ(HandlePpoll(frame), -kEfault);
-    ASSERT_TRUE(self.signals.blocked.raw == kBefore.raw);
+    ASSERT_TRUE(self.signals->blocked.raw == kBefore.raw);
     cinux::proc::Scheduler::self().exit_current();
 }
 
@@ -1193,6 +1197,40 @@ void run_eventfd_door_body() {
 TEST("syscall face: eventfd refuses the all-ones write and honours the semaphore") {
     FaceWorld world;
     world.run(run_eventfd_door_body);
+}
+
+void run_futex_bitset_body() {
+    using namespace cinux::syscall;
+    unsigned int word  = 5;
+    SyscallFrame frame = plain_frame();
+    frame.rdi          = reinterpret_cast<Word>(&word);
+
+    frame.rsi = 9;  // FUTEX_WAIT_BITSET, word already moved on
+    frame.rdx = 6;
+    frame.r9  = 0x4;
+    ASSERT_EQ(HandleFutex(frame), -kEagain);
+
+    frame.r9 = 0;  // a waiter watching nothing would never wake
+    ASSERT_EQ(HandleFutex(frame), -kEinval);
+
+    frame.rsi = 10;  // FUTEX_WAKE_BITSET refuses an empty offer too
+    frame.rdx = 1;
+    ASSERT_EQ(HandleFutex(frame), -kEinval);
+
+    frame.r9 = 0x4;
+    ASSERT_EQ(HandleFutex(frame), 0);  // nobody parked on this word
+
+    frame.rsi = 128 + 10;  // the private bit is stripped, still the same call
+    ASSERT_EQ(HandleFutex(frame), 0);
+
+    frame.rsi = 8;  // unknown op
+    ASSERT_EQ(HandleFutex(frame), -kEnosys);
+    cinux::proc::Scheduler::self().exit_current();
+}
+
+TEST("syscall face: futex bitset ops vet their bitset and their op") {
+    FaceWorld world;
+    world.run(run_futex_bitset_body);
 }
 
 }  // namespace

@@ -255,48 +255,48 @@ TEST("signal send: bad numbers refuse and zombies shrug") {
     target.state = TaskState::kReady;
     ASSERT_TRUE(!SendSignal(target, 0));
     ASSERT_TRUE(!SendSignal(target, cinux::syscall::kSignalCount + 1));
-    ASSERT_TRUE(target.signals.pending.raw == 0);
+    ASSERT_TRUE(target.signals->pending.raw == 0);
 
     target.state = TaskState::kZombie;
     ASSERT_TRUE(SendSignal(target, kSigKill));
-    ASSERT_TRUE(target.signals.pending.raw == 0);
+    ASSERT_TRUE(target.signals->pending.raw == 0);
 }
 
 TEST("signal send: an ignored signal drops, anything else parks a bit") {
     cinux::proc::Task target;
-    target.state                                 = TaskState::kReady;
-    target.signals.actions[kSigUsr1 - 1].handler = kSignalIgnore;
+    target.state                                  = TaskState::kReady;
+    target.signals->actions[kSigUsr1 - 1].handler = kSignalIgnore;
     ASSERT_TRUE(SendSignal(target, kSigUsr1));
-    ASSERT_TRUE(target.signals.pending.raw == 0);
+    ASSERT_TRUE(target.signals->pending.raw == 0);
 
     ASSERT_TRUE(SendSignal(target, kSigInt));
-    ASSERT_TRUE(target.signals.pending.has(bit_for(kSigInt)));
+    ASSERT_TRUE(target.signals->pending.has(bit_for(kSigInt)));
 }
 
 TEST("signal delivery: an ignored signal evaporates on the return path") {
     World world(700);
     world.body = [](World& site) {
-        site.alpha.signals.actions[kSigUsr1 - 1].handler = kSignalIgnore;
+        site.alpha.signals->actions[kSigUsr1 - 1].handler = kSignalIgnore;
         SendSignal(site.alpha, kSigUsr1);
         site.rewrote = DeliverPendingSignals(site.frame);
         cinux::proc::Scheduler::self().exit_current();
     };
     world.run();
     ASSERT_TRUE(!world.rewrote);
-    ASSERT_TRUE(world.alpha.signals.pending.raw == 0);
+    ASSERT_TRUE(world.alpha.signals->pending.raw == 0);
 }
 
 TEST("signal delivery: a blocked signal stays parked until the mask opens") {
     World world(800);
     world.body = [](World& site) {
-        site.alpha.signals.blocked = bit_for(kSigInt);
+        site.alpha.signals->blocked = bit_for(kSigInt);
         SendSignal(site.alpha, kSigInt);
         site.rewrote = DeliverPendingSignals(site.frame);
         cinux::proc::Scheduler::self().exit_current();
     };
     world.run();
     ASSERT_TRUE(!world.rewrote);
-    ASSERT_TRUE(world.alpha.signals.pending.has(bit_for(kSigInt)));
+    ASSERT_TRUE(world.alpha.signals->pending.has(bit_for(kSigInt)));
 }
 
 TEST("signal delivery: a default terminate exits carrying the number") {
@@ -313,8 +313,8 @@ TEST("signal delivery: a default terminate exits carrying the number") {
 TEST("signal delivery: masked wait delivers before restoring the caller mask") {
     World world(990);
     world.body = [](World& site) {
-        site.alpha.signals.actions[kSigInt - 1].handler = kHandlerWord;
-        site.frame.user_rsp                             = g_fake_rsp;
+        site.alpha.signals->actions[kSigInt - 1].handler = kHandlerWord;
+        site.frame.user_rsp                              = g_fake_rsp;
         SendSignal(site.alpha, kSigInt);
         cinux::proc::FinishSignalWait(site.alpha, bit_for(kSigInt));
         site.rewrote = DeliverPendingSignals(site.frame);
@@ -322,17 +322,17 @@ TEST("signal delivery: masked wait delivers before restoring the caller mask") {
     };
     world.run();
     ASSERT_TRUE(world.rewrote);
-    ASSERT_TRUE(!world.alpha.signals.wait_restore_pending);
+    ASSERT_TRUE(!world.alpha.signals->wait_restore_pending);
     const auto  kContext = (g_fake_rsp - 128 - sizeof(cinux::proc::SigReturnContext)) & ~0xFULL;
     const auto* context  = cinux::base::PtrAt<const cinux::proc::SigReturnContext>(kContext);
     ASSERT_TRUE(context->old_blocked.has(bit_for(kSigInt)));
-    ASSERT_TRUE(world.alpha.signals.blocked.has(bit_for(kSigInt)));
+    ASSERT_TRUE(world.alpha.signals->blocked.has(bit_for(kSigInt)));
 }
 
 TEST("signal delivery: a custom handler rewrites the frame onto its stack") {
     World world(1000);
     world.body = [](World& site) {
-        SigAction& action   = site.alpha.signals.actions[kSigInt - 1];
+        SigAction& action   = site.alpha.signals->actions[kSigInt - 1];
         action.handler      = kHandlerWord;
         action.mask         = bit_for(kSigUsr1);
         site.frame.user_rsp = g_fake_rsp;
@@ -346,16 +346,16 @@ TEST("signal delivery: a custom handler rewrites the frame onto its stack") {
     world.run();
     ASSERT_TRUE(world.rewrote);
     ASSERT_TRUE(frame_says(world.frame, g_fake_rsp));
-    ASSERT_TRUE(world.alpha.signals.pending.raw == 0);
-    ASSERT_TRUE(world.alpha.signals.blocked.has(bit_for(kSigUsr1)));
-    ASSERT_TRUE(world.alpha.signals.blocked.has(bit_for(kSigInt)));
+    ASSERT_TRUE(world.alpha.signals->pending.raw == 0);
+    ASSERT_TRUE(world.alpha.signals->blocked.has(bit_for(kSigUsr1)));
+    ASSERT_TRUE(world.alpha.signals->blocked.has(bit_for(kSigInt)));
 }
 
 TEST("signal delivery: an action promising a restorer returns to it, not the trampoline") {
     constexpr unsigned long kRestorerWord = 0x0000000000402000UL;
     World                   world(1025);
     world.body = [](World& site) {
-        SigAction& action   = site.alpha.signals.actions[kSigInt - 1];
+        SigAction& action   = site.alpha.signals->actions[kSigInt - 1];
         action.handler      = kHandlerWord;
         action.flags        = cinux::syscall::kSaRestorer | cinux::syscall::kSaRestart;
         action.restorer     = kRestorerWord;
@@ -380,7 +380,7 @@ TEST("signal delivery: an action promising a restorer returns to it, not the tra
 TEST("signal delivery: without the restorer flag the kernel trampoline keeps the slot") {
     World world(1037);
     world.body = [](World& site) {
-        SigAction& action   = site.alpha.signals.actions[kSigInt - 1];
+        SigAction& action   = site.alpha.signals->actions[kSigInt - 1];
         action.handler      = kHandlerWord;
         action.flags        = cinux::syscall::kSaRestart;
         action.restorer     = 0x0000000000402000UL;
@@ -402,14 +402,14 @@ TEST("signal delivery: without the restorer flag the kernel trampoline keeps the
 TEST("signal delivery: handler return restores registers, mask and the interrupted red zone") {
     World world(1050);
     world.body = [](World& site) {
-        site.alpha.signals.actions[kSigChld - 1].handler = kHandlerWord;
-        site.frame.user_rsp                              = g_fake_rsp - 8;
-        site.frame.rax                                   = 7;
-        site.frame.rcx                                   = 0x401234;
-        site.frame.r11                                   = 0x202;
-        site.frame.rbx                                   = 0x12345678;
-        site.alpha.signals.blocked                       = bit_for(kSigUsr1);
-        const SyscallFrame kBefore                       = site.frame;
+        site.alpha.signals->actions[kSigChld - 1].handler = kHandlerWord;
+        site.frame.user_rsp                               = g_fake_rsp - 8;
+        site.frame.rax                                    = 7;
+        site.frame.rcx                                    = 0x401234;
+        site.frame.r11                                    = 0x202;
+        site.frame.rbx                                    = 0x12345678;
+        site.alpha.signals->blocked                       = bit_for(kSigUsr1);
+        const SyscallFrame kBefore                        = site.frame;
         auto* const        kRedZone = cinux::base::PtrAt<unsigned char>(site.frame.user_rsp - 128);
         cinux::base::SetBytes(kRedZone, 0xA5, 128);
         SendSignal(site.alpha, kSigChld);
@@ -426,7 +426,7 @@ TEST("signal delivery: handler return restores registers, mask and the interrupt
         const long long kRestored = cinux::syscall::HandleRtSigreturn(site.frame);
         site.second_ok = kRestored == 7 &&
                          cinux::base::EqualBytes(&site.frame, &kBefore, sizeof(kBefore)) &&
-                         site.alpha.signals.blocked.raw == bit_for(kSigUsr1).raw;
+                         site.alpha.signals->blocked.raw == bit_for(kSigUsr1).raw;
         site.finish();
     };
     world.run();
@@ -452,7 +452,7 @@ TEST("signal syscall: musl's four-word action preserves flags, restorer and mask
         call.rdx                = reinterpret_cast<unsigned long long>(old);
         call.r10                = sizeof(SigSet);
         const long long  kSet   = cinux::syscall::HandleRtSigaction(call);
-        const SigAction& action = site.alpha.signals.actions[kSigChld - 1];
+        const SigAction& action = site.alpha.signals->actions[kSigChld - 1];
         site.first_ok = kSet == 0 && action.handler == record[0] && action.flags == record[1] &&
                         action.restorer == record[2] && action.mask.raw == record[3];
         call.rsi      = 0;
@@ -468,7 +468,7 @@ TEST("signal syscall: musl's four-word action preserves flags, restorer and mask
 TEST("signal delivery: resethand reverts the action once it has run") {
     World world(1100);
     world.body = [](World& site) {
-        SigAction& action   = site.alpha.signals.actions[kSigInt - 1];
+        SigAction& action   = site.alpha.signals->actions[kSigInt - 1];
         action.handler      = kHandlerWord;
         action.flags        = kSaResethand;
         site.frame.user_rsp = g_fake_rsp;
@@ -478,14 +478,14 @@ TEST("signal delivery: resethand reverts the action once it has run") {
     };
     world.run();
     ASSERT_TRUE(world.rewrote);
-    ASSERT_TRUE(world.alpha.signals.actions[kSigInt - 1].handler == kSignalDefault);
+    ASSERT_TRUE(world.alpha.signals->actions[kSigInt - 1].handler == kSignalDefault);
 }
 
 TEST("signal delivery: a delivery that cannot fit the stack window kills") {
     World world(1200);
     world.body = [](World& site) {
-        site.alpha.signals.actions[kSigInt - 1].handler = kHandlerWord;
-        site.frame.user_rsp                             = cinux::mm::kUserStackBottom - 0x100UL;
+        site.alpha.signals->actions[kSigInt - 1].handler = kHandlerWord;
+        site.frame.user_rsp                              = cinux::mm::kUserStackBottom - 0x100UL;
         SendSignal(site.alpha, kSigInt);
         site.rewrote = DeliverPendingSignals(site.frame);
     };
@@ -513,8 +513,8 @@ TEST("signal delivery: SIGCHLD returns through a stack slid below the old window
     ASSERT_TRUE(world.alpha.vmas->register_range(stack).ok());
     world.frame.user_rsp = kShiftedRsp;
     world.body           = [](World& site) {
-        site.alpha.signals.actions[kSigChld - 1].handler = kHandlerWord;
-        const auto kBefore                               = site.frame.user_rsp;
+        site.alpha.signals->actions[kSigChld - 1].handler = kHandlerWord;
+        const auto kBefore                                = site.frame.user_rsp;
         SendSignal(site.alpha, kSigChld);
         site.rewrote = DeliverPendingSignals(site.frame);
         if (site.rewrote) {
@@ -536,7 +536,7 @@ TEST("signal delivery: SIGCHLD returns through a stack slid below the old window
 TEST("signal delivery: the registered guard rejects SIGCHLD with SIGSEGV") {
     World world(1275);
     world.body = [](World& site) {
-        site.alpha.signals.actions[kSigChld - 1].handler = kHandlerWord;
+        site.alpha.signals->actions[kSigChld - 1].handler = kHandlerWord;
         site.frame.user_rsp = cinux::mm::kUserStackBottom + cinux::arch::page::kSize;
         SendSignal(site.alpha, kSigChld);
         site.rewrote = DeliverPendingSignals(site.frame);
@@ -577,8 +577,8 @@ TEST("signal scheduler: guarded lookup visits seated tasks and nobody else") {
 TEST("signal pairs: an exit marks the parent's pending chld") {
     World world(1400);
     world.run();
-    ASSERT_TRUE(world.kin.signals.pending.has(bit_for(kSigChld)));
-    ASSERT_TRUE(world.kin.signals.actions[kSigChld - 1].handler == kSignalDefault);
+    ASSERT_TRUE(world.kin.signals->pending.has(bit_for(kSigChld)));
+    ASSERT_TRUE(world.kin.signals->actions[kSigChld - 1].handler == kSignalDefault);
 }
 
 TEST("wait groups: wanted zero keeps to the caller's own group") {
@@ -642,7 +642,7 @@ TEST("stop and cont: a queued task stands stopped the moment stop lands") {
     };
     world.run();
     ASSERT_TRUE(world.beta.state == TaskState::kStopped);
-    ASSERT_TRUE(world.beta.signals.pending.has(bit_for(kSigStop)));
+    ASSERT_TRUE(world.beta.signals->pending.has(bit_for(kSigStop)));
 }
 
 TEST("stop and cont: a continue puts the halted task back on the queue") {
@@ -654,8 +654,8 @@ TEST("stop and cont: a continue puts the halted task back on the queue") {
     };
     world.run();
     ASSERT_TRUE(world.beta.state == TaskState::kZombie);
-    ASSERT_TRUE(world.beta.signals.pending.has(bit_for(kSigCont)));
-    ASSERT_TRUE(world.kin.signals.pending.has(bit_for(kSigChld)));
+    ASSERT_TRUE(world.beta.signals->pending.has(bit_for(kSigCont)));
+    ASSERT_TRUE(world.kin.signals->pending.has(bit_for(kSigChld)));
 }
 
 TEST("stop and cont: a continue sweeps the pending stop-class bits") {
@@ -669,11 +669,11 @@ TEST("stop and cont: a continue sweeps the pending stop-class bits") {
         site.finish();
     };
     world.run();
-    ASSERT_TRUE(!world.beta.signals.pending.has(bit_for(kSigStop)));
-    ASSERT_TRUE(!world.beta.signals.pending.has(bit_for(kSigTstp)));
-    ASSERT_TRUE(!world.beta.signals.pending.has(bit_for(kSigTtin)));
-    ASSERT_TRUE(!world.beta.signals.pending.has(bit_for(kSigTtou)));
-    ASSERT_TRUE(world.beta.signals.pending.has(bit_for(kSigCont)));
+    ASSERT_TRUE(!world.beta.signals->pending.has(bit_for(kSigStop)));
+    ASSERT_TRUE(!world.beta.signals->pending.has(bit_for(kSigTstp)));
+    ASSERT_TRUE(!world.beta.signals->pending.has(bit_for(kSigTtin)));
+    ASSERT_TRUE(!world.beta.signals->pending.has(bit_for(kSigTtou)));
+    ASSERT_TRUE(world.beta.signals->pending.has(bit_for(kSigCont)));
     ASSERT_TRUE(world.beta.state == TaskState::kZombie);
 }
 
@@ -686,8 +686,8 @@ TEST("stop and cont: kill wakes the halted task, a plain term stays parked") {
         site.finish();
     };
     world.run();
-    ASSERT_TRUE(world.beta.signals.pending.has(bit_for(kSigTerm)));
-    ASSERT_TRUE(world.beta.signals.pending.has(bit_for(kSigKill)));
+    ASSERT_TRUE(world.beta.signals->pending.has(bit_for(kSigTerm)));
+    ASSERT_TRUE(world.beta.signals->pending.has(bit_for(kSigKill)));
     ASSERT_TRUE(world.beta.state == TaskState::kZombie);
 }
 
@@ -699,9 +699,33 @@ TEST("stop delivery: the halting stop consumes itself and halts mid-delivery") {
     };
     world.run();
     ASSERT_TRUE(!world.rewrote);
-    ASSERT_TRUE(world.alpha.signals.pending.raw == 0);
+    ASSERT_TRUE(world.alpha.signals->pending.raw == 0);
     ASSERT_TRUE(world.alpha.state == TaskState::kStopped);
     ASSERT_TRUE(world.beta.state == TaskState::kZombie);
+}
+
+TEST("signal tables: a forked state copies actions and mask, not pending") {
+    cinux::proc::SignalState parent;
+    parent.actions[kSigInt - 1].handler = kSignalIgnore;
+    parent.blocked                      = bit_for(kSigUsr1);
+    parent.pending                      = bit_for(kSigChld);
+    auto child                          = cinux::proc::CloneSignalState(parent);
+    ASSERT_TRUE(child.holds());
+    ASSERT_TRUE(child->actions[kSigInt - 1].handler == kSignalIgnore);
+    ASSERT_TRUE(child->blocked.has(bit_for(kSigUsr1)));
+    ASSERT_TRUE(child->pending.raw == 0);
+    child->blocked = {};
+    ASSERT_TRUE(parent.blocked.has(bit_for(kSigUsr1)));
+}
+
+TEST("signal tables: a CLONE_SIGHAND pair answers one action table") {
+    cinux::proc::Task maker;
+    cinux::proc::Task member;
+    member.signals                              = maker.signals;
+    maker.signals->actions[kSigInt - 1].handler = kSignalIgnore;
+    ASSERT_TRUE(member.signals->actions[kSigInt - 1].handler == kSignalIgnore);
+    member.signals->blocked = bit_for(kSigUsr1);
+    ASSERT_TRUE(maker.signals->blocked.has(bit_for(kSigUsr1)));
 }
 
 }  // namespace
@@ -725,7 +749,7 @@ int main() {
 TEST("signal delivery: SA_NODEFER leaves the delivered signal unblocked") {
     World world(992);
     world.body = [](World& site) {
-        auto& action        = site.alpha.signals.actions[kSigInt - 1];
+        auto& action        = site.alpha.signals->actions[kSigInt - 1];
         action.handler      = kHandlerWord;
         action.flags        = cinux::syscall::kSaNodefer;
         site.frame.user_rsp = g_fake_rsp;
@@ -735,5 +759,5 @@ TEST("signal delivery: SA_NODEFER leaves the delivered signal unblocked") {
     };
     world.run();
     ASSERT_TRUE(world.rewrote);
-    ASSERT_FALSE(world.alpha.signals.blocked.has(bit_for(kSigInt)));
+    ASSERT_FALSE(world.alpha.signals->blocked.has(bit_for(kSigInt)));
 }

@@ -3,6 +3,7 @@
 #include "../framework/framework.hpp"
 #include "kernel/arch/x86_64/per_cpu.hpp"
 #include "kernel/proc/futex.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -120,6 +121,10 @@ struct World {
             check_early_wake(
                 task, [&] { cinux::proc::futex::WaitOnUserWord(kAddress, 7); },
                 [&] { cinux::proc::futex::WakeUserWord(kAddress, 1); });
+            unsigned int             bits_word = 9;
+            const unsigned long long kBits     = reinterpret_cast<unsigned long long>(&bits_word);
+            check_bitset_wake(task, kBits);
+            ASSERT_TRUE(scheduler.withdraw(task));
         }
         scheduler.schedule_blocked();
         ASSERT_TRUE(task.state == cinux::proc::TaskState::kRunning);
@@ -146,6 +151,21 @@ struct World {
         std::jthread other([&] {
             cinux::arch::per_cpu::PerCpu::self().cpu_id = 1;
             wake();
+        });
+        other.join();
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kReady);
+        ASSERT_EQ(sink.played, 1U);
+    }
+
+    void check_bitset_wake(cinux::proc::Task& task, unsigned long long address) const {
+        const auto kWaitResult = cinux::proc::futex::WaitOnUserWord(address, 9, 0x4U);
+        ASSERT_TRUE(kWaitResult == cinux::base::KernelError::kOk);
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kBlocked);
+        ASSERT_EQ(cinux::proc::futex::WakeUserWord(address, 1, 0x2U), 0LL);
+        ASSERT_TRUE(task.state == cinux::proc::TaskState::kBlocked);
+        std::jthread other([&] {
+            cinux::arch::per_cpu::PerCpu::self().cpu_id = 1;
+            ASSERT_EQ(cinux::proc::futex::WakeUserWord(address, 1, 0x4U), 1LL);
         });
         other.join();
         ASSERT_TRUE(task.state == cinux::proc::TaskState::kReady);
@@ -280,6 +300,30 @@ TEST("scheduler: parentless tasks stay visible until they are reclaimed") {
         scheduler.with_task(world.alpha.pid, []([[maybe_unused]] cinux::proc::Task& task) {}));
     ASSERT_FALSE(scheduler.snapshot_by_pid(world.beta.pid, shot));
     ASSERT_FALSE(scheduler.nth_group_leader(0, pid));
+}
+
+TEST("futex: a due deadline answers the clock without a park") {
+    unsigned int word    = 5;
+    const auto   address = reinterpret_cast<unsigned long long>(&word);
+    // The value holds and the deadline is already spent: the clock
+    // decides, and no bucket seat was ever taken.
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(
+                    address, 5, ~0U, cinux::syscall::MonotonicNanoseconds()) ==
+                cinux::base::KernelError::kTimedOut);
+    // A moved word still answers the value first, as on Linux.
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(
+                    address, 4, ~0U, cinux::syscall::MonotonicNanoseconds()) ==
+                cinux::base::KernelError::kWouldBlock);
+}
+
+TEST("futex: ParkOnWord compares the word as it stands under the bucket lock") {
+    unsigned int word    = 5;
+    const auto   address = reinterpret_cast<unsigned long long>(&word);
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(address, 4) ==
+                cinux::base::KernelError::kWouldBlock);
+    word = 6;
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(address, 4) ==
+                cinux::base::KernelError::kWouldBlock);
 }
 
 }  // namespace

@@ -1,0 +1,28 @@
+{
+  "group": "boot_loader",
+  "namespace": "cinux::boot::load",
+  "intro": "负责内核镜像从磁盘读到内存的头部读取与搬运。",
+  "categories": ["头部读取", "镜像搬运", "扇区换算"],
+  "functions": {
+    "LoadKernel": {
+      "summary": "把整个内核镜像从磁盘搬到内存，返回搬运结果",
+      "category": "镜像搬运"
+    },
+    "ReadHeader": {
+      "summary": "把内核镜像头部从磁盘读进暂存区并返回",
+      "category": "头部读取"
+    },
+    "RunFerry": {
+      "summary": "经 32 位传送窗口复制一段内存，无返回值",
+      "category": "镜像搬运"
+    },
+    "SectorBytes": {
+      "summary": "把扇区数换算成字节数并返回",
+      "category": "扇区换算"
+    },
+    "SectorsFor": {
+      "summary": "按字节数算出所需扇区数，不超过上限",
+      "category": "扇区换算"
+    }
+  }
+}

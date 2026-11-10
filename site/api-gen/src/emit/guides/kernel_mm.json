@@ -1,0 +1,291 @@
+{
+  "group": "kernel_mm",
+  "namespace": "cinux::mm",
+  "intro": "管地址翻译、页表、空间生命周期、物理页与写时复制",
+  "categories": [
+    "地址翻译",
+    "页表映射",
+    "地址空间生命周期",
+    "物理内存分配",
+    "写时复制",
+    "直接映射"
+  ],
+  "functions": {
+    "cinux::mm::AddressSpace::~AddressSpace": {
+      "summary": "析构归还用户半区所有帧和表，已拆除时什么都不做",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::AddressSpace::activate": {
+      "summary": "把机器切进这套地址空间，调用前关中断",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::AddressSpace::init": {
+      "summary": "建根表并镜像内核半区，成功返回 true",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::AddressSpace::map": {
+      "summary": "映射一页，写入末级表项成功返回 true",
+      "category": "页表映射"
+    },
+    "cinux::mm::AddressSpace::map_user": {
+      "summary": "映射一页给用户态，可带末级权限位，成功为 true",
+      "category": "页表映射"
+    },
+    "cinux::mm::AddressSpace::root": {
+      "summary": "返回根表物理地址，初始化前为 0",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::AddressSpace::teardown": {
+      "summary": "归还用户半区的帧和表，根表清零",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::AddressSpace::translate": {
+      "summary": "把虚拟地址翻成物理地址，未映射返回 0",
+      "category": "地址翻译"
+    },
+    "cinux::mm::BringUpAddressSpace": {
+      "summary": "换掉启动期的映射并归档交接记录，失败返回空指针",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::BringUpHeap": {
+      "summary": "映射初始堆段并启动分配器，成功返回 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::cow::CloneSharedSpace": {
+      "summary": "给子空间复制父空间映射并共享页，内存不足返回空指针",
+      "category": "写时复制"
+    },
+    "cinux::mm::cow::InstallResolver": {
+      "summary": "把缺页引擎挂到异常处理的故障入口",
+      "category": "写时复制"
+    },
+    "cinux::mm::cow::MarkPageShared": {
+      "summary": "把一条用户映射标为共享并加计数，成功为 true",
+      "category": "写时复制"
+    },
+    "cinux::mm::cow::ReleaseFrame": {
+      "summary": "给共享帧减一，最后一个使用者归还分配器",
+      "category": "写时复制"
+    },
+    "cinux::mm::cow::TryResolvePageFault": {
+      "summary": "为写缺页复制私有帧，修好返回 true，否则 false",
+      "category": "写时复制"
+    },
+    "cinux::mm::demand::FillPage": {
+      "summary": "为不存在的页补一帧，补上返回 true，否则 false",
+      "category": "页表映射"
+    },
+    "cinux::mm::DirectMapPhys": {
+      "summary": "由直接映射指针反推出物理地址",
+      "category": "直接映射"
+    },
+    "cinux::mm::DirectMapVirt": {
+      "summary": "把物理地址换成直接映射里的别名",
+      "category": "直接映射"
+    },
+    "cinux::mm::Heap::allocate": {
+      "summary": "从空闲链首适配分配一块，缺空间返回空指针",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Heap::free": {
+      "summary": "收回一块并与相邻空闲块合并，接受返回 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Heap::grow": {
+      "summary": "新页到位后抬高堆顶，并入尾部空闲块，成功为 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Heap::init": {
+      "summary": "把一段连续内存认作整个堆，成功返回 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::HeapAllocate": {
+      "summary": "装不下就扩堆再分配，扩不动返回空指针",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::HeapFree": {
+      "summary": "归还堆块，与空闲邻块合并，指针无效返回 false",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::IoremapVirt": {
+      "summary": "把设备物理地址换成第一阶段 ioremap 别名",
+      "category": "页表映射"
+    },
+    "cinux::mm::IsDirectMap": {
+      "summary": "地址落在直接映射那一格才返回 true",
+      "category": "直接映射"
+    },
+    "cinux::mm::IsHardwarePage": {
+      "summary": "帧在硬件保留区间内返回 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::IsKernelHalf": {
+      "summary": "地址在内核半区返回 true",
+      "category": "直接映射"
+    },
+    "cinux::mm::KernelPageRoot": {
+      "summary": "返回内核自己的页表根物理地址",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::KernelTables::table": {
+      "summary": "经直接映射取得页表页的可写视图",
+      "category": "页表映射"
+    },
+    "cinux::mm::KernelTables::take_page": {
+      "summary": "从物理页池取一张清零页当新页表，没有返回 0",
+      "category": "页表映射"
+    },
+    "cinux::mm::MapDeviceWindow": {
+      "summary": "设备窗口以免缓存方式映射，全部成功返回 true",
+      "category": "页表映射"
+    },
+    "cinux::mm::MapFramebufferDoor": {
+      "summary": "把帧缓冲的 ioremap 别名装进活动页表",
+      "category": "页表映射"
+    },
+    "cinux::mm::Pmm::allocate_pages": {
+      "summary": "分配 2^order 张连续页，不能分配时返回零地址",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Pmm::free_pages": {
+      "summary": "按原 order 归还整串页，无返回值",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Pmm::init": {
+      "summary": "按启动内存图建页池，成功返回 true",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::Pmm::release_frame": {
+      "summary": "给共享帧少记一个映射，返回剩余使用者数",
+      "category": "写时复制"
+    },
+    "cinux::mm::Pmm::retain_frame": {
+      "summary": "给共享帧多记一个映射，无返回值",
+      "category": "写时复制"
+    },
+    "cinux::mm::PrintFaultVerdict": {
+      "summary": "打印登记表对这次缺页地址的看法",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::ReserveHardwarePages": {
+      "summary": "把一段硬件帧登记为保留，表满返回 false",
+      "category": "物理内存分配"
+    },
+    "cinux::mm::VmaStore::~VmaStore": {
+      "summary": "析构时归还全部已登记区域",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::clone": {
+      "summary": "整份复制区域登记，任一节点失败返回空指针",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::empty": {
+      "summary": "登记表为空时返回 true",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::find": {
+      "summary": "找出覆盖该地址的区域，没有返回空指针",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::find_free_spot": {
+      "summary": "从上限往下找一段空隙，找不到返回内存不足",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::heap_end": {
+      "summary": "返回当前堆顶，还没种下时是 0",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::max_end": {
+      "summary": "返回已登记区域和堆里的最高结尾",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::move_heap_end": {
+      "summary": "挪堆顶并返回新位置，越界不改，报错",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::protect": {
+      "summary": "改写一段内各区域的权限，覆盖不全就报错",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::region_count": {
+      "summary": "返回链上区域数，不含 brk 段",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::register_range": {
+      "summary": "登记一段用户区域，越界或重叠都报错",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::seed_heap": {
+      "summary": "指定程序堆的起点和上限，无返回值",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::set_mmap_ceiling": {
+      "summary": "设定本空间 mmap 的搜索上限",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::span_known": {
+      "summary": "整段都被已登记区域盖住才返回 true",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::teardown": {
+      "summary": "归还全部已登记区域，无返回值",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::VmaStore::unregister_range": {
+      "summary": "把一段从各区域里撤掉，空段报错",
+      "category": "地址空间生命周期"
+    },
+    "cinux::mm::walk::EnsureLeafTable": {
+      "summary": "走到末级页表，缺的中间表边建边取，失败返回空指针",
+      "category": "页表映射"
+    },
+    "cinux::mm::walk::EntryTarget": {
+      "summary": "读出表项指向的下一级表物理地址",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::FindSlot": {
+      "summary": "只读走到地址对应的表项，走空返回空指针",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::FollowTable": {
+      "summary": "顺着表项往下找到下一级表",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::IndexRange": {
+      "summary": "给出一级索引在地址里占的位段",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::LowBits": {
+      "summary": "按页大小截出地址在页内的偏移",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::MapPage": {
+      "summary": "映射一页，缺的中间页表一并建出来",
+      "category": "页表映射"
+    },
+    "cinux::mm::walk::MapUserPage": {
+      "summary": "给用户态映射一页，整条路径都带用户位",
+      "category": "页表映射"
+    },
+    "cinux::mm::walk::SlotIndex": {
+      "summary": "读出某一级消费的九位索引",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::TranslatePage": {
+      "summary": "把虚拟地址翻成物理字节，未映射返回 0",
+      "category": "地址翻译"
+    },
+    "cinux::mm::walk::UnmapPage": {
+      "summary": "清掉一页映射，返回原来占位的表项",
+      "category": "页表映射"
+    }
+  },
+  "components": [
+    {
+      "anchor": "address",
+      "title": "地址拆解",
+      "component": "ApiAddressIndex",
+      "note": "输入一个地址,看四级索引各落多少,以及换大页时偏移宽度怎么变。"
+    }
+  ]
+}

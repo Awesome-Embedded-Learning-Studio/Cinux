@@ -219,7 +219,9 @@ long long HandleShmdt(const SyscallFrame& frame) {
     if (!kSelf->vmas.holds()) {
         return -kEinval;
     }
-    const auto* const kRegion = kSelf->vmas->find(frame.rdi);
+    mm::VmaRegion              region{};
+    const bool                 kCovered = kSelf->vmas->lookup(frame.rdi, region);
+    const mm::VmaRegion* const kRegion  = kCovered ? &region : nullptr;
     if (kRegion == nullptr || !kRegion->shared.holds() || kRegion->shared->start != frame.rdi) {
         return -kEinval;
     }

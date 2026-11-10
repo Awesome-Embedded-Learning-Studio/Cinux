@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "kernel/boot/print.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signals.hpp"
 #include "kernel/syscall/sys_access.hpp"
 #include "kernel/syscall/sys_arch_prctl.hpp"
@@ -172,7 +173,7 @@ constexpr Row kRows[] = {
     {.number = cinux::syscall::SyscallNr::kVfork, .handler = cinux::syscall::HandleFork},
     {.number = cinux::syscall::SyscallNr::kExecve, .handler = cinux::syscall::HandleExecve},
     {.number = cinux::syscall::SyscallNr::kExit, .handler = cinux::syscall::HandleExit},
-    {.number = cinux::syscall::SyscallNr::kExitGroup, .handler = cinux::syscall::HandleExit},
+    {.number = cinux::syscall::SyscallNr::kExitGroup, .handler = cinux::syscall::HandleExitGroup},
     {.number = cinux::syscall::SyscallNr::kWaitid, .handler = cinux::syscall::HandleWaitid},
     {.number = cinux::syscall::SyscallNr::kWait4, .handler = cinux::syscall::HandleWait4},
     {.number = cinux::syscall::SyscallNr::kKill, .handler = cinux::syscall::HandleKill},
@@ -320,6 +321,7 @@ extern "C" long long InvokeSyscall(cinux::syscall::SyscallFrame& frame) {
     }
     const long long kResult = kHandlers[kNumber](frame);
     frame.rax               = static_cast<unsigned long long>(kResult);
+    cinux::proc::Scheduler::self().exit_if_group_pending();
     if (cinux::proc::DeliverPendingSignals(frame)) {
         return static_cast<long long>(frame.rax);
     }

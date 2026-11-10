@@ -1,0 +1,21 @@
+{
+  "group": "kernel_init",
+  "namespace": "cinux::init",
+  "intro": "把内核从第一条指令带到第一个线程跑起来的那段启动路径",
+  "categories": [
+    "启动梯子",
+    "步骤协议",
+    "失败停机",
+    "初始化线程"
+  ],
+  "functions": {
+    "cinux::init::RunInitSequence": {
+      "summary": "爬完启动梯子，返回最后的启动信息，某级失败就停机",
+      "category": "启动梯子"
+    },
+    "cinux::init::StartInitThread": {
+      "summary": "建好初始化线程交给调度器，无返回值，建不出就停机",
+      "category": "初始化线程"
+    }
+  }
+}

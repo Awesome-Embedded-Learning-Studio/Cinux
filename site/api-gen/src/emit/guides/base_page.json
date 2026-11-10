@@ -1,0 +1,39 @@
+{
+  "group": "base_page",
+  "namespace": "cinux::arch::page",
+  "intro": "构造 x86_64 页表项，算对齐基址与设备映射范围。",
+  "categories": ["地址对齐", "页表项构造", "设备映射规划", "权限位组合"],
+  "functions": {
+    "HugeWindowBase": {
+      "summary": "返回包含该物理地址的 1GB 窗口起始地址",
+      "category": "地址对齐",
+      "example": "#include \"kernel/arch/x86_64/page_entry.hpp\"\n\nusing namespace cinux::arch::page;\n\nconstexpr uint64_t kWindow = HugeWindowBase(0x1'2345'6789ULL);\n// kWindow = 0x1'0000'0000 · 4 GiB 处开始的 1 GB 窗口\nstatic_assert(kWindow == 0x1'0000'0000ULL);"
+    },
+    "LargePageBase": {
+      "summary": "返回包含该物理地址的 2MB 页起始地址",
+      "category": "地址对齐"
+    },
+    "MakeHugePageEntry": {
+      "summary": "拼出 1GB 大页表项，置存在与大页标志",
+      "category": "页表项构造"
+    },
+    "MakeLargePageEntry": {
+      "summary": "拼出 2MB 大页表项，置存在与大页标志",
+      "category": "页表项构造"
+    },
+    "MakeTableEntry": {
+      "summary": "拼出指向下一级页表的表项，返回编码结果",
+      "category": "页表项构造",
+      "example": "#include \"kernel/arch/x86_64/page_entry.hpp\"\n\nusing namespace cinux::arch::page;\n\nconstexpr Entry kNextTable = MakeTableEntry(0x40'0000ULL, kWritable);\n// raw = 0x400003 · 存在位、可写位和下一级表的 4 KiB 帧地址\nstatic_assert(kNextTable.raw == 0x400003);"
+    },
+    "PlanDeviceDoors": {
+      "summary": "算出设备区域占的 1GB 页数，给出首个编号",
+      "category": "设备映射规划",
+      "example": "#include \"kernel/arch/x86_64/page_entry.hpp\"\n\nusing namespace cinux::arch::page;\n\nconstexpr DoorSpan kDoors = PlanDeviceDoors(0xFD00'0000ULL, 0x0400'0000ULL);\n// first_index = 3 · count = 2 · 64 MiB 帧缓冲跨过 4 GiB 边界\nstatic_assert(kDoors.first_index == 3 && kDoors.count == 2);"
+    },
+    "UserLeafTerms": {
+      "summary": "组合用户页的可写与不可执行位，返回标志",
+      "category": "权限位组合"
+    }
+  }
+}

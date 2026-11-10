@@ -1,0 +1,77 @@
+/* ════════════════════════════════════════════════════════════════
+   API 参考页 — 页头
+
+   书页式的页头：标题是主角，其余信息压成一行小字，不抢戏。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── @ingroup：小号药丸 + 文件夹图标 ─────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > h1 + p > code {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.18em 0.7em 0.18em 0.6em;
+  border: 1px solid var(--api-rule-strong);
+  border-radius: 999px;
+  background: none;
+  color: var(--api-muted);
+  font-family: var(--api-mono);
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > h1 + p > code::before {
+  content: '';
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  background: currentColor;
+  mask: var(--api-ico-folder) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-folder) center / contain no-repeat;
+  opacity: 0.8;
+}
+
+/* ── 「N 个符号」：字阶收小，数字用等宽 ──────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > h1 + p + p {
+  margin-top: 0.35em;
+  font-size: 0.8em;
+  letter-spacing: 0.06em;
+  color: var(--api-muted);
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > h1 + p + p > strong {
+  font-family: var(--api-mono);
+  font-size: 1.1em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--api-ink);
+}
+
+/* ── Badge：安静一点，别和标题争 ───────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > .VPBadge {
+  display: inline-flex;
+  align-items: center;
+  margin: 0.35em 0.4em 0 0;
+  font-size: 0.75em;
+  vertical-align: middle;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .VPBadge + .details {
+  margin-top: 1.6em;
+}
+
+/* ── h1 与下方信息的节奏 ────────────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > h1 {
+  margin-bottom: 0.35em;
+  letter-spacing: -0.02em;
+}
+
+@media (max-width: 639px) {
+  .vp-doc[class*="_Cinux_api_"] > div > h1 + p > code {
+    font-size: 0.68em;
+  }
+}

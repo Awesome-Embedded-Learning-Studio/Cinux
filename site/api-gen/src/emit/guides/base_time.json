@@ -1,0 +1,21 @@
+{
+  "group": "base_time",
+  "namespace": "cinux::base::time",
+  "intro": "日历读数换算与带单位的时长转换",
+  "categories": [
+    "日历换算",
+    "时长转换"
+  ],
+  "functions": {
+    "ToNanoseconds": {
+      "summary": "把任意时间跨度换算成纳秒",
+      "category": "时长转换",
+      "example": "#include <cinux/time.hpp>\n\nusing namespace cinux::base::time;\n\nvoid Example() {\n    constexpr auto kHalf = ToNanoseconds(500_ms);  // kHalf.value = 500000000 · 半秒\n    static_assert(kHalf.value == 500000000ULL);\n    static_assert(ToNanoseconds(2_s).value == 2000000000ULL);   // 2 秒\n    static_assert(ToNanoseconds(1500_us).value == 1500000ULL);  // 1500 微秒\n}"
+    },
+    "UnixSecondsOf": {
+      "summary": "把公历读数换算成 Unix 秒",
+      "category": "日历换算",
+      "example": "#include <cinux/time.hpp>\n\nusing namespace cinux::base::time;\n\nvoid Example() {\n    constexpr CivilTime kEpoch{\n        .year = 1970, .month = 1, .day = 1, .hour = 0, .minute = 0, .second = 0};\n    static_assert(UnixSecondsOf(kEpoch) == 0ULL);  // 0 · 纪元起点\n\n    constexpr CivilTime kNoon{\n        .year = 2026, .month = 11, .day = 9, .hour = 12, .minute = 0, .second = 0};\n    // 1794225600 · 2026-11-09T12:00:00Z 距纪元的秒数\n    static_assert(UnixSecondsOf(kNoon) == 1794225600ULL);\n}"
+    }
+  }
+}

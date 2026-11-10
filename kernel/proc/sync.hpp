@@ -28,6 +28,7 @@
 #include <type_traits>
 
 #include "cinux/container/self_list.hpp"
+#include "cinux/scoped_guard.hpp"
 #include "kernel/arch/x86_64/per_cpu_config.hpp"
 #include "kernel/proc/checks_config.hpp"
 #include "kernel/proc/lockdep.hpp"
@@ -119,43 +120,40 @@ SpinLedger& DefaultSpinLedger();
 
 /**
  * @brief         RAII scope over one Spinlock.
+ * @note          The shell is the shared ScopedGuard; this station
+ *                only supplies the enter/exit pair, so lock discipline
+ *                is spelled once for the whole kernel.
  * @since         0.1.0
  * @ingroup       kernel_proc
  */
-class SpinGuard {
-public:
-    /**
-     * @brief   Acquire the supplied lock for this scope.
-     * @param[in,out] lock Lock released when the scope ends.
-     * @since   0.1.0
-     * @ingroup kernel_proc
-     */
-    explicit SpinGuard(Spinlock& lock);
-    ~SpinGuard();
-
-    SpinGuard(const SpinGuard&)            = delete;
-    SpinGuard& operator=(const SpinGuard&) = delete;
-
-private:
-    Spinlock& lock_;
+struct SpinLockPolicy {
+    /// The lock the guard holds.
+    struct State {
+        Spinlock& lock;  ///< What enter acquires and exit releases.
+    };
+    static void enter(State& state);
+    static void exit(State& state);
 };
+
+/// Scoped spinlock hold; releases, restoring interrupts, on scope exit.
+using SpinGuard = cinux::base::ScopedGuard<SpinLockPolicy>;
 
 /**
  * @brief         RAII scope over one Mutex.
  * @since         0.1.0
  * @ingroup       kernel_proc
  */
-class MutexGuard {
-public:
-    explicit MutexGuard(Mutex& mutex);
-    ~MutexGuard();
-
-    MutexGuard(const MutexGuard&)            = delete;
-    MutexGuard& operator=(const MutexGuard&) = delete;
-
-private:
-    Mutex& mutex_;
+struct MutexLockPolicy {
+    /// The mutex the guard holds.
+    struct State {
+        Mutex& mutex;  ///< What enter locks and exit unlocks.
+    };
+    static void enter(State& state);
+    static void exit(State& state);
 };
+
+/// Scoped mutex hold; wakes the next waiter on scope exit.
+using MutexGuard = cinux::base::ScopedGuard<MutexLockPolicy>;
 
 /**
  * @brief         Interrupt-blocking mutual exclusion, the fast lane.

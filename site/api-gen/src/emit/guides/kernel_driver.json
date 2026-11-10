@@ -1,0 +1,997 @@
+{
+  "group": "kernel_driver",
+  "namespace": "cinux::driver",
+  "intro": "把网卡、终端和 USB 设备接上内核",
+  "categories": [
+    "网络设备",
+    "USB",
+    "终端",
+    "端口与寄存器访问",
+    "PCI 与配置空间",
+    "ACPI 与中断控制器",
+    "块设备",
+    "命令下发与完成",
+    "控制台与字体",
+    "输入设备",
+    "时间与时钟",
+    "设备枚举"
+  ],
+  "functions": {
+    "cinux::driver::net::E1000::has_ethernet_header": {
+      "summary": "线路带以太网帧头，本卡恒为真",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::has_mac": {
+      "summary": "有没有硬件地址，本卡有",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::init": {
+      "summary": "找卡并把它拉起来，失败返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::mac": {
+      "summary": "读 EEPROM 得出的六个字节地址",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::max_frame": {
+      "summary": "本设备能搬的最大帧长",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::poll_frame": {
+      "summary": "取出一帧收到的数据，环空返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::port": {
+      "summary": "给协议栈接线用的网络端口",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::present": {
+      "summary": "卡在本次启动里是否起来了",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::rx_head": {
+      "summary": "接收环已经填到的位置",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::send_l3": {
+      "summary": "封好以太网头发出三层负载，发不出返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::take_ring_pages": {
+      "summary": "占下环页和全部缓冲页，占不全就全退",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::E1000::tx_head": {
+      "summary": "发送环已经消费到的位置",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::EraseNetworkDevice": {
+      "summary": "造一台网络操作全为空实现的设备",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::dropped": {
+      "summary": "队满被拒的帧数，供诊断查",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::has_ethernet_header": {
+      "summary": "线路带不带以太网帧头，回环恒假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::has_mac": {
+      "summary": "有没有硬件地址，回环没有",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::init": {
+      "summary": "清空收帧队列",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::mac": {
+      "summary": "硬件地址，回环恒为零",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::max_frame": {
+      "summary": "本设备能搬的最大帧长",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::poll_frame": {
+      "summary": "取出队首那一帧，队空返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::Loopback::send_l3": {
+      "summary": "把三层负载排进队列，超长或队满返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::adopt": {
+      "summary": "把一个网络设备装到端口后面",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::has_ethernet_header": {
+      "summary": "端口后的设备带不带以太网帧头，未装返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::has_mac": {
+      "summary": "端口后的设备有没有硬件地址",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::mac": {
+      "summary": "端口后设备的硬件地址，未装为零",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::max_frame": {
+      "summary": "端口后设备能搬的最大帧长，未装为零",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::poll_frame": {
+      "summary": "取一帧收到的数据，没帧返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::net::NetPort::send_l3": {
+      "summary": "把三层负载交给端口后的设备，被拒返回假",
+      "category": "网络设备"
+    },
+    "cinux::driver::Pty::master_closed": {
+      "summary": "主端最后一份打开是否关了",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::master_has_input": {
+      "summary": "主端现在读能不能读到东西",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::master_read": {
+      "summary": "取走回显和从端写来的输出，空返回零",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::master_write": {
+      "summary": "像在主端键入一样塞字节，满环只收一部分",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::Pty": {
+      "summary": "围绕一个等待钩子建出主从一对",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::raw_has_keys": {
+      "summary": "从端还没取走的按键有没有",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::release_master": {
+      "summary": "主端最后一份关闭时挂断从端输入",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::release_slave": {
+      "summary": "从端全部关闭时让主端读到文件尾",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::reset": {
+      "summary": "恢复到刚建好时的空状态",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::retain_master": {
+      "summary": "记下一份独立的主端打开",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::retain_slave": {
+      "summary": "记下一份独立的从端打开",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::slave": {
+      "summary": "从端那个真正管行编辑的终端",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::slave_closed": {
+      "summary": "开过的从端是否已经全关",
+      "category": "终端"
+    },
+    "cinux::driver::Pty::slave_write": {
+      "summary": "把从端自己的输出推给主端，满环只收一部分",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::apply_termios": {
+      "summary": "把一份 termios 记录接成现行设置",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::copy_termios": {
+      "summary": "复制出一份 Linux 终端属性记录",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::feed": {
+      "summary": "送一个字节过行编辑，成行返回真",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::hang_up": {
+      "summary": "剩余按键和编辑中的字节排完再停输入",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::has_input": {
+      "summary": "输入路径上还有没有东西等着",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::has_line": {
+      "summary": "有没有一整行等着读",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::hung_up": {
+      "summary": "输入一方是否已经关闭",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::read_line": {
+      "summary": "读一行编辑结果，等待时无整行则阻塞",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::set_window": {
+      "summary": "记下窗口行列，供 ioctl 报告",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::signal_for": {
+      "summary": "把开了的信号字符换成信号号，普通键回零",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::take_pending_signal": {
+      "summary": "取走按键请求的信号，没有返回零",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::Tty(const TtyWiring &)": {
+      "summary": "按接线建出接好三个座位的终端",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::Tty()": {
+      "summary": "建一个没接线的终端，出生即安静",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::window": {
+      "summary": "终端报的窗口行列形状",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::wire": {
+      "summary": "把座位和出生标志交进来",
+      "category": "终端"
+    },
+    "cinux::driver::Tty::wired": {
+      "summary": "座位是不是都接上了",
+      "category": "终端"
+    },
+    "cinux::driver::usb::BuildControlEpContext": {
+      "summary": "建出每台设备起步用的零号端点上下文",
+      "category": "USB"
+    },
+    "cinux::driver::usb::BuildInterruptInEpContext": {
+      "summary": "建出键盘上报用的中断入端点上下文",
+      "category": "USB"
+    },
+    "cinux::driver::usb::BuildSlotContext": {
+      "summary": "建出一台已寻址设备带的槽上下文",
+      "category": "USB"
+    },
+    "cinux::driver::usb::CompletionCode": {
+      "summary": "取事件里的完成码，状态字高八位",
+      "category": "USB"
+    },
+    "cinux::driver::usb::EnqueueCommand": {
+      "summary": "往命令环放一个 TRB，并把链接位写对",
+      "category": "USB"
+    },
+    "cinux::driver::usb::EventPending": {
+      "summary": "这个事件是不是控制器新产出的",
+      "category": "USB"
+    },
+    "cinux::driver::usb::FindHidInterface": {
+      "summary": "按协议在配置里找一个 HID 接口",
+      "category": "USB"
+    },
+    "cinux::driver::usb::HidReportKey": {
+      "summary": "比对前后两份报告，找出新按下的键",
+      "category": "USB"
+    },
+    "cinux::driver::usb::InitRing": {
+      "summary": "把环清空并拉起链接位",
+      "category": "USB"
+    },
+    "cinux::driver::usb::IsXhciController": {
+      "summary": "看 PCI 三个字节是不是 xHCI 控制器",
+      "category": "USB"
+    },
+    "cinux::driver::usb::LocateRegions": {
+      "summary": "从能力块里读出三块区域的偏移",
+      "category": "USB"
+    },
+    "cinux::driver::usb::PackSetup": {
+      "summary": "把 USB 设置包压成一个参数字",
+      "category": "USB"
+    },
+    "cinux::driver::usb::ReadShape": {
+      "summary": "读出控制器的版本、槽数和端口数",
+      "category": "USB"
+    },
+    "cinux::driver::usb::SetAddFlags": {
+      "summary": "写输入控制上下文的添加标志",
+      "category": "USB"
+    },
+    "cinux::driver::usb::SlotIdOf": {
+      "summary": "取事件说的设备槽号，控制字高八位",
+      "category": "USB"
+    },
+    "cinux::driver::usb::TrbControl": {
+      "summary": "拼出 TRB 控制字，不含周期位",
+      "category": "USB"
+    },
+    "cinux::driver::usb::TrbType": {
+      "summary": "取 TRB 的类型字段",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::address": {
+      "summary": "拿一个空槽并给设备分总线地址",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::configure_interrupt_in": {
+      "summary": "把中断入端点的上下文放进去",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::control_read": {
+      "summary": "在零号端点上走一次控制读",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::detach": {
+      "summary": "把槽还回去并释放设备占的页",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::enumerate": {
+      "summary": "挨个空端口找回应协议的设备",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::interrupt_read": {
+      "summary": "挂一次中断读，带完成回调",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::report": {
+      "summary": "中断端点填的八字节报告缓冲",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::set_configuration": {
+      "summary": "在零号端点上写一次配置值",
+      "category": "USB"
+    },
+    "cinux::driver::usb::UsbDevice::slot": {
+      "summary": "设备占的槽号，没寻址前是零",
+      "category": "USB"
+    },
+    "cinux::driver::acpi::FindFadt": {
+      "summary": "在 ACPI 目录里找 FACP 表，没有就返回空指针",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::FindInterruptTopology": {
+      "summary": "走一遍 ACPI 表解出中断拓扑，缺表返回空",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::FindRootPointer": {
+      "summary": "扫 EBDA 与固件窗口找 RSDP，找不到返回空指针",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::FindTable": {
+      "summary": "按四字节签名在目录里找表，没有就返回空指针",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::ParseMadt": {
+      "summary": "解析一段 MADT 字节得到中断拓扑，残缺返回空",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::PowerOff": {
+      "summary": "往 PM1a 控制寄存器写 16 位请求断电，返回即固件没断",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::acpi::TableSumsToZero": {
+      "summary": "把整张表逐字节相加，和为零才算 ACPI 表",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::Ahci::block_count": {
+      "summary": "报出识别到的扇区上限，识别前返回零",
+      "category": "块设备"
+    },
+    "cinux::driver::Ahci::block_size": {
+      "summary": "报出这块盘的扇区字节数，同一块盘上固定",
+      "category": "块设备"
+    },
+    "cinux::driver::Ahci::flush": {
+      "summary": "让盘先写完缓存，成功返回真，盘拒绝返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::Ahci::init": {
+      "summary": "拉起控制器并让它做识别，没有控制器返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::Ahci::issue": {
+      "summary": "把一条 ATA 命令放进零号槽发出，扇区数越界返回假",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::Ahci::on_interrupt": {
+      "summary": "查状态位，置起才认领这条共享中断，否则放行",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::Ahci::read_blocks": {
+      "summary": "从盘上读一段扇区到内存，盘出错返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::Ahci::take_port_pages": {
+      "summary": "一次拿端口的三页工作内存，拿不齐就全退",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::Ahci::wait_for_completion": {
+      "summary": "睡到中断给出结果，返回这条命令的成败",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::Ahci::write_blocks": {
+      "summary": "把内存里一段扇区写到盘上，盘出错返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::BlockCache": {
+      "summary": "把缓存绑到队列上并定下槽数，零槽让请求全拒",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::flush": {
+      "summary": "写回所有脏页再让盘刷缓存，任一失败返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::patch": {
+      "summary": "把字节写进缓存槽并标脏，要跨出本页返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::read": {
+      "summary": "从缓存页拷出字节，跨页或取页失败返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::spill": {
+      "summary": "把一槽脏页写到盘上，写成才清脏标记",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockCache::view": {
+      "summary": "借出从某扇区起的视图，取页失败返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::adopt": {
+      "summary": "把一块块设备安置到端口后面，之后读写都走它",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::block_count": {
+      "summary": "报出所接设备的块数，端口空着返回零",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::block_size": {
+      "summary": "报出所接设备的块大小，端口空着返回零",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::flush": {
+      "summary": "让所接设备刷缓存，端口空着或设备拒绝返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::read_blocks": {
+      "summary": "从所接设备读一段块，端口空着返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockPort::write_blocks": {
+      "summary": "往所接设备写一段块，端口空着返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::await": {
+      "summary": "睡到这个槽的请求做完，返回设备给出的结果",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::BlockQueue": {
+      "summary": "把队列绑到唯一一块设备上，设备得比队列活得久",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::drive": {
+      "summary": "把停着的请求逐个推到完成，只在改队列时加锁",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::enqueue": {
+      "summary": "把一条请求停进空槽，槽满返回队列深度",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::flush": {
+      "summary": "和排队的写共用一条队列，保证刷在写之后",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::read": {
+      "summary": "经队列读一段块，设备拒绝或槽满返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::BlockQueue::write": {
+      "summary": "经队列写一段块，设备拒绝或槽满返回假",
+      "category": "块设备"
+    },
+    "cinux::driver::EventStream::answer": {
+      "summary": "应答抓取问询，成返回零，不成返回负 errno",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::configure_absolute": {
+      "summary": "把流改成绝对坐标轴，掉报告后补回两轴位置",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::poll": {
+      "summary": "看读的人此刻能不能取到东西，能返回真",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::publish": {
+      "summary": "塞进一条事件，中断里也能调，溢出补发释放",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::publish_report": {
+      "summary": "收尾一次输入报告，让后面读的人收得到",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::read": {
+      "summary": "取出整条记录，没有可取返回 kWouldBlock",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::set_grab_hook": {
+      "summary": "登记抓取事件要唤醒的钩子，传空表示不设",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::EventStream::set_poll_hook": {
+      "summary": "登记每次读之前先跑的函数，供无中断设备用",
+      "category": "命令下发与完成"
+    },
+    "cinux::driver::Framebuffer::alive": {
+      "summary": "报出 init 有没有拿到可用几何，拿到才能画",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::clear": {
+      "summary": "用纸色铺满整块画面，不出返回值",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::frame_bytes": {
+      "summary": "报出整帧字节数，行距乘行数",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::height": {
+      "summary": "报出画面像素行数",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::init": {
+      "summary": "接住引导传来的几何，不可用返回假并停用",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::layout": {
+      "summary": "交出引导报的几何记录，整次开机内都有效",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::put_pixel": {
+      "summary": "按列和行点一个像素，假就涂纸色抹掉",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::scroll_up": {
+      "summary": "整块画面上移若干行，底部空带涂纸色",
+      "category": "块设备"
+    },
+    "cinux::driver::Framebuffer::width": {
+      "summary": "报出画面像素列数",
+      "category": "块设备"
+    },
+    "cinux::driver::LocalApic::enable": {
+      "summary": "打开本地中断投递，并登记伪中断向量",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::eoi": {
+      "summary": "结束正在服务的最高优先级本地中断",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::id": {
+      "summary": "读出这个处理器的物理 APIC 号",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::init": {
+      "summary": "核对基址后映射 APIC 页，不是 xAPIC 返回假",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::send": {
+      "summary": "向某个处理器发启动或固定投递命令，不出返回值",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::start_timer": {
+      "summary": "按十六分频启动本地定时器，周期模式可选",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::stop_timer": {
+      "summary": "停掉并屏蔽本地定时器",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::LocalApic::timer_remaining": {
+      "summary": "读一次本地定时器还剩多少计数",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::msi::ArmMsixEntry": {
+      "summary": "分四步写好一个 MSI-X 表项并解屏蔽，写回不符返回假",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::msi::DecodeMsi": {
+      "summary": "读配置空间解出 MSI 能力，没有该能力返回假",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::msi::DecodeMsix": {
+      "summary": "读配置空间解出 MSI-X 能力，没有该能力返回假",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::msi::EntryLatched": {
+      "summary": "看表项两个字段写回是否原样，原样才返回真",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::msi::ResolveMsixWindows": {
+      "summary": "按 BAR 与表内偏移算出 MSI-X 两表窗口基址",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::msi::XapicMessageAddress": {
+      "summary": "拼出某个核的 xAPIC 消息地址，供设备写进表项",
+      "category": "ACPI 与中断控制器"
+    },
+    "cinux::driver::PciBus::admit": {
+      "summary": "把探测到的设备收进表里，表满返回假",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::PciBus::enable_device": {
+      "summary": "一次打开内存译码、总线主控和中断，让设备能干活",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::PciBus::find_by_class": {
+      "summary": "按类与子类找第一块匹配设备，没有返回空指针",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::PciBus::find_by_ids": {
+      "summary": "按厂商号和设备号找第一块匹配设备，没有返回空指针",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::PciBus::init": {
+      "summary": "走一遍配置空间，把应答的设备逐个报出来",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::driver::PciBus::scan_slot": {
+      "summary": "扫一个槽，零号功能不应答就跳过，表满返回空",
+      "category": "PCI 与配置空间"
+    },
+    "cinux::console::AdvanceCaret": {
+      "summary": "按字符推进光标，到底行滚动，返回新光标与滚动标记",
+      "category": "控制台与字体"
+    },
+    "cinux::console::AdvanceLine": {
+      "summary": "回行首下移一行，底行滚动，返回新光标与滚动标记",
+      "category": "控制台与字体"
+    },
+    "cinux::console::EmbeddedFont": {
+      "summary": "返回内核内嵌字体的解析结果，含宽高与字形数",
+      "category": "控制台与字体"
+    },
+    "cinux::console::EmbeddedFontData": {
+      "summary": "返回内嵌字体数据的首字节指针，配字节数使用",
+      "category": "控制台与字体"
+    },
+    "cinux::console::GlyphPixel": {
+      "summary": "判断字形某行某列像素是否点亮，列零在最左",
+      "category": "控制台与字体"
+    },
+    "cinux::console::GlyphRowBits": {
+      "summary": "取出某字形某一行的像素位，最高位在最左",
+      "category": "控制台与字体"
+    },
+    "cinux::console::ParsePsf2": {
+      "summary": "解析 PSF2 字体，截断或字段不合规时标记无效",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::alive": {
+      "summary": "屏幕能否绘制，初始化失败后为假",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::columns": {
+      "summary": "返回文本网格的列数",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::init": {
+      "summary": "接收帧缓冲几何、解析字体并清屏，任一失败返回假",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::put_char": {
+      "summary": "绘制一个字符并推进光标，控制字符只移动光标",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::reclaim_frame": {
+      "summary": "收回像素，文本屏从原光标处恢复",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::rows": {
+      "summary": "返回文本网格的行数",
+      "category": "控制台与字体"
+    },
+    "cinux::console::TextConsole::yield_frame": {
+      "summary": "把屏幕让给持帧者，绘制暂停但串口照常输出",
+      "category": "控制台与字体"
+    },
+    "cinux::driver::BarBase": {
+      "summary": "取某窗口的完整基址，64 位窗口拼合高低两半",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::ClockIsBinary": {
+      "summary": "查状态寄存器 B，判断时间字节是否是二进制",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::ClockIsTwentyFourHour": {
+      "summary": "查状态寄存器 B，判断小时是否按 24 时制",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::ConsoleTty": {
+      "summary": "返回接好串口与键盘座位的控制台终端",
+      "category": "控制台与字体"
+    },
+    "cinux::driver::DecodeBar": {
+      "summary": "解析 BAR 低寄存器，返回窗口类型、基址与预取位",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::DecodeClock": {
+      "summary": "把一次原始读数换算成 Unix 秒，按 UTC 语义",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::DecodeTablet": {
+      "summary": "解析一帧数位板报文，返回按键与两个坐标",
+      "category": "输入设备"
+    },
+    "cinux::driver::DeviceModel::bind": {
+      "summary": "指定字符设备落座的 devfs",
+      "category": "设备枚举"
+    },
+    "cinux::driver::DeviceModel::bound_devfs": {
+      "summary": "返回模型绑定到的设备文件系统",
+      "category": "设备枚举"
+    },
+    "cinux::driver::DeviceModel::device_count": {
+      "summary": "返回已落座设备的数量",
+      "category": "设备枚举"
+    },
+    "cinux::driver::DeviceModel::nth_device": {
+      "summary": "按序号取一台设备的信息，越界返回假",
+      "category": "设备枚举"
+    },
+    "cinux::driver::DeviceModel::seat": {
+      "summary": "落座一台设备，参数坏、重名或表满时报错",
+      "category": "设备枚举"
+    },
+    "cinux::driver::EraseBlockDevice": {
+      "summary": "把设备的读写操作装成回调表，交给块层使用",
+      "category": "设备枚举"
+    },
+    "cinux::driver::FillRegisterFis": {
+      "summary": "填一条寄存器 FIS，写入命令、LBA 与扇区数",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::FindCapability": {
+      "summary": "沿 PCI 能力链找指定能力，找不到返回零",
+      "category": "设备枚举"
+    },
+    "cinux::driver::hpet::BlockAddress": {
+      "summary": "从 ACPI 表字节解出 HPET 寄存器块地址，坏表返回零",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::Hpet::init": {
+      "summary": "在 ACPI 树里找 HPET 并映射启用，失败返回假",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::hpet::Nanoseconds": {
+      "summary": "把 HPET 计数换算成纳秒，先除后乘避免溢出",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::Hpet::since_boot_ns": {
+      "summary": "返回自首次找到计时器以来的纳秒数，未启用为零",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::hpet::ValidPeriod": {
+      "summary": "判断周期是否非零且不超过 100 纳秒",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::IdentifyAdmits": {
+      "summary": "核查 ATA 类型、LBA48、扇区大小与校验和，判断盘可用",
+      "category": "设备枚举"
+    },
+    "cinux::driver::In32": {
+      "summary": "从端口读一个双字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::InB": {
+      "summary": "从端口读一个字节",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::IoApic::ack": {
+      "summary": "确认一个 IOAPIC 中断已在本地送达",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::IoApic::init": {
+      "summary": "映射并屏蔽 IOAPIC，保留固件路由，失败返回假",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::IoApic::unmask": {
+      "summary": "把一条 ISA 线路由到启动处理器并放行",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::Keyboard::attach": {
+      "summary": "把 IRQ1 处理函数挂进中断服务并打开这条线",
+      "category": "输入设备"
+    },
+    "cinux::driver::Keyboard::events": {
+      "summary": "返回键盘发布事件的输入流",
+      "category": "输入设备"
+    },
+    "cinux::driver::Keyboard::init": {
+      "summary": "走完 8042 上电流程，自检不应答返回假",
+      "category": "输入设备"
+    },
+    "cinux::driver::Keyboard::on_byte": {
+      "summary": "把一个原始字节过翻译器，可打印结果入队",
+      "category": "输入设备"
+    },
+    "cinux::driver::Keyboard::take": {
+      "summary": "取最旧的一个字符，队列空且不等时返回零",
+      "category": "输入设备"
+    },
+    "cinux::driver::MakeConfigAddress": {
+      "summary": "把总线、槽、功能与偏移拼成配置地址字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::MakeHeaderFlags": {
+      "summary": "拼出一条命令头的标志字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::MakeRegionFlags": {
+      "summary": "拼出一个区域标志字并置完成位",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::ModelFromIdentify": {
+      "summary": "从 identify 字里裁出型号字符串",
+      "category": "设备枚举"
+    },
+    "cinux::driver::MousePacketDecoder::feed": {
+      "summary": "喂一个字节给报文状态机，凑成一帧时返回真",
+      "category": "输入设备"
+    },
+    "cinux::driver::Out16": {
+      "summary": "向端口写一个字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::Out32": {
+      "summary": "向端口写一个双字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::OutB(PortWrite)": {
+      "summary": "向端口写一个字节",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::OutB(const PortWrite(&)[Count])": {
+      "summary": "按顺序执行一整张端口写表",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::Pit::start": {
+      "summary": "把 0 号通道设成给定频率的方波",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::Pit::wait_microseconds": {
+      "summary": "借 2 号通道等若干微秒，不扰 0 号节拍",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::ps2::Drain": {
+      "summary": "清空 8042 输出缓冲区现成的字节，忙时返回假",
+      "category": "输入设备"
+    },
+    "cinux::driver::ps2::SendAux": {
+      "summary": "向辅助端口发一次事务，设备不确认即失败",
+      "category": "输入设备"
+    },
+    "cinux::driver::ps2::SendCommand": {
+      "summary": "等输入缓冲空后写命令字节，控制器忙则失败",
+      "category": "输入设备"
+    },
+    "cinux::driver::ps2::WriteData": {
+      "summary": "等输入缓冲空后写数据字节，控制器忙则失败",
+      "category": "输入设备"
+    },
+    "cinux::driver::Ps2Mouse::events": {
+      "summary": "返回鼠标发布事件的输入流",
+      "category": "输入设备"
+    },
+    "cinux::driver::Ps2Mouse::init": {
+      "summary": "走完辅助端口上电流程，失败不阻塞启动",
+      "category": "输入设备"
+    },
+    "cinux::driver::Ps2Mouse::on_byte": {
+      "summary": "把一个字节过报文语法，凑整帧后发事件",
+      "category": "输入设备"
+    },
+    "cinux::driver::ReadSpotConfig": {
+      "summary": "在指定位置读一个配置双字",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::Rtc::now_seconds": {
+      "summary": "读一次墙钟，返回 Unix 秒",
+      "category": "时间与时钟"
+    },
+    "cinux::driver::SeatUsbKeyboard": {
+      "summary": "在设备模型里落座 USB 键盘，不存在返回假",
+      "category": "设备枚举"
+    },
+    "cinux::driver::SectorCeilingFromIdentify": {
+      "summary": "从 identify 字里取 48 位扇区上限",
+      "category": "设备枚举"
+    },
+    "cinux::driver::SerialDrain": {
+      "summary": "等到发送器彻底排空",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::SerialHasKey": {
+      "summary": "查数据就绪位，判断串口是否收到字节",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::SerialInit": {
+      "summary": "把 COM1 配成 115200 8N1 轮询输出",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::SerialPutChar": {
+      "summary": "发一个字节，线路忙时先等待",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::SerialTryGetChar": {
+      "summary": "有字节就取一个到 out，取到返回真",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::TranslateScancode": {
+      "summary": "按修饰键翻译扫描码，不可打印时返回零",
+      "category": "输入设备"
+    },
+    "cinux::driver::TranslateScancodeKeycode": {
+      "summary": "把扫描码翻成键码与按下抬起，无名码返回假",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbKeyboard::init": {
+      "summary": "通过已落座的控制器枚举键盘，成功返回真",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbKeyboard::poll": {
+      "summary": "先收完报告，再看队列里有没有字符",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbKeyboard::seated_slot": {
+      "summary": "返回键盘占用的槽号，未落座为零",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbKeyboard::take": {
+      "summary": "收完报告后取一个字符，没输入返回零",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbTablet::events": {
+      "summary": "返回数位板发布事件的输入流",
+      "category": "输入设备"
+    },
+    "cinux::driver::UsbTablet::init": {
+      "summary": "通过已落座的控制器枚举数位板，成功返回真",
+      "category": "输入设备"
+    },
+    "cinux::driver::WaitBitsClear": {
+      "summary": "循环读端口，直到掩码各位全为零",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::WaitBitsSet": {
+      "summary": "循环读端口，直到掩码各位全为一",
+      "category": "端口与寄存器访问"
+    },
+    "cinux::driver::XhciHost::drain_events": {
+      "summary": "收干事件环上所有已完成的事件",
+      "category": "设备枚举"
+    },
+    "cinux::driver::XhciHost::init": {
+      "summary": "找到控制器并走完上电流程，失败返回假",
+      "category": "设备枚举"
+    },
+    "cinux::driver::XhciHost::max_ports": {
+      "summary": "返回控制器提供的根端口数",
+      "category": "设备枚举"
+    },
+    "cinux::driver::XhciHost::present": {
+      "summary": "本次启动是否成功带起过控制器",
+      "category": "设备枚举"
+    },
+    "cinux::driver::XhciHost::unhealthy": {
+      "summary": "控制器报过主机系统错误时返回真",
+      "category": "设备枚举"
+    }
+  }
+}

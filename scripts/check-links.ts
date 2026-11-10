@@ -21,9 +21,6 @@ const PROJECT_ROOT = resolve(import.meta.dirname, '..')
 const DOCS = join(PROJECT_ROOT, projectConfig.documentsDir)
 const BASE_NO_SLASH = projectConfig.base.replace(/\/$/, '')
 
-/** 上站目录(与 source-link-plugin 的 PUBLISHED_DIRS 保持一致) */
-const PUBLISHED_VOLUME_DIRS = ['notes', 'ci', 'document', 'design', 'changelogs', 'api']
-
 interface Volume {
   srcDir: string
   urlPrefix: string
@@ -129,19 +126,8 @@ function checkTarget(file: string, line: number, rawTarget: string, isImage: boo
     return
   }
 
-  // 日志卷的站外相对链接(源码、todo、ai)在渲染层被 source-link-plugin
-  // 改写为 GitHub URL,源文件层放行,与渲染行为对齐:解析落点不在上站
-  // 目录、或在上站目录但文件不存在(裸相对路径按仓库根坐标写,渲染层
-  // 有仓库根回退)都算会被改写。
-  const inNotes = relative(DOCS, file).startsWith('notes/')
   const abs = resolve(dirname(file), path)
   const withinDocs = relative(DOCS, abs)
-  if (inNotes && withinDocs.startsWith('..')) return
-  if (inNotes) {
-    const firstSeg = withinDocs.split('/')[0] ?? ''
-    if (!PUBLISHED_VOLUME_DIRS.includes(firstSeg)) return
-    if (!existsSync(`${abs}.md`) && !existsSync(abs)) return
-  }
   if (withinDocs.startsWith('..')) {
     failures.push({ file, line, target, reason: '指向 document/ 之外(站内没有该目标)' })
     return
@@ -160,17 +146,33 @@ function checkTarget(file: string, line: number, rawTarget: string, isImage: boo
 function checkFile(volume: Volume, file: string): void {
   checkedFiles++
   const lines = readFileSync(file, 'utf-8').split('\n')
+  // 围栏代码块(``` 或 ~~~)里的 [x](y) 是代码不是链接,整块跳过
+  let inFence = false
+  let fenceMarker = ''
   lines.forEach((text, idx) => {
     const lineNo = idx + 1
+    const fence = text.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (fence) {
+      if (!inFence) {
+        inFence = true
+        fenceMarker = fence[1][0]
+      } else if (fence[1][0] === fenceMarker) {
+        inFence = false
+      }
+      return
+    }
+    if (inFence) return
+    // 行内代码 `...` 里的内容同样不是链接,匹配前先摘掉
+    const prose = text.replace(/(`+)[^`]*\1/g, '')
     // markdown 行内链接与图片
     const linkRe = /(!?)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
     let m: RegExpExecArray | null
-    while ((m = linkRe.exec(text)) !== null) {
+    while ((m = linkRe.exec(prose)) !== null) {
       checkTarget(file, lineNo, m[2], m[1] === '!')
     }
     // HTML 链接
     const hrefRe = /<a\s[^>]*href="([^"]+)"/gi
-    while ((m = hrefRe.exec(text)) !== null) {
+    while ((m = hrefRe.exec(prose)) !== null) {
       checkTarget(file, lineNo, m[1], false)
     }
   })

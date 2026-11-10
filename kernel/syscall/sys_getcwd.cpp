@@ -13,7 +13,7 @@ long long HandleGetcwd(const SyscallFrame& frame) {
         return -kEfault;
     }
     const unsigned long kRoom = base::math::Min(frame.rsi, fs::kFsPathMax);
-    const char* const   kCwd  = CurrentTask()->cwd;
+    const char* const   kCwd  = CurrentTask()->fs_ctx->cwd;
     unsigned long       used  = 0;
     while (used + 1 < kRoom && kCwd[used] != '\0') {
         ++used;

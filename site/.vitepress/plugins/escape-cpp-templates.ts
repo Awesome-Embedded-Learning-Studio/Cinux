@@ -37,6 +37,8 @@ const VUE_COMPONENTS = new Set([
   'DrawioViewer',
   // theme/index.ts enhanceApp 中注册
   'HomeFeatureGrid', 'ApiGroupExplorer',
+  'ApiModuleOverview', 'ApiFunctionIndex', 'ApiFunctionCard', 'ApiMathPlayground',
+  'ApiAddressIndex', 'ApiIpv4Gates', 'ApiTaskStates',
   'ReferenceCard', 'ReferenceItem', 'RefLink',
 ])
 

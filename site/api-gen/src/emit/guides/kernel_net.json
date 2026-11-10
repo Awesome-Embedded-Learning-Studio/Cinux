@@ -1,0 +1,443 @@
+{
+  "group": "kernel_net",
+  "namespace": "cinux::net",
+  "intro": "把 IPv4、TCP、UDP 的收发和套接字接口收在一处。",
+  "categories": [
+    "传输层连接",
+    "端口与套接字",
+    "报文解析",
+    "协议分发",
+    "装配与轮询",
+    "地址解析"
+  ],
+  "functions": {
+    "cinux::net::Ipv4Module::aim": {
+      "summary": "重设出口和源地址，已登记的协议和计数都不动",
+      "category": "传输层连接"
+    },
+    "cinux::net::Ipv4Module::handle": {
+      "summary": "判断收到的数据报属于哪个协议，再交给对应处理者",
+      "category": "传输层连接"
+    },
+    "cinux::net::Ipv4Module::init": {
+      "summary": "接上出口和源地址，让模块能收发数据报",
+      "category": "传输层连接"
+    },
+    "cinux::net::Ipv4Module::seat_protocol": {
+      "summary": "登记一个四层协议，表满或协议号已占用时返回 false",
+      "category": "传输层连接"
+    },
+    "cinux::net::Ipv4Module::send": {
+      "summary": "组装并发出一个数据报，载荷超长或出口没接上时返回 false",
+      "category": "传输层连接"
+    },
+    "cinux::net::Ipv4Module::stats": {
+      "summary": "返回投递和拒收的累计计数",
+      "category": "传输层连接"
+    },
+    "cinux::net::Socket::~Socket": {
+      "summary": "释放套接字共用的接口，具体清理交给派生类的释放钩子",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::accept_one": {
+      "summary": "取一个完成握手的连接，暂无握手时返回 kWouldBlock",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::adopt_local": {
+      "summary": "绑定本地地址和端口，占用时返回 kAlreadyExists",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::adopt_peer": {
+      "summary": "记下默认目的地，之后不带地址的发送都用到它",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::begin_listen": {
+      "summary": "开始在被绑定的端口上接连接请求，失败时返回对应错误",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::handshake_failed": {
+      "summary": "判断进行中的握手是否在建立前失败或被重置",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::handshake_pending": {
+      "summary": "判断连接是否还停在未建立状态",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::holds_input": {
+      "summary": "判断此刻是否已有数据可读，轮询时可反复问",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::identity": {
+      "summary": "返回本套接字独有的 inode 编号，与别的套接字不重复",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::receive": {
+      "summary": "收一个数据报进缓冲区，无数据时返回 kWouldBlock",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::report_local": {
+      "summary": "回填套接字自己的地址和端口",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::report_peer": {
+      "summary": "回填已命名的目的地址，没命名过时返回 kNotFound",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::Socket": {
+      "summary": "按类型和地址族构造套接字，地址族默认 IPv4",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::transmit": {
+      "summary": "把一段数据发给指定目的地，成功时返回发出的字节数",
+      "category": "端口与套接字"
+    },
+    "cinux::net::Socket::type": {
+      "summary": "返回构造时定下的套接字类型",
+      "category": "端口与套接字"
+    },
+    "cinux::net::TcpModule::abandon": {
+      "summary": "立即发重置断掉连接，席位马上释放",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::aim": {
+      "summary": "换出口和源地址，连接表与计数保持不变",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::alive": {
+      "summary": "判断凭据是否还指向一个存在的连接",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::clock": {
+      "summary": "返回上一次服务循环记下的单调时间，单位纳秒",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::close": {
+      "summary": "发 FIN 开始优雅关闭，告别走完由连接自己释放席位",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::concluded": {
+      "summary": "判断对端的 FIN 是否已收到，收到后读空即到文件尾",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::connect": {
+      "summary": "主动向远端端口发起连接，返回连接凭据或拒绝原因",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::established": {
+      "summary": "判断连接是否已建立、可以双向传数据",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::handle": {
+      "summary": "判断一个 TCP 段并推进它所属连接的状态机",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::holds_bytes": {
+      "summary": "判断连接是否已有数据可读、对端已道别或席位已消失",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::init": {
+      "summary": "接上出口和源地址，伪首部校验和用到这个地址",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::listen": {
+      "summary": "在指定端口被动监听握手，返回监听凭据或拒绝原因",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::own_address": {
+      "summary": "返回伪首部校验和里用的源地址",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::peer_of": {
+      "summary": "取一条连接的对端地址和端口，连接已释放时返回 false",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::receive": {
+      "summary": "从收件箱取不超过 capacity 的字节，文件尾返回零",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::send": {
+      "summary": "把载荷交给连接发送，返回实际收下的字节数或拒绝原因",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::service": {
+      "summary": "推一步所有连接的定时工作，重传超时的段或放弃连接",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::stats": {
+      "summary": "返回投递和拒收的累计计数",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::take_accepted": {
+      "summary": "取一个完成握手的凭据，队列为空返回 kWouldBlock",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpModule::unlisten": {
+      "summary": "关掉监听，已在服务的连接继续活着",
+      "category": "传输层连接"
+    },
+    "cinux::net::TcpSocket::~TcpSocket": {
+      "summary": "归还占用的监听位或连接位",
+      "category": "端口与套接字"
+    },
+    "cinux::net::TcpSocket::TcpSocket": {
+      "summary": "把套接字接到它所用的 TCP 模块上",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::aim": {
+      "summary": "换出口和源地址，端口表与计数保持不变",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::bind": {
+      "summary": "在一个端口上登记监听者，表满或端口已占时返回 false",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::ephemeral_port": {
+      "summary": "返回临时端口段里第一个空闲端口，用尽时返回零",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::handle": {
+      "summary": "判断一个数据报并交给对应端口的监听者",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::init": {
+      "summary": "接上出口和源地址，伪首部校验和用到这个地址",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::own_address": {
+      "summary": "返回装配时设给这个模块的源地址",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::send": {
+      "summary": "组装并发出一个数据报，载荷超长或出口没接上时返回 false",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::stats": {
+      "summary": "返回投递和拒收的累计计数",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpModule::unbind": {
+      "summary": "释放端口给下一个监听者，原本没人占用时返回 false",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpSocket::~UdpSocket": {
+      "summary": "释放占用的端口，没占用就什么都不做",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpSocket::dropped": {
+      "summary": "返回因为环形缓冲满而被丢弃的数据报计数",
+      "category": "端口与套接字"
+    },
+    "cinux::net::UdpSocket::UdpSocket": {
+      "summary": "把套接字接到它所用的 UDP 模块上，绑定时才进端口表",
+      "category": "端口与套接字"
+    },
+    "cinux::net::ArpCache::build_request": {
+      "summary": "把一条 ARP 请求写进调用者的缓冲区，不发送",
+      "category": "地址解析"
+    },
+    "cinux::net::ArpCache::init": {
+      "summary": "清空缓存，回到什么都没学到的状态",
+      "category": "地址解析"
+    },
+    "cinux::net::ArpCache::lookup": {
+      "summary": "查该 IPv4 地址学到的硬件地址，没有就返回空指针",
+      "category": "地址解析"
+    },
+    "cinux::net::ArpCache::observe": {
+      "summary": "从 ARP 报文学习发送方地址对，解析失败返回 false",
+      "category": "地址解析"
+    },
+    "cinux::net::BuildEchoRequest": {
+      "summary": "把回显请求的报文、载荷和校验和写进缓冲区",
+      "category": "报文解析"
+    },
+    "cinux::net::DatagramSink::assigned": {
+      "summary": "两半都接好了才返回 true，否则 false",
+      "category": "装配与轮询"
+    },
+    "cinux::net::IcmpModule::handle": {
+      "summary": "判断一条 ICMP 报文，回显请求就答，其余只记统计",
+      "category": "协议分发"
+    },
+    "cinux::net::IcmpModule::init": {
+      "summary": "把回显应答的去路指向给定的发送通道",
+      "category": "协议分发"
+    },
+    "cinux::net::IcmpModule::stats": {
+      "summary": "返回模块至今的收发统计",
+      "category": "协议分发"
+    },
+    "cinux::net::InterfaceCount": {
+      "summary": "返回接口个数，回环一个，接了网线两个",
+      "category": "端口与套接字"
+    },
+    "cinux::net::L4Seat::adopt": {
+      "summary": "把一份四层协议接到座位上，分发交给它",
+      "category": "协议分发"
+    },
+    "cinux::net::L4Seat::handle": {
+      "summary": "把载荷交给座上的协议处理",
+      "category": "协议分发"
+    },
+    "cinux::net::L4Seat::seated": {
+      "summary": "座位上已有协议就返回 true",
+      "category": "协议分发"
+    },
+    "cinux::net::NameInterfaceAt": {
+      "summary": "按序号把接口名写进缓冲区，越界返回 false",
+      "category": "端口与套接字"
+    },
+    "cinux::net::NetStack::attach_port": {
+      "summary": "接一个设备端口进栈，端口表满返回 false",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetStack::init": {
+      "summary": "清空协议座位和端口表，回到初始状态",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetStack::poll": {
+      "summary": "按预算从各端口收帧，预算用完就停",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetStack::seat_protocol": {
+      "summary": "按以太类型占一个座位，重号或满返回 false",
+      "category": "协议分发"
+    },
+    "cinux::net::NetStack::stats": {
+      "summary": "返回栈至今的收发统计",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::arp": {
+      "summary": "返回世界里的 ARP 缓存",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::attach_wire": {
+      "summary": "接上物理网口，之后非回环流量都走它",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::icmp": {
+      "summary": "返回世界里的 ICMP 模块",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::init": {
+      "summary": "把世界恢复到干净状态，可以重复调用",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::ipv4": {
+      "summary": "返回世界里的 IPv4 模块",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::ping_sweep": {
+      "summary": "连发几次回显请求，返回收到的应答数",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::pump_once": {
+      "summary": "跑一轮收帧，手动驱动时用",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::pump_running": {
+      "summary": "收帧线程在跑就返回 true",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::stack": {
+      "summary": "返回世界里的协议栈",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::start_pump": {
+      "summary": "启动收帧线程，建不出来返回 false",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::tcp": {
+      "summary": "返回世界里的 TCP 模块",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::udp": {
+      "summary": "返回世界里的 UDP 模块",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::wire": {
+      "summary": "返回接上的网口，还没接返回空指针",
+      "category": "装配与轮询"
+    },
+    "cinux::net::NetWorld::wired": {
+      "summary": "接过网口就返回 true",
+      "category": "装配与轮询"
+    },
+    "cinux::net::ParseArp": {
+      "summary": "解析 ARP 报文得到地址对，拒绝时带回错误",
+      "category": "报文解析"
+    },
+    "cinux::net::ParseEthernetHeader": {
+      "summary": "解析以太网头的三个字段，拒绝时带回错误",
+      "category": "报文解析"
+    },
+    "cinux::net::ParseIcmpEcho": {
+      "summary": "解析 ICMP 回显头，拒绝时带回错误码",
+      "category": "报文解析"
+    },
+    "cinux::net::ParseIpv4": {
+      "summary": "解析 IPv4 头，拒绝时带回错误码",
+      "category": "报文解析"
+    },
+    "cinux::net::ParseTcp": {
+      "summary": "解析 TCP 头，数据偏移吃掉载荷就拒绝",
+      "category": "报文解析"
+    },
+    "cinux::net::ParseUdp": {
+      "summary": "解析 UDP 头，拒绝时带回错误码",
+      "category": "报文解析"
+    },
+    "cinux::net::ProtocolSeat::adopt": {
+      "summary": "把一份协议接到座位上，分发交给它",
+      "category": "协议分发"
+    },
+    "cinux::net::ProtocolSeat::handle": {
+      "summary": "把载荷交给座上的协议处理",
+      "category": "协议分发"
+    },
+    "cinux::net::ProtocolSeat::seated": {
+      "summary": "座位上已有协议就返回 true",
+      "category": "协议分发"
+    },
+    "cinux::net::RawModule::bind": {
+      "summary": "登记一个订阅者，表满或参数不全返回 false",
+      "category": "协议分发"
+    },
+    "cinux::net::RawModule::handle": {
+      "summary": "把整个数据报交给订阅者，从 IP 头开始",
+      "category": "协议分发"
+    },
+    "cinux::net::RawModule::RawModule": {
+      "summary": "接上 IPv4 模块，裸报文借它的发送路径",
+      "category": "协议分发"
+    },
+    "cinux::net::RawModule::send": {
+      "summary": "封成 IP 报文发出，太大或没有发送路径返回 false",
+      "category": "协议分发"
+    },
+    "cinux::net::RawModule::unbind": {
+      "summary": "注销订阅者，等在跑的投递结束才返回",
+      "category": "协议分发"
+    },
+    "cinux::net::ReadInterfaceFacts": {
+      "summary": "按名字读接口参数，名字不认识返回 false",
+      "category": "端口与套接字"
+    },
+    "cinux::net::SocketOps": {
+      "summary": "返回所有套接字共用的文件操作表",
+      "category": "端口与套接字"
+    },
+    "cinux::net::SourceAddressFor": {
+      "summary": "回环目标取回环地址，其余取模块自己的地址",
+      "category": "地址解析"
+    }
+  },
+  "components": [
+    {
+      "anchor": "ipv4-gates",
+      "title": "IPv4 头部判别",
+      "component": "ApiIpv4Gates",
+      "note": "喂一个首字节和两个长度,看五道关哪一道先亮,后面的因此看不到。"
+    }
+  ]
+}

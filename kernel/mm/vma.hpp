@@ -26,6 +26,8 @@
 #include "cinux/container/self_list.hpp"
 #include "cinux/ref_count.hpp"
 #include "cinux/result.hpp"
+#include "cinux/spin_mutex.hpp"
+#include "kernel/arch/x86_64/irq_guard.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/mm/layout.hpp"
@@ -110,6 +112,35 @@ public:
     VmaStore() = default;
 
     /**
+     * @brief         Borrowed hold over the whole chain.
+     * @note          Exists for a caller that must keep several lookups
+     *                coherent — the fault path reads one range and fills
+     *                its page without letting munmap free the range
+     *                underneath it. Public methods take the gate
+     *                themselves, so they must not be called while a
+     *                Hold is alive; the *_locked faces are for holders.
+     *                Interrupts stay off for the hold's lifetime: the
+     *                gate is a spin, and a timer that preempted inside
+     *                it would leave a second task spinning on one core.
+     *                Nothing inside a hold may schedule or sleep.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    class Hold {
+    public:
+        explicit Hold(const VmaStore& store);
+        ~Hold();
+        Hold(const Hold&)            = delete;
+        Hold& operator=(const Hold&) = delete;
+        Hold(Hold&&)                 = delete;
+        Hold& operator=(Hold&&)      = delete;
+
+    private:
+        unsigned long long irq_ = 0;
+        const VmaStore&    store_;
+    };
+
+    /**
      * @brief         Names this world's mmap ceiling.
      *
      * @param[in]     ceiling   Where anonymous mmap hunts begin; the
@@ -147,12 +178,43 @@ public:
      *
      * @param[in]     address   The byte to look up.
      * @return        The covering region, nullptr when none does.
+     * @note          The walk is serialized against every rewrite, but
+     *                the returned pointer stops being safe the moment
+     *                the gate is released: a concurrent munmap may
+     *                return its node to the heap. A caller that means
+     *                to read fields later takes lookup()'s copy, or
+     *                holds a Hold and calls find_locked().
      * @warning       None
      * @throws        None
      * @since         0.1.0
      * @ingroup       kernel_mm
      */
     [[nodiscard]] const VmaRegion* find(unsigned long address) const;
+
+    /**
+     * @brief         Finds the covering region while the caller holds
+     *                a Hold.
+     * @param[in]     address   The byte to look up.
+     * @return        The covering region, nullptr when none does; the
+     *                pointer stays alive until the Hold is released.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] const VmaRegion* find_locked(unsigned long address) const;
+
+    /**
+     * @brief         Copies the covering region out under the gate.
+     * @param[in]     address   The byte to look up.
+     * @param[out]    out       Filled with a copy when one covers it.
+     * @return        true when a region covered the address.
+     * @note          The copy owns its shared attachments, so it stays
+     *                valid after the gate is released and the original
+     *                is unregistered. This is the read face for code
+     *                that only needs a snapshot of the terms.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] bool lookup(unsigned long address, VmaRegion& out) const;
 
     [[nodiscard]] bool stack_contains(unsigned long start, unsigned long bytes) const;
 
@@ -202,7 +264,7 @@ public:
      * @since         0.1.0
      * @ingroup       kernel_mm
      */
-    [[nodiscard]] bool empty() const { return regions_.empty(); }
+    [[nodiscard]] bool empty() const;
 
     /**
      * @brief         How many promises the register holds.
@@ -216,7 +278,7 @@ public:
      * @since         0.3.0
      * @ingroup       kernel_mm
      */
-    [[nodiscard]] unsigned long long region_count() const { return regions_.size(); }
+    [[nodiscard]] unsigned long long region_count() const;
 
     /**
      * @brief         Names the heap span this world grows by brk.
@@ -263,11 +325,11 @@ public:
      * @since         0.2.0
      * @ingroup       kernel_mm
      */
-    [[nodiscard]] unsigned long heap_end() const { return heap_break_; }
+    [[nodiscard]] unsigned long heap_end() const;
 
     /// Where this world's anonymous mmap hunts begin; the boot default
     /// is the compiled-in top until exec lowers it.
-    [[nodiscard]] unsigned long mmap_ceiling() const { return mmap_ceiling_; }
+    [[nodiscard]] unsigned long mmap_ceiling() const;
 
     /**
      * @brief         Finds a free stretch below a ceiling, growing down.
@@ -289,6 +351,27 @@ public:
      */
     [[nodiscard]] base::Result<unsigned long> find_free_spot(unsigned long ceiling,
                                                              unsigned long bytes) const;
+
+    /**
+     * @brief         Finds a free stretch and records a promise over it
+     *                in one step.
+     * @param[in]     ceiling   The address the stretch must end at or below.
+     * @param[in]     bytes     How many bytes are wanted; page-aligned.
+     * @param[in]     spec      The region's terms; start and end are
+     *                          written from the chosen stretch.
+     * @return        The stretch's first byte, or the allocation error.
+     * @note          The pair find_free_spot-then-register is two gates
+     *                apart, and two mmaps racing there can both choose
+     *                one gap: the loser then registers over the winner
+     *                and gets kAlreadyExists, or worse, a caller that
+     *                forgets the check hands out an overlap. This holds
+     *                the gate across both, so the chosen gap is the
+     *                recorded one.
+     * @since         0.9.0
+     * @ingroup       kernel_mm
+     */
+    [[nodiscard]] base::Result<unsigned long> reserve(unsigned long ceiling, unsigned long bytes,
+                                                      VmaRegion spec);
 
     /**
      * @brief         Withdraws the stretch's pages from every promise.
@@ -358,6 +441,21 @@ private:
      * @ingroup       kernel_mm
      */
     [[nodiscard]] bool span_known(unsigned long start, unsigned long end) const;
+
+    /// The bodies below assume the gate is already held.
+    [[nodiscard]] base::Result<void>          register_range_locked(const VmaRegion& spec);
+    [[nodiscard]] base::Result<void>          unregister_range_locked(unsigned long start,
+                                                                      unsigned long end);
+    [[nodiscard]] base::Result<void>          protect_locked(unsigned long start, unsigned long end,
+                                                             VmaProtection terms);
+    [[nodiscard]] base::Result<unsigned long> find_free_spot_locked(unsigned long ceiling,
+                                                                    unsigned long bytes) const;
+    [[nodiscard]] bool stack_contains_locked(unsigned long start, unsigned long bytes) const;
+    [[nodiscard]] bool span_known_locked(unsigned long start, unsigned long end) const;
+
+    /// Serializes every walk and rewrite of the chain; mutable because
+    /// the read faces lock too.
+    mutable cinux::base::SpinMutex gate_;
 
     base::container::SelfList<VmaRegion> regions_;       ///< The promises, arrival order.
     VmaRegion                            heap_{};        ///< The brk span, empty until seeded.

@@ -1,0 +1,109 @@
+{
+  "group": "base_result",
+  "namespace": "cinux::base",
+  "intro": "用一个对象携带成功值或失败错误码",
+  "categories": [
+    "取值访问",
+    "状态查询",
+    "错误码",
+    "构造与赋值",
+    "生命周期"
+  ],
+  "functions": {
+    "ErrorString": {
+      "summary": "把错误码映射成可读的名字",
+      "category": "错误码",
+      "example": "#include <string_view>\n\n#include \"cinux/result.hpp\"\n\nusing namespace cinux::base;\n\nvoid ErrorStringExample() {\n    // 表长和枚举项在编译期就对上了，问不存在的项拿到 \"Unknown\"\n    static_assert(std::string_view(ErrorString(KernelError::kNotFound)) == \"NotFound\");\n\n    const char* kName = ErrorString(KernelError::kConnectionReset);\n    // kName == \"ConnectionReset\" · 连接被对端重置\n}"
+    },
+    "~Result": {
+      "summary": "析构时销毁当前活跃的成员",
+      "category": "生命周期"
+    },
+    "cinux::base::Result::error": {
+      "summary": "读出当前存的错误码",
+      "category": "错误码"
+    },
+    "cinux::base::Result::ok": {
+      "summary": "判断对象里是否存着值",
+      "category": "状态查询",
+      "example": "#include \"cinux/result.hpp\"\n\nusing namespace cinux::base;\n\nvoid ResultOkExample() {\n    const Result<int> kValue(42);  // 成功路径，存一个 int\n    const bool kHaveValue = kValue.ok();\n    // kHaveValue == true\n\n    const Result<int> kFailure(KernelError::kNotFound);  // 错误路径，只存错误码\n    const bool kFailureOk = kFailure.ok();\n    // kFailureOk == false\n\n    const int kNumber = kHaveValue ? kValue.value() : -1;\n    // kNumber == 42 · 先用 ok() 问过再取，没问就取会走断言终止\n}"
+    },
+    "cinux::base::Result::operator bool": {
+      "summary": "隐式转成 bool，有值时为真",
+      "category": "状态查询"
+    },
+    "cinux::base::Result::operator->()": {
+      "summary": "取出指向内部值的指针",
+      "category": "取值访问"
+    },
+    "cinux::base::Result::operator->() const": {
+      "summary": "取出指向内部值的只读指针",
+      "category": "取值访问"
+    },
+    "cinux::base::Result::operator*()": {
+      "summary": "解引用得到内部值的引用",
+      "category": "取值访问"
+    },
+    "cinux::base::Result::operator*() const": {
+      "summary": "解引用得到内部值的只读引用",
+      "category": "取值访问"
+    },
+    "cinux::base::Result::operator=(const Result&)": {
+      "summary": "拷贝赋值，先销毁旧值再构造",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result::operator=(Result&&)": {
+      "summary": "移动赋值，先销毁旧值再构造",
+      "category": "构造与赋值"
+    },
+    "release_self": {
+      "summary": "销毁当前活跃的联合体成员",
+      "category": "生命周期"
+    },
+    "cinux::base::Result::Result(const Result&)": {
+      "summary": "拷贝构造，复制另一个结果的内容",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result::Result(Result&&)": {
+      "summary": "移动构造，接管另一个结果的内容",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result::Result(RawResult)": {
+      "summary": "成功路径，用值构造一个结果",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result::Result(ErrorType)": {
+      "summary": "错误路径，用错误码构造结果",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result::value()": {
+      "summary": "取内部值，失败时触发断言",
+      "category": "取值访问"
+    },
+    "cinux::base::Result::value() const": {
+      "summary": "取内部值的只读引用，失败触发断言",
+      "category": "取值访问"
+    },
+    "cinux::base::Result< void, ErrorType >::error": {
+      "summary": "读出错误码，成功路径返回 kOk",
+      "category": "错误码",
+      "example": "#include \"cinux/result.hpp\"\n\nusing namespace cinux::base;\n\nvoid VoidResultErrorExample() {\n    constexpr Result<void> kSuccess{};  // 默认构造，表示成功\n    static_assert(kSuccess.error() == KernelError::kOk);\n\n    constexpr Result<void> kFailure(KernelError::kOutOfMemory);  // 错误路径只带一个码\n    static_assert(kFailure.error() == KernelError::kOutOfMemory);\n}"
+    },
+    "cinux::base::Result< void, ErrorType >::ok": {
+      "summary": "判断对象是否表示成功",
+      "category": "状态查询"
+    },
+    "cinux::base::Result< void, ErrorType >::operator bool": {
+      "summary": "隐式转成 bool，成功时为真",
+      "category": "状态查询"
+    },
+    "cinux::base::Result< void, ErrorType >::Result(ErrorType)": {
+      "summary": "错误路径，只存一个错误码",
+      "category": "构造与赋值"
+    },
+    "cinux::base::Result< void, ErrorType >::Result()": {
+      "summary": "默认构造，对象表示成功",
+      "category": "构造与赋值"
+    }
+  }
+}

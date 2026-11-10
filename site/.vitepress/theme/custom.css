@@ -635,26 +635,7 @@ body.rs-resizing { cursor: col-resize !important; user-select: none !important; 
   .checkpoint { box-shadow: none; }
 }
 
-/* API 组页:符号小节用 h4 以外的大纲层级,视觉恢复到接近 h3 的分量 */
-.content-container h4 {
-  font-size: 1.05rem;
-  font-weight: 600;
-  margin-top: 1.75rem;
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.2rem;
-  border-bottom: 1px solid var(--vp-c-divider);
-}
-
-/* API 组页符号索引:details 展开后多列,长列表不占竖向空间 */
-.content-container details ul {
-  columns: 3;
-  column-gap: 24px;
-}
-@media (max-width: 960px) {
-  .content-container details ul {
-    columns: 2;
-  }
-}
+/* API 样式已迁移至 api-*.css 模块组 */
 
 /* ════════════════════════════════════════════════════════════════
    质感精修层(Polish Pass)— 2026-11-07 激进样式轮
