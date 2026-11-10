@@ -46,7 +46,6 @@ public:
      *
      * @param[in]     data    First byte of the span.
      * @param[in]     length  How many bytes the span holds.
-     * @return        None
      * @since         0.6.0
      * @ingroup       base_bytes
      */

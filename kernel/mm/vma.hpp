@@ -145,7 +145,6 @@ public:
      *
      * @param[in]     ceiling   Where anonymous mmap hunts begin; the
      *                          boot default is the compiled-in top.
-     * @return        None.
      * @note          exec lowers the ceiling by one random page-multiple
      *                per world, so no two programs agree on where their
      *                          mappings start.
@@ -236,7 +235,6 @@ public:
     /**
      * @brief         Returns every recorded region to the heap.
      *
-     * @return        None.
      * @note          Also the destructor's body: a register that goes out
      *                of scope cleans up after itself, so owners delete and
      *                nothing more.
@@ -249,7 +247,6 @@ public:
 
     /**
      * @brief         The destructor's share of the lifecycle.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -289,7 +286,6 @@ public:
      * @param[in]     base   Where the program image ends; the break starts
      *                       there and only moves up.
      * @param[in]     max    The highest address the break may reach.
-     * @return        None.
      * @note          The heap is not a chain region: its length starts at
      *                zero, and an empty range cannot register. It rides as
      *                its own member the fault path reads through find(),

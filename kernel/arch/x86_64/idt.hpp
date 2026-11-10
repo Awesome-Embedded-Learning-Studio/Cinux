@@ -64,7 +64,6 @@ struct [[gnu::packed]] TablePointer {
  * @brief         Write one gate into the table.
  * @param[in]     vector   Vector number, 0..255.
  * @param[in]     entry    Encoded gate value.
- * @return        None.
  * @since         0.1.0
  * @ingroup       kernel_arch
  */
@@ -72,9 +71,8 @@ void InstallGate(unsigned int vector, GateEntry entry);
 
 /**
  * @brief         Point the CPU at the table with one lidt.
- * @return        None.
  * @note          Nothing fires through gates that were never installed —
- *                an absent gate raises #GP with the vector in its error
+ *                an absent gate raises \#GP with the vector in its error
  *                code, which the exception dump then names.
  * @since         0.1.0
  * @ingroup       kernel_arch

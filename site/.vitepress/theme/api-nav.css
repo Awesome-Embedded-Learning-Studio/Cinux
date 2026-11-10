@@ -1,0 +1,112 @@
+/* ════════════════════════════════════════════════════════════════
+   API 参考页 — 底部导航与特殊页
+
+   · 底部前后组：两道等宽的细线入口
+   · 覆盖率页、版本页的微调
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 底部 prev/next ─────────────────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type {
+  margin: 2.4em 0 0;
+  transform: none !important;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type .doc-table__scroll {
+  border: none;
+  background: none;
+  box-shadow: none !important;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type table {
+  border: none;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type th {
+  padding: 0 0 0.5em;
+  border-bottom: 1px solid var(--api-rule-strong);
+  background: none;
+  color: var(--api-muted);
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type td {
+  padding: 1em 1.2em 1em 0;
+  border-bottom: none;
+  background: none;
+  vertical-align: top;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type td a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4em;
+  color: var(--api-ink);
+  font-size: 0.95em;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type td a:hover {
+  color: var(--api-accent);
+  border-bottom-color: currentColor;
+}
+
+/* ── 覆盖率页 ────────────────────────────────────────────── */
+
+.vp-doc._Cinux_api_coverage table td .VPBadge {
+  font-size: 0.78em;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.vp-doc._Cinux_api_coverage table tbody tr:has(.VPBadge.warning) td {
+  background: color-mix(in srgb, var(--vp-c-warning-1) 5%, transparent);
+}
+
+/* ── 版本页：版本号前的时间线圆点 ─────────────────────────── */
+
+.vp-doc._Cinux_api_versions h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vp-doc._Cinux_api_versions h2::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vp-c-brand-1);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--vp-c-bg), 0 0 0 4px var(--vp-c-brand-1);
+}
+
+/* ── 右侧大纲：长函数名截断 ──────────────────────────────── */
+
+/* DOM 结构里 .aside 排在 .content 前面，所以要往后看 */
+.aside:has(~ .content .vp-doc[class*="_Cinux_api_"]) .outline-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ── 响应式与打印 ───────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type td {
+    padding: 0.8em 0.8em 0.8em 0;
+  }
+}
+
+@media print {
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > .doc-table:last-of-type {
+    display: none;
+  }
+}

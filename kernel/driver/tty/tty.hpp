@@ -70,7 +70,6 @@ public:
     /**
      * @brief     Builds an unwired terminal, born quiet.
      *
-     * @return    None
      * @note      A constant-initializable shape: the kernel's own
      *              terminals sit in function-local constinit storage,
      *              so construction takes no runtime step. Wire() hands
@@ -85,7 +84,6 @@ public:
      * @brief     Builds and wires one terminal to its three seats.
      *
      * @param[in] wiring   The input, echo and wait seats.
-     * @return    None
      * @note      The wiring is borrowed for the instance's whole life;
      *              it typically points at static functions.
      * @since     0.5.0
@@ -97,7 +95,6 @@ public:
      * @brief     Hands over the seats and the born flags.
      *
      * @param[in] wiring   The input, echo and wait seats.
-     * @return    None
      * @note      Call once before any discipline work; it installs the
      *              wiring and the fully-canonical born flags. Calling
      *              it again would undo a caller's termios, so the
@@ -132,7 +129,6 @@ public:
 
     /**
      * @brief     Ends input after the remaining keys and edited bytes drain.
-     * @return    None
      * @since     0.6.0
      * @ingroup   kernel_driver
      */
@@ -192,7 +188,6 @@ public:
      *
      * @param[out] sink   Where the record lands; kTermiosBytes wide.
      * @param[in] bytes Wire record size, termios or termios2.
-     * @return    None
      * @note      The record answers back exactly what was last applied,
      *              with the three governing flags — ECHO, ICANON, ISIG —
      *              standing or falling by their stored bits.
@@ -206,7 +201,6 @@ public:
      *
      * @param[in] source   The record to adopt; kTermiosBytes wide.
      * @param[in] bytes Wire record size, termios or termios2.
-     * @return    None
      * @note      The whole record is stored and answers back verbatim;
      *              of its flags, ECHO gates echo, ICANON gates line
      *              editing, and ISIG recognizes VINTR, VQUIT and VSUSP
@@ -229,7 +223,6 @@ public:
      * @brief     Sets the window shape ioctl answers report.
      *
      * @param[in] window   Rows and columns to report from now on.
-     * @return    None
      * @since     0.5.0
      * @ingroup   kernel_driver
      */

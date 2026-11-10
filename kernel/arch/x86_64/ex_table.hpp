@@ -41,7 +41,6 @@ struct Entry {
  *
  * @param[in,out] table   The entries to order; caller owns them.
  * @param[in]     count   How many entries the table holds.
- * @return        None.
  * @note          The linker emits entries in translation-unit order,
  *                not address order, and the walk below is a binary
  *                search, so the boot sorts once. The table holds a
@@ -83,7 +82,6 @@ inline void SortEntries(Entry* table, unsigned long count) {
 /**
  * @brief         Sorts the linked exception table once, at boot.
  *
- * @return        None.
  * @note          Reads the linker's table bounds and orders the real
  *                entries in place. Every world that lets the
  *                user-access copies fault through this table — the

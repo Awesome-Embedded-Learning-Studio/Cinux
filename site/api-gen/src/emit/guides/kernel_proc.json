@@ -1,0 +1,386 @@
+{
+  "group": "kernel_proc",
+  "namespace": "cinux::proc",
+  "intro": "管进程的建立、调度、等待和信号投递",
+  "categories": [
+    "任务生命周期",
+    "调度与抢占",
+    "信号投递",
+    "同步与等待",
+    "futex 等待"
+  ],
+  "functions": {
+    "cinux::proc::BuildCloneChild": {
+      "summary": "克隆调用的子任务造好但没入队，失败回空指针",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::BuildForkChild": {
+      "summary": "造出当前任务的 fork 子任务，失败回空指针",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Completion::finish": {
+      "summary": "把状态一次性推到终态，没抢到转换就返回假",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Completion::rearm": {
+      "summary": "把已完成的会合点复位成待定，有等待者就报错",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Completion::retire": {
+      "summary": "放掉已完成会合点的锁身份，好让存储复用",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Completion::wait": {
+      "summary": "挂起当前任务等终态，返回对方公布的结果",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::DefaultDisposition": {
+      "summary": "查没人处理的信号，内核默认怎么处置",
+      "category": "信号投递"
+    },
+    "cinux::proc::DefaultFifoClass": {
+      "summary": "取先来先跑的默认调度类，全系统共一个",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::DefaultSpinLedger": {
+      "summary": "取内核自旋锁共用的记录器，锁默认挂在它上面",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::DeliverPendingSignals": {
+      "summary": "在返回用户态前投递待处理信号，改返回帧就回真",
+      "category": "信号投递"
+    },
+    "cinux::proc::futex::ClearTidWord": {
+      "summary": "把退出中任务留下的等待字清零，唤醒一个等待者",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::futex::ParkOnWord": {
+      "summary": "字还是期望值就挂起，值先变了就立刻返回",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::futex::WaitOnUserWord": {
+      "summary": "经访问器读用户字再挂起，地址读不了报参数错",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::futex::WakeUserWord": {
+      "summary": "按上限唤醒等着这个字的任务，返回醒来的个数",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::InstallFaultDiagnoser": {
+      "summary": "把当前任务的缺页诊断器装进报告器",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::InstallFaultResolver": {
+      "summary": "把当前任务的缺页处理器装进报告器",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::InstallKernelSwitchSink": {
+      "summary": "把汇编实现的上下文切换器装进调度器",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::InstallLockdepSink": {
+      "summary": "指定锁依赖转储把内容写到哪里",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::MapSignalTrampoline": {
+      "summary": "把内核的信号返回跳板页映射进地址空间",
+      "category": "信号投递"
+    },
+    "cinux::proc::Mutex::guard": {
+      "summary": "取一把作用域锁，离开作用域自动解锁",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Mutex::lock": {
+      "summary": "拿互斥锁，有人占着就挂起排队",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Mutex::retire": {
+      "summary": "放掉空闲互斥锁占的锁身份，存储可复用",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Mutex::unlock": {
+      "summary": "放开互斥锁，有等待者就交给下一个",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::PrepareTaskContext": {
+      "summary": "把零上下文按启动计划填成可跑的映像",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::PriorityClass": {
+      "summary": "取按优先级排队的调度类，数字小的先跑",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::block_current": {
+      "summary": "把当前任务移出就绪队列并切走，醒来才回来",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::class_at": {
+      "summary": "按注册顺序取一个调度类，越界给空指针",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::class_count": {
+      "summary": "报出登记在册的调度类个数",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::current": {
+      "summary": "取当前在 CPU 上的任务，内核主线程时为空",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::exit_current": {
+      "summary": "结束当前任务，有父任务就先变僵尸",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::for_each_task": {
+      "summary": "逐个走访任务总表，把每个任务交给回调",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::init": {
+      "summary": "装上真正做上下文切换的执行器",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::install_class": {
+      "summary": "注册一个调度类，挑选顺序跟着注册顺序",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::maybe_preempt": {
+      "summary": "中断返回前判断要不要现在就换任务",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::nth_group_leader": {
+      "summary": "按序号找活着的进程组组长，超出回假",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::offspring_count": {
+      "summary": "报出还挂在后代名册上的任务数",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::on_timer_tick": {
+      "summary": "记一次时钟滴答，片用完就挂上轮换请求",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::preempt_disable": {
+      "summary": "把当前任务留在 CPU 上，嵌套计数加一",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::preempt_enable": {
+      "summary": "嵌套计数减一，归零才放开抢占",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::prepare_to_wait": {
+      "summary": "等待锁还没放时把当前任务标成阻塞",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::ready_refusals": {
+      "summary": "报出就绪队列满而拒绝入队的累计次数",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::resume": {
+      "summary": "把停住的任务放回就绪队列等再被选中",
+      "category": "信号投递"
+    },
+    "cinux::proc::Scheduler::run_until_done": {
+      "summary": "把 CPU 交给就绪队列，跑到队空才回来",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::schedule_blocked": {
+      "summary": "放掉等待锁再切走，不丢掉中途来的唤醒",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::seat": {
+      "summary": "把任务交进就绪队列，队列满了回假并记数",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::set_preemption": {
+      "summary": "开关时钟抢占，默认是关着的",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::snapshot_by_pid": {
+      "summary": "按 pid 拷一份任务快照，没有这个任务回假",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::stop_current": {
+      "summary": "停住当前任务，离队直到有人让它续跑",
+      "category": "信号投递"
+    },
+    "cinux::proc::Scheduler::unblock": {
+      "summary": "把一个挂起的任务放回就绪队列",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Scheduler::wait_child": {
+      "summary": "等一个子任务退出并回收它，没得等就回假",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::with_task": {
+      "summary": "在登记锁里访问一个任务，没这个 pid 回假",
+      "category": "任务生命周期"
+    },
+    "cinux::proc::Scheduler::withdraw": {
+      "summary": "把就绪任务从调度类队列摘下并停住",
+      "category": "信号投递"
+    },
+    "cinux::proc::Scheduler::yield": {
+      "summary": "让出 CPU 给别人跑，回头再轮到自己",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::~SchedulingClass": {
+      "summary": "调度类活到进程结束，析构只走具体类",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::enqueue": {
+      "summary": "把刚可跑的任务收进本类队列，满了回假",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::name": {
+      "summary": "交回类名，转储和崩溃信息照此打印",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::pick": {
+      "summary": "摘走下一个该上 CPU 的任务，空队列返回空指针",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::remove": {
+      "summary": "把已入队的任务摘下来，不在本类手里就返回假",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SchedulingClass::wants_rotate": {
+      "summary": "按时间片问本级该不该换人，该换返回真",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::Semaphore::post": {
+      "summary": "叫醒队首等待者，没人等就把一个单位存着",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Semaphore::retire": {
+      "summary": "所有使用者走光后，抹掉这把锁的身份",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Semaphore::Semaphore": {
+      "summary": "按给定初值把可用单位数设好",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Semaphore::try_wait": {
+      "summary": "有单位就取走一个，没有也不挂起，返回假",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Semaphore::wait": {
+      "summary": "取一个单位，没有就挂起等别人送",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SendSignal": {
+      "summary": "把信号挂到目标任务待处理，编号越界返回假",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SendToGroup": {
+      "summary": "给组里每个任务送一份信号，无返回值",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SignalBlockable": {
+      "summary": "问这个信号能不能被信号掩码挡住",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SignalCatchable": {
+      "summary": "问这个信号能不能装处理函数，KILL 与 STOP 不行",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SignalTrampolineAddress": {
+      "summary": "返回每个进程都相同的信号跳板页地址",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::SpinGuard::SpinGuard": {
+      "summary": "进作用域就锁上，出作用域自动放锁",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::depth": {
+      "summary": "当前还压着几层自旋锁，零表示手里没锁",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::dump_held": {
+      "summary": "顺着持有链走一遍，把每把锁打出来",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::forget": {
+      "summary": "存储重用前，把没人持有的锁记录删掉",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::name_lock": {
+      "summary": "给一把锁登记一个给人看的名字",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::note_acquire": {
+      "summary": "记下又进了一层自旋锁",
+      "category": "同步与等待"
+    },
+    "cinux::proc::SpinLedger::note_release": {
+      "summary": "记下退掉一层自旋锁",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::guard": {
+      "summary": "返回守卫对象，其作用域内一直持锁",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::holder_name": {
+      "summary": "返回持锁者名字，不在任务里时是 irq/main",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::lock": {
+      "summary": "拿锁并关中断，直到解锁才恢复",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::retire": {
+      "summary": "临时锁的地址重用前，抹掉它的身份",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::set_name": {
+      "summary": "第一次拿锁前给锁起名，供转储打印",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::Spinlock": {
+      "summary": "把锁绑到一本记录上，不传就用共享那本",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Spinlock::unlock": {
+      "summary": "放锁，中断恢复成拿锁前的样子",
+      "category": "同步与等待"
+    },
+    "cinux::proc::Task::ppid": {
+      "summary": "返回父进程号，没有父进程时为零",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::TaskBuilder::set_class": {
+      "summary": "指定任务排哪个调度类，返回构造器自己",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::TaskBuilder::set_entry": {
+      "summary": "指定任务入口，构造之前必须给定",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::TaskBuilder::set_name": {
+      "summary": "设置转储里显示的名字，存储由调用者保管",
+      "category": "调度与抢占"
+    },
+    "cinux::proc::TaskBuilder::set_priority": {
+      "summary": "设任务优先级，数小先跑，只对优先级类有效",
+      "category": "调度与抢占"
+    },
+    "EnterFpuGate": {
+      "summary": "最外层进入时保存当前任务的 FPU 状态",
+      "category": "调度与抢占"
+    },
+    "ExitFpuGate": {
+      "summary": "最外层退出时恢复当前任务的 FPU 状态",
+      "category": "调度与抢占"
+    },
+    "ForkChildEntry": {
+      "summary": "fork 出的子任务从这里开始跑，每个 fork 只进一次",
+      "category": "调度与抢占"
+    }
+  },
+  "components": [
+    {
+      "anchor": "task-states",
+      "title": "任务状态与迁移",
+      "component": "ApiTaskStates",
+      "note": "点一个状态,只看进出它的边,每条边标着改它的函数和源码行。"
+    }
+  ]
+}

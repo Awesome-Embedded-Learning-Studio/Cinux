@@ -289,7 +289,6 @@ extern "C" void StoreGdtSnapshot(TablePointer* snapshot);
 
 /**
  * @brief         Load the kernel GDT and start running on its selectors.
- * @return        None.
  * @note          lgdt followed by a far return into selector 0x08 and a
  *                reload of DS, ES and SS; interrupts are
  *                still off at this point in the bring-up, so the reload

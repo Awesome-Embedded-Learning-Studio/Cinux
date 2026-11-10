@@ -31,8 +31,7 @@ namespace cinux::syscall::uaccess {
  *
  * @param[in]     supported   The CPUID answer for SMAP, taken once at
  *                            boot and again in each test world.
- * @return        None.
- * @note          stac and clac fault with #UD on a processor whose
+ * @note          stac and clac fault with \#UD on a processor whose
  *                CPUID answer lacks SMAP, so the copies reach for the
  *                window only when this bit says the machine has one.
  * @since         0.3.0

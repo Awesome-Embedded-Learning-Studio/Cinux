@@ -1,0 +1,486 @@
+{
+  "group": "kernel_syscall",
+  "namespace": "cinux::syscall",
+  "intro": "把用户态的系统调用分派到各处理函数，管描述符、任务和路径",
+  "categories": [
+    "入口与分发",
+    "描述符与任务上下文",
+    "路径处理",
+    "用户内存访问",
+    "错误码翻译"
+  ],
+  "functions": {
+    "cinux::syscall::CopyUserPath": {
+      "summary": "把用户路径搬进内核缓冲，返回长度，越界或为空时给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::CurrentTask": {
+      "summary": "返回当前占用 CPU、正在执行这次调用的任务指针",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::ErrnoFrom": {
+      "summary": "把内核错误译成 Linux 错误码，由调用方取负返回",
+      "category": "入口与分发"
+    },
+    "cinux::syscall::FoldUserPath": {
+      "summary": "把用户路径折成绝对路径，返回长度，溢出时给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::FoldUserPathAt": {
+      "summary": "按目录描述符或 AT_FDCWD 折算路径，失败返回负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleAccept": {
+      "summary": "接下一个等待中的连接，返回新描述符，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleAccept4": {
+      "summary": "按 flags 接受连接，新描述符带上标志，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleAccess": {
+      "summary": "只查路径存不存在，能解析返回 0，否则给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleAlarm": {
+      "summary": "按秒设一次性实时定时器，返回剩余秒数，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleArchPrctl": {
+      "summary": "读写调用任务的线程指针基址，操作或地址不合规时给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleBind": {
+      "summary": "把套接字绑到给定地址上，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleBrk": {
+      "summary": "挪动堆的边界，返回调用后的边界地址，失败时边界不动",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleCapget": {
+      "summary": "读出任务的能力集，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleCapset": {
+      "summary": "给任务写入新的能力集，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleChdir": {
+      "summary": "换调用任务的当前工作目录，成功返回 0，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleClockGettime": {
+      "summary": "读指定时钟的秒和纳秒，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleClockNanosleep": {
+      "summary": "在指定时钟上睡相对或绝对时长，成功返回 0，否则给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleClone": {
+      "summary": "按选项复制任务，父进程得到子 pid，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleClose": {
+      "summary": "交还一个描述符，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleConnect": {
+      "summary": "把套接字接到远端地址，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleCreat": {
+      "summary": "新建或截断一个可写文件，返回描述符，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleDup": {
+      "summary": "在最小空闲号上复制描述符，返回新描述符，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleDup2": {
+      "summary": "把描述符复制到指定号上，返回该号，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleExecve": {
+      "summary": "拿卷上的程序替换当前任务，成功不返回，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleExit": {
+      "summary": "结束当前任务，不再返回，退出状态交给父进程收",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleFaccessat": {
+      "summary": "按目录描述符查路径能否访问，成功返回 0，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleFcntl": {
+      "summary": "读改描述符的标志位和状态位，返回查询值，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleFork": {
+      "summary": "复制调用任务，父得子 pid、子得 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleFstat": {
+      "summary": "按描述符读一份文件元数据，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleFutex": {
+      "summary": "在用户字上等待或唤醒，返回 0 或被唤醒数，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetcwd": {
+      "summary": "把当前工作目录写进用户缓冲，返回字节数，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleGetdents": {
+      "summary": "每次从目录里读一个条目，返回字节数，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleGetegid": {
+      "summary": "返回内核固定的有效组 id，不查凭据表",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGeteuid": {
+      "summary": "返回内核固定的有效用户 id，不查凭据表",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetgid": {
+      "summary": "返回内核固定的组 id，调用方都是同一号",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetitimer": {
+      "summary": "读出实时定时器的剩余时间，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetpeername": {
+      "summary": "读对端地址填进用户缓冲，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetpgid": {
+      "summary": "读指定任务的进程组号，无此任务时给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetpid": {
+      "summary": "返回调度器在创建时分配给调用任务的 pid",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetppid": {
+      "summary": "返回父任务的 pid，没有父任务时返回 0",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetrandom": {
+      "summary": "把不可预测的字节填进用户缓冲，返回字节数，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetsid": {
+      "summary": "读指定任务的会话号，无此任务时给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetsockname": {
+      "summary": "读套接字本端地址，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetsockopt": {
+      "summary": "按层和选项名读一个套接字选项，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGettid": {
+      "summary": "返回调度器在创建时分配给调用任务的线程号",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGettimeofday": {
+      "summary": "读墙钟的秒和微秒，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleGetuid": {
+      "summary": "返回内核固定的用户 id，每个任务都是 root",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleIoctl": {
+      "summary": "只答 TCGETS，别的请求回 ENOTTY，成功返回 0",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleKill": {
+      "summary": "信号投给任务、进程组或全体，有目标就返回 0，否则给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleListen": {
+      "summary": "让套接字进入监听并给排队上限，成功返回 0，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleLseek": {
+      "summary": "挪动打开文件的共享游标，返回落点，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleMkdir": {
+      "summary": "新建一个目录，成功返回 0，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleMmap": {
+      "summary": "登记一段映射并返回首地址，页等到缺页再填，失败给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleMount": {
+      "summary": "在某个目录上挂一个新建的内存卷，成功返回 0，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleMprotect": {
+      "summary": "改写一段内存的保护承诺，成功返回 0，跨段请求给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleMunmap": {
+      "summary": "撤回一段映射承诺并释放页，成功返回 0，跨段请求给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleNanosleep": {
+      "summary": "按请求的时长睡，睡满返回 0，被信号打断给负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleNewfstatat": {
+      "summary": "按目录描述符取元数据写进缓冲，成功返回 0，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleOpen": {
+      "summary": "给路径分配描述符，O_CREAT 时建文件，失败给负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleOpenat": {
+      "summary": "按目录描述符打开路径，回新描述符或负码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandlePipe": {
+      "summary": "建一条管道交出两端，读端编号在前",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePipe2": {
+      "summary": "带标志建管道，标志非零回 -EINVAL",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePoll": {
+      "summary": "等描述符就绪，回就绪条数，超时回零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePpoll": {
+      "summary": "等描述符就绪，挂起的信号回 -EINTR",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePrctl": {
+      "summary": "设或读任务名，别的操作回 -EINVAL",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePread": {
+      "summary": "按偏移读一打开文件，游标原地不动",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandlePrlimit64": {
+      "summary": "读写本任务的资源上限，别人回 -EPERM",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRead": {
+      "summary": "从键盘或打开的文件读，回字节数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleReadlink": {
+      "summary": "读链接目标，只认 /proc/self/exe",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleReadlinkat": {
+      "summary": "按目录描述符读链接目标，回写入字节数",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleReboot": {
+      "summary": "校验权限后同步并关机，失败机器照跑",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRecvfrom": {
+      "summary": "收一条数据报，回收到的字节数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRecvmsg": {
+      "summary": "散射收取套接字消息，回字节数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRtSigaction": {
+      "summary": "装或查一个信号的处理方式，失败回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRtSigprocmask": {
+      "summary": "改调用者的阻塞信号集，失败回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRtSigreturn": {
+      "summary": "恢复信号投递前的现场，交回原调用结果",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleRtSigtimedwait": {
+      "summary": "带超时等一组信号，超时回 -EAGAIN",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSendfile": {
+      "summary": "在两描述符间搬文件字节，不经过用户缓冲",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSendmsg": {
+      "summary": "收集并发送套接字消息，回发出字节数",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSendto": {
+      "summary": "发一条数据报，回发出的字节数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetgid": {
+      "summary": "换调用者的组号，本内核总是回零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetitimer": {
+      "summary": "换掉实时定时器，可顺带取回旧的",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetpgid": {
+      "summary": "把任务挪进进程组，条件不满足回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetsid": {
+      "summary": "给调用者新会话，已是组长回 -EPERM",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetsockopt": {
+      "summary": "改一个套接字选项，失败回负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetTidAddress": {
+      "summary": "登记任务死后要清的用户字，回自身 tid",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSetuid": {
+      "summary": "换调用者的用户号，本内核总是回零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleShutdown": {
+      "summary": "关掉套接字一个或两个方向，失败回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSocket": {
+      "summary": "开一个套接字，回描述符或负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleSocketpair": {
+      "summary": "开一对连通的套接字端，失败回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleStat": {
+      "summary": "把路径元数据写进用户记录，失败回负码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleSysinfo": {
+      "summary": "填一条系统信息，负载与运行时长留零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleTgkill": {
+      "summary": "给指定线程发信号，线程不属该组回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleTime": {
+      "summary": "取纪元以来的秒数，失败回负错误码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleUmount2": {
+      "summary": "卸载运行时挂的 tmpfs，启动时的挂载不卸",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleUname": {
+      "summary": "报内核、节点、版本、机器名，失败回负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleUnlink": {
+      "summary": "删文件或空目录，失败回负错误码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::HandleUnsupportedProbe": {
+      "summary": "报告不支持的可选功能，一律回 -ENOSYS",
+      "category": "错误码翻译"
+    },
+    "cinux::syscall::HandleWait4": {
+      "summary": "等一个子进程退出并回收，回它的 pid",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleWaitid": {
+      "summary": "按 waitid 的身份选法回收子进程，回零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleWrite": {
+      "summary": "往控制台或文件写字节，回写入数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleWritev": {
+      "summary": "把多段字节一次写入描述符，回总字节数",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::HandleYield": {
+      "summary": "让出 CPU 一个回合，正常回零",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::LiveSlot": {
+      "summary": "按描述符取出活的打开文件，空号回错误",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::MonotonicNanoseconds": {
+      "summary": "读开机以来的单调纳秒，精细时钟优先",
+      "category": "描述符与任务上下文"
+    },
+    "cinux::syscall::OpenPath": {
+      "summary": "打开已折好的内核路径，回描述符或负码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::OpenPathAt": {
+      "summary": "经目录描述符开相对名，不支持请回退",
+      "category": "路径处理"
+    },
+    "cinux::syscall::ReclaimUserSpan": {
+      "summary": "拆掉用户地址区间到未映射，成功才扫页",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::StatPath": {
+      "summary": "把内核路径的元数据写进用户区，失败回负码",
+      "category": "路径处理"
+    },
+    "cinux::syscall::StatPathAt": {
+      "summary": "经目录描述符取相对名信息，不支持请回退",
+      "category": "路径处理"
+    },
+    "cinux::syscall::uaccess::ArmWindows": {
+      "summary": "记下这台机器有没有 SMAP 窗口，无返回值",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::uaccess::CopyFromUser": {
+      "summary": "把用户内存的字节读到内核，区间拒了回假",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::uaccess::CopyToUser": {
+      "summary": "把内核字节写进用户内存，区间拒了回假",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::UserRangeReadable": {
+      "summary": "查用户区间能否读，只验边界不验映射",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::UserRangeWritable": {
+      "summary": "查用户区间能否写，只验边界不验映射",
+      "category": "用户内存访问"
+    },
+    "cinux::syscall::WriteRun": {
+      "summary": "往一个描述符写一段字节，回写入数或负码",
+      "category": "描述符与任务上下文"
+    },
+    "InvokeSyscall": {
+      "summary": "按编号执行一次系统调用，回值进 RAX",
+      "category": "描述符与任务上下文"
+    },
+    "SyscallEntry": {
+      "summary": "SYSCALL 进来落在这里，整理现场再分发",
+      "category": "描述符与任务上下文"
+    }
+  }
+}

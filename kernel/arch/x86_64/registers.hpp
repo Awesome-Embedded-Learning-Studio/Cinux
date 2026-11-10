@@ -57,7 +57,6 @@ inline unsigned long long ReadCr0() {
  * @brief         Writes CR0 wholesale.
  *
  * @param[in]     value   The new image.
- * @return        None.
  * @note          Callers flip named bits, never rebuild the word.
  * @warning       None
  * @throws        None
@@ -91,10 +90,9 @@ inline unsigned long long ReadCr4() {
  * @brief         Writes CR4 wholesale.
  *
  * @param[in]     value   The new image.
- * @return        None.
  * @note          Callers read, OR in named bits, and write back — never
  *                rebuild the word, the machine owns the rest of it. Bits
- *                the CPU does not know refuse the whole write with #GP,
+ *                the CPU does not know refuse the whole write with \#GP,
  *                which is why SMEP and SMAP ask CPUID first.
  * @warning       None
  * @throws        None
@@ -147,7 +145,6 @@ inline unsigned long ReadCr2() {
  * @brief         Reloads CR3 with its current value, flushing every
  *                non-global TLB entry.
  *
- * @return        None
  * @note          The blunt instrument: dropping whole address-space
  *                translations at once. Single-page removals use
  *                  InvalidatePage.
@@ -165,7 +162,6 @@ inline void ReloadCr3() {
  *                machine to that address space.
  *
  * @param[in]     root   Physical address of the target PML4.
- * @return        None
  * @note          Everything the running code needs must already be
  *                mapped in the target space — kernel-half mirroring is
  *                what makes switching safe.
@@ -182,7 +178,6 @@ inline void LoadCr3(unsigned long root) {
  * @brief         Invalidates the local TLB entry for one page.
  *
  * @param[in]     virtual_address   Any address inside the page to drop.
- * @return        None
  * @note          Required after unmapping or tightening permissions;
  *                  skipping it leaves stale translations in play.
  *                Local CPU only: another processor running the same

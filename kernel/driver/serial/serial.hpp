@@ -22,7 +22,6 @@ namespace cinux::driver {
 /**
  * @brief         Programs COM1 for polling output.
  *
- * @return        None
  * @note          Idempotent: 115200 8N1, FIFOs on, interrupts off.
  * @warning       None
  * @throws        None
@@ -35,7 +34,6 @@ void SerialInit();
  * @brief         Sends one byte, waiting until the line can take it.
  *
  * @param[in]     character   Byte to transmit.
- * @return        None
  * @note          Blocks on the transmitter-hold-empty bit.
  * @warning       None
  * @throws        None
@@ -47,7 +45,6 @@ void SerialPutChar(char character);
 /**
  * @brief         Waits until the transmitter has fully emptied.
  *
- * @return        None
  * @note          Sending only waits for the hold register; the byte
  *                then spends its shift-register time on the wire. This
  *                waits for both to be empty, so whatever was printed

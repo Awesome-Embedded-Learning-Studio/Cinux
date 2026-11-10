@@ -89,7 +89,6 @@ LoadStatus LoadKernel(const ImageHeader& header);
  * @param[in]     dst   Destination linear address.
  * @param[in]     src   Source linear address.
  * @param[in]     len   Byte count to move.
- * @return        None
  * @note          Enters protected mode briefly; callers must be in real
  *                mode with the GDT loaded.
  * @warning       None

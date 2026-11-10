@@ -120,7 +120,6 @@ public:
      * @brief         Seats one concept-checked protocol.
      *
      * @param[in,out] protocol  The protocol instance taking the seat.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -141,7 +140,6 @@ public:
      * @param[in]     bytes   First payload byte.
      * @param[in]     length  Payload length.
      * @param[in]     header  The IPv4 header this payload travelled in.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -200,7 +198,6 @@ public:
      *
      * @param[in]     sink          Where built datagrams go.
      * @param[in]     own_address   Source address outgoing headers carry.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -211,7 +208,6 @@ public:
      *
      * @param[in]     sink          The new outgoing path.
      * @param[in]     own_address   The new source address.
-     * @return        None
      * @note          For the boot wiring's reroute: the loopback world
      *                runs first, a wire joins later, and counters and
      *                seats survive the aim.
@@ -237,7 +233,6 @@ public:
      *
      * @param[in]     bytes   First datagram byte.
      * @param[in]     length  Bytes the datagram holds.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */

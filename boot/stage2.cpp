@@ -29,7 +29,7 @@ asm(".section .text.boot, \"ax\"\n"
 namespace {
 using namespace cinux::base;
 using namespace cinux::boot;
-using namespace cinux::console;
+using namespace cinux::boot_early;
 using cinux::print::Println;
 
 cinux::boot::BootInfo g_boot_info;
@@ -44,7 +44,7 @@ constexpr unsigned char  kBppSpare   = 24;
 
 [[noreturn]] void fail(char const* what) {
     Println("%s FAILED", what);
-    cinux::console::Halt();
+    cinux::boot_early::Halt();
 }
 
 void dump_memory_map(cinux::boot::MemoryMap const& map) {
@@ -166,15 +166,15 @@ cinux::boot::ImageHeader load_kernel_image(cinux::boot::MemoryMap const& map) {
         cinux::boot::ValidateImage(kHeader, usable, kUsableCount, kOwned, 4);
     if (kVerdict != cinux::boot::LoadStatus::kOk) {
         Println("[stage2] kernel image rejected: %s", cinux::boot::NameOf(kVerdict));
-        cinux::console::Halt();
+        cinux::boot_early::Halt();
     }
-    cinux::console::PutString("[stage2] kernel image ok\n");
+    cinux::boot_early::PutString("[stage2] kernel image ok\n");
     cinux::boot::LoadStatus const kLoaded = cinux::boot::load::LoadKernel(kHeader);
     if (kLoaded != cinux::boot::LoadStatus::kOk) {
         Println("[stage2] kernel load failed: %s", cinux::boot::NameOf(kLoaded));
-        cinux::console::Halt();
+        cinux::boot_early::Halt();
     }
-    cinux::console::PutString("[stage2] kernel ferried\n");
+    cinux::boot_early::PutString("[stage2] kernel ferried\n");
     return kHeader;
 }
 
@@ -186,13 +186,13 @@ void* g_kernel_boot_info = &g_boot_info;
 
 extern "C" [[noreturn]] void Stage2Main() {
     using namespace cinux::boot;
-    cinux::console::InitConsole();
-    cinux::console::PutString("[stage2] stack ok\n");
+    cinux::boot_early::InitConsole();
+    cinux::boot_early::PutString("[stage2] stack ok\n");
 
     if (!bios::EnableA20AddressLine()) {
         fail("A20");
     }
-    cinux::console::PutString("A20 ok\n");
+    cinux::boot_early::PutString("A20 ok\n");
 
     cinux::boot::MemoryMap memory_map{};
     if (!bios::CollectMemoryMap(&memory_map)) {
@@ -228,6 +228,6 @@ extern "C" [[noreturn]] void Stage2Main() {
     StoreWord(kHandoffMailboxEntry, static_cast<unsigned long>(kHeader.entry));
     StoreWord(kHandoffMailboxInfo, reinterpret_cast<unsigned long>(g_kernel_boot_info));
 
-    cinux::console::PutString("[stage2] leaving real mode\n");
+    cinux::boot_early::PutString("[stage2] leaving real mode\n");
     EnterProtectedMode();
 }

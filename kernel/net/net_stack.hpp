@@ -71,7 +71,6 @@ public:
      * @brief         Seats one concept-checked protocol.
      *
      * @param[in,out] protocol  The protocol instance taking the seat.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -91,7 +90,6 @@ public:
      *
      * @param[in]     bytes   First payload byte.
      * @param[in]     length  Payload length.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -139,7 +137,6 @@ class NetStack {
 public:
     /**
      * @brief         Returns the counters to zero.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_net
      */
@@ -171,7 +168,6 @@ public:
      * @brief         Drains every port under one frame budget.
      *
      * @param[in]     budget  How many frames this call may deliver.
-     * @return        None
      * @note          The budget spans all ports and is the re-entry
      *                leash: a handler whose send lands a frame in a
      *                queue sees it drained only while budget remains.

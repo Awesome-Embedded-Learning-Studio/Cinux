@@ -112,7 +112,6 @@ public:
      * @brief         Success path — construct with a value.
      *
      * @param[in]     value   Value to store.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -128,7 +127,6 @@ public:
      * @brief         Error path — construct with an error code.
      *
      * @param[in]     error   Error code to store.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -142,7 +140,6 @@ public:
      * @brief         Copy constructor.
      *
      * @param[in]     other   Source to copy from.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -162,7 +159,6 @@ public:
      * @brief         Move constructor.
      *
      * @param[in]     other   Source to move from.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -231,7 +227,6 @@ public:
 
     /**
      * @brief         Destructor — destroys whichever member is active.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -360,7 +355,6 @@ public:
 private:
     /**
      * @brief         Destroys the active union member, if it is a value.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -395,7 +389,6 @@ class [[nodiscard("Dont throw away the Result, check it!")]] Result<void, ErrorT
 public:
     /**
      * @brief         Success path.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -408,7 +401,6 @@ public:
      * @brief         Error path — construct with an error code.
      *
      * @param[in]     error   Error code to store.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None

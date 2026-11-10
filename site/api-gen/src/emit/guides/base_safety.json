@@ -1,0 +1,21 @@
+{
+  "group": "base_safety",
+  "namespace": "cinux::base::safety",
+  "intro": "条件检查与断言失败的报告出口",
+  "categories": [
+    "断言检查",
+    "失败终止"
+  ],
+  "functions": {
+    "AssertionFailed": {
+      "summary": "打印断言信息并终止进程，不返回",
+      "category": "失败终止",
+      "example": "#include \"cinux/assert.hpp\"\n\nusing namespace cinux::base::safety;\n\nvoid StopUnlessReady(bool ready) {\n    if (!ready) {\n        AssertionFailed(\"StopUnlessReady: caller must finish setup first\");\n        // 不返回 · 打印这句话和调用点，然后终止进程\n    }\n}"
+    },
+    "Check": {
+      "summary": "条件不成立时交给断言失败处理并终止",
+      "category": "断言检查",
+      "example": "#include \"cinux/assert.hpp\"\n\nusing namespace cinux::base::safety;\n\nvoid CheckExample() {\n    Check(2 + 2 == 4, \"arithmetic must hold\");\n    // 条件成立 → 直接返回，既不打印也不终止\n}"
+    }
+  }
+}

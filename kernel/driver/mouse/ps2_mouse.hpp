@@ -55,7 +55,6 @@ public:
      *                grammar; a finished report becomes event words.
      *
      * @param[in]     raw_byte   Byte read from port 0x60.
-     * @return        None
      * @note          Runs on the IRQ12 path: integer-only, queue push,
      *                nothing slow.
      * @since         0.9.0

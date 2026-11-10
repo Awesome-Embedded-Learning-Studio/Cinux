@@ -1,0 +1,85 @@
+{
+  "group": "base_container",
+  "namespace": "cinux::base::container",
+  "intro": "在定长存储里组织队列、链表与栈，并支持查表",
+  "categories": [
+    "表查找",
+    "队列存取",
+    "链表增删",
+    "链表遍历",
+    "栈存取"
+  ],
+  "functions": {
+    "FindByName": {
+      "summary": "按名字走常量表找一项，未命中返回空指针",
+      "category": "表查找",
+      "example": "#include <cinux/container/name_table.hpp>\n\nusing namespace cinux::base::container;\n\nstruct DeviceTag {\n    const char* name;\n    unsigned long long word;\n};\n\nconstexpr DeviceTag kTags[] = {\n    {\"console\", 0},\n    {\"tty\", 1},\n    {\"null\", 2},\n};\n\nvoid Example() {\n    constexpr auto* kTty = FindByName(kTags, \"tty\");  // kTty->word = 1 · 命中 tty 这一项\n    static_assert(kTty->word == 1);\n    static_assert(FindByName(kTags, \"pty\") == nullptr);  // 查不到时拿到空指针\n}"
+    },
+    "FindByWord": {
+      "summary": "按整数键走常量表找一项，未命中返回空指针",
+      "category": "表查找",
+      "example": "#include <cinux/container/name_table.hpp>\n\nusing namespace cinux::base::container;\n\nstruct IoctlTag {\n    const char* name;\n    unsigned long long word;\n};\n\nconstexpr IoctlTag kIoctls[] = {\n    {\"TCGETS\", 0x5401},\n    {\"TCSETS\", 0x5402},\n};\n\nvoid Example() {\n    constexpr auto* kSet = FindByWord(kIoctls, 0x5402);  // kSet->word = 0x5402 · 命中 TCSETS\n    static_assert(kSet->word == 0x5402);\n    static_assert(FindByWord(kIoctls, 0x9999) == nullptr);\n}"
+    },
+    "advance": {
+      "summary": "槽位前进一格，走到末尾绕回开头",
+      "category": "队列存取"
+    },
+    "count": {
+      "summary": "返回队列中排队的元素个数",
+      "category": "队列存取"
+    },
+    "peek": {
+      "summary": "按偏移从队首读数但不取走，越界报假",
+      "category": "队列存取"
+    },
+    "cinux::base::container::RingQueue::pop": {
+      "summary": "取走队首最旧的元素，空队列返回假",
+      "category": "队列存取"
+    },
+    "push": {
+      "summary": "把元素放进队尾，队满丢弃并返回假",
+      "category": "队列存取"
+    },
+    "cinux::base::container::SelfList::after(Stuff &)": {
+      "summary": "返回链表中该对象的后继，尾端为空指针",
+      "category": "链表遍历"
+    },
+    "cinux::base::container::SelfList::after(const Stuff &) const": {
+      "summary": "只读地返回该对象的后继，尾端为空指针",
+      "category": "链表遍历"
+    },
+    "empty": {
+      "summary": "判断链表里有没有挂对象",
+      "category": "链表遍历"
+    },
+    "head": {
+      "summary": "返回链表第一个对象，空表为空指针",
+      "category": "链表遍历"
+    },
+    "pop_head": {
+      "summary": "摘下并返回链表第一个对象",
+      "category": "链表增删"
+    },
+    "push_back": {
+      "summary": "把对象挂到链表尾部，先来先出",
+      "category": "链表增删"
+    },
+    "push_front": {
+      "summary": "把对象挂到链表头部，插到最前",
+      "category": "链表增删"
+    },
+    "remove": {
+      "summary": "从链表任意位置摘下一个对象，没摘到报假",
+      "category": "链表增删"
+    },
+    "size": {
+      "summary": "走一遍链表数出对象个数",
+      "category": "链表遍历"
+    },
+    "cinux::base::container::StaticStack::pop": {
+      "summary": "把栈顶元素搬进输出参数，空栈返回假",
+      "category": "栈存取",
+      "example": "#include <cinux/container/static_stack.hpp>\n\nusing namespace cinux::base::container;\n\nvoid Example() {\n    constexpr int kTop = [] {\n        StaticStack<int, 4> stack;\n        const bool kFilled = stack.push(11) && stack.push(22);  // true · 11 在下，22 在上\n        int value = 0;\n        const bool kPopped = stack.pop(value);  // kPopped = true，value = 22 · 后进先出\n        return kFilled && kPopped ? value : -1;\n    }();\n    static_assert(kTop == 22);\n}"
+    }
+  }
+}

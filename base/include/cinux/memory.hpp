@@ -25,7 +25,6 @@ namespace cinux::base {
  * @param[in,out] destination   Where the bytes land.
  * @param[in]     source        Where the bytes come from.
  * @param[in]     bytes         How many bytes to copy.
- * @return        None
  * @note          Regions must not overlap; this is the memcpy shape,
  *                not memmove.
  * @warning       None
@@ -49,7 +48,6 @@ inline void CopyBytes(void* destination, const void* source, unsigned long bytes
  * @param[in,out] destination   Where the fill lands.
  * @param[in]     value         The byte to repeat.
  * @param[in]     bytes         How many bytes to fill.
- * @return        None
  * @note          This is the memset shape; zeroing a table page is its
  *                everyday caller.
  * @warning       None

@@ -55,7 +55,6 @@ public:
      * @param[in]     type    The event's class word.
      * @param[in]     code    The event's member word.
      * @param[in]     value   The event's payload word.
-     * @return        None.
      * @note          Interrupt-context safe: queue push, nothing slow.
      *                Overflow starts a SYN_DROPPED recovery with releases for
      *                delivered keys, followed by the latest report.
@@ -67,7 +66,6 @@ public:
     /**
      * @brief         Hands the report-closing word in.
      *
-     * @return        None.
      * @since         0.9.0
      * @ingroup       kernel_driver
      */
@@ -77,7 +75,6 @@ public:
      * @brief         Turns the stream into absolute axes with one range.
      *
      * @param[in]     maximum   The top of both axes' range, zero based.
-     * @return        None
      * @note          After this word the stream answers the absolute-axis
      *                question and replays both axes' positions after a
      *                dropped burst.
@@ -92,7 +89,6 @@ public:
      * @brief         Registers the drain a reader's read runs first.
      *
      * @param[in]     hook   The function polled before every read and poll.
-     * @return        None
      * @note          Devices whose reports wait on a drained ring hand
      *                their drain over here, so a reader pulls reports
      *                without an interrupt line.
@@ -106,6 +102,7 @@ public:
     /**
      * @brief         Reads whole wire records out, oldest first.
      *
+ * @param[in]     owner   Poll token; when set, only this owner's records drain.
      * @param[out]    sink    Where the records land.
      * @param[in]     count   Bytes the reader offered.
      * @return        Bytes handed over, or kWouldBlock when nothing
@@ -130,6 +127,7 @@ public:
     /**
      * @brief         Answers the grab question.
      *
+ * @param[in]     owner   The grab owner asking the question.
      * @param[in]     word    The question word.
      * @param[in]     argument   The grab flag's value.
      * @return        Zero on the grab word, a negative errno otherwise.
@@ -147,7 +145,6 @@ public:
      *
      * @param[in]     hook     The hook, or nullptr for none.
      * @param[in]     context  The word the hook receives back.
-     * @return        None.
      * @note          Bring-up wiring, before the node goes live.
      * @since         0.9.0
      * @ingroup       kernel_driver

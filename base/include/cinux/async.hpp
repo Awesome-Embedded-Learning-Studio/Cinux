@@ -52,7 +52,6 @@ public:
      *
      * @param[in]     handler   The word to call on completion.
      * @param[in]     owner     The object the handler serves.
-     * @return        None
      * @note          Arming over an armed seat replaces it — re-arming
      *                per submission is the intended rhythm.
      * @warning       None
@@ -70,7 +69,6 @@ public:
      *
      * @param[in]     status   The completion's status word, caller's meaning.
      * @param[in]     length   How much the operation moved, in bytes.
-     * @return        None
      * @note          Disarming before the call keeps a handler that
      *                re-arms itself from firing twice on one shot. An
      *                empty seat takes nothing.
@@ -101,7 +99,6 @@ public:
     /**
      * @brief         Clears the seat without firing it.
      *
-     * @return        None
      * @warning       None
      * @throws        None
      * @since         0.6.0

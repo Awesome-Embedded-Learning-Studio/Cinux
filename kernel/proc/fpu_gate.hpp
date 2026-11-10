@@ -16,7 +16,6 @@ extern "C" {
 
 /**
  * @brief         Save the current task's state on its outermost entry.
- * @return        None.
  * @note          Nesting belongs to the task so blocking and preemption
  *                cannot transfer a pending gate to another task. Safe
  *                before a current task exists. Call from the no-SSE island.
@@ -27,7 +26,6 @@ void EnterFpuGate();
 
 /**
  * @brief         Restore the current task's state on its outermost exit.
- * @return        None.
  * @note          Each returning entry must balance its own exit. A fork
  *                child starts outside the gate. Call from the no-SSE island.
  * @since         0.1.0

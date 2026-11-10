@@ -41,7 +41,6 @@ static_assert(alignof(FpuImage) >= 16, "FXSAVE64 demands 16-byte alignment");
 /**
  * @brief         Save the live floating-point state into an aligned image.
  * @param[out]    image   Receives the x87, MXCSR and SSE registers.
- * @return        None.
  * @since         0.1.0
  * @ingroup       kernel_arch
  */
@@ -53,7 +52,6 @@ inline void SaveFpu(FpuImage& image) {
 /**
  * @brief         Restore floating-point state from an aligned image.
  * @param[in]     image   A valid FXSAVE64 register image.
- * @return        None.
  * @note          Call from code compiled with general registers only.
  * @since         0.1.0
  * @ingroup       kernel_arch
@@ -116,7 +114,7 @@ inline constexpr unsigned long long kCanonicalKernelBottom = 0xFFFF800000000000U
  * @param[in]     value   The address to judge.
  * @return        true when bits 63..47 all agree, the shape every
  *                base MSR demands — a non-canonical value handed to
- *                wrmsr raises #GP instead of returning an error.
+ *                wrmsr raises \#GP instead of returning an error.
  * @since         0.8.0
  * @ingroup       kernel_arch
  */
@@ -133,7 +131,7 @@ extern "C" {
  *                never return normally.
  * @param[in,out] outgoing   Context that receives the current registers.
  * @param[in]     incoming   Context whose registers become live.
- * @return        None.
+ * @param[out]    released_cpu   Set when the switch released a CPU id.
  * @note          Control continues at incoming.rip. When the outgoing
  *                task is switched back in, execution lands at the
  *                internal resume point and this call returns as if it

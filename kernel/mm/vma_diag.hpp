@@ -32,7 +32,6 @@ namespace cinux::mm {
  * @param[in]     address      The faulting virtual address.
  * @param[in]     error_code   The page-fault error word, read for the
  *                             access type.
- * @return        None.
  * @note          A hit is not innocence and a miss is not automatically
  *                guilt at this station: the resolver alone decides, and
  *                this line is the evidence it leaves behind. One range

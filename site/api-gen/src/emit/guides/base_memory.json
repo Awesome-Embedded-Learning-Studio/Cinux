@@ -1,0 +1,43 @@
+{
+  "group": "base_memory",
+  "namespace": "cinux::base",
+  "intro": "内存的字节级操作，加上堆对象的创建与持有。",
+  "categories": ["区域比较", "字节复制", "文本处理", "内存填充", "堆对象创建"],
+  "functions": {
+    "BytesAre": {
+      "summary": "检查一段内存是否全是给定字节，返回真假",
+      "category": "区域比较",
+      "example": "#include <cinux/memory.hpp>\n\nusing namespace cinux::base;\n\nvoid CheckBlock() {\n    const unsigned char kBlock[4] = {0xAA, 0xAA, 0xAA, 0xAA};\n    const bool kAllSet = BytesAre(kBlock, 0xAA, sizeof kBlock);\n    // kAllSet = true · 四个字节全是 0xAA\n}"
+    },
+    "CopyBytes": {
+      "summary": "把一段内存的字节复制到另一段，无返回值",
+      "category": "字节复制"
+    },
+    "CopyText": {
+      "summary": "复制文本前缀并补 NUL，返回复制的字符数",
+      "category": "文本处理"
+    },
+    "EqualBytes": {
+      "summary": "逐字节比较两段内存，返回是否完全相同",
+      "category": "区域比较"
+    },
+    "MakeOwn": {
+      "summary": "在堆上构造一个对象，返回它的唯一持有者",
+      "category": "堆对象创建",
+      "example": "#include <cinux/own.hpp>\n\nusing namespace cinux::base;\n\nvoid OwnValue() {\n    const auto kValue = MakeOwn<int>(42);\n    // *kValue = 42 · 离开作用域时自动 delete\n}"
+    },
+    "MakeOwnArray": {
+      "summary": "在堆上构造默认初始化的数组，返回持有者",
+      "category": "堆对象创建"
+    },
+    "SetBytes": {
+      "summary": "把一段内存全部填成同一字节，无返回值",
+      "category": "内存填充"
+    },
+    "StrLength": {
+      "summary": "在给定上限内数 NUL 前的字节，返回长度",
+      "category": "文本处理",
+      "example": "#include <cinux/memory.hpp>\n\nusing namespace cinux::base;\n\nvoid MeasureText() {\n    const unsigned long kLength = StrLength(\"cinux\", 16);\n    // kLength = 5 · 数到 NUL 为止，上限 16 没有碰到\n}"
+    }
+  }
+}

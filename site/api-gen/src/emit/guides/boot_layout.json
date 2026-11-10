@@ -1,0 +1,16 @@
+{
+  "group": "boot_layout",
+  "namespace": "cinux::boot",
+  "intro": "按固定物理地址读写一个字，供启动阶段传递交接值。",
+  "categories": ["固定地址读取", "固定地址写入"],
+  "functions": {
+    "LoadWord": {
+      "summary": "读出指定线性地址处的那个字并返回",
+      "category": "固定地址读取"
+    },
+    "StoreWord": {
+      "summary": "把给定的字写到指定线性地址，无返回",
+      "category": "固定地址写入"
+    }
+  }
+}

@@ -5,10 +5,41 @@
 
 file(MAKE_DIRECTORY "${TEST_DIR}")
 
-execute_process(COMMAND test -c /dev/kvm -a -w /dev/kvm RESULT_VARIABLE kvm_usable)
-if(NOT kvm_usable EQUAL 0)
-    message(FATAL_ERROR
-        "/dev/kvm is missing: Cinux runs QEMU with -accel kvm only, no TCG fallback")
+# Configure already picked an accelerator from CINUX_QEMU_ACCEL and baked it
+# into QEMU_DEVICE_ARGS. A build configured on a KVM host can still run where
+# /dev/kvm is absent or unreadable (containers, WSL2 without nested
+# virtualisation), so rewrite the pair to TCG instead of refusing to boot.
+# CI keeps /dev/kvm, so the arguments stay untouched there.
+list(FIND QEMU_DEVICE_ARGS -accel accel_index)
+set(qemu_accel "")
+if(NOT accel_index EQUAL -1)
+    math(EXPR accel_value_index "${accel_index} + 1")
+    list(GET QEMU_DEVICE_ARGS ${accel_value_index} qemu_accel)
+endif()
+
+if(qemu_accel STREQUAL "kvm")
+    execute_process(COMMAND test -c /dev/kvm -a -w /dev/kvm RESULT_VARIABLE kvm_usable)
+    if(NOT kvm_usable EQUAL 0)
+        message(WARNING
+            "/dev/kvm is not usable here: falling back to tcg for this kernel test "
+            "(emulated, slow)")
+        list(REMOVE_AT QEMU_DEVICE_ARGS ${accel_value_index})
+        list(INSERT QEMU_DEVICE_ARGS ${accel_value_index} tcg)
+        set(qemu_accel tcg)
+        list(FIND QEMU_DEVICE_ARGS -cpu cpu_index)
+        if(NOT cpu_index EQUAL -1)
+            math(EXPR cpu_value_index "${cpu_index} + 1")
+            list(REMOVE_AT QEMU_DEVICE_ARGS ${cpu_value_index})
+            list(INSERT QEMU_DEVICE_ARGS ${cpu_value_index} max)
+        endif()
+    endif()
+endif()
+
+# TCG emulates every instruction, so give it more headroom while staying
+# below CTest's 120 s limit in test/CMakeLists.txt.
+set(qemu_timeout 60)
+if(qemu_accel STREQUAL "tcg")
+    set(qemu_timeout 100)
 endif()
 
 set(serial_log "${TEST_DIR}/serial.log")
@@ -31,7 +62,7 @@ execute_process(
             -drive format=raw,file=${IMAGE_FILE}
             -serial file:${serial_log}
     RESULT_VARIABLE qemu_status
-    TIMEOUT 60
+    TIMEOUT ${qemu_timeout}
     OUTPUT_QUIET ERROR_VARIABLE qemu_stderr)
 
 if(NOT qemu_status EQUAL 3 AND NOT qemu_stderr STREQUAL "")

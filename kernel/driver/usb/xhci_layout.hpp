@@ -138,7 +138,6 @@ inline constexpr uint32_t kCompletionShortPacket = 13;
  * @param[in,out] ring           The TRB array, slots long.
  * @param[in]     slots          Ring capacity, the last slot is the link's.
  * @param[in]     ring_physical  The ring's physical address, for the link.
- * @return        None
  * @warning       None
  * @throws        None
  * @since         0.6.0
@@ -158,7 +157,6 @@ void InitRing(Trb* ring, unsigned long slots, uint64_t ring_physical);
  * @param[in]     control        The control word minus its cycle bit, as
  *                               TrbControl builds it: type, direction,
  *                               chain, slot id, everything but the handshake.
- * @return        None
  * @note          Reaching the last slot rewrites the link with the toggle
  *                bit and flips the cycle state, so the consumer chases
  *                the producer around one ring without a second word.

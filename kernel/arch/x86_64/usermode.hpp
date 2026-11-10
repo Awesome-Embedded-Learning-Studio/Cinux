@@ -24,7 +24,6 @@ namespace cinux::arch::usermode {
 
 /**
  * @brief         Unlock the fast-system instructions and aim STAR.
- * @return        None.
  * @note          EFER.SCE gates both SYSCALL and SYSRET — without it
  *                the instructions themselves fault as invalid opcodes,
  *                whichever direction you face. With it on, SYSCALL
@@ -48,7 +47,7 @@ extern "C" {
  *                          the caller owns the entry stack's alignment
  *                          and whatever picture (argc, argv, envp) sits
  *                          on top of it.
- * @return        None, ever.
+ * @note          Does not return.
  * @note          The CPU lands with CS 0x33, SS 0x2B, RFLAGS from the
  *                constant in usermode.S (interrupts enabled), and RSP
  *                verbatim from entry_rsp. C linkage, like the context

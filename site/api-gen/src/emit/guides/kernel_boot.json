@@ -1,0 +1,74 @@
+{
+  "group": "kernel_boot",
+  "namespace": "cinux",
+  "intro": "启动阶段的镜像核对、控制台通道和格式化打印",
+  "categories": [
+    "镜像校验",
+    "区间判定",
+    "拒绝理由",
+    "控制台",
+    "格式化输出"
+  ],
+  "functions": {
+    "cinux::boot::ContainsRegion": {
+      "summary": "区间是否被某个已列区域整个包住，是则返回真",
+      "category": "区间判定"
+    },
+    "cinux::boot::NameOf": {
+      "summary": "把加载判定换成一句人能读的拒绝理由",
+      "category": "拒绝理由"
+    },
+    "cinux::boot::OverlapsRegion": {
+      "summary": "区间与任一已列区域有重叠就返回真，边沿相接不算",
+      "category": "区间判定"
+    },
+    "cinux::boot::ValidateImage": {
+      "summary": "按内存实际情况核对镜像，返回第一处不过的检查",
+      "category": "镜像校验"
+    },
+    "cinux::console::Flush": {
+      "summary": "等所有控制台接收端把剩下的字节送完再返回",
+      "category": "控制台"
+    },
+    "cinux::console::InitConsole": {
+      "summary": "先起串口再起文本屏，屏幕起不来时串口照常输出",
+      "category": "控制台"
+    },
+    "cinux::console::PutChar": {
+      "summary": "把一个字符送给所有控制台接收端，无返回值",
+      "category": "控制台"
+    },
+    "cinux::console::PutString": {
+      "summary": "逐字符送出零结尾字符串，可选在末尾补换行",
+      "category": "控制台"
+    },
+    "cinux::print::detail::Argify(const char *)": {
+      "summary": "把字符串参数包成格式引擎认得的参数",
+      "category": "格式化输出"
+    },
+    "cinux::print::detail::Argify(const void *)": {
+      "summary": "把指针参数包成格式引擎认得的参数",
+      "category": "格式化输出"
+    },
+    "cinux::print::detail::Argify(unsigned long long)": {
+      "summary": "把整数参数包成格式引擎认得的参数，整数都走这里",
+      "category": "格式化输出"
+    },
+    "cinux::print::detail::Emit(bool, const char *, Args...)": {
+      "summary": "按格式串和参数发一行，可带尾换行",
+      "category": "格式化输出"
+    },
+    "cinux::print::detail::Emit(bool, const char *)": {
+      "summary": "格式串没有参数时直接发一行，可带尾换行",
+      "category": "格式化输出"
+    },
+    "cinux::print::Print": {
+      "summary": "按格式串写调试控制台，超出缓冲就截断",
+      "category": "格式化输出"
+    },
+    "cinux::print::Println": {
+      "summary": "按格式串写一行并补换行，超出缓冲就截断",
+      "category": "格式化输出"
+    }
+  }
+}

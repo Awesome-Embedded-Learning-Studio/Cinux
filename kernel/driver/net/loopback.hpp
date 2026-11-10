@@ -46,7 +46,6 @@ class Loopback : public cinux::base::Singleton<Loopback> {
 public:
     /**
      * @brief         Empties the frame queue.
-     * @return        None
      * @note          Bring-up wiring; also how a test returns the one
      *                instance to a clean slate.
      * @since         0.6.0

@@ -73,7 +73,6 @@ public:
      * @param[in]     words         Caller-owned word array, at least
      *                              words_for(bit_capacity) entries.
      * @param[in]     bit_capacity  Number of bits the bitmap governs.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -94,7 +93,6 @@ public:
      *                              bits as they stand; at least
      *                              words_for(bit_capacity) entries.
      * @param[in]     bit_capacity  Number of bits the bitmap governs.
-     * @return        None
      * @note          init wipes the words into a fresh empty map; adopt
      *                keeps them — the face for bits read off a disk. The
      *                set count is walked up from the words so later set
@@ -148,7 +146,6 @@ public:
      *
      * @param[in]     base   First bit index.
      * @param[in]     count  Bits to mark.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -166,7 +163,6 @@ public:
      *
      * @param[in]     base   First bit index.
      * @param[in]     count  Bits to clear.
-     * @return        None
      * @note          None
      * @warning       None
      * @throws        None
@@ -182,7 +178,6 @@ public:
     /**
      * @brief         Sets every bit up to capacity.
      *
-     * @return        None
      * @note          The tail word is masked to capacity, so bits past the
      *                end never pretend to exist.
      * @warning       None

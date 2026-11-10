@@ -90,7 +90,6 @@ public:
      * @brief         Injects the interrupt chip backing the service.
      *
      * @param[in]     chip   Device to drive, any IrqChip type.
-     * @return        None
      * @note          Type erasure after the Tick init pattern: two
      *                captureless lambdas become the stored unmask and
      *                acknowledge thunks, the chip pointer rides along
@@ -112,7 +111,6 @@ public:
      * @param[in]     line     The line the handler takes.
      * @param[in]     handler   Entry to call when the line fires; nullptr
      *                          clears the seat.
-     * @return        None
      * @note          Seating does not open the line — enable_line does.
      *                Seat and gate move independently, so neither can
      *                fire before both are set.
@@ -125,7 +123,6 @@ public:
      * @brief         Opens one device line at the injected chip.
      *
      * @param[in]     line   Device line to unmask.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_interrupt
      */
@@ -135,7 +132,6 @@ public:
      * @brief         Runs the seated handler, then thanks the chip.
      *
      * @param[in]     line   Device line that fired.
-     * @return        None
      * @note          Called by the arch stub layer; acknowledge happens
      *                here, inside the service, so no driver or stub
      *                ever sends one. An unseated line is still
@@ -151,7 +147,6 @@ public:
      *
      * @param[in]     first   Raw vector of the pool's first seat.
      * @param[in]     count   How many vectors the pool spans.
-     * @return        None
      * @note          The numbers are platform wiring knowledge — which
      *                vectors the IDT stubs own — so the arch layer hands
      *                them over instead of this file guessing. Called once
@@ -182,7 +177,6 @@ public:
      * @brief         Runs the message handler one vector carries.
      *
      * @param[in]     vector   Message vector that fired.
-     * @return        None
      * @note          Called by the arch stub layer, which acknowledges
      *                the local controller afterwards — message delivery
      *                ends at the local APIC, never at the line chip. An

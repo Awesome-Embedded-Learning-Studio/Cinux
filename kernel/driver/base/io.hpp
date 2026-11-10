@@ -60,7 +60,6 @@ struct PortWrite16 {
  * @brief         Performs one port write described by the pair.
  *
  * @param[in]     write   Port and value to emit.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -74,7 +73,6 @@ void OutB(PortWrite write);
  *
  * @tparam        Count   Table length, deduced from the array.
  * @param[in]     writes  Register writes to apply front to back.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -92,7 +90,6 @@ void OutB(const PortWrite (&writes)[Count]) {
  * @brief         Performs one word port write described by the pair.
  *
  * @param[in]     write   Port and value to emit.
- * @return        None
  * @note          ACPI's PM1 control blocks are word registers.
  * @warning       None
  * @throws        None
@@ -118,7 +115,6 @@ uint8_t InB(uint16_t port);
  * @brief         Performs one dword port write described by the pair.
  *
  * @param[in]     write   Port and value to emit.
- * @return        None
  * @note          PCI configuration access selects a dword by writing the
  *                address register first; this is that write.
  * @warning       None
@@ -146,7 +142,6 @@ uint32_t In32(uint16_t port);
  *
  * @param[in]     port   Status port to poll.
  * @param[in]     mask   Bits that must all be set to continue.
- * @return        None
  * @note          The transmitter-ready wait of every polling driver.
  * @warning       None
  * @throws        None
@@ -160,7 +155,6 @@ void WaitBitsSet(uint16_t port, uint8_t mask);
  *
  * @param[in]     port   Status port to poll.
  * @param[in]     mask   Bits that must all be clear to continue.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None

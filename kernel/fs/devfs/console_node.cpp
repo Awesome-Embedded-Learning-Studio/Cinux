@@ -40,7 +40,6 @@ public:
     /**
      * @brief         Hands the console's keys to a group.
      * @param[in,out] pgid   The group taking the foreground.
-     * @return        None
      * @since         0.6.0
      * @ingroup       kernel_fs
      */

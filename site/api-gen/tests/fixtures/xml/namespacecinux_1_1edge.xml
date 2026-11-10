@@ -1,0 +1,133 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.18.0" xml:lang="English">
+  <compounddef id="namespacecinux_1_1edge" kind="namespace" language="C++">
+    <compoundname>cinux::edge</compoundname>
+    <sectiondef kind="func">
+      <!-- 重载一:单参数 -->
+      <memberdef kind="function" id="namespacecinux_1_1edge_1a00000000000000000000000000000001" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>int</type>
+        <definition>int cinux::edge::Measure</definition>
+        <argsstring>(size_t count)</argsstring>
+        <name>Measure</name>
+        <qualifiedname>cinux::edge::Measure</qualifiedname>
+        <param>
+          <type>size_t</type>
+          <declname>count</declname>
+          <defval>16</defval>
+        </param>
+        <briefdescription>
+<para>Measures with a default count. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">count</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of samples. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>v0.2.0</para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <referencedby refid="namespacecinux_1_1edge_1a00000000000000000000000000000002" compoundref="edge_8cpp" startline="30" endline="40">cinux::edge::Measure</referencedby>
+        <referencedby refid="unknown_1file_1symbol" compoundref="other_8cpp" startline="1" endline="2">ExternalCaller</referencedby>
+        <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="10" column="5" declfile="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" declline="10" declcolumn="5"/>
+      </memberdef>
+      <!-- 重载二:同名不同参 -->
+      <memberdef kind="function" id="namespacecinux_1_1edge_1a00000000000000000000000000000002" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>int</type>
+        <definition>int cinux::edge::Measure</definition>
+        <argsstring>(const char *label)</argsstring>
+        <name>Measure</name>
+        <qualifiedname>cinux::edge::Measure</qualifiedname>
+        <param>
+          <type>const char *</type>
+          <declname>label</declname>
+        </param>
+        <briefdescription>
+<para>Measures with a label. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="since"><para>0.3.0</para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="14" column="5" declfile="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" declline="14" declcolumn="5"/>
+      </memberdef>
+      <!-- 无注释符号:coverage 的分母 -->
+      <memberdef kind="function" id="namespacecinux_1_1edge_1a00000000000000000000000000000003" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::edge::Undocumented</definition>
+        <argsstring>()</argsstring>
+        <name>Undocumented</name>
+        <qualifiedname>cinux::edge::Undocumented</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="warning"><para>None</para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="18" column="6" declfile="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" declline="18" declcolumn="6"/>
+      </memberdef>
+      <!-- brief 占位值 None:按无注释处理 -->
+      <memberdef kind="function" id="namespacecinux_1_1edge_1a00000000000000000000000000000004" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::edge::Placeholder</definition>
+        <argsstring>()</argsstring>
+        <name>Placeholder</name>
+        <qualifiedname>cinux::edge::Placeholder</qualifiedname>
+        <briefdescription>
+<para>None</para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="22" column="6" declfile="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" declline="22" declcolumn="6"/>
+      </memberdef>
+      <!-- 枚举:取值与说明各在自己的节点里 -->
+      <memberdef kind="enum" id="namespacecinux_1_1edge_1a00000000000000000000000000000005" prot="public" static="no" strong="no">
+        <type>unsigned char</type>
+        <name>Mode</name>
+        <qualifiedname>cinux::edge::Mode</qualifiedname>
+        <enumvalue id="namespacecinux_1_1edge_1a00000000000000000000000000000005a1" prot="public">
+          <name>kIdle</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Nothing in flight. </para>
+          </briefdescription>
+        </enumvalue>
+        <enumvalue id="namespacecinux_1_1edge_1a00000000000000000000000000000005a2" prot="public">
+          <name>kBusy</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>A transfer is running. </para>
+          </briefdescription>
+        </enumvalue>
+        <briefdescription>
+<para>Where a transfer stands. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="26" column="6" declfile="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" declline="26" declcolumn="6"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/charliechen/CinuxOS/kernel/edge/edge.hpp" line="8" column="1"/>
+  </compounddef>
+</doxygen>

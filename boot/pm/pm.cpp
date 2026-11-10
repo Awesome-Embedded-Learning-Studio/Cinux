@@ -16,7 +16,7 @@ extern "C" [[noreturn]] void PmEntry() {
         :
         : [stack] "n"(cinux::boot::kPmStackTop)
         : "ax");
-    cinux::console::PutString("[pm] 32-bit world alive\n");
+    cinux::boot_early::PutString("[pm] 32-bit world alive\n");
     BuildHandoffDoors();
     EnterLongMode();
 }

@@ -87,7 +87,6 @@ public:
      *
      * @param[in]     phys   Base address of the run.
      * @param[in]     order  The same order it was allocated with.
-     * @return        None
      * @note          The order is the caller's contract; freeing with a
      *                wrong order corrupts the ledger.
      * @warning       None
@@ -107,7 +106,6 @@ public:
      * @brief         Counts one more mapping sharing this frame.
      *
      * @param[in]     phys   The frame gaining a shareholder.
-     * @return        None.
      * @note          Copy-on-write's marking half: a frame mapped at
      *                several addresses, or by several address spaces,
      *                carries one count per mapping. Frames nothing

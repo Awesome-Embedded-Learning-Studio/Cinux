@@ -30,7 +30,6 @@ namespace cinux::debug {
 /**
  * @brief         Walk the frame chain from one frame base and print it.
  * @param[in]     frame_base   rbp value of the frame to start from.
- * @return        None.
  * @note          The walk validates each link (non-null, 16-byte
  *                aligned, kernel half) before following it, and stops
  *                at the first link that fails or after

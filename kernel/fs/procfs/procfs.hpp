@@ -164,7 +164,6 @@ public:
      * @brief         Installs the facts this instance answers with.
      *
      * @param[in]     source   The facts and their context.
-     * @return        None
      * @note          Bring-up wiring, single-threaded, before the mount
      *                goes live. The source is borrowed for the
      *                instance's whole life.
@@ -188,7 +187,6 @@ public:
      * @brief         Pins a node for an open descriptor.
      *
      * @param[in]     node   Handle from lookup.
-     * @return        None
      * @note          No-op: facts have no life to hold.
      * @since         0.5.0
      * @ingroup       kernel_fs
@@ -199,7 +197,6 @@ public:
      * @brief         Drops an open descriptor's pin on a node.
      *
      * @param[in]     node   Handle from lookup.
-     * @return        None
      * @note          No-op: facts have no life to hold.
      * @since         0.5.0
      * @ingroup       kernel_fs

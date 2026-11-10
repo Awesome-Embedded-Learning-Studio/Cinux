@@ -1,0 +1,19 @@
+{
+  "group": "boot_e820",
+  "namespace": "cinux::boot",
+  "intro": "把 BIOS 报的内存段分类，供后续判断哪些能分配",
+  "categories": [
+    "类型映射",
+    "可用性判断"
+  ],
+  "functions": {
+    "ClassifyEntry": {
+      "summary": "把 BIOS 给的原始类型值翻成内存段分类，未知归保留",
+      "category": "类型映射"
+    },
+    "IsUsable": {
+      "summary": "判断该分类能否当空闲内存发放，只有可用为真",
+      "category": "可用性判断"
+    }
+  }
+}

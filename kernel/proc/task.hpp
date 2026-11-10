@@ -229,7 +229,6 @@ struct StartPlan {
  *                image, and plant the overflow magic.
  * @param[out]    ctx    The context to arm; fully overwritten.
  * @param[in]     plan   Addresses describing this task's start.
- * @return        None.
  * @note          Pure arithmetic plus one store through plan's own
  *                stack addresses, so host tests drive it with plain
  *                buffers. The FXSAVE64 image is preloaded with the
@@ -321,7 +320,6 @@ private:
 /**
  * @brief         Seat the assembly-backed switch executor into the
  *                scheduler.
- * @return        None.
  * @note          The kernel bring-up call: once this runs, spawn,
  *                yield and exit operate on real register images.
  *                Test worlds install their own sink instead and never

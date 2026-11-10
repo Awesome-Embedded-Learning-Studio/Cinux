@@ -62,7 +62,6 @@ struct [[gnu::packed]] InterruptFrame {
  * @param[in,out] frame       The frame the stub received; rip moves forward
  *                            when an armed recovery consumes this fault.
  * @param[in]     error_code  CPU-pushed code, 0 for no-code exceptions.
- * @return        None.
  * @note          An armed-and-matching fault is repaired and returned
  *                through iret; every other fault prints the dump and
  *                parks the machine.
@@ -100,7 +99,6 @@ unsigned long long TakeRecoveredVector();
 /**
  * @brief         Seat the one resolver every page fault is offered to.
  * @param[in]     resolver   The callback, or nullptr to uninstall.
- * @return        None.
  * @note          The memory theme's copy-on-write answer installs here;
  *                a resolver that declines (returns false) changes nothing,
  *                the fault falls through to the armed-recovery probe and
@@ -127,7 +125,6 @@ using PageFaultDiagnoser = void (*)(unsigned long long address, unsigned long lo
 /**
  * @brief         Seat the one diagnoser declined faults are shown to.
  * @param[in]     diagnoser   The callback, or nullptr to uninstall.
- * @return        None.
  * @note          A mirror of the resolver seat: arch owns the seat, the
  *                memory theme owns the knowledge, so the reporter never
  *                learns what a range register is. The diagnoser runs after
@@ -140,7 +137,6 @@ void InstallPageFaultDiagnoser(PageFaultDiagnoser diagnoser);
 
 /**
  * @brief         Arm all 32 CPU exception vectors with attribute stubs.
- * @return        None.
  * @note          Vectors 8, 10-14, 17, 21, 29 and 30 take the error-code
  *                signature; the rest take the bare one. Every stub here
  *                lands before lidt makes the table live.

@@ -52,7 +52,6 @@ class NetWorld : public cinux::base::Singleton<NetWorld> {
 public:
     /**
      * @brief         Wires the loopback world together.
-     * @return        None
      * @note          Idempotent: re-running returns the world to a clean
      *                slate with the pump, if seated, still draining it.
      * @since         0.6.0
@@ -73,7 +72,6 @@ public:
      * @brief         Joins a real wire to the world and reroutes sends.
      *
      * @param[in,out] wire  The port of a framing device the boot found.
-     * @return        None
      * @note          Loopback-bound datagrams keep their loopback path;
      *                everything else routes through the wire, resolving
      *                hardware addresses from the cache and sending a
@@ -102,7 +100,6 @@ public:
 
     /**
      * @brief         Drains the stack once under the frame budget.
-     * @return        None
      * @note          The injectable pump: the thread's whole body, and
      *                        a test's handle when it prefers to drive.
      * @since         0.6.0

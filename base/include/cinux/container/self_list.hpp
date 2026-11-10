@@ -104,7 +104,6 @@ struct SelfList {
      * @brief         Append at the tail; arrival order is pop order.
      * @param[in,out] item   Object to link; must not be linked here
      *                      already.
-     * @return        None.
      * @since         0.1.0
      * @ingroup       base_container
      */
@@ -121,7 +120,6 @@ struct SelfList {
     /**
      * @brief         Prepend at the head; jumps the arrival order.
      * @param[in,out] item   Object to link at the front.
-     * @return        None.
      * @since         0.1.0
      * @ingroup       base_container
      */

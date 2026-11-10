@@ -136,7 +136,6 @@ struct DeviceOps {
 /**
  * @brief   Seats the two pure-computation devices, null and zero.
  *
- * @return  None
  * @note    Bring-up wiring: the registrations travel through the device
  *          model, so both devices join the model's registry and the
  *          bound devfs in one breath. Null takes 1:3, zero 1:5, the
@@ -183,7 +182,6 @@ public:
      * @brief         Installs the resolver for names beyond the table.
      *
      * @param[in]     resolve   The resolver, or nullptr to uninstall.
-     * @return        None
      * @note          Lookup consults the seated table first; a miss then
      *                asks the resolver, which answers whole FsNodes from
      *                its own namespace (the PTY pairs' /dev/pts seats).
@@ -197,7 +195,6 @@ public:
      * @brief         Installs the open-time seat exchanger.
      *
      * @param[in]     adopt   The exchanger, or nullptr to uninstall.
-     * @return        None
      * @note          Every open passes its node through the exchanger,
      *                which answers the same node back except for a
      *                cloning device, whose open mints a fresh pair and
@@ -311,7 +308,6 @@ public:
      * @brief         Pins a node for an open descriptor.
      *
      * @param[in]     node   Handle from lookup.
-     * @return        None
      * @note          Forwards to the device's optional ownership hook.
      * @since         0.5.0
      * @ingroup       kernel_fs
@@ -322,7 +318,6 @@ public:
      * @brief         Drops an open descriptor's pin on a node.
      *
      * @param[in]     node   Handle from lookup.
-     * @return        None
      * @note          Table rows outlive every descriptor. Each independent
      *                open has one retain/release pair; dup and fork share
      *                the open description and do not add device pins.

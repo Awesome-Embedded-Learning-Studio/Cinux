@@ -1,0 +1,42 @@
+{
+  "group": "base_format",
+  "namespace": "cinux::base::format",
+  "intro": "把整数和指针格式化成文本，并解析格式串字段。",
+  "categories": ["数值格式化", "指针格式化", "格式说明符解析", "缓冲区输出"],
+  "functions": {
+    "FormatDecimal": {
+      "summary": "把有符号整数写成十进制，返回写入的字符视图",
+      "category": "数值格式化"
+    },
+    "FormatPointerPrefixed": {
+      "summary": "把指针写成 0x 加小写十六进制，返回字符视图",
+      "category": "指针格式化"
+    },
+    "FormatRadix": {
+      "summary": "按给定进制写无符号整数，返回写入字符的视图",
+      "category": "数值格式化"
+    },
+    "ParseFieldSpec": {
+      "summary": "解析宽度和填充标志，返回字段控制信息",
+      "category": "格式说明符解析"
+    },
+    "ParseLengthModifier": {
+      "summary": "解析 l、ll、z 长度修饰符，返回对应编号",
+      "category": "格式说明符解析"
+    },
+    "RadixFor": {
+      "summary": "把转换说明符映射成进制，返回 8、10 或 16",
+      "category": "格式说明符解析"
+    },
+    "FormatToBuf": {
+      "summary": "把参数数组按格式写进缓冲区，不返回值",
+      "category": "缓冲区输出",
+      "example": "#include <cinux/format.hpp>\n\nusing namespace cinux::base::format;\n\nvoid WriteUnsigned() {\n    char text[32];\n    const Arg kArguments[] = {NumU(4096)};\n    FormatToBuf(text, sizeof text, \"%u\", ArgsView::of(kArguments));\n    // text = \"4096\" · 参数按数组顺序取用\n}"
+    },
+    "VformatToBuf": {
+      "summary": "按可变参数写进缓冲区，截断而不越界",
+      "category": "缓冲区输出",
+      "example": "#include <cinux/format.hpp>\n\nusing namespace cinux::base::format;\n\nvoid TruncateSafely() {\n    char text[5];\n    VformatToBuf(text, sizeof text, \"%s\", \"cinux\");\n    // text = \"cinu\" · 放不下时截断，末尾始终留一个 NUL\n}"
+    }
+  }
+}

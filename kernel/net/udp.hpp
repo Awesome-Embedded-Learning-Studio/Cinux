@@ -96,7 +96,6 @@ public:
      *
      * @param[in]     sink          Where built datagrams go.
      * @param[in]     own_address   Source address the pseudo header sums.
-     * @return        None
      * @since         0.7.0
      * @ingroup       kernel_net
      */
@@ -107,7 +106,6 @@ public:
      *
      * @param[in]     sink          The new outgoing path.
      * @param[in]     own_address   The new source address.
-     * @return        None
      * @note          For the boot wiring's reroute: the loopback world
      *                runs first, a wire joins later, and the port table
      *                and counters survive the aim.
@@ -122,7 +120,6 @@ public:
      * @param[in]     bytes   First datagram byte.
      * @param[in]     length  Bytes the datagram holds.
      * @param[in]     header  The IPv4 header it travelled in.
-     * @return        None
      * @since         0.7.0
      * @ingroup       kernel_net
      */

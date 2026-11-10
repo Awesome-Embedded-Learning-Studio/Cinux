@@ -21,7 +21,6 @@ namespace cinux::arch {
 /**
  * @brief         Parks the CPU forever with interrupts as they stand.
  *
- * @return        None
  * @note          The final stop of every early failure and every clean
  *                end; callers that need silence park their own
  *                interrupts first.

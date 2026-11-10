@@ -24,7 +24,6 @@ namespace cinux::proc {
 /**
  * @brief         Seats the current-task fault diagnoser into the reporter.
  *
- * @return        None.
  * @note          After this runs, every page fault the resolver declines
  *                is judged once against the running task's range register
  *                before the dump. Safe before the first task exists: an
