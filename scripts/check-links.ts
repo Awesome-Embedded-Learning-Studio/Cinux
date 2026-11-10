@@ -146,17 +146,33 @@ function checkTarget(file: string, line: number, rawTarget: string, isImage: boo
 function checkFile(volume: Volume, file: string): void {
   checkedFiles++
   const lines = readFileSync(file, 'utf-8').split('\n')
+  // 围栏代码块(``` 或 ~~~)里的 [x](y) 是代码不是链接,整块跳过
+  let inFence = false
+  let fenceMarker = ''
   lines.forEach((text, idx) => {
     const lineNo = idx + 1
+    const fence = text.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (fence) {
+      if (!inFence) {
+        inFence = true
+        fenceMarker = fence[1][0]
+      } else if (fence[1][0] === fenceMarker) {
+        inFence = false
+      }
+      return
+    }
+    if (inFence) return
+    // 行内代码 `...` 里的内容同样不是链接,匹配前先摘掉
+    const prose = text.replace(/(`+)[^`]*\1/g, '')
     // markdown 行内链接与图片
     const linkRe = /(!?)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
     let m: RegExpExecArray | null
-    while ((m = linkRe.exec(text)) !== null) {
+    while ((m = linkRe.exec(prose)) !== null) {
       checkTarget(file, lineNo, m[2], m[1] === '!')
     }
     // HTML 链接
     const hrefRe = /<a\s[^>]*href="([^"]+)"/gi
-    while ((m = hrefRe.exec(text)) !== null) {
+    while ((m = hrefRe.exec(prose)) !== null) {
       checkTarget(file, lineNo, m[1], false)
     }
   })
