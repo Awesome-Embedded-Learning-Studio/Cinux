@@ -131,6 +131,18 @@ TEST("pmm: neighboring frames keep independent share counts") {
     run_last_release_ladder(pmm, kFirst, kSecond);
 }
 
+TEST("pmm: share counts work for frames past 4 MiB") {
+    Pmm pmm{};
+    ASSERT_TRUE(pmm.init(make_info({make_entry(8_MiB, 16_MiB, 1)}, 2_MiB, 8_KiB)));
+    const PhysAddr kHigh = pmm.allocate_page();
+    ASSERT_TRUE(kHigh == PhysAddr{8_MiB});
+    pmm.retain_frame(kHigh);
+    pmm.retain_frame(kHigh);
+    ASSERT_TRUE(pmm.release_frame(kHigh) == 1);
+    ASSERT_TRUE(pmm.release_frame(kHigh) == 0);
+    ASSERT_TRUE(pmm.release_frame(kHigh) == 0);
+}
+
 int main() {
     return cinux::test::RunAll();
 }
