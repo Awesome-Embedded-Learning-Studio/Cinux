@@ -1,0 +1,344 @@
+/* ════════════════════════════════════════════════════════════════
+   API 参考页 — 参数表、结构标签与元数据
+
+   书页式的表：只有横细线，没有外框和底色。
+   结构标签（返回/被调用/注）做成带图标的小型标签，
+   元数据行里的源码行号做成可点的章。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 参数表：拆掉卡片外壳，只留横细线 ─────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table {
+  margin: 1.5em 0 1.2em;
+  transform: none !important;
+  transition: none !important;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table__scroll {
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none !important;
+  overflow: visible;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table table {
+  font-size: 0.92em;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table th {
+  padding: 0 0.9em 0.5em 0;
+  border-bottom: 1px solid var(--api-rule-strong);
+  background: none;
+  color: var(--api-muted);
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table td {
+  padding: 0.55em 0.9em 0.55em 0;
+  border-bottom: 1px solid var(--api-rule);
+  background: none;
+  vertical-align: top;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 表格里的行内代码不再套框 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table :not(pre) > code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.92em;
+  color: var(--api-ink);
+}
+
+/* ── 方向列：图标 + 颜色，一眼看清数据往哪流 ─────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table td:nth-child(2) {
+  width: 6em;
+  white-space: nowrap;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir] code {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--api-mono);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--api-dir-in);
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir] code::before {
+  content: '';
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  background: currentColor;
+  mask: var(--api-ico-in) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-in) center / contain no-repeat;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir='out'] code {
+  color: var(--api-dir-out);
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir='out'] code::before {
+  mask: var(--api-ico-out) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-out) center / contain no-repeat;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir='inout'] code {
+  color: var(--api-dir-inout);
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] td[data-dir='inout'] code::before {
+  mask: var(--api-ico-inout) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-inout) center / contain no-repeat;
+}
+
+/* ── 结构标签：返回 / 被调用 / 注 ────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label] {
+  margin: 0.7em 0;
+  padding-left: 5.4em;
+  text-indent: -5.4em;
+  line-height: 1.75;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label] > strong:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 5.4em;
+  margin-right: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-indent: 0;
+  vertical-align: baseline;
+  color: var(--api-muted);
+  font-size: 0.74em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 2;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label] > strong:first-child::before {
+  content: '';
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  background: currentColor;
+  mask: var(--api-ico-return) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-return) center / contain no-repeat;
+  opacity: 0.75;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label='被调用'] > strong:first-child::before {
+  mask: var(--api-ico-callers) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-callers) center / contain no-repeat;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label='注'] > strong:first-child::before {
+  mask: var(--api-ico-note) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-note) center / contain no-repeat;
+}
+
+/* 悬挂缩进只作用于段落首行，标签内的行内元素一律归零 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label] *,
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p * {
+  text-indent: 0;
+}
+
+/* 被调用的函数名：安静的等宽小章 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label='被调用'] code {
+  display: inline-block;
+  /* 悬挂缩进会被行内块继承，这里要归零，否则每个章都往左缩、叠成一团 */
+  text-indent: 0;
+  margin: 0 0.3em 0.25em 0;
+  padding: 0 0.45em;
+  border: 1px solid var(--api-rule);
+  border-radius: 4px;
+  background: none;
+  font-size: 0.78em;
+  color: var(--vp-c-text-2);
+}
+
+/* 返回段里的类型：只留等宽字，不加底 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label='返回'] code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.88em;
+  color: var(--api-ink);
+}
+
+/* ── 注：向左的一道细线，不用色块 ────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote {
+  margin: 0.9em 0;
+  padding: 0 0 0 1em;
+  border: none;
+  border-left: 2px solid var(--api-rule-strong);
+  background: none;
+  font-size: 0.9em;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote > p {
+  margin: 0.5em 0;
+  padding-left: 5.4em;
+  text-indent: -5.4em;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p > strong:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 5.4em;
+  padding: 0;
+  border: none;
+  background: none;
+  text-indent: 0;
+  color: var(--api-muted);
+  font-size: 0.74em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 2;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p > strong:first-child::before {
+  content: '';
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  background: currentColor;
+  mask: var(--api-ico-note) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-note) center / contain no-repeat;
+  opacity: 0.75;
+}
+
+/* 警告：三角图标 + 警示色 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p[data-label='警告'] > strong:first-child {
+  color: var(--vp-c-warning-1);
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p[data-label='警告'] > strong:first-child::before {
+  mask: var(--api-ico-warn) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-warn) center / contain no-repeat;
+  opacity: 1;
+}
+
+/* ── 元数据行：版本章 + 源码行号章，可点跳 GitHub ─────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45em;
+  margin: 1.3em 0 0;
+  font-size: 0.78em;
+  letter-spacing: 0.02em;
+  color: var(--api-muted);
+}
+
+/* 版本号 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] > code {
+  padding: 0.05em 0.5em;
+  border: 1px solid var(--api-rule-strong);
+  border-radius: 4px;
+  background: none;
+  color: var(--vp-c-text-2);
+  font-family: var(--api-mono);
+  font-size: 0.95em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 源码链接：等宽路径 + 外链图标。
+   用 inline 而非 flex——flex 的 gap 会在「:」和行号之间插一道缝 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a {
+  display: inline;
+  color: var(--vp-c-text-2);
+  font-family: var(--api-mono);
+  font-size: 1em;
+  text-decoration: none;
+  border: none;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a:hover {
+  color: var(--api-accent);
+}
+
+/* 链接前的源码图标、链接后的外链图标 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a::before,
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a::after {
+  content: '';
+  display: inline-block;
+  vertical-align: -0.12em;
+  width: 0.85em;
+  height: 0.85em;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a::before {
+  margin-right: 0.4em;
+  mask: var(--api-ico-source) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-source) center / contain no-repeat;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a::after {
+  margin-left: 0.4em;
+  mask: var(--api-ico-external) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-external) center / contain no-repeat;
+}
+
+/* 行号：做成可点的章，悬停时亮起来 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] .api-line {
+  margin-left: 0.05em;
+  padding: 0.02em 0.3em;
+  border-radius: 4px;
+  background: var(--api-accent-soft);
+  color: var(--api-accent);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.15s;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] a:hover .api-line {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 18%, transparent);
+}
+
+/* ── 响应式 ──────────────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  .vp-doc[class*="_Cinux_api_"][class$="_"] .doc-table table {
+    font-size: 0.86em;
+  }
+
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label],
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote > p {
+    padding-left: 0;
+    text-indent: 0;
+  }
+
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-label] > strong:first-child,
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > blockquote p > strong:first-child {
+    width: auto;
+    margin-right: 0.4em;
+  }
+
+  .vp-doc[class*="_Cinux_api_"][class$="_"] > div > p[data-meta] {
+    font-size: 0.74em;
+  }
+}

@@ -1,7 +1,7 @@
 ---
 layout: home
 title: Cinux 文档
-description: Cinux OS 的系统文档、设计说明、开发指南与更新记录
+description: Cinux OS 的系统文档、手册与更新记录
 
 hero:
   name: "Cinux"
@@ -14,9 +14,6 @@ hero:
     - theme: alt
       text: API 参考
       link: /api/
-    - theme: alt
-      text: 开发指南
-      link: /guide/
     - theme: alt
       text: 更新记录
       link: /changelog/
@@ -33,14 +30,9 @@ features:
     link: /api/
     linkText: 查接口
   - icon: 📐
-    title: 设计文档
-    details: Cinux-Base 基础库的设计规范：header-only、constexpr、无堆分配
-    link: /design/
-    linkText: 查看
-  - icon: 🛠️
-    title: 开发指南
-    details: 分支策略、提交规范、PR 流程、CI 流水线与本地复现
-    link: /guide/
+    title: 手册
+    details: 文档站怎么建、怎么查、怎么发：命令、卷的构成与 CI 流程
+    link: /handbook/
     linkText: 查看
   - icon: 🧾
     title: 更新记录
@@ -52,7 +44,6 @@ features:
 ## 按目标找入口
 
 - 想知道某个子系统怎么工作：从[系统文档](/systems/)进入。启动流程先看[Bootloader](/systems/boot)，内存子系统从[物理内存管理（PMM）](/systems/kernel/mm/pmm)看起。
-- 想查工程约定、提交流程与 CI：见[开发指南](/guide/)。
 - 想确认某个行为属于哪个版本：见[更新记录](/changelog/)。
 - 想从头学起：走教程站 Cinux-Book。本站只讲当前实现，不重复教程内容。
 

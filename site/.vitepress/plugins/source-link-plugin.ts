@@ -35,7 +35,7 @@ export interface SourceLinkOptions {
 }
 
 /** 上站目录(站内有页面) */
-const PUBLISHED_DIRS = ['notes', 'ci', 'document', 'design', 'changelogs', 'api']
+const PUBLISHED_DIRS = ['document', 'design', 'changelogs', 'api']
 
 function normalizeSlashes(p: string): string {
   return p.replace(/\\/g, '/')

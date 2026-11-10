@@ -1,0 +1,35 @@
+{
+  "group": "base_ptr",
+  "namespace": "cinux::base",
+  "intro": "共享持有的建立与释放，外加整数地址转指针。",
+  "categories": [
+    "共享持有",
+    "引用计数",
+    "地址转换"
+  ],
+  "functions": {
+    "MakeShared": {
+      "summary": "分配新对象并交出第一份共享持有",
+      "category": "共享持有",
+      "example": "#include <cinux/shared.hpp>\n#include <type_traits>\n\nusing namespace cinux::base;\n\nstruct Frame : RefCount<> {\n    int width;\n    int height;\n    Frame(int w, int h) : width(w), height(h) {}\n};\n\nvoid Example() {\n    Shared<Frame> frame = MakeShared<Frame>(640, 480);\n    // frame->width = 640，frame->height = 480，持有计数为 1\n    static_assert(std::is_same_v<decltype(MakeShared<Frame>(640, 480)), Shared<Frame>>);\n\n    frame.reset();  // 提前放掉这份持有，计数归零，Frame 随之删除\n}"
+    },
+    "reset": {
+      "summary": "提前放掉这份持有，让对象计数减一",
+      "category": "共享持有"
+    },
+    "retain": {
+      "summary": "加一份持有，计数为零或溢出时中止",
+      "category": "引用计数"
+    },
+    "release": {
+      "summary": "放一份持有，放掉最后一份时返回真",
+      "category": "引用计数",
+      "example": "#include <cinux/ref_count.hpp>\n#include <type_traits>\n\nusing namespace cinux::base;\n\nvoid Example() {\n    RefCount<> counter;                       // 计数从 1 开始，属于第一个持有者\n    counter.retain();                         // 借用方多持有一份，计数变成 2\n    const bool borrowed = counter.release();  // 归还借来的那份，计数回到 1，返回 false\n    const bool last = counter.release();      // 最后一份放掉，计数归零，返回 true\n    static_assert(std::is_same_v<decltype(counter.release()), bool>);\n}"
+    },
+    "PtrAt": {
+      "summary": "把整数地址转回指向 T 的指针并返回",
+      "category": "地址转换",
+      "example": "#include <cinux/ptr.hpp>\n#include <type_traits>\n\nusing namespace cinux::base;\n\nvoid Example() {\n    auto* const kScreen = PtrAt<volatile unsigned short>(0xB8000UL);\n    // kScreen 指向 0xB8000，文本模式显存的起点\n    static_assert(std::is_same_v<decltype(PtrAt<volatile unsigned short>(0xB8000UL)),\n                                 volatile unsigned short*>);\n}"
+    }
+  }
+}

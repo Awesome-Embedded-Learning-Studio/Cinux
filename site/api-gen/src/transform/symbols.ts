@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { createXmlParser, asArray, textOf, type XmlNode, type DescNode } from '../parse/xml'
 import type { DoxyCompound, DoxyCompoundDef, DoxyMemberDef } from '../parse/doxygen'
 import { extractBrief, extractDetails, extractDetailProse, flattenPlain } from './doc'
-import type { ApiSymbol, ApiParam } from '../model/symbol'
+import type { ApiSymbol, ApiParam, ApiEnumValue } from '../model/symbol'
 
 const CONTAINER_KINDS = new Set(['namespace', 'class', 'struct', 'union', 'interface'])
 
@@ -66,6 +66,13 @@ export function memberToSymbol(
   })
 
   const brief = extractBrief(member.briefdescription)
+  // 枚举成员的说明各在自己的 briefdescription 里,doxygen 把它们挂在
+  // memberdef 的 enumvalue 节点下,转换器此前只读签名,页面因此只剩一行。
+  const values: ApiEnumValue[] = asArray<XmlNode>(member.enumvalue).map((v: XmlNode) => ({
+    name: textOf(v.name),
+    value: textOf(v.initializer),
+    brief: extractBrief(v.briefdescription as DescNode),
+  })).filter(v => v.name)
   // 声明处优先(API 文档读者要的是头文件里的签名);无声明属性才用定义处
   const declFile = member.location?.['@declfile']
   const loc = declFile
@@ -102,6 +109,7 @@ export function memberToSymbol(
       name: textOf(r['#text'] ?? r),
     })).filter(r => r.id && r.name),
     location: loc,
+    values,
     documented: brief !== '',
   }
 }

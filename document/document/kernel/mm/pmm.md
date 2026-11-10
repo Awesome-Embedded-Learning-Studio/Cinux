@@ -1,29 +1,48 @@
-# 物理内存管理 (PMM)
-
-> 里程碑: `015_mm_pmm`
+# 物理内存管理（PMM）
 
 ## 功能概述
 
-大内核的 Bitmap 物理内存分配器。解析 E820 内存图，管理 4KB 物理页面，支持单页和连续多页分配/释放。
+这一页我们读 `kernel/mm` 里的 Pmm，它管的是整台机器的物理内存。启动时 BIOS 交给内核一张叫 E820 的物理内存布局表，我们把它换算成一张空闲位图，此后的物理页分配和归还都从空闲位图上走，而页的大小固定是 x86-64 的 4 KiB。全内核只有一份 Pmm 的实例，它继承的 Singleton 是个单例壳，管的就是只此一份的约定，我们的各个子系统都拿 Pmm::self() 来用。虚拟内存的页表要页，内核堆的分配要页，任务的内核栈也要页，写时复制还要给共享的帧记引用数，这些子系统的介绍各有专页，见 [vmm](vmm.md)、[内核堆](heap.md) 和 [地址空间](address_space.md)，这里我们只看物理页这一层。它的接口面很窄，就是单页与成段的分配归还，加上空闲与管辖的两个计数器和一对共享计数，我们沿着初始化、数据结构和调用链一路看下去。
 
-## 初始化
-1. `parse_memory_map(BootInfo&, regions[], max)` — 提取 type=1 可用区域，过滤低 1MB，对齐到 4KB
-2. Bitmap 放于 `__kernel_end` 对齐后
-3. 先全标记已用，再将可用区域清零，最后标记内核 + bitmap 自身为已用
+## 它管的范围
 
-## API (`kernel/mm/pmm.hpp/cpp`)
-- `PMM::init(BootInfo&)` — 初始化
-- `alloc_page() → uint64_t` — 分配一页，返回物理地址 (0=OOM)
-- `free_page(uint64_t phys)` — 释放一页
-- `alloc_pages(count)` — 分配连续多页
-- `free_pages(phys, count)` — 释放连续多页
-- `free_page_count()` / `total_page_count()` — 统计信息
+Pmm 管的内存范围，我们一个个数。它只收 E820 里 type 为可用的那几段，低位的 1 MiB 一律不收，因为那是固件和启动代码的地盘，分界线的名字叫 kLowMemoryTop。管理的上限是 16 GiB，对应的常量是 kPmmMaxPhys，比它高的物理地址就管不着了，而我们在测试里看到，4 GiB 以上的内存照样入册、只是封了顶。一次能要的最大的连续段是 order 9，即 512 个连续页凑成的 2 MiB，正好够我们铺一张大页，而口子的大小就是常量 kMaxOrder。这几个数字加上 4 KiB 的页大小，我们都对到了测试的断言上，改错了一个，编译能过、而测试会拦。
 
-## 性能优化
-- `alloc_page` 用 `__builtin_ctzll` 加速 bit 扫描 (64 位一组)
+## 初始化：从 E820 到位图
 
-## 线程安全
-- Spinlock 保护: `alloc_page/alloc_pages/free_page/free_pages` 持锁 (TIER 0)
+init 拿到的入参是启动交接的 BootInfo，里面装着 E820 数组、还有内核自己的物理地址和内存大小。它的做法我们分三步看。头一步我们把位图全部置为已用，因为按这里的语义，置位的位表示占用，而清位的位表示空闲，全置之后整台机器在它眼里都是占着的。第二步我们扫 E820，type 不是可用项的条目直接跳过，而可用项的区间要夹到 1 MiB 以上、16 GiB 以下，夹完的区间用 math::Span 算出页数，对齐的事交给 math::Floor，然后我们把这些页清位放出来，managed_pages_ 也跟着我们一路累加，记下我们实际管到的量。第三步我们把内核镜像占的那段重新标成已用，起点和大小读的是 info 里的 kernel_paddr 和 kernel_mem_size，对齐同样落在页的边界上。位图上清着的位，就是我们真正能分的内存了。整个过程持着锁、中断也关了，因为别的核可能已经跑了起来，而 init 这时候才执行。而 BootInfo 本身用完即弃，Pmm 不保留它里面的任何东西。
+
+## 位图与共享计数
+
+Pmm 的家底就是三个数组成员。bitmap_ 是个不自带存储的 Bitmap，真正的字数组 words_ 是 Pmm 自己的成员，它的长度 kPmmBitmapWords 在编译期由容量算出来：16 GiB 除以 4 KiB 得到四百多万个页，摊到 64 位的字上就是六万多个字，占掉约半 MiB 的 .bss。位图的每个位对应一个物理页，分配方向的换算在 allocate_run 里，页号乘以 4 KiB 得到的就是物理地址。而 frame_index 走的是反方向的另外一半，它做的是 math::Floor 的地板除法，物理地址除以 4 KiB 得到页号，retain 和 release 拿这个页号当 shares_ 的下标用，我们到下一节再展开。shares_ 则是给每个被管辖的页配的一个字节的共享计数，它服务的是写时复制和共享内存，来历我们放到下一节。头文件的注释把体量提醒写得很直白：一个 Pmm 实例是半 MiB 位图的大块头，共享计数给每个管辖的页占一个字节，四百多万个页加起来就到了 4 MiB，我们只能把它放在静态存储里，别往小的栈上放。
+
+而 Bitmap 本体住在 `base/include/cinux/bit_ops/bitmap.hpp` 里，它是被多个子系统共用的基础件。存储归的是调用者，base 自己也不做分配的事，而置位清位都维护着一个已置位数，所以我们的 free_page_count 不用现数一遍，直接拿容量减去已置位的数。我们分页找空位时最依赖的 find_clear_run 也在这里实现，做法是从头扫字：整个字全是置位的直接跳过，否则就按位走、数连续的清位，数够请求的长度就返回起点，而全程找不到就回答 kInvalidIndex。
+
+## 分配与释放的调用链
+
+我们数过，对外的入口有四个。allocate_page 是单页的分配，内部走的就是 allocate_run(1)。allocate_pages(order) 要的是 2 的 order 次方个连续页，order 小于零或者大于 kMaxOrder 的请求直接退回零地址，合法的我们才换算成页数交给 allocate_run。释放的两口是对称的，free_page 还的是一页，free_pages 按同样的 order 还整段，头文件的注释把责任写得很清楚：order 是调用方的承诺，还的时候报错了数，我们的位图就被改坏了，而 Pmm 自己没有地方去核对它。
+
+真正的分配在私有的 allocate_run 里，三条语句干完：find_clear_run 找到第一段够长的连续清位，set_range 把它们置位占了下来，而返回值就是起点下标乘以页大小。找不到就返回零地址，我们约定用零地址表示没分到，这个语义跟重写前的 pmm.md 写的返回 0 是同一个，只是类型如今换成了 PhysAddr。我们的挑法是首个空段适配，哪里有第一段够长的空位我们就用哪里，而不做伙伴合并。释放回来的时候我们只清位，不把相邻的空闲块拼回去，所以要一大段连续内存时，位图里零星几颗空位也就帮不上忙了。换来的好处是释放特别便宜，free_pages 干的就是一句 clear_range，把那个区间里的页清位，几页都不用我们额外操心。
+
+我们用 host 测试里的一个回合把这个链条走实：1 MiB 起一段 4 MiB 的可用内存、内核镜像落在 2 MiB 占 8 KiB，我们的 allocate_pages(9) 返回的起点就是 2 MiB 加 8 KiB，也就是内核镜像后面紧接着的位置。同时申请两次 order 9 的话，第二次会因为连续段不够长而拿回零地址。单页穷举的用例分完了 1022 个空闲页，而一页都没有少，free_page_count 也归了零，这些数字都是测试断言过的。
+
+## 共享计数：retain 与 release
+
+我们把 retain_frame 和 release_frame 放在一起读，它们是内核 0.3 版加进来的那一对，管的是同一个物理帧被多少处映射共享这件事。写时复制把一页的内容标成共享之后，几个地址空间同时映射它，我们的每个新持有者调用一次 retain_frame，计数就加了一。而 release_frame 往回减，返回值是剩下的人数。计数的用途是簿记而不是所有权，头文件的注释特意写了这一句：减到零之后要不要 free_page，仍然是我们的调用方在那一刻自己做决定，而 Pmm 不替谁收内存。
+
+我们的安全网分成两路。retain 的路径上是两道 Check，也就是内核的运行时断言，命中了就停机报告，一道拦登记表里没见过的帧，另一道拦单字节计数的溢出，0xFF 之上加一就进不来了。release 走的是软返回，越界的或者计数本来就为零的帧都回 0，我们的机器照常跑。消费方我们也数过：cow.cpp 的复制与放手机会、demand.cpp 的按需调页、sys_shm.cpp 的共享内存，走的都是同一对接口，所以一个帧到底还有几个人看着，全内核问的是同一个地方。
+
+## 并发与统计
+
+锁的纪律，是每个公开路径都走 IrqGuard 加 SpinMutex 的组合。IrqGuard 进门的时候把 rflags 存下来，接着把里面的中断标志位 IF 清掉，出门按存下的样子恢复，所以嵌套时内层关了、我们的外层出口就不会误开，这个形状我们在同步那一页还会见到。SpinMutex 是原子标志的自旋等锁，Pmm 里有的只是一把 lock_，分配与释放的路径、共享计数、还有两个统计口，全都要从 lock_ 的手里过，所以从任何核、任何中断上下文来调都是安全的。统计的两口就住在位图上，free_page_count 回答当前空闲的页数，managed_page_count 回答管辖的总数，procfs 的内存信息、sys_sysinfo 系统调用、还有 panic 时的现场报告，读的都是它们俩的数。host 测试不碰真正的机器，测试里自己构造 Pmm 实例、喂假的 BootInfo，分配释放和共享计数的状态机就这样在我们的开发电脑上跑完了。
 
 ## 源码位置
-- `kernel/mm/pmm.hpp/cpp`
+
+- `kernel/mm/pmm.hpp`、`kernel/mm/pmm.cpp` — Pmm 类、初始化、分配释放、共享计数
+- `kernel/mm/pmm_config.hpp` — 低内存线、管理上限、最大 order、位图字数等常量
+- `base/include/cinux/bit_ops/bitmap.hpp` — Bitmap 本体与 find_clear_run
+- `base/include/cinux/addr.hpp` — PhysAddr 地址类型
+- `kernel/boot/boot_info.hpp` — E820 数组与内核镜像的交接记录
+- `kernel/init/init_sequence.cpp` — Pmm::self().init 在启动序列里的调用点
+- `kernel/mm/cow.cpp`、`kernel/mm/demand.cpp`、`kernel/syscall/sys_shm.cpp` — 共享计数的三个消费方
+- `test/unit/test_pmm.cpp` — 用假 BootInfo 驱动的 host 测试

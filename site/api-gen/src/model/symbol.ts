@@ -13,6 +13,14 @@ export interface ApiParam {
   description: string
 }
 
+/** 枚举成员:名字、可选的初始化值、说明 */
+export interface ApiEnumValue {
+  name: string
+  /** 源码里的初始化表达式,例如 0x04,未写时为空串 */
+  value: string
+  brief: string
+}
+
 /** 单个符号(函数/变量/类型成员) */
 export interface ApiSymbol {
   /** doxygen refid,如 namespacecinux_1_1console_1a9475…,站内唯一 */
@@ -46,6 +54,8 @@ export interface ApiSymbol {
   referencedBy: { id: string, name: string }[]
   /** 源码位置,file 是仓库相对路径(保证跨机构建产物一致) */
   location: { file: string, line: number }
+  /** 枚举的成员列表,只有 kind 为 enum 时非空 */
+  values: ApiEnumValue[]
   /** 文档完备度标记,coverage 统计与展示分层用 */
   documented: boolean
 }

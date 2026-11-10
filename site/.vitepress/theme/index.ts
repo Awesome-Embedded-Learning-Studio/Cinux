@@ -7,6 +7,15 @@ import './article-code.css'
 import './article-quote.css'
 import './article-figure.css'
 import './article-nav.css'
+// API 参考页专属样式组
+import './api-vars.css'
+import './api-header.css'
+import './api-entry.css'
+import './api-params.css'
+import './api-index.css'
+import './api-nav.css'
+import './api-rich.css'
+import './api-lab.css'
 
 // 阅读体验
 import FontSizeSwitcher from './components/FontSizeSwitcher.vue'
@@ -21,9 +30,12 @@ import HomeFeatureGrid from './components/HomeFeatureGrid.vue'
 // 文档页
 import DocNavCards from './components/DocNavCards.vue'
 import ApiGroupExplorer from './components/ApiGroupExplorer.vue'
+// 同步挂载标题插槽，让 VitePress 在内容更新时正确收集函数大纲。
+import ApiFunctionCard from './components/ApiFunctionCard.vue'
 
 import { setupMermaid } from './mermaid-client'
 import { setupFigureZoom } from './figure-zoom'
+import { setupApiDecor } from './api-decor'
 
 export default {
   extends: DefaultTheme,
@@ -52,12 +64,21 @@ export default {
     setupMermaid()
     // 插图挂放大按钮(流程图的按钮由 mermaid-client 渲染完后挂,共用同一实现)
     setupFigureZoom()
+    // API 页装饰:拆命名空间、标方向、源码行号做成可点的章
+    setupApiDecor()
   },
   enhanceApp({ app }) {
     // md 正文中可全局使用的组件(escape-cpp-templates 的 VUE_COMPONENTS
     // 白名单与之保持同步)
     app.component('HomeFeatureGrid', HomeFeatureGrid)
     app.component('ApiGroupExplorer', ApiGroupExplorer)
+    app.component('ApiModuleOverview', defineAsyncComponent(() => import('./components/ApiModuleOverview.vue')))
+    app.component('ApiFunctionIndex', defineAsyncComponent(() => import('./components/ApiFunctionIndex.vue')))
+    app.component('ApiFunctionCard', ApiFunctionCard)
+    app.component('ApiMathPlayground', defineAsyncComponent(() => import('./components/ApiMathPlayground.vue')))
+    app.component('ApiAddressIndex', defineAsyncComponent(() => import('./components/ApiAddressIndex.vue')))
+    app.component('ApiIpv4Gates', defineAsyncComponent(() => import('./components/ApiIpv4Gates.vue')))
+    app.component('ApiTaskStates', defineAsyncComponent(() => import('./components/ApiTaskStates.vue')))
     app.component('ReferenceCard', defineAsyncComponent(() => import('./components/ReferenceCard.vue')))
     app.component('ReferenceItem', defineAsyncComponent(() => import('./components/ReferenceItem.vue')))
     app.component('RefLink', defineAsyncComponent(() => import('./components/RefLink.vue')))

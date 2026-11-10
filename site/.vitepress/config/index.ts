@@ -39,9 +39,9 @@ export default withSharedDrawio(defineConfig({
   srcDir: '../document',
   outDir: '../dist-single',
 
-  // 单体构建只渲染会上站的四卷。内部目录(todo/ai/ai_prompts)与二期的开发日志
-  // 不进产物;日志卷等第七批接入时再从这里放行。
-  srcExclude: ['todo/**', 'ai/**', 'ai_prompts/**'],
+  // 单体构建只渲染会上站的几卷;曾经的内部目录(todo/ai/ai_prompts)与
+  // 开发日志卷已从仓库删除,这里不再需要排除项。
+  srcExclude: [],
 
   // 目录名与线上 URL 前缀不同(卷名见 project.config)。单体构建靠 rewrites
   // 把源码路径映射到与分卷构建一致的 URL,dev 与线上地址因此对得上。

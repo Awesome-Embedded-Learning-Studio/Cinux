@@ -1,0 +1,71 @@
+{
+  "group": "base_bytes",
+  "namespace": "cinux::base",
+  "intro": "在字节块与整数之间按大小端互转，并累加校验和",
+  "categories": [
+    "字节读取",
+    "字节写入",
+    "校验和"
+  ],
+  "functions": {
+    "add": {
+      "summary": "把一段字节折进校验和累加器",
+      "category": "校验和",
+      "example": "#include <cinux/checksum.hpp>\n\nusing namespace cinux::base;\n\nconstexpr uint16_t ChecksumOf(const unsigned char* data, size_t length) {\n    InternetChecksum sum;\n    sum.add(data, length);\n    return sum.value();\n}\n\nconstexpr uint16_t SplitChecksum(const unsigned char* data, size_t cut, size_t length) {\n    InternetChecksum sum;\n    sum.add(data, cut);                // 前一段在奇数位置断开，末尾字节先存着\n    sum.add(data + cut, length - cut); // 后一段的第一个字节跟它拼成一对\n    return sum.value();\n}\n\nvoid Example() {\n    // RFC 1071 的样例字节：00 01 f2 03 f4 f5 f6 f7\n    constexpr unsigned char kBytes[8] = {0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7};\n\n    // 一次喂完，反码和是 0x220d\n    static_assert(ChecksumOf(kBytes, 8) == 0x220d);\n\n    // 在第三个字节后断开再喂，跨段的那一对照样拼回去，结果不变\n    static_assert(SplitChecksum(kBytes, 3, 8) == 0x220d);\n}"
+    },
+    "fold_carries": {
+      "summary": "把进位折回低位，使和收进十六位",
+      "category": "校验和"
+    },
+    "pair_word": {
+      "summary": "把两个字节拼成大端十六位字",
+      "category": "校验和"
+    },
+    "value": {
+      "summary": "返回目前已累加字节的反码校验和",
+      "category": "校验和"
+    },
+    "ReadWord16": {
+      "summary": "从字节块读一个小端十六位字",
+      "category": "字节读取",
+      "example": "#include <cinux/byte_order.hpp>\n\nusing namespace cinux::base;\n\nvoid Example() {\n    // 一块字节：低字节在前，0x34 0x12 合起来就是 0x1234\n    constexpr unsigned char kBlob[4] = {0x34, 0x12, 0x56, 0x78};\n\n    constexpr uint16_t kWord = ReadWord16(kBlob, 0);\n    // kWord = 0x1234 · 从偏移 0 起两字节按小端拼成十六位\n    static_assert(kWord == 0x1234);\n\n    // 从偏移 2 起再读一个字\n    static_assert(ReadWord16(kBlob, 2) == 0x7856);\n}"
+    },
+    "ReadWord16Be": {
+      "summary": "从字节块读一个大端十六位字",
+      "category": "字节读取"
+    },
+    "ReadWord32": {
+      "summary": "从字节块读一个小端三十二位字",
+      "category": "字节读取"
+    },
+    "ReadWord32Be": {
+      "summary": "从字节块读一个大端三十二位字",
+      "category": "字节读取"
+    },
+    "ReadWord64": {
+      "summary": "从字节块读一个小端六十四位字",
+      "category": "字节读取"
+    },
+    "WriteWord16": {
+      "summary": "把十六位字以小端写进字节块",
+      "category": "字节写入",
+      "example": "#include <cinux/byte_order.hpp>\n\nusing namespace cinux::base;\n\nconstexpr bool WritesLowByteFirst() {\n    unsigned char bytes[2] = {};\n    WriteWord16(bytes, 0, 0x1234);\n    return bytes[0] == 0x34 && bytes[1] == 0x12;\n}\n\nvoid Example() {\n    // 往空缓冲里写 0x1234，小端先落低字节\n    unsigned char bytes[2] = {};\n    WriteWord16(bytes, 0, 0x1234);\n    // bytes[0] = 0x34，bytes[1] = 0x12 · 读回来还是 0x1234\n    static_assert(WritesLowByteFirst());\n}"
+    },
+    "WriteWord16Be": {
+      "summary": "把十六位字以大端写进字节块",
+      "category": "字节写入"
+    },
+    "WriteWord32": {
+      "summary": "把三十二位字以小端写进字节块",
+      "category": "字节写入"
+    },
+    "WriteWord32Be": {
+      "summary": "把三十二位字以大端写进字节块",
+      "category": "字节写入"
+    },
+    "WriteWord64": {
+      "summary": "把六十四位字以小端写进字节块",
+      "category": "字节写入"
+    }
+  }
+}

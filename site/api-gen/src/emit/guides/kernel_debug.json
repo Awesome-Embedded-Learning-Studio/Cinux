@@ -1,0 +1,41 @@
+{
+  "group": "kernel_debug",
+  "namespace": "cinux::debug",
+  "intro": "给崩溃和断言提供符号名与调用链，出事时能报出函数",
+  "categories": [
+    "符号表注入",
+    "地址命名",
+    "栈回溯",
+    "崩溃转储"
+  ],
+  "functions": {
+    "cinux::debug::__attribute__": {
+      "summary": "弱符号声明内置符号表，镜像没带表时符号为空、安装直接跳过",
+      "category": "符号表注入"
+    },
+    "cinux::debug::KallsymsInstall": {
+      "summary": "换掉查表用的符号表，表归调用方所有，计数为零时装空表",
+      "category": "符号表注入"
+    },
+    "cinux::debug::KallsymsInstallBuiltIn": {
+      "summary": "镜像自带内置符号表时把它装上，没带就什么都不做",
+      "category": "符号表注入"
+    },
+    "cinux::debug::KallsymsLookup": {
+      "summary": "把地址换成符号名并回填偏移，没表或地址低于首符号时返回空",
+      "category": "地址命名"
+    },
+    "cinux::debug::KallsymsTableReady": {
+      "summary": "查符号表能不能用，装了至少一条表项才返回真",
+      "category": "地址命名"
+    },
+    "cinux::debug::PanicDump": {
+      "summary": "打印崩溃现场并停住机器，不返回",
+      "category": "崩溃转储"
+    },
+    "cinux::debug::TraceFrom": {
+      "summary": "从帧基址逐层回溯调用链并打印，遇到坏链或帧数到上限就停",
+      "category": "栈回溯"
+    }
+  }
+}

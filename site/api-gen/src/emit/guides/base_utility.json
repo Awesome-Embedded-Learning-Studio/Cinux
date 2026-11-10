@@ -1,0 +1,31 @@
+{
+  "group": "base_utility",
+  "namespace": "cinux::base",
+  "intro": "全局单例与自旋锁的基础设施",
+  "categories": [
+    "单例访问",
+    "互斥锁",
+    "作用域守卫"
+  ],
+  "functions": {
+    "self": {
+      "summary": "返回执行前就完成初始化的唯一实例",
+      "category": "单例访问",
+      "example": "#include <cinux/singleton.hpp>\n\n#include <type_traits>\n\nusing namespace cinux::base;\n\nclass Counter : public Singleton<Counter> {\npublic:\n    unsigned long long total = 0;\n};\n\nstatic_assert(std::is_trivially_destructible_v<Counter>);  // self() 的断言前提，不能带析构钩子\n\nvoid Example() {\n    Counter& counter = Counter::self();              // 执行前就初始化好的唯一实例\n    counter.total = 7;\n    const bool kSame = &Counter::self() == &counter;  // true · 两次调用拿到同一份存储\n    (void)kSame;\n}"
+    },
+    "guard": {
+      "summary": "返回按作用域自动加锁解锁的守卫",
+      "category": "作用域守卫",
+      "example": "#include <cinux/spin_mutex.hpp>\n\nusing namespace cinux::base;\n\nunsigned long long gShared = 0;\n\nvoid Example() {\n    static SpinMutex kMutex;\n\n    {\n        auto held = kMutex.guard();  // 构造即加锁\n        gShared += 1;\n    }  // 离开作用域，析构解锁\n}"
+    },
+    "lock": {
+      "summary": "自旋等待，直到取得独占所有权",
+      "category": "互斥锁",
+      "example": "#include <cinux/spin_mutex.hpp>\n\nusing namespace cinux::base;\n\nunsigned long long gShared = 0;\n\nvoid Example() {\n    static SpinMutex kMutex;  // 一把自旋锁，守着下面的共享计数\n\n    kMutex.lock();  // 自旋到取得独占所有权\n    gShared += 1;\n    kMutex.unlock();  // 发布这一笔修改，放开所有权\n}"
+    },
+    "unlock": {
+      "summary": "发布修改并释放独占所有权",
+      "category": "互斥锁"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "group": "base_parse",
+  "namespace": "cinux::base",
+  "intro": "把 ASCII 数字字段整体转成整数，不合法就报错。",
+  "categories": [
+    "十进制解析",
+    "八进制解析"
+  ],
+  "functions": {
+    "ParseDecimal": {
+      "summary": "把整段十进制字段转成数值，不合法就报错",
+      "category": "十进制解析",
+      "example": "#include <string_view>\n\n#include \"cinux/parse.hpp\"\n\nusing namespace cinux::base;\n\nvoid ParseDecimalExample() {\n    // /proc 下的进程目录名整个都得是数字，一个字符不对就不是数\n    const Result<unsigned long> kPid = ParseDecimal(\"1234\");\n    // kPid.ok() 为真，kPid.value() == 1234\n    const Result<unsigned long> kBad = ParseDecimal(\"12a4\");\n    // kBad.ok() 为假，错误码是 KernelError::kInvalidArgument\n}"
+    },
+    "ParseOctal": {
+      "summary": "把八进制字段转成数值，碰到非法字符报错",
+      "category": "八进制解析",
+      "example": "#include <string_view>\n\n#include \"cinux/parse.hpp\"\n\nusing namespace cinux::base;\n\nvoid ParseOctalExample() {\n    // ustar 头里的大小字段是 11 个八进制数字加一个 NUL\n    const Result<unsigned long> kSize = ParseOctal(std::string_view{\"00000000144\", 11});\n    // kSize.ok() 为真，kSize.value() == 100 · 八进制 144 是十进制 100\n    const Result<unsigned long> kZero = ParseOctal(std::string_view{\"\\0\", 1});\n    // kZero.ok() 为真，kZero.value() == 0 · 全 NUL 的字段读成零\n}"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "group": "boot_early",
+  "namespace": "cinux::boot_early",
+  "intro": "用端口读写点亮 COM1 串口，把字符送出去并在需要时停机",
+  "categories": [
+    "端口读写",
+    "串口初始化",
+    "串口输出",
+    "停机挂起"
+  ],
+  "functions": {
+    "Halt": {
+      "summary": "死循环执行 hlt，让 CPU 停在这里不再返回",
+      "category": "停机挂起"
+    },
+    "InB": {
+      "summary": "从指定端口读一个字节并返回",
+      "category": "端口读写"
+    },
+    "InitConsole": {
+      "summary": "把 COM1 配成 115200 8N1，供后续轮询收发",
+      "category": "串口初始化"
+    },
+    "OutB": {
+      "summary": "把一个字节写到指定端口，无返回值",
+      "category": "端口读写"
+    },
+    "PutChar": {
+      "summary": "等发送寄存器空出来后写出一个字符",
+      "category": "串口输出"
+    },
+    "PutString": {
+      "summary": "逐个字符写出 NUL 结尾的字符串，遇 NUL 停止",
+      "category": "串口输出"
+    }
+  }
+}

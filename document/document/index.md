@@ -4,27 +4,27 @@
 
 ## 启动
 
-- [Bootloader](/systems/boot)
+- [引导链](/systems/boot)
 
 ## 架构与内核基础
 
-- [x86_64 架构支持](/systems/kernel/arch)
-- [系统调用 (Syscall)](/systems/kernel/syscall)
+- [x86_64 架构层](/systems/kernel/arch)
+- [系统调用](/systems/kernel/syscall)
 - [内核库](/systems/kernel/lib)
-- [小内核 (Bootstrap Kernel)](/systems/kernel/mini)
+- [小内核](/systems/kernel/mini)
 
 ## 内存管理（mm）
 
-- [地址空间 (Address Space)](/systems/kernel/mm/address_space)
+- [地址空间](/systems/kernel/mm/address_space)
 - [堆管理 (Heap)](/systems/kernel/mm/heap)
 - [物理内存管理 (PMM)](/systems/kernel/mm/pmm)
 - [虚拟内存管理 (VMM)](/systems/kernel/mm/vmm)
 
 ## 进程与调度（proc）
 
-- [fork / execve / waitpid](/systems/kernel/proc/fork_exec)
-- [Init 线程](/systems/kernel/proc/init)
-- [PID 管理](/systems/kernel/proc/pid)
+- [进程的复制与替换：fork、execve 与 wait](/systems/kernel/proc/fork_exec)
+- [Init 任务](/systems/kernel/proc/init)
+- [任务的身份：pid 与线程组](/systems/kernel/proc/pid)
 - [进程与调度器](/systems/kernel/proc/process_and_scheduler)
 - [同步原语](/systems/kernel/proc/sync)
 
@@ -36,10 +36,10 @@
 
 ## 驱动（drivers）
 
-- [PCI 总线 & AHCI SATA 驱动](/systems/kernel/drivers/ahci_pci)
+- [AHCI 与它脚下的 PCI 总线](/systems/kernel/drivers/ahci_pci)
 - [Canvas 画布](/systems/kernel/drivers/canvas)
 - [键盘驱动](/systems/kernel/drivers/keyboard)
-- [鼠标驱动](/systems/kernel/drivers/mouse)
+- [指点设备](/systems/kernel/drivers/mouse)
 - [PIT 定时器](/systems/kernel/drivers/pit)
 - [串口驱动](/systems/kernel/drivers/serial)
 - [视频子系统](/systems/kernel/drivers/video)
@@ -47,13 +47,13 @@
 ## 图形与交互（gui）
 
 - [Canvas & Window](/systems/kernel/gui/canvas_and_window)
-- [桌面 & 图标](/systems/kernel/gui/desktop_and_icons)
+- [桌面与图标](/systems/kernel/gui/desktop_and_icons)
 - [Terminal 终端](/systems/kernel/gui/terminal)
 - [窗口管理器 & 事件系统](/systems/kernel/gui/wm_and_events)
 
 ## 进程间通信（ipc）
 
-- [Pipe 管道](/systems/kernel/ipc/pipe)
+- [管道](/systems/kernel/ipc/pipe)
 
 ## 用户态
 
@@ -63,5 +63,5 @@
 ## 工程与测试
 
 - [构建脚本](/systems/scripts)
-- [Host 测试基建](/systems/testing)
+- [测试与验收](/systems/testing)
 - [内核测试基建](/systems/kernel/test)

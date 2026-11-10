@@ -1,0 +1,118 @@
+/* ════════════════════════════════════════════════════════════════
+   API 参考页 — 符号索引（书页式）
+
+   收起时就是一行字；展开后是等宽字的小目录，靠列和 hover 帮助扫读。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 外壳：去掉卡片，换成一条顶线 ────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > .details {
+  margin: 1.4em 0 1.8em;
+  padding: 0;
+  border: none;
+  border-top: 1px solid var(--api-rule);
+  border-radius: 0;
+  background: none;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0;
+  padding: 0.75em 0;
+  color: var(--api-muted);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  list-style: none;
+  text-transform: uppercase;
+  transition: color 0.15s;
+}
+
+/* 原生三角换成会转的 chevron */
+.vp-doc[class*="_Cinux_api_"] > div > .details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details > summary::before {
+  content: '';
+  flex: none;
+  width: 0.42em;
+  height: 0.42em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: 60% 60%;
+  transition: transform 0.18s;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details > summary:hover {
+  color: var(--api-ink);
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details[open] > summary {
+  margin-bottom: 0.4em;
+}
+
+/* ── 展开后的列表：多列等宽目录 ──────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"] > div > .details ul {
+  columns: 3;
+  column-gap: 28px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details ul li {
+  break-inside: avoid;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  transition: background 0.12s;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details ul li:hover {
+  background: var(--api-accent-soft);
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details ul li a {
+  color: var(--vp-c-text-2);
+  font-family: var(--api-mono);
+  font-size: 0.8em;
+  text-decoration: none;
+}
+
+.vp-doc[class*="_Cinux_api_"] > div > .details ul li a:hover {
+  color: var(--api-accent);
+}
+
+/* 「函数 / 变量」分类标签 */
+.vp-doc[class*="_Cinux_api_"] > div > .details > p > strong {
+  display: block;
+  margin: 0.8em 0 0.35em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--api-rule);
+  color: var(--api-muted);
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ── 响应式：2 列 → 1 列 ─────────────────────────────────── */
+
+@media (max-width: 960px) {
+  .vp-doc[class*="_Cinux_api_"] > div > .details ul {
+    columns: 2;
+  }
+}
+
+@media (max-width: 639px) {
+  .vp-doc[class*="_Cinux_api_"] > div > .details ul {
+    columns: 1;
+  }
+}
