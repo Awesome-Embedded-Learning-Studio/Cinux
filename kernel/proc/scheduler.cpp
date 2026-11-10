@@ -32,6 +32,23 @@ char state_letter(TaskState state) {
         return 'Z';
     }
 }
+
+/// Arms the group-exit pair on a member: the code word lands first and
+/// the pending word publishes it. A reader on the member's own CPU sees
+/// the pair without the queue gate, so the release stores pair with the
+/// acquiring reads in group_exit_armed(); on the TSO lanes the order
+/// falls out of the machine, and on the weakly ordered lanes (armv7)
+/// it is the difference between the right exit word and a stale one.
+void arm_group_exit(Task& member, long long code) {
+    __atomic_store_n(&member.group_exit_code, code, __ATOMIC_RELEASE);
+    __atomic_store_n(&member.group_exit_pending, true, __ATOMIC_RELEASE);
+}
+
+/// Reports whether the group-exit pair is armed; seeing true also
+/// means seeing the code word that was stored before it.
+bool group_exit_armed(const Task& member) {
+    return __atomic_load_n(&member.group_exit_pending, __ATOMIC_ACQUIRE);
+}
 }  // namespace
 
 arch::per_cpu::PerCpu& Scheduler::local() {
@@ -291,6 +308,9 @@ void Scheduler::on_timer_tick(unsigned long long now_ns) {
     if (now_ns >= next_real_deadline_ns_.load(std::memory_order_acquire)) {
         expire_real_timers(now_ns);
     }
+    if (now_ns >= next_park_deadline_ns_.load(std::memory_order_acquire)) {
+        expire_timed_parks(now_ns);
+    }
     if (current() == nullptr || !preemption_.load(std::memory_order_acquire)) {
         return;
     }
@@ -402,20 +422,18 @@ void Scheduler::retire_group_member(Task& member, long long code) {
             // Running on another processor: mark it and let its own
             // syscall return or wake end it. Its files and join word
             // stay untouched while it still executes.
-            member.group_exit_pending = true;
-            member.group_exit_code    = code;
+            arm_group_exit(member, code);
             return;
         }
-        if (member.group_exit_pending && member.state != TaskState::kBlocked) {
+        if (group_exit_armed(member) && member.state != TaskState::kBlocked) {
             // Claimed by exit_group and already on its way out.
             return;
         }
         if (member.state == TaskState::kReady) {
             base::safety::Check(member.sched_class->remove(member), "ready queue lost a group member");
         }
-        member.group_exit_pending = true;
-        member.group_exit_code    = code;
-        member.exit_code          = code;
+        arm_group_exit(member, code);
+        member.exit_code = code;
         detach_offspring(member);
     }
     retire_claimed(member, kSelf);
@@ -476,7 +494,7 @@ void Scheduler::exit_group(long long code) {
             const QueueGuard kQueue(*this);
             for (Task* scan = tasks_.head(); scan != nullptr && taken < 8;) {
                 Task* const kNext = tasks_.after(*scan);
-                if (scan == kSelf || scan->tgid != kGroup || scan->group_exit_pending ||
+                if (scan == kSelf || scan->tgid != kGroup || group_exit_armed(*scan) ||
                     scan->state == TaskState::kZombie || scan->state == TaskState::kDead) {
                     scan = kNext;
                     continue;
@@ -484,8 +502,7 @@ void Scheduler::exit_group(long long code) {
                 if (scan->state == TaskState::kRunning || scan->state == TaskState::kBlocked) {
                     // Running elsewhere or parked on someone else's wait
                     // queue: mark only. Its own return or wake retires it.
-                    scan->group_exit_pending = true;
-                    scan->group_exit_code    = code;
+                    arm_group_exit(*scan, code);
                     // A task parked for a child sits on the scheduler's
                     // own wait list; that one this code may unlink, and
                     // the shared unblock path retires it. Other wait
@@ -501,9 +518,8 @@ void Scheduler::exit_group(long long code) {
                     base::safety::Check(scan->sched_class->remove(*scan),
                                         "ready queue lost a group member");
                 }
-                scan->group_exit_pending = true;
-                scan->group_exit_code    = code;
-                scan->exit_code          = code;
+                arm_group_exit(*scan, code);
+                scan->exit_code = code;
                 detach_offspring(*scan);
                 batch[taken++] = scan;
                 scan           = kNext;
@@ -528,11 +544,15 @@ void Scheduler::exit_group(long long code) {
 
 void Scheduler::exit_if_group_pending() {
     Task* const kSelf = current();
-    if (kSelf == nullptr || !kSelf->group_exit_pending) {
+    if (kSelf == nullptr || !group_exit_armed(*kSelf)) {
         return;
     }
-    kSelf->group_exit_pending = false;
-    exit_current(kSelf->group_exit_code);
+    // The acquire in group_exit_armed() carried the code word here
+    // across the ungated read; take both before lowering the flag.
+    const long long kGroupCode =
+        __atomic_load_n(&kSelf->group_exit_code, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&kSelf->group_exit_pending, false, __ATOMIC_RELEASE);
+    exit_current(kGroupCode);
 }
 
 Task* Scheduler::take_zombie_child(Task& watcher, long long wanted, bool& has_eligible) {
@@ -689,7 +709,7 @@ void Scheduler::unblock(Task& task) {
         if (task.state != TaskState::kBlocked) {
             return;
         }
-        if (task.group_exit_pending) {
+        if (group_exit_armed(task)) {
             // The group died while this member was parked; the wakeup
             // that pulled it off its wait queue is its exit, not a
             // resume. The retirement itself runs outside this gate: it
@@ -714,6 +734,66 @@ void Scheduler::unblock(Task& task) {
     if (dying) {
         retire_group_member(task, code);
     }
+}
+
+void Scheduler::arm_timed_park(Task& task, unsigned long long deadline_ns) {
+    const QueueGuard kQueue(*this);
+    task.park_deadline_ns = deadline_ns;
+    timed_waiters_.push_back(task);
+    // Many arms may race the hint; the winner is whichever saw the
+    // smaller word, so the loop retries only when it lost to an
+    // earlier deadline than its own.
+    unsigned long long earliest =
+        next_park_deadline_ns_.load(std::memory_order_relaxed);
+    while (deadline_ns < earliest &&
+           !next_park_deadline_ns_.compare_exchange_weak(
+               earliest, deadline_ns, std::memory_order_release)) {
+    }
+}
+
+void Scheduler::cancel_timed_park(Task& task) {
+    const QueueGuard kQueue(*this);
+    timed_waiters_.remove(task);
+}
+
+void Scheduler::expire_timed_parks(unsigned long long now_ns) {
+    unsigned long long earliest = ~0ULL;
+    const QueueGuard  kQueue(*this);
+    for (Task* scan = timed_waiters_.head(); scan != nullptr;) {
+        Task* const kNext = timed_waiters_.after(*scan);
+        if (scan->state != TaskState::kBlocked) {
+            // A wake won the race; the resume or retire path on the
+            // task's own CPU is past this list, so the seat clears here.
+            timed_waiters_.remove(*scan);
+            scan = kNext;
+            continue;
+        }
+        if (scan->park_deadline_ns > now_ns) {
+            if (scan->park_deadline_ns < earliest) {
+                earliest = scan->park_deadline_ns;
+            }
+            scan = kNext;
+            continue;
+        }
+        __atomic_store_n(&scan->timed_park_fired, true, __ATOMIC_RELEASE);
+        if (!scan->sched_class->enqueue(*scan)) {
+            // Row full: the fired task waits for a slot. It keeps its
+            // seat and its past deadline, so the next tick retries the
+            // enqueue until a pick frees a row. A dropped beat, not a
+            // dead machine.
+            ++ready_refusals_;
+            if (scan->park_deadline_ns < earliest) {
+                earliest = scan->park_deadline_ns;
+            }
+            scan = kNext;
+            continue;
+        }
+        scan->state            = TaskState::kReady;
+        local().notify_pending = true;
+        timed_waiters_.remove(*scan);
+        scan = kNext;
+    }
+    next_park_deadline_ns_.store(earliest, std::memory_order_release);
 }
 
 void Scheduler::stop_current() {

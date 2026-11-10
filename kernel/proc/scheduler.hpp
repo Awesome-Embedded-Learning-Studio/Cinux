@@ -440,6 +440,34 @@ public:
     void unblock(Task& task);
 
     /**
+     * @brief         Arm a deadline that drags a parked task back out.
+     * @param[in,out] task          The task about to block; must still
+     *                              hold the state kBlocked.
+     * @param[in]     deadline_ns   Absolute monotonic wake instant.
+     * @return        None.
+     * @note          The wait primitive that parked the task calls this
+     *                with its own gate held, so the queue gate nests
+     *                inside it in the documented order. The timer
+     *                interrupt later fires the wake itself: the task is
+     *                enqueued, its fired flag raised, and it reports a
+     *                timeout instead of a wake when it resumes.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void arm_timed_park(Task& task, unsigned long long deadline_ns);
+
+    /**
+     * @brief         Drop a task's deadline after a normal wake won.
+     * @param[in,out] task   The task that resumed before its deadline.
+     * @return        None.
+     * @note          Harmless on a task the timer already unlinked:
+     *                the removal is a lookup that answers false.
+     * @since         0.9.0
+     * @ingroup       kernel_proc
+     */
+    void cancel_timed_park(Task& task);
+
+    /**
      * @brief         Halt the current task off every queue until a
      *                continue names it.
      * @return        None.
@@ -619,6 +647,11 @@ private:
     cinux::base::container::SelfList<Task, &Task::registry_link>                 tasks_;
     cinux::base::container::SelfList<Task, &Task::registry_link>                 retired_;
     cinux::base::container::SelfList<Task>                                       waiters_;
+    /// Parked tasks carrying a deadline, walked by the timer interrupt.
+    cinux::base::container::SelfList<Task, &Task::timed_park_link>               timed_waiters_;
+    /// Earliest deadline on that list; ~0 while nobody parks timed.
+    std::atomic<unsigned long long>                                             next_park_deadline_ns_{~0ULL};
+    void expire_timed_parks(unsigned long long now_ns);
     cinux::base::container::StaticStack<SchedulingClass*, kMaxSchedulingClasses> classes_  = {};
     unsigned long long                                                           next_pid_ = 1;
     unsigned long long ready_refusals_                                                     = 0;

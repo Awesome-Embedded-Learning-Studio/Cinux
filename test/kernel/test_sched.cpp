@@ -19,6 +19,7 @@
 #include "kernel/proc/clone.hpp"
 #include "kernel/proc/fork.hpp"
 #include "kernel/proc/futex.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -955,13 +956,13 @@ cinux::base::KernelError g_futex_mismatch = cinux::base::KernelError::kOk;
 
 void futex_mismatch_task() {
     g_futex_mismatch =
-        cinux::proc::futex::ParkOnWord(reinterpret_cast<unsigned long long>(&g_futex_word_a), 999);
+        cinux::proc::futex::ParkKernelWord(reinterpret_cast<unsigned long long>(&g_futex_word_a), 999);
     cinux::proc::Scheduler::self().exit_current();
 }
 
 void futex_waiter_a_task() {
     cinux::base::safety::Check(
-        cinux::proc::futex::ParkOnWord(reinterpret_cast<unsigned long long>(&g_futex_word_a), 1) ==
+        cinux::proc::futex::ParkKernelWord(reinterpret_cast<unsigned long long>(&g_futex_word_a), 1) ==
             cinux::base::KernelError::kOk,
         "waiter a did not return ok");
     g_futex_a_awake = true;
@@ -970,10 +971,31 @@ void futex_waiter_a_task() {
 
 void futex_waiter_b_task() {
     cinux::base::safety::Check(
-        cinux::proc::futex::ParkOnWord(reinterpret_cast<unsigned long long>(&g_futex_word_b), 1) ==
+        cinux::proc::futex::ParkKernelWord(reinterpret_cast<unsigned long long>(&g_futex_word_b), 1) ==
             cinux::base::KernelError::kOk,
         "waiter b did not return ok");
     g_futex_b_awake = true;
+    cinux::proc::Scheduler::self().exit_current();
+}
+
+bool                     g_futex_timed_awake  = false;
+cinux::base::KernelError g_futex_timed_result = cinux::base::KernelError::kOk;
+
+void futex_timed_waiter_task() {
+    g_futex_timed_result = cinux::proc::futex::ParkKernelWord(
+        reinterpret_cast<unsigned long long>(&g_futex_word_a), 1, ~0U,
+        cinux::syscall::MonotonicNanoseconds() + 100000000ULL);
+    g_futex_timed_awake = true;
+    cinux::proc::Scheduler::self().exit_current();
+}
+
+cinux::base::KernelError g_futex_due_result = cinux::base::KernelError::kOk;
+
+void futex_due_waiter_task() {
+    // Deadline zero sat due since boot: the park must answer the
+    // clock before any queue work happens.
+    g_futex_due_result = cinux::proc::futex::ParkKernelWord(
+        reinterpret_cast<unsigned long long>(&g_futex_word_a), 1, ~0U, 0ULL);
     cinux::proc::Scheduler::self().exit_current();
 }
 
@@ -1034,6 +1056,35 @@ TEST("sched: a futex wait on a moved word refuses to park") {
         cinux::proc::TaskBuilder{}.set_entry(futex_mismatch_task).set_name("f-miss").build());
     scheduler.run_until_done();
     ASSERT_TRUE(g_futex_mismatch == cinux::base::KernelError::kWouldBlock);
+}
+
+TEST("sched: a spent deadline answers the clock before the park") {
+    auto& scheduler = cinux::proc::Scheduler::self();
+    g_futex_word_a  = 1;
+    g_futex_due_result = cinux::base::KernelError::kOk;
+    seat_built(
+        cinux::proc::TaskBuilder{}.set_entry(futex_due_waiter_task).set_name("f-due").build());
+    scheduler.run_until_done();
+    ASSERT_TRUE(g_futex_due_result == cinux::base::KernelError::kTimedOut);
+    ASSERT_EQ(scheduler.offspring_count(), 0ULL);
+}
+
+TEST("sched: a futex deadline drags the waiter out alone") {
+    auto& scheduler      = cinux::proc::Scheduler::self();
+    g_futex_word_a       = 1;
+    g_futex_timed_awake  = false;
+    g_futex_timed_result = cinux::base::KernelError::kOk;
+    seat_built(
+        cinux::proc::TaskBuilder{}.set_entry(futex_timed_waiter_task).set_name("f-timed").build());
+    scheduler.run_until_done();
+    ASSERT_FALSE(g_futex_timed_awake);
+    // The harness runs with the irq gates closed, so the deadline is
+    // driven through the same entry the timer interrupt would take.
+    scheduler.on_timer_tick(cinux::syscall::MonotonicNanoseconds() + 200000000ULL);
+    scheduler.run_until_done();
+    ASSERT_TRUE(g_futex_timed_awake);
+    ASSERT_TRUE(g_futex_timed_result == cinux::base::KernelError::kTimedOut);
+    ASSERT_EQ(scheduler.offspring_count(), 0ULL);
 }
 
 TEST("sched: waking an untouched futex word wakes nobody") {

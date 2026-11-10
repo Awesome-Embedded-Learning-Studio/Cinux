@@ -49,6 +49,7 @@ enum class KernelError : std::uint8_t {
     kNotConnected,       ///< The operation needs a connected socket first.
     kConnectionRefused,  ///< The peer refused the open.
     kConnectionReset,    ///< The peer reset the connection.
+    kTimedOut,           ///< The deadline passed before the wait ended.
 
     kCount,  ///< Sentinel: number of real entries. Never returned.
 };
@@ -86,6 +87,7 @@ constexpr const char* ErrorString(KernelError error) {
         "NotConnected",
         "ConnectionRefused",
         "ConnectionReset",
+        "TimedOut",
     };
     static_assert(sizeof(kNames) / sizeof(kNames[0]) == std::to_underlying(KernelError::kCount));
 

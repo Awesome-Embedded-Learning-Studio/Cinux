@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "cinux/container/self_list.hpp"
+#include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/singleton.hpp"
 #include "cinux/spin_mutex.hpp"
@@ -14,6 +15,7 @@
 #include "kernel/proc/sync.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/syscall.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 #include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::proc::futex {
@@ -60,7 +62,8 @@ FutexTable& shared_table() {
 
 }  // namespace
 
-base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, unsigned int bitset) {
+base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
+                             unsigned int bitset, unsigned long long deadline_ns) {
     const cinux::arch::IrqGuard kQuiet;
     Task* const                 kSelf = Scheduler::self().current();
     FutexTable&                 table = shared_table();
@@ -78,6 +81,11 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, un
         }
         if (present != expected) {
             return base::KernelError::kWouldBlock;
+        }
+        if (deadline_ns != ~0ULL && cinux::syscall::MonotonicNanoseconds() >= deadline_ns) {
+            // The value held, but the deadline is already spent: no
+            // park, no bucket seat, and the caller answers the clock.
+            return base::KernelError::kTimedOut;
         }
         // About to park, so the task pointer is needed now. The read
         // that closes the lost-wakeup window runs under the gate, so it
@@ -98,14 +106,70 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected, un
         kSelf->futex_bitset = bitset;
         table.buckets[FutexTable::bucket_for(uaddr)].push_back(*kSelf);
         Scheduler::self().prepare_to_wait();
+        if (deadline_ns != ~0ULL) {
+            // Still inside the bucket gate: the queue gate nests in
+            // the documented order, and the timer can only expire the
+            // task once it is on the deadline list.
+            Scheduler::self().arm_timed_park(*kSelf, deadline_ns);
+        }
     }
     Scheduler::self().schedule_blocked();
+    if (__atomic_load_n(&kSelf->timed_park_fired, __ATOMIC_ACQUIRE)) {
+        // The deadline fired the wake: the bucket seat is still held
+        // unless a late waker cleared it first, so the unseat is this
+        // side's own to do, and the answer is the clock's.
+        __atomic_store_n(&kSelf->timed_park_fired, false, __ATOMIC_RELEASE);
+        const SpinGuard kUnguard(table.gate);
+        table.buckets[FutexTable::bucket_for(uaddr)].remove(*kSelf);
+        return base::KernelError::kTimedOut;
+    }
+    Scheduler::self().cancel_timed_park(*kSelf);
     return base::KernelError::kOk;
 }
 
 base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected,
-                                 unsigned int bitset) {
-    return ParkOnWord(uaddr, expected, bitset);
+                                 unsigned int bitset, unsigned long long deadline_ns) {
+    return ParkOnWord(uaddr, expected, bitset, deadline_ns);
+}
+
+base::KernelError ParkKernelWord(unsigned long long uaddr, unsigned int expected,
+                                 unsigned int bitset, unsigned long long deadline_ns) {
+    const cinux::arch::IrqGuard kQuiet;
+    Task* const                 kSelf = Scheduler::self().current();
+    if ((uaddr & 3ULL) != 0ULL || kSelf == nullptr) {
+        return base::KernelError::kInvalidArgument;
+    }
+    FutexTable& table = shared_table();
+    {
+        const SpinGuard kGuard(table.gate);
+        // Kernel memory: this locked re-read can neither fault nor be
+        // unmapped, so it takes no accessor door and consults no range
+        // register — a direct load is the whole comparison.
+        const unsigned int kPresent =
+            *cinux::base::PtrAt<const volatile unsigned int>(uaddr);
+        if (kPresent != expected) {
+            return base::KernelError::kWouldBlock;
+        }
+        if (deadline_ns != ~0ULL && cinux::syscall::MonotonicNanoseconds() >= deadline_ns) {
+            return base::KernelError::kTimedOut;
+        }
+        kSelf->futex_uaddr  = uaddr;
+        kSelf->futex_bitset = bitset;
+        table.buckets[FutexTable::bucket_for(uaddr)].push_back(*kSelf);
+        Scheduler::self().prepare_to_wait();
+        if (deadline_ns != ~0ULL) {
+            Scheduler::self().arm_timed_park(*kSelf, deadline_ns);
+        }
+    }
+    Scheduler::self().schedule_blocked();
+    if (__atomic_load_n(&kSelf->timed_park_fired, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&kSelf->timed_park_fired, false, __ATOMIC_RELEASE);
+        const SpinGuard kUnguard(table.gate);
+        table.buckets[FutexTable::bucket_for(uaddr)].remove(*kSelf);
+        return base::KernelError::kTimedOut;
+    }
+    Scheduler::self().cancel_timed_park(*kSelf);
+    return base::KernelError::kOk;
 }
 
 long long WakeUserWord(unsigned long long uaddr, unsigned long long count, unsigned int bitset) {

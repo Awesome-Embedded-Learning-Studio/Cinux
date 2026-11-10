@@ -203,6 +203,7 @@ inline constexpr int kEdestaddrreq    = 89;   ///< The socket has no destination
 inline constexpr int kEmsgsize        = 90;   ///< The datagram is too large to carry.
 inline constexpr int kEnoprotoopt     = 92;   ///< The option word names nothing served.
 inline constexpr int kEprotonosupport = 93;   ///< The protocol word names nothing served.
+inline constexpr int kEtimedout       = 110;  ///< The wait's own deadline passed.
 inline constexpr int kEsocktnosupport = 94;   ///< The type word names nothing served.
 inline constexpr int kEopnotsupp      = 95;   ///< The operation is not served here.
 inline constexpr int kEafnosupport    = 97;   ///< The address family names nothing served.

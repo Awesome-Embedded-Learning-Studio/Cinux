@@ -83,6 +83,17 @@ struct Task : cinux::base::container::SelfNode<Task> {
     /// Seat on one futex bucket's wait list, kept apart so parking on
     /// a user word can never share a link with the sync family.
     cinux::base::container::SelfNode<Task> futex_wait_link;
+    /// Seat on the scheduler's deadline list while this task parks with
+    /// a wake-up time, kept apart so a timed futex wait can ride both
+    /// lists at once.
+    cinux::base::container::SelfNode<Task> timed_park_link;
+    /// Absolute monotonic instant the timer interrupt should force this
+    /// parked task ready again; ~0 while the task parks without one.
+    unsigned long long park_deadline_ns = ~0ULL;
+    /// Raised by the timer path when the deadline, not a queue peer,
+    /// was what woke this task; the atomic pair in scheduler.cpp keeps
+    /// the reader on this task's own CPU in step.
+    bool timed_park_fired = false;
     cinux::arch::CpuContext                ctx{};  ///< Register image the switcher moves.
     cinux::arch::FpuImage                  entry_fpu{};
     unsigned long long                     fpu_gate_depth{};
@@ -116,10 +127,14 @@ struct Task : cinux::base::container::SelfNode<Task> {
     long long          exit_code{};  ///< What a zombie has to hand its parent.
     /// Set on a thread-group member a sibling's exit_group named but
     /// could not retire on the spot (a parked member whose wait queue
-    /// this code must not unlink, or a member running elsewhere).
-    /// The next syscall return or wakeup ends the task with the code.
-    bool               group_exit_pending = false;
-    long long          group_exit_code{};  ///< The exit word the group asked for.
+    /// this code must not unlink, or a member running elsewhere). The
+    /// next syscall return or wakeup ends the task with the code. The
+    /// reader on the member's own CPU takes this without the queue
+    /// gate, so every change goes through the atomic pair in
+    /// scheduler.cpp: the code word is stored first and this flag
+    /// publishes it.
+    bool        group_exit_pending = false;
+    long long   group_exit_code{};  ///< The exit word the group asked for.
     const char*        name{};             ///< Label for dumps, caller-owned storage.
     unsigned long long stack_base{};       ///< Direct-map base of the owned stack.
     unsigned long long user_root{};        ///< PML4 of the user world, 0 while kernel-only.

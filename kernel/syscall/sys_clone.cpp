@@ -30,6 +30,19 @@ long long HandleClone(const SyscallFrame& frame) {
     if ((kFlags & ~kServedFlags) != 0) {
         return -kEinval;
     }
+    // Shared hands need a shared world: Linux rejects these mixes with
+    // EINVAL, and the retire paths below lean on the promise they make.
+    // A CLONE_THREAD member without CLONE_VM would exit through the
+    // "different address space" branch and lose its join word's wake;
+    // a CLONE_SIGHAND without CLONE_VM would share signal actions with
+    // a world the table's words cannot reach.
+    if ((kFlags & kCloneSighand) != 0 && (kFlags & kCloneVm) == 0) {
+        return -kEinval;
+    }
+    if ((kFlags & kCloneThread) != 0 &&
+        (kFlags & (kCloneVm | kCloneSighand)) != (kCloneVm | kCloneSighand)) {
+        return -kEinval;
+    }
     const auto kExitSignal = kFlags & 0xFFULL;
     if (kExitSignal != 0 && (kExitSignal != kSigChld || (kFlags & kCloneThread) != 0)) {
         return -kEinval;

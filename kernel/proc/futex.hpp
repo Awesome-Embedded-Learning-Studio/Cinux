@@ -36,10 +36,15 @@ namespace cinux::proc::futex {
  * @param[in]     bitset     Bits this waiter watches; a waker must
  *                           intersect them. Defaults to every bit,
  *                           which is what plain FUTEX_WAIT plants.
+ * @param[in]     deadline_ns Absolute monotonic instant that drags
+ *                           the caller out however the word moved; ~0
+ *                           for the untimed park. A due deadline is
+ *                           checked after the value match, so a moved
+ *                           word answers kWouldBlock first.
  * @return        kOk once another side woke the caller, kWouldBlock
- *                when the word moved on before the park,
- *                kInvalidArgument when the read through the door
- *                failed.
+ *                when the word moved on before the park, kTimedOut
+ *                when the deadline ended the wait, kInvalidArgument
+ *                when the read through the door failed.
  * @note          The word is re-read through the accessor door while
  *                the bucket lock is held, not taken on trust from a
  *                read the caller made before the lock: a wake that
@@ -52,7 +57,32 @@ namespace cinux::proc::futex {
  * @ingroup       kernel_proc
  */
 base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
-                             unsigned int bitset = ~0U);
+                             unsigned int bitset = ~0U, unsigned long long deadline_ns = ~0ULL);
+/**
+ * @brief         Park the caller while a kernel word holds a value.
+ * @param[in]     uaddr      The kernel word's address, four-byte aligned.
+ * @param[in]     expected   The value to hold the caller for.
+ * @param[in]     bitset     Bits this waiter watches; a waker must
+ *                           intersect them. Defaults to every bit.
+ * @return        kOk once another side woke the caller, kWouldBlock
+ *                when the word moved on before the park,
+ *                kInvalidArgument on an unaligned word or a caller
+ *                outside any task.
+ * @note          The kernel-side counterpart of ParkOnWord: the word
+ *                lives in kernel memory, so the re-read under the
+ *                bucket lock is a plain volatile load. It cannot fault
+ *                and nothing can unmap it, so no accessor door and no
+ *                range-register check stand in front of it. Ring 3
+ *                never names one of these words; the waiters are
+ *                kernel tasks parking on kernel state, which is the
+ *                shape the kernel tests exercise.
+ * @since         0.9.0
+ * @ingroup       kernel_proc
+ */
+base::KernelError ParkKernelWord(unsigned long long uaddr, unsigned int expected,
+                                 unsigned int bitset = ~0U,
+                                 unsigned long long deadline_ns = ~0ULL);
+
 /**
  * @brief         Parks the caller on a user word after reading it through
  *                the accessor door.
@@ -61,6 +91,7 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
  * @param[in]     expected  The value the caller believes the word holds.
  * @param[in]     bitset    Bits this waiter watches, every bit by default.
  * @return        Ok when woken; WouldBlock when the word already moved;
+ *                TimedOut when the deadline ended the wait;
  *                InvalidArgument when the door refuses the address.
  * @note          The comparison happens inside ParkOnWord, under the
  *                bucket lock, against a fresh read. The SMAP window
@@ -70,7 +101,7 @@ base::KernelError ParkOnWord(unsigned long long uaddr, unsigned int expected,
  * @ingroup       kernel_proc
  */
 base::KernelError WaitOnUserWord(unsigned long long uaddr, unsigned int expected,
-                                 unsigned int bitset = ~0U);
+                                 unsigned int bitset = ~0U, unsigned long long deadline_ns = ~0ULL);
 
 /**
  * @brief         Wake up to a count of waiters parked on one word.

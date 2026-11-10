@@ -3,6 +3,7 @@
 #include "../framework/framework.hpp"
 #include "kernel/arch/x86_64/per_cpu.hpp"
 #include "kernel/proc/futex.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -299,6 +300,20 @@ TEST("scheduler: parentless tasks stay visible until they are reclaimed") {
         scheduler.with_task(world.alpha.pid, []([[maybe_unused]] cinux::proc::Task& task) {}));
     ASSERT_FALSE(scheduler.snapshot_by_pid(world.beta.pid, shot));
     ASSERT_FALSE(scheduler.nth_group_leader(0, pid));
+}
+
+TEST("futex: a due deadline answers the clock without a park") {
+    unsigned int word    = 5;
+    const auto   address = reinterpret_cast<unsigned long long>(&word);
+    // The value holds and the deadline is already spent: the clock
+    // decides, and no bucket seat was ever taken.
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(
+                    address, 5, ~0U, cinux::syscall::MonotonicNanoseconds()) ==
+                cinux::base::KernelError::kTimedOut);
+    // A moved word still answers the value first, as on Linux.
+    ASSERT_TRUE(cinux::proc::futex::ParkOnWord(
+                    address, 4, ~0U, cinux::syscall::MonotonicNanoseconds()) ==
+                cinux::base::KernelError::kWouldBlock);
 }
 
 TEST("futex: ParkOnWord compares the word as it stands under the bucket lock") {
