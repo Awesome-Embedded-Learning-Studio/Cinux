@@ -42,7 +42,6 @@ public:
      *
      * @param[in]     rate   Desired oscillation; divisor is
      *                      kPitInputHz / rate.value and must fit 16 bits.
-     * @return        None
      * @note          Three port writes in one table: 0x36 to the command
      *                      port, then low and high divisor bytes.
      * @since         0.1.0

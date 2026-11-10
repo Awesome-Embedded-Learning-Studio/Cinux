@@ -51,7 +51,6 @@ public:
      * @brief     Builds the pair around one wait hook.
      *
      * @param[in] wait   How a blocked side lets the world run.
-     * @return    None
      * @note      The hook is typically the scheduler's yield; a test
      *              world hands a no-op. The pair wires itself: the
      *              slave's seats point back here, so a Pty must live
@@ -132,7 +131,6 @@ public:
 
     /**
      * @brief     Pins one independent master open description.
-     * @return    None
      * @since     0.6.0
      * @ingroup   kernel_driver
      */
@@ -140,7 +138,6 @@ public:
 
     /**
      * @brief     Hangs up slave input when the last master open closes.
-     * @return    None
      * @since     0.6.0
      * @ingroup   kernel_driver
      */
@@ -148,7 +145,6 @@ public:
 
     /**
      * @brief     Pins one independent slave open description.
-     * @return    None
      * @since     0.6.0
      * @ingroup   kernel_driver
      */
@@ -156,7 +152,6 @@ public:
 
     /**
      * @brief     Makes master EOF visible at the last slave close.
-     * @return    None
      * @since     0.6.0
      * @ingroup   kernel_driver
      */
@@ -181,7 +176,6 @@ public:
     /**
      * @brief     Resets the pair to its born state, rings drained.
      *
-     * @return    None
      * @note      Called when a freed slot returns to the table and a new
      *              pair takes the seat, so no old byte survives.
      * @since     0.5.0

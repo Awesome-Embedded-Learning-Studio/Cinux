@@ -27,7 +27,6 @@ namespace cinux::fs {
  *
  * @param[in]     keyboard  The keyboard's event stream, event0's source.
  * @param[in]     pointer   The pointer's event stream, event1's source.
- * @return  None
  * @note    Bring-up wiring, single-threaded, before the devfs mount
  *          goes live. The streams arrive as arguments so the seat can
  *          be driven by host tests without the device singletons; a

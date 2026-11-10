@@ -1,0 +1,271 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.18.0" xml:lang="en-US">
+  <compounddef id="group__kernel__boot" kind="group">
+    <compoundname>kernel_boot</compoundname>
+    <title>内核启动 (Kernel Boot)</title>
+    <innerfile refid="boot__info_8hpp">boot_info.hpp</innerfile>
+    <innerfile refid="image__header_8hpp">image_header.hpp</innerfile>
+    <innerfile refid="kernel_2boot_2print_8hpp">print.hpp</innerfile>
+    <innerfile refid="kernel_2console_2console_8hpp">console.hpp</innerfile>
+    <innerfile refid="boot_2early_2print_8hpp">print.hpp</innerfile>
+    <sectiondef kind="func">
+<memberdef kind="function" id="group__kernel__boot_1ga9475a8b0f79cbe2e76c0cc7c7611eabe" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::console::InitConsole</definition>
+        <argsstring>(const cinux::boot::BootInfo &amp;info)</argsstring>
+        <name>InitConsole</name>
+        <qualifiedname>cinux::console::InitConsole</qualifiedname>
+        <param>
+          <type>const <ref refid="structcinux_1_1boot_1_1BootInfo" kindref="compound">cinux::boot::BootInfo</ref> &amp;</type>
+          <declname>info</declname>
+        </param>
+        <briefdescription>
+<para>Brings the kernel console up: serial first so debugging never waits on a screen, then the text screen when the boot record carries a usable framebuffer. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">info</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The boot handoff record. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>Safe to call again; a screen that refused init stays silent and serial keeps carrying the whole output. </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.1.0</para>
+</simplesect>
+Brings the kernel console up: serial first so debugging never waits on a screen, then the text screen when the boot record carries a usable framebuffer.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">info</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The boot handoff record. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>Safe to call again; a screen that refused init stays silent and serial keeps carrying the whole output. </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.1.0 </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console.cpp" line="20" column="6" bodyfile="kernel/console/console.cpp" bodystart="20" bodyend="23" declfile="kernel/console/console.hpp" declline="54" declcolumn="6"/>
+        <references refid="structcinux_1_1boot_1_1BootInfo_1a1ec46ed814c02db5156e2130bf4e1e68" compoundref="boot__info_8hpp" startline="51">cinux::boot::BootInfo::framebuffer</references>
+        <references refid="group__kernel__driver_1ga00b0f475cea0be9c7366480e09a52059" compoundref="screen_8cpp" startline="13" endline="30">cinux::console::TextConsole::init</references>
+        <references refid="group__kernel__boot_1ga9475a8b0f79cbe2e76c0cc7c7611eabe" compoundref="console_8cpp" startline="20" endline="23">cinux::console::InitConsole</references>
+        <references refid="group__base__utility_1ga222532bedfdcc1e5167cb9be83be26f3" compoundref="singleton_8hpp" startline="56" endline="61">cinux::base::Singleton&lt; TextConsole &gt;::self</references>
+        <references refid="group__kernel__driver_1ga5ada316f498906fea30dc842f3868b19" compoundref="serial_8cpp" startline="33" endline="35">cinux::driver::SerialInit</references>
+        <referencedby refid="group__boot__early_1ga27a4de1561ca7e4de8133c59a0a8d48c" compoundref="boot_2early_2console_8hpp" startline="95" endline="99">cinux::console::InitConsole</referencedby>
+        <referencedby refid="group__kernel__boot_1ga9475a8b0f79cbe2e76c0cc7c7611eabe" compoundref="console_8cpp" startline="20" endline="23">cinux::console::InitConsole</referencedby>
+      </memberdef>
+<memberdef kind="function" id="group__kernel__boot_1gaf127968b88d026dd07167045b2131d3b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::console::PutChar</definition>
+        <argsstring>(char character)</argsstring>
+        <name>PutChar</name>
+        <qualifiedname>cinux::console::PutChar</qualifiedname>
+        <param>
+          <type>char</type>
+          <declname>character</declname>
+        </param>
+        <briefdescription>
+<para>Sends one character to every console sink. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Sends one character, waiting for the line to be ready.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">character</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Byte to emit. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>None </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.1.0</para>
+</simplesect>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">character</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Byte to transmit. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>None </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.1.0 </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console.cpp" line="25" column="6" bodyfile="kernel/console/console.cpp" bodystart="25" bodyend="29" declfile="kernel/console/console.hpp" declline="67" declcolumn="6"/>
+        <references refid="group__kernel__boot_1gaf127968b88d026dd07167045b2131d3b" compoundref="console_8cpp" startline="25" endline="29">cinux::console::PutChar</references>
+        <referencedby refid="group__kernel__boot_1gaf127968b88d026dd07167045b2131d3b" compoundref="console_8cpp" startline="25" endline="29">cinux::console::PutChar</referencedby>
+        <referencedby refid="group__boot__early_1ga0702b59ecfe7d16296de97bcba8b08d2" compoundref="boot_2early_2console_8hpp" startline="130" endline="135">cinux::console::PutString</referencedby>
+      </memberdef>
+<memberdef kind="function" id="group__kernel__boot_1ga2247c933cd932774549e06317c3cb8dd" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::console::PutString</definition>
+        <argsstring>(const char *text, bool newline=false)</argsstring>
+        <name>PutString</name>
+        <qualifiedname>cinux::console::PutString</qualifiedname>
+        <param>
+          <type>const char *</type>
+          <declname>text</declname>
+        </param>
+        <param>
+          <type>bool</type>
+          <declname>newline</declname>
+          <defval>false</defval>
+        </param>
+        <briefdescription>
+<para>Sends a NUL-terminated string, one character at a time. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">text</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>String to emit. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>None </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.1.0 </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console.cpp" line="31" column="6" bodyfile="kernel/console/console.cpp" bodystart="31" bodyend="40" declfile="kernel/console/console.hpp" declline="80" declcolumn="6"/>
+        <references refid="group__kernel__boot_1ga2247c933cd932774549e06317c3cb8dd" compoundref="console_8cpp" startline="31" endline="40">cinux::console::PutString</references>
+        <referencedby refid="stage2_8cpp_1afcbdf548d11c4bab412e892fa095f515">asm</referencedby>
+        <referencedby refid="group__kernel__boot_1gafd9a691ab4ba31ef103ea6aef1fc9c80" compoundref="kernel_2boot_2print_8hpp" startline="88" endline="93">cinux::print::detail::Emit</referencedby>
+        <referencedby refid="group__kernel__boot_1ga1b5eefb0555c3011c94fe26491cc63a6" compoundref="kernel_2boot_2print_8hpp" startline="109" endline="115">cinux::print::detail::Emit</referencedby>
+        <referencedby refid="lm_8cpp_1afb9022a8eb45f8e887edfc16a49a685e" compoundref="lm_8cpp" startline="5" endline="31">LmEntry</referencedby>
+        <referencedby refid="pm_8cpp_1ab2476827fc6fd980ec5567eec3953d43" compoundref="pm_8cpp" startline="7" endline="22">PmEntry</referencedby>
+        <referencedby refid="group__boot__early_1ga0702b59ecfe7d16296de97bcba8b08d2" compoundref="boot_2early_2console_8hpp" startline="130" endline="135">cinux::console::PutString</referencedby>
+        <referencedby refid="group__kernel__boot_1ga2247c933cd932774549e06317c3cb8dd" compoundref="console_8cpp" startline="31" endline="40">cinux::console::PutString</referencedby>
+        <referencedby refid="stage2_8cpp_1a967da172c2813d1e3dacd0857abe92d1" compoundref="stage2_8cpp" startline="187" endline="233">Stage2Main</referencedby>
+      </memberdef>
+<memberdef kind="function" id="group__kernel__boot_1ga59129e8b1dfdd85addf66f6247543d54" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>void</type>
+        <definition>void cinux::console::Flush</definition>
+        <argsstring>()</argsstring>
+        <name>Flush</name>
+        <qualifiedname>cinux::console::Flush</qualifiedname>
+        <briefdescription>
+<para>Waits until every console sink has finished sending. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>None </para>
+</simplesect>
+<simplesect kind="note"><para>The screen paints at once; the serial line keeps the last bytes in its shift register. This drain belongs in front of anything as final as power off, so the farewell lines truly leave the machine. </para>
+</simplesect>
+<simplesect kind="warning"><para>None </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>None</parametername>
+</parameternamelist>
+<parameterdescription>
+<para></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="since"><para>0.4.0 </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console.cpp" line="42" column="6" bodyfile="kernel/console/console.cpp" bodystart="42" bodyend="46" declfile="kernel/console/console.hpp" declline="95" declcolumn="6"/>
+        <references refid="group__kernel__boot_1ga59129e8b1dfdd85addf66f6247543d54" compoundref="console_8cpp" startline="42" endline="46">cinux::console::Flush</references>
+        <references refid="group__kernel__driver_1ga450a1fdc0389cdeed3620cbccf3652e6" compoundref="serial_8cpp" startline="42" endline="44">cinux::driver::SerialDrain</references>
+        <referencedby refid="group__kernel__boot_1ga59129e8b1dfdd85addf66f6247543d54" compoundref="console_8cpp" startline="42" endline="46">cinux::console::Flush</referencedby>
+        <referencedby refid="group__kernel__syscall_1ga1f307701e73c56b66e020fd641b9cc91" compoundref="sys__reboot_8cpp" startline="11" endline="34">cinux::syscall::HandleReboot</referencedby>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+  </compounddef>
+</doxygen>

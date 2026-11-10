@@ -1,0 +1,16 @@
+{
+  "group": "boot_vesa",
+  "namespace": "cinux::boot",
+  "intro": "构造 BIOS 模式信息块，并判断它是否满足显示请求。",
+  "categories": ["模式信息构造", "候选模式匹配"],
+  "functions": {
+    "MakeSample": {
+      "summary": "只用样本里的字段生成模式信息块并返回",
+      "category": "模式信息构造"
+    },
+    "MatchesRequest": {
+      "summary": "判断某个 BIOS 模式是否满足宽高、色深和线性帧缓冲要求",
+      "category": "候选模式匹配"
+    }
+  }
+}

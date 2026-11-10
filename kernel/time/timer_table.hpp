@@ -85,7 +85,6 @@ public:
      * @brief         Fires every seat whose deadline has landed.
      *
      * @param[in]     now   The monotonic now, in nanoseconds.
-     * @return        None
      * @note          Each firing seat is disarmed before its call runs,
      *                so the call may arm or cancel seats freely, this
      *                seat's included. Calls run in seat order, one pass,

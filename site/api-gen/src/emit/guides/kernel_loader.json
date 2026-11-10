@@ -1,0 +1,58 @@
+{
+  "group": "kernel_loader",
+  "namespace": "cinux::loader",
+  "intro": "把 ELF 镜像装进地址空间，并铺好进程入口栈。",
+  "categories": [
+    "ELF 解析",
+    "段映射",
+    "入口栈",
+    "解释器与基址",
+    "参数预算"
+  ],
+  "functions": {
+    "cinux::loader::ArgumentStringBudget": {
+      "summary": "算出参数字符串的预算，指针空间占满时报参数错误。",
+      "category": "参数预算"
+    },
+    "cinux::loader::EntryPictureBytes": {
+      "summary": "量出入口画面要多少字节，不含对齐余量。",
+      "category": "入口栈"
+    },
+    "cinux::loader::LoadElfIntoSpace": {
+      "summary": "把镜像各段映射进去并登记范围，解析失败或范围冲突时返回假。",
+      "category": "段映射"
+    },
+    "cinux::loader::LoadInterpreter": {
+      "summary": "读入解释器并映射进地址空间，读盘或解析出错时报错。",
+      "category": "解释器与基址"
+    },
+    "cinux::loader::ParseElf64": {
+      "summary": "校验并解析 ELF64 镜像，不合格时返回参数错误。",
+      "category": "ELF 解析"
+    },
+    "cinux::loader::ProgramNeedsLoadBias": {
+      "summary": "判断程序映像是否要加载偏移才落位，固定基址的返回假。",
+      "category": "解释器与基址"
+    },
+    "cinux::loader::ReadGnuStackFlags": {
+      "summary": "读出映像要求的栈属性，没写这一项就返回假。",
+      "category": "ELF 解析"
+    },
+    "cinux::loader::ReadInterpreterPath": {
+      "summary": "读出映像指名的解释器路径，静态映像或路径越界时返回假。",
+      "category": "解释器与基址"
+    },
+    "cinux::loader::ReadSegment": {
+      "summary": "从解析好的段表取一段，非可载段或序号越界返回假。",
+      "category": "段映射"
+    },
+    "cinux::loader::WriteEntryPicture(const EntryStack &, const EntryRuns &, const EntryFacts &)": {
+      "summary": "按给定缓冲区铺好入口画面，空间不够时返回零。",
+      "category": "入口栈"
+    },
+    "cinux::loader::WriteEntryPicture(unsigned char *, unsigned long, const EntryRuns &, const EntryFacts &)": {
+      "summary": "在一页清零的栈上铺入口画面，交回入口栈指针。",
+      "category": "入口栈"
+    }
+  }
+}

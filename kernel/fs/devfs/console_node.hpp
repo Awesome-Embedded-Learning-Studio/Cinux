@@ -23,7 +23,6 @@ namespace cinux::fs {
 /**
  * @brief   Seats the console device with the device model.
  *
- * @return  None
  * @note    Bring-up wiring, single-threaded, before the mount goes
  *          live. The registration travels through the device model, so
  *          the console joins the model's registry and the bound devfs
@@ -40,7 +39,6 @@ void StartConsoleInputPump();
  * @brief         Names the group the console's keys belong to.
  *
  * @param[in]     pgid   The foreground group, the login shell's own.
- * @return        None
  * @note          The boot brings the login shell up under init, not
  *                through a TIOCSCTTY the shell asked for itself, so
  *                bring-up hands the foreground over in the same step

@@ -119,7 +119,6 @@ public:
     /**
      * @brief         Switches the machine into this space.
      *
-     * @return        None
      * @note          Interrupts must be off across the switch; the
      *                kernel half mirror is what keeps the caller alive
      *                inside the new world, and LoadCr3(KernelPageRoot())
@@ -134,7 +133,6 @@ public:
     /**
      * @brief         Returns every frame and table of the user half.
      *
-     * @return        None.
      * @note          The retiring call of an owning process: walks the
      *                      user half only — the kernel half is a mirror,
      *                      its frames belong to the kernel — freeing leaf
@@ -152,7 +150,6 @@ public:
     /**
      * @brief         Tears the user half down unless already torn.
      *
-     * @return        None.
      * @note          The RAII half of the lifecycle: a world that goes
      *                      out of scope returns its frames by itself, so
      *                      owners delete and nothing more. Explicit

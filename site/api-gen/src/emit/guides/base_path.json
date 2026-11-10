@@ -1,0 +1,48 @@
+{
+  "group": "base_path",
+  "namespace": "cinux::base",
+  "intro": "在字符串视图上拆解和拼接路径，不复制字节。",
+  "categories": [
+    "路径拆解",
+    "路径遍历",
+    "路径归一",
+    "路径判定"
+  ],
+  "functions": {
+    "FileName": {
+      "summary": "取路径最后一段，没有斜杠时原样返回整条",
+      "category": "路径拆解",
+      "example": "#include <string_view>\n\n#include \"cinux/path.hpp\"\n\nusing namespace cinux::base;\n\nvoid FileNameExample() {\n    const std::string_view kName = FileName(\"/dev/pts/3\");\n    // kName == \"3\" · 最后一个斜杠之后的整段\n    const std::string_view kBare = FileName(\"Makefile\");\n    // kBare == \"Makefile\" · 没有斜杠时原样返回\n    const std::string_view kRoot = FileName(\"/\");\n    // kRoot.empty() 为真 · 根没有文件名\n}"
+    },
+    "ParentPath": {
+      "summary": "取上一级目录，根和裸文件名返回空",
+      "category": "路径拆解"
+    },
+    "SplitLeaf": {
+      "summary": "按最后一个斜杠切成父路径和末段两片",
+      "category": "路径拆解",
+      "example": "#include <string_view>\n\n#include \"cinux/path.hpp\"\n\nusing namespace cinux::base;\n\nvoid SplitLeafExample() {\n    std::string_view parent{};\n    std::string_view leaf{};\n    const bool kSplit = SplitLeaf(\"/etc/fstab\", parent, leaf);\n    // kSplit 为真，parent == \"/etc\"，leaf == \"fstab\"\n\n    const bool kBare = SplitLeaf(\"fstab\", parent, leaf);\n    // kBare 为假，parent.empty() 为真，leaf == \"fstab\"\n}"
+    },
+    "Extension": {
+      "summary": "取扩展名并带上点，没有扩展名时返回空",
+      "category": "路径拆解",
+      "example": "#include <string_view>\n\n#include \"cinux/path.hpp\"\n\nusing namespace cinux::base;\n\nvoid ExtensionExample() {\n    const std::string_view kExt = Extension(\"/var/log/syslog.tar.gz\");\n    // kExt == \".gz\" · 只取文件名里最后一个点及其后面\n    const std::string_view kNone = Extension(\"/etc/Makefile\");\n    // kNone.empty() 为真 · 没有点就是没有扩展名\n    const std::string_view kHidden = Extension(\"/etc/.hidden\");\n    // kHidden.empty() 为真 · 开头的点是文件名的一部分，不是扩展名\n}"
+    },
+    "Stem": {
+      "summary": "取去掉扩展名的文件名，点开头的文件保留原名",
+      "category": "路径拆解"
+    },
+    "NextComponent": {
+      "summary": "取路径的下一段并推进游标，走完返回假",
+      "category": "路径遍历"
+    },
+    "FoldOntoPath": {
+      "summary": "把要叠的路径接到绝对基路径上，返回是否装得下",
+      "category": "路径归一"
+    },
+    "IsAbsolute": {
+      "summary": "判断路径是否从根开始，看首字节是不是斜杠",
+      "category": "路径判定"
+    }
+  }
+}

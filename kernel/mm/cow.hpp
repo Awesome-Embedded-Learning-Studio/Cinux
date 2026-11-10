@@ -70,7 +70,6 @@ namespace cow {
 /**
  * @brief         Seat the engine at the exception reporter's fault door.
  *
- * @return        None.
  * @note          The resolver answers only faults it can repair;
  *          everything else falls through unchanged. Bring-up installs
  *          this once page tables exist; a machine without shared pages
@@ -86,7 +85,6 @@ void InstallResolver();
  * @brief         Give one frame back, honoring whoever still shares it.
  *
  * @param[in]     frame   The physical frame a retiring mapping showed.
- * @return        None.
  * @note          The teardown half of the use count: a frame with
  *                company stays put, the last user's release returns it
  *                to the allocator. Retiring a space calls this for
@@ -103,6 +101,7 @@ void ReleaseFrame(unsigned long long frame);
 /**
  * @brief         Build a child address space sharing the parent's pages.
  *
+ * @param[in]     ranges   Address ranges to clone; all when null.
  * @param[in]     parent   The world fork copies, read-only.
  * @return        The heap-owned child space, or nullptr when memory
  *                ran out.

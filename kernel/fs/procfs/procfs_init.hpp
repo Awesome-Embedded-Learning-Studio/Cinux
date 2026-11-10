@@ -28,7 +28,6 @@ class ProcFs;
  * @brief         Wires one procfs instance to the kernel's own facts.
  *
  * @param[in,out] procfs   The instance receiving the source.
- * @return        None
  * @note          Bring-up wiring, single-threaded, before the mount
  *                goes live.
  * @since         0.5.0

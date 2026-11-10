@@ -220,6 +220,16 @@ function generateVolumeConfig(
   const desc = projectConfig.description[code] ?? ''
   const localeDirPart = view.locale.default ? '' : `/${view.locale.dir ?? view.localeKey}`
 
+  // 卷的源码目录名与线上 URL 前缀不一定相同(document → /systems/:path* 或
+  // changelogs → /changelog)。不同则生成 rewrites,让产物落到 urlPrefix 上,
+  // 与 sidebar 里 volumeSidebar 生成的链接一致。
+  const urlSeg = prefix.replace(/^\//, '')
+  const srcSeg = localeDirPart ? `${localeDirPart.replace(/^\//, '')}/${vol.srcDir}` : vol.srcDir
+  const rewritesEntry =
+    srcSeg === urlSeg
+      ? ''
+      : `  rewrites: { ${JSON.stringify(`${srcSeg}/:path*`)}: ${JSON.stringify(`${urlSeg}/:path*`)} },\n`
+
   return `import { defineConfig } from 'vitepress'
 import { resolve } from 'path'
 import { volumeSidebar } from '${relSidebar}'
@@ -246,7 +256,7 @@ export default withSharedDrawio(defineConfig({
   srcDir: '${relSrc}',
   outDir: '${relOut}',
   ignoreDeadLinks: true,
-  title: ${JSON.stringify(title)},
+${rewritesEntry}  title: ${JSON.stringify(title)},
   description: ${JSON.stringify(desc)},
   lang: '${code}',
   locales: {
@@ -265,7 +275,7 @@ export default withSharedDrawio(defineConfig({
     },
   },
   head: [
-    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.ico\` }],
+    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.svg\` }],
     ['meta', { name: 'theme-color', content: '#F5FAF8' }],
     ['meta', { name: 'theme-color', content: '#0B1512', media: '(prefers-color-scheme: dark)' }],
     ['script', {}, ${JSON.stringify(FONT_SIZE_SCRIPT)}],
@@ -355,7 +365,7 @@ export default withSharedDrawio(defineConfig({
     },
   },
   head: [
-    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.ico\` }],
+    ['link', { rel: 'icon', href: projectConfig.favicon || \`\${projectConfig.base}favicon.svg\` }],
     ['meta', { name: 'theme-color', content: '#F5FAF8' }],
     ['meta', { name: 'theme-color', content: '#0B1512', media: '(prefers-color-scheme: dark)' }],
     ['script', {}, ${JSON.stringify(FONT_SIZE_SCRIPT)}],
@@ -547,6 +557,10 @@ function unifyCrossVolumeData(distDir: string) {
   log(`  Root site data: ${rootSiteDataExpr ? 'found' : 'MISSING'}`)
 
   const hmJsLiteral = JSON.stringify(JSON.stringify(mergedHashMap))
+
+  // dist/hashmap.json 也会被各卷构建各自产出、cpSync 叠加时互相覆盖成
+  // 最后一卷的残缺版;vitepress preview 与运行时都读它,必须写回合并版
+  writeFileSync(join(distDir, 'hashmap.json'), JSON.stringify(mergedHashMap))
 
   let patched = 0
   for (const f of htmlFiles) {
@@ -846,6 +860,43 @@ async function main() {
 
   // ── Step 3.5: Unify hash maps and site data ─────────────
   unifyCrossVolumeData(DIST_FINAL)
+
+  // ── Step 3.6: Sitemap(全站合成) ────────────────────────
+  // 各卷构建会各自产出仅含本卷的 sitemap.xml,cpSync 叠加时互相覆盖,
+  // 与 hashmap 同款残缺问题;这里删除残卷产物,从 dist 的 HTML 全量合成。
+  {
+    const hostname = 'https://awesome-embedded-learning-studio.github.io'
+    const urls: string[] = []
+    function walkForPages(d: string) {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const full = join(d, e.name)
+        if (e.isDirectory()) { walkForPages(full); continue }
+        if (!e.name.endsWith('.html')) continue
+        let rel = relative(DIST_FINAL, full).replace(/\\/g, '/')
+        if (rel === '404.html' || rel === 'index.html') {
+          if (rel === '404.html') continue
+          rel = ''
+        } else if (rel.endsWith('/index.html')) {
+          rel = rel.slice(0, -'index.html'.length)
+        } else {
+          rel = rel.slice(0, -'.html'.length)
+        }
+        urls.push(`${hostname}${projectConfig.base}${rel}`)
+      }
+    }
+    walkForPages(DIST_FINAL)
+    rmSync(join(DIST_FINAL, 'sitemap.xml'), { force: true })
+    const today = new Date().toISOString().substring(0, 10)
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...urls.map(u => `  <url><loc>${u}</loc><lastmod>${today}</lastmod></url>`),
+      '</urlset>',
+      '',
+    ].join('\n')
+    writeFileSync(join(DIST_FINAL, 'sitemap.xml'), xml)
+    log(`  Sitemap: ${urls.length} URLs`)
+  }
 
   // ── Step 3.7: Copy checkpoint data (source outside srcDir, only copied once in final artifact) ─────
   const CHECKPOINTS_SRC = join(PROJECT_ROOT, 'checkpoints')

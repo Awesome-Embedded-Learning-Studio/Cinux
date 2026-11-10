@@ -185,7 +185,6 @@ public:
      *
      * @param[in]     sink          Where built segments go.
      * @param[in]     own_address   Source address the pseudo header sums.
-     * @return        None
      * @since         0.7.0
      * @ingroup       kernel_net
      */
@@ -196,7 +195,6 @@ public:
      *
      * @param[in]     sink          The new outgoing path.
      * @param[in]     own_address   The new source address.
-     * @return        None
      * @note          For the boot wiring's reroute: the loopback world
      *                runs first, a wire joins later, and the connection
      *                table and counters survive the aim.
@@ -211,7 +209,6 @@ public:
      * @param[in]     bytes   First segment byte.
      * @param[in]     length  Segment bytes, payload included.
      * @param[in]     header  The IPv4 header it travelled in.
-     * @return        None
      * @note          The service pass owns the clock: an
      *                acknowledgement that clears every unacknowledged
      *                byte measures its round trip against the module's
@@ -342,7 +339,6 @@ public:
      * @brief         Begins the graceful farewell for the local direction.
      *
      * @param[in]     ticket   The connection's ticket.
-     * @return        None
      * @note          Sends the FIN and moves the machine on; the seat
      *                frees itself when the dance completes. A connection
      *                already closing simply ignores the call.
@@ -355,7 +351,6 @@ public:
      * @brief         Kills the connection at once with a reset.
      *
      * @param[in]     ticket   The connection's ticket.
-     * @return        None
      * @note          For the forced path: the seat frees immediately
      *                and the farewell callback answers with kReset.
      * @since         0.7.0
@@ -367,7 +362,6 @@ public:
      * @brief         Advances every connection's clock work by one step.
      *
      * @param[in]     now   The monotonic now, in nanoseconds.
-     * @return        None
      * @note          The wiring calls this from its heartbeat. One pass
      *              arms a retransmission guard for every connection with
      *                bytes in flight; the timer table fires the guards

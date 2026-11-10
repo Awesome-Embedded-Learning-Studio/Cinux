@@ -1,0 +1,26 @@
+{
+  "group": "base_random",
+  "namespace": "cinux::base::random",
+  "intro": "四字状态的伪随机生成器：播种、搅种、取字。",
+  "categories": [
+    "状态播种",
+    "随机取字"
+  ],
+  "functions": {
+    "Seed": {
+      "summary": "用一个字给生成器播种，铺满四字状态",
+      "category": "状态播种",
+      "example": "#include <cinux/random.hpp>\n\nusing namespace cinux::base::random;\n\nvoid Example() {\n    Generator generator;        // 四个状态字全零，还没播种\n    Seed(generator, 0xC0FFEE);  // 一个字搅出四份状态\n    // generator.state = {0xCA8216FA9058D0FA, 0xECE45BABCE870479,\n    //                    0x87BE93A4A16A73CB, 0x5A71C08957A50D44}\n}"
+    },
+    "SplitMix64": {
+      "summary": "把一个种子字搅乱，返回搅乱后的值",
+      "category": "状态播种",
+      "example": "#include <cinux/random.hpp>\n\nusing namespace cinux::base::random;\n\nvoid Example() {\n    uint64_t seed = 0;\n    const uint64_t mixed = SplitMix64(seed);\n    // mixed = 0xE220A8397B1DCDAF · seed 同时推进到 0x9E3779B97F4A7C15\n}"
+    },
+    "Next": {
+      "summary": "推进状态并返回下一个伪随机字",
+      "category": "随机取字",
+      "example": "#include <cinux/random.hpp>\n\nusing namespace cinux::base::random;\n\nvoid Example() {\n    Generator generator;\n    Seed(generator, 42);                    // 播种，让状态离开全零\n    const uint64_t word = Next(generator);  // 取第一个字，状态同时推进\n    // word = 0x15780B2E0C2EC716\n}"
+    }
+  }
+}

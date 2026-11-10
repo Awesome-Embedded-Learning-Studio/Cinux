@@ -1,0 +1,138 @@
+/* ════════════════════════════════════════════════════════════════
+   API 参考页 — 函数条目（书页式）
+
+   不用卡片。每个条目是一条细线起头的一节：函数名是排版主角，
+   签名是一条安静的等宽行，正文顺着读下去。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 条目起头：一道细线，函数名做主角 ─────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 {
+  position: relative;
+  margin: 2.3em 0 0;
+  padding: 1.05em 0 0;
+  border-top: 1px solid var(--api-rule);
+  background: none;
+  border-radius: 0;
+  font-family: var(--api-mono);
+  font-size: 1.02em;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  /* 长命名空间路径允许断行 */
+  overflow-wrap: anywhere;
+}
+
+/* 第一个条目上方已有 h2 的顶线，不再叠一道 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] h2 + h4 {
+  margin-top: 1.5em;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* 命名空间淡、函数名重——一眼看到函数本身 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 .api-ns {
+  color: var(--api-muted);
+  font-weight: 400;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 .api-fn {
+  color: var(--api-ink);
+  font-weight: 650;
+}
+
+/* ── 锚点：悬停时右侧浮出链环图标 ────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 > .header-anchor {
+  position: absolute;
+  top: 1.05em;
+  right: 0.1em;
+  margin: 0;
+  float: none;
+  width: 0.95em;
+  height: 0.95em;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4:hover > .header-anchor {
+  opacity: 0.6;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 > .header-anchor::before {
+  content: '';
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: currentColor;
+  mask: var(--api-ico-link) center / contain no-repeat;
+  -webkit-mask: var(--api-ico-link) center / contain no-repeat;
+}
+
+/* 锚点命中时函数名亮一下，代替整块高亮 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4:target .api-fn {
+  color: var(--api-accent);
+}
+
+/* ── 签名：一道薄荷细线，不加盒子 ────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] {
+  margin: 0.7em 0 1.1em;
+  padding: 0;
+  border: none;
+  border-left: 2px solid color-mix(in srgb, var(--vp-c-brand-1) 55%, transparent);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* 代码块顶部那 32px 语言标签轨、行号槽、语言标签、复制按钮都不要 */
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-']::before,
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] .line-numbers-wrapper,
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] > span.lang,
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] > button.copy {
+  display: none;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'].line-numbers-mode {
+  padding-left: 0;
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] pre {
+  margin: 0;
+  padding: 0.08em 0 0.08em 1em;
+  background: none;
+  font-size: 0.85em;
+  color: var(--vp-c-text-2);
+}
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] code {
+  font-size: 0.85em;
+}
+
+/* ── 描述段：与签名留一点呼吸 ────────────────────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] + p {
+  margin-top: 1em;
+}
+
+/* ── 条目之间的 <hr>：只在它的位置留一道细线 ─────────────── */
+
+.vp-doc[class*="_Cinux_api_"][class$="_"] hr {
+  margin: 3em 0 2em;
+  border: none;
+  border-top: 1px solid var(--api-rule);
+}
+
+/* ── 响应式 ──────────────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  .vp-doc[class*="_Cinux_api_"][class$="_"] h4 {
+    margin-top: 1.9em;
+    font-size: 0.96em;
+  }
+
+  .vp-doc[class*="_Cinux_api_"][class$="_"] h4 + div[class*='language-'] pre {
+    font-size: 0.8em;
+  }
+}

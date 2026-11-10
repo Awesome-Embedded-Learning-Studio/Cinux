@@ -102,7 +102,6 @@ public:
     /**
      * @brief         Names the devfs that character seats land in.
      * @param[in,out] devfs   The device file system mount binds to.
-     * @return        None
      * @note          Bring-up wiring, once, before any character seat.
      * @since         0.6.0
      * @ingroup       kernel_driver

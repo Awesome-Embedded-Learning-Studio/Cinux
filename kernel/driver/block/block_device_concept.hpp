@@ -132,7 +132,6 @@ public:
      * @brief         Seats one concept-checked device behind this port.
      *
      * @param[in,out] device  The device instance taking the seat.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */

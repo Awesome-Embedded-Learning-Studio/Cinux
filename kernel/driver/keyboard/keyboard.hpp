@@ -54,7 +54,6 @@ public:
      * @brief         Seat the IRQ1 handler with the interrupt service
      *                and open the line.
      *
-     * @return        None
      * @note          Bring-up order is caller's: the interrupt service
      *                must already hold its chip.
      * @since         0.1.0
@@ -68,7 +67,6 @@ public:
      *                and the event face publishes its word.
      *
      * @param[in]     raw_byte   Byte read from port 0x60.
-     * @return        None
      * @note          Runs on the IRQ1 path: integer-only, queue push,
      *                nothing slow. The glyph queue only hears the
      *                stream while nobody grabbed the device.

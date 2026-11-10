@@ -65,7 +65,6 @@ public:
  *                page tables.
  *
  * @param[in]     info   The boot handoff record carrying the framebuffer.
- * @return        None
  * @note          Seed pages from the low span; no PMM, no direct map,
  *                  no low-half teardown, so a test kernel can light the
  *                  screen without the full takeover.

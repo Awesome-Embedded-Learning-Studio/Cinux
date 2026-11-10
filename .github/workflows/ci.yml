@@ -209,6 +209,23 @@ jobs:
           key: cinux-build-${{ runner.os }}-${{ hashFiles('document/**', 'site/.vitepress/config/**', 'site/.vitepress/plugins/**', 'site/.vitepress/public/**', 'site/.vitepress/theme/**', 'project.config.ts', 'scripts/build.ts', 'package.json', 'pnpm-lock.yaml') }}
           restore-keys: |
             cinux-build-${{ runner.os }}-
+      - name: Typecheck api-gen
+        if: steps.toolchain.outputs.present == 'true'
+        run: pnpm typecheck:api
+      - name: Test api-gen transformer
+        if: steps.toolchain.outputs.present == 'true'
+        run: pnpm test:api
+      - name: Generate API data (doxygen)
+        if: steps.toolchain.outputs.present == 'true'
+        run: |
+          if command -v doxygen >/dev/null 2>&1; then
+            pnpm docs:api
+          else
+            echo "doxygen not found on runner, skipping API data generation"
+          fi
+      - name: Check internal links
+        if: steps.toolchain.outputs.present == 'true'
+        run: pnpm check:links
       - name: Build docs
         if: steps.toolchain.outputs.present == 'true'
         run: pnpm build

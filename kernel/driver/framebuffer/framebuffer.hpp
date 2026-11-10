@@ -89,7 +89,6 @@ public:
      * @param[in]     column   Pixel column.
      * @param[in]     row      Pixel row.
      * @param[in]     lit      Paint when true, erase when false.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */
@@ -119,7 +118,6 @@ public:
     /**
      * @brief         Flood the whole surface with the paper color.
      *
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */
@@ -130,7 +128,6 @@ public:
      *                the freed band at the bottom with the paper color.
      *
      * @param[in]     line_count   Pixel rows to shift up.
-     * @return        None
      * @since         0.1.0
      * @ingroup       kernel_driver
      */

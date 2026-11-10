@@ -1,0 +1,284 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.18.0" xml:lang="en-US">
+  <compounddef id="namespacecinux_1_1console" kind="namespace" language="C++">
+    <compoundname>cinux::console</compoundname>
+    <innerclass refid="structcinux_1_1console_1_1Caret" prot="public">cinux::console::Caret</innerclass>
+    <innerclass refid="structcinux_1_1console_1_1CaretStep" prot="public">cinux::console::CaretStep</innerclass>
+    <innerclass refid="structcinux_1_1console_1_1PortWrite" prot="public">cinux::console::PortWrite</innerclass>
+    <innerclass refid="structcinux_1_1console_1_1Psf2Font" prot="public">cinux::console::Psf2Font</innerclass>
+    <innerclass refid="classcinux_1_1console_1_1TextConsole" prot="public">cinux::console::TextConsole</innerclass>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a479c580253ad09f0c8fd7f7fe8304966" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>char</type>
+        <definition>char cinux::console::kCharNewline</definition>
+        <argsstring></argsstring>
+        <name>kCharNewline</name>
+        <qualifiedname>cinux::console::kCharNewline</qualifiedname>
+        <initializer>= &apos;\n&apos;</initializer>
+        <briefdescription>
+<para>Newline in the char grammar. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console_grid.hpp" line="39" column="23" bodyfile="kernel/console/console_grid.hpp" bodystart="39" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1gab2bd77740c07406dcae0922aec1c7b1f" compoundref="console__grid_8hpp" startline="79" endline="102">AdvanceCaret</referencedby>
+        <referencedby refid="group__kernel__driver_1ga4f74b38cc3990e4f3f74e26fb8b2ef75" compoundref="screen_8cpp" startline="50" endline="67">cinux::console::TextConsole::put_char</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a2fa3cb205077db02e4dd1b36cc74e20c" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>char</type>
+        <definition>char cinux::console::kCharReturn</definition>
+        <argsstring></argsstring>
+        <name>kCharReturn</name>
+        <qualifiedname>cinux::console::kCharReturn</qualifiedname>
+        <initializer>= &apos;\r&apos;</initializer>
+        <briefdescription>
+<para>Carriage return in the char grammar. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console_grid.hpp" line="42" column="23" bodyfile="kernel/console/console_grid.hpp" bodystart="42" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1gab2bd77740c07406dcae0922aec1c7b1f" compoundref="console__grid_8hpp" startline="79" endline="102">AdvanceCaret</referencedby>
+        <referencedby refid="group__kernel__driver_1ga4f74b38cc3990e4f3f74e26fb8b2ef75" compoundref="screen_8cpp" startline="50" endline="67">cinux::console::TextConsole::put_char</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a5bba25427bd87f1f914512ff00ee2f9a" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>char</type>
+        <definition>char cinux::console::kCharBackspace</definition>
+        <argsstring></argsstring>
+        <name>kCharBackspace</name>
+        <qualifiedname>cinux::console::kCharBackspace</qualifiedname>
+        <initializer>= &apos;\b&apos;</initializer>
+        <briefdescription>
+<para>Backspace in the char grammar. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/console_grid.hpp" line="45" column="23" bodyfile="kernel/console/console_grid.hpp" bodystart="45" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1gab2bd77740c07406dcae0922aec1c7b1f" compoundref="console__grid_8hpp" startline="79" endline="102">AdvanceCaret</referencedby>
+        <referencedby refid="group__kernel__driver_1ga4f74b38cc3990e4f3f74e26fb8b2ef75" compoundref="screen_8cpp" startline="50" endline="67">cinux::console::TextConsole::put_char</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1adcb43b3802a1b97505575807c4a67cd8" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint32_t</type>
+        <definition>uint32_t cinux::console::kPsf2Magic</definition>
+        <argsstring></argsstring>
+        <name>kPsf2Magic</name>
+        <qualifiedname>cinux::console::kPsf2Magic</qualifiedname>
+        <initializer>= 0x864AB572</initializer>
+        <briefdescription>
+<para>Magic every PSF2 file begins with, little-endian on disk. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/font.hpp" line="27" column="27" bodyfile="kernel/console/font.hpp" bodystart="27" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1ga4ed791fb2d39310b6b815afae891cda8" compoundref="font_8hpp" startline="84" endline="103">ParsePsf2</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a760dc245ef9b8903deffde8f9c34a1fb" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint32_t</type>
+        <definition>uint32_t cinux::console::kPsf2HeaderBytes</definition>
+        <argsstring></argsstring>
+        <name>kPsf2HeaderBytes</name>
+        <qualifiedname>cinux::console::kPsf2HeaderBytes</qualifiedname>
+        <initializer>= 32</initializer>
+        <briefdescription>
+<para>Bytes in a PSF2 header: eight 32-bit fields. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/font.hpp" line="30" column="27" bodyfile="kernel/console/font.hpp" bodystart="30" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1ga42e75b9e2ef0a6fb17d4348e772479b6" compoundref="font_8hpp" startline="120" endline="126">GlyphRowBits</referencedby>
+        <referencedby refid="group__kernel__driver_1ga4ed791fb2d39310b6b815afae891cda8" compoundref="font_8hpp" startline="84" endline="103">ParsePsf2</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a0ae54aec8d91e99f71e2a1e49ab7db94" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint32_t</type>
+        <definition>uint32_t cinux::console::kPsf2MaxWidth</definition>
+        <argsstring></argsstring>
+        <name>kPsf2MaxWidth</name>
+        <qualifiedname>cinux::console::kPsf2MaxWidth</qualifiedname>
+        <initializer>= 8</initializer>
+        <briefdescription>
+<para>Widest glyph this grammar understands: one row must fit one byte. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="kernel/console/font.hpp" line="33" column="27" bodyfile="kernel/console/font.hpp" bodystart="33" bodyend="-1"/>
+        <referencedby refid="group__kernel__driver_1gaa3d726ad375a3acc9f70df295ff43c2b" compoundref="font_8hpp" startline="139" endline="141">GlyphPixel</referencedby>
+        <referencedby refid="group__kernel__driver_1ga4ed791fb2d39310b6b815afae891cda8" compoundref="font_8hpp" startline="84" endline="103">ParsePsf2</referencedby>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint16_t</type>
+        <definition>uint16_t cinux::console::kCom1Base</definition>
+        <argsstring></argsstring>
+        <name>kCom1Base</name>
+        <qualifiedname>cinux::console::kCom1Base</qualifiedname>
+        <initializer>= 0x3F8</initializer>
+        <briefdescription>
+<para>COM1 register block base. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="25" column="20" bodyfile="boot/early/console.hpp" bodystart="25" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a14cfffec4f573b3c96629f721554d1ea" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegData</definition>
+        <argsstring></argsstring>
+        <name>kRegData</name>
+        <qualifiedname>cinux::console::kRegData</qualifiedname>
+        <initializer>= 0x0</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="27" column="19" bodyfile="boot/early/console.hpp" bodystart="27" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a1b96c9d4defce49398d1852d01c30ae8" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegIer</definition>
+        <argsstring></argsstring>
+        <name>kRegIer</name>
+        <qualifiedname>cinux::console::kRegIer</qualifiedname>
+        <initializer>= 0x1</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="28" column="19" bodyfile="boot/early/console.hpp" bodystart="28" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1aed5f26e57bf197a8c2f543b69f359168" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegFcr</definition>
+        <argsstring></argsstring>
+        <name>kRegFcr</name>
+        <qualifiedname>cinux::console::kRegFcr</qualifiedname>
+        <initializer>= 0x2</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="29" column="19" bodyfile="boot/early/console.hpp" bodystart="29" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1ab37cea93db55d6cccb699335ab1241e1" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegLcr</definition>
+        <argsstring></argsstring>
+        <name>kRegLcr</name>
+        <qualifiedname>cinux::console::kRegLcr</qualifiedname>
+        <initializer>= 0x3</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="30" column="19" bodyfile="boot/early/console.hpp" bodystart="30" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1aa731e259ae42032c821b076516d2a9a5" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegMcr</definition>
+        <argsstring></argsstring>
+        <name>kRegMcr</name>
+        <qualifiedname>cinux::console::kRegMcr</qualifiedname>
+        <initializer>= 0x4</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="31" column="19" bodyfile="boot/early/console.hpp" bodystart="31" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1ab07367d991cb3508a9411c9eadcca013" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kRegLsr</definition>
+        <argsstring></argsstring>
+        <name>kRegLsr</name>
+        <qualifiedname>cinux::console::kRegLsr</qualifiedname>
+        <initializer>= 0x5</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="32" column="19" bodyfile="boot/early/console.hpp" bodystart="32" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a10481f769cf918b645d093eaabe67db0" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>uint8_t</type>
+        <definition>uint8_t cinux::console::kLsrThre</definition>
+        <argsstring></argsstring>
+        <name>kLsrThre</name>
+        <qualifiedname>cinux::console::kLsrThre</qualifiedname>
+        <initializer>= 0x20</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="34" column="19" bodyfile="boot/early/console.hpp" bodystart="34" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacecinux_1_1console_1a62177c40c6aefc2654cf83e871abc637" prot="public" static="no" constexpr="yes" mutable="no">
+        <type><ref refid="structcinux_1_1console_1_1PortWrite" kindref="compound">PortWrite</ref></type>
+        <definition>PortWrite cinux::console::kInitSequence[]</definition>
+        <argsstring>[]</argsstring>
+        <name>kInitSequence</name>
+        <qualifiedname>cinux::console::kInitSequence</qualifiedname>
+        <initializer>                              = {
+{.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1a1b96c9d4defce49398d1852d01c30ae8" kindref="member">kRegIer</ref>, .value = 0x00},  {.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1ab37cea93db55d6cccb699335ab1241e1" kindref="member">kRegLcr</ref>, .value = 0x80},
+{.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1a14cfffec4f573b3c96629f721554d1ea" kindref="member">kRegData</ref>, .value = 0x01}, {.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1a1b96c9d4defce49398d1852d01c30ae8" kindref="member">kRegIer</ref>, .value = 0x00},
+{.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1ab37cea93db55d6cccb699335ab1241e1" kindref="member">kRegLcr</ref>, .value = 0x03},  {.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1aed5f26e57bf197a8c2f543b69f359168" kindref="member">kRegFcr</ref>, .value = 0xC7},
+{.port = <ref refid="namespacecinux_1_1console_1a5156e8590b6fc7dda6e6d320834a769c" kindref="member">kCom1Base</ref> + <ref refid="namespacecinux_1_1console_1aa731e259ae42032c821b076516d2a9a5" kindref="member">kRegMcr</ref>, .value = 0x0B}}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="boot/early/console.hpp" line="46" column="21" bodyfile="boot/early/console.hpp" bodystart="46" bodyend="50"/>
+        <referencedby refid="group__boot__early_1ga27a4de1561ca7e4de8133c59a0a8d48c" compoundref="boot_2early_2console_8hpp" startline="95" endline="99">InitConsole</referencedby>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <member refid="group__kernel__boot_1ga9475a8b0f79cbe2e76c0cc7c7611eabe" kind="function"><name>InitConsole</name></member>
+      <member refid="group__kernel__boot_1gaf127968b88d026dd07167045b2131d3b" kind="function"><name>PutChar</name></member>
+      <member refid="group__kernel__boot_1ga2247c933cd932774549e06317c3cb8dd" kind="function"><name>PutString</name></member>
+      <member refid="group__kernel__boot_1ga59129e8b1dfdd85addf66f6247543d54" kind="function"><name>Flush</name></member>
+      <member refid="group__kernel__driver_1ga8e3eb3c52822ed7ca8e1309fa6f7d0d9" kind="function"><name>AdvanceLine</name></member>
+      <member refid="group__kernel__driver_1gab2bd77740c07406dcae0922aec1c7b1f" kind="function"><name>AdvanceCaret</name></member>
+      <member refid="group__kernel__driver_1gade85ace29aa86c579c9a347e2def9cc8" kind="function"><name>EmbeddedFont</name></member>
+      <member refid="group__kernel__driver_1ga25c4a754fcad8719b68a3d4772d709a5" kind="function"><name>EmbeddedFontData</name></member>
+      <member refid="group__kernel__driver_1ga4ed791fb2d39310b6b815afae891cda8" kind="function"><name>ParsePsf2</name></member>
+      <member refid="group__kernel__driver_1ga42e75b9e2ef0a6fb17d4348e772479b6" kind="function"><name>GlyphRowBits</name></member>
+      <member refid="group__kernel__driver_1gaa3d726ad375a3acc9f70df295ff43c2b" kind="function"><name>GlyphPixel</name></member>
+      <member refid="group__boot__early_1ga3b21dd934bfd8d96ec563dc46121ed94" kind="function"><name>OutB</name></member>
+      <member refid="group__boot__early_1gaeed3451a21f52902d2c3b4bcf991914f" kind="function"><name>InB</name></member>
+      <member refid="group__boot__early_1ga27a4de1561ca7e4de8133c59a0a8d48c" kind="function"><name>InitConsole</name></member>
+      <member refid="group__boot__early_1ga0702b59ecfe7d16296de97bcba8b08d2" kind="function"><name>PutString</name></member>
+      <member refid="group__boot__early_1ga8d29fa452927bcbb8fa49d3a578db5dc" kind="function"><name>Halt</name></member>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="kernel/console/console.cpp" line="9" column="1"/>
+  </compounddef>
+</doxygen>

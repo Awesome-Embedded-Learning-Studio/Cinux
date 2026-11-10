@@ -1,0 +1,342 @@
+{
+  "group": "kernel_arch",
+  "namespace": "cinux::arch",
+  "intro": "封装 GDT、中断、MSR 与每 CPU 状态的底层操作",
+  "categories": [
+    "段与 GDT",
+    "中断与 IDT",
+    "MSR 与控制寄存器",
+    "每 CPU 状态",
+    "TLB 维护"
+  ],
+  "functions": {
+    "cinux::arch::Clac": {
+      "summary": "清掉 RFLAGS.AC，关掉 SMAP 的访问窗口",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::CpuRelax": {
+      "summary": "自旋等的时候让 CPU 歇一拍，省电也让别的线程往前跑",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::EnableCoreProtections": {
+      "summary": "有 SMEP 和 SMAP 就打开对应位，没报就跳过",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::EnableIrqAndHalt": {
+      "summary": "开中断紧接一条 halt，休眠和开中断合成一步",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::ex_table::ArmTable": {
+      "summary": "开机时把链接来的异常表按出错地址排好序",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::ex_table::FindFixup": {
+      "summary": "在排好序的表里二分查落点，查不到返回 0",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::ex_table::FindFixupFor": {
+      "summary": "拿链接好的异常表查落点，没有就返回 0",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::ex_table::SortEntries": {
+      "summary": "把异常表按出错地址就地排好",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::gdt::LoadOwnedGdt": {
+      "summary": "载入内核 GDT，顺手把本 CPU 的 TSS 地址填进表",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeFlagsLimitHigh": {
+      "summary": "把标志位和限长高四位拼成一个字节返回",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeKernelGdt": {
+      "summary": "拼出内核那七项 GDT，TSS 基址留 0 等运行时填",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeLongCodeDescriptor": {
+      "summary": "编出 64 位代码段描述符，L=1、D=0，返回 8 字节值",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeLongDataDescriptor": {
+      "summary": "编出 64 位数据段描述符，长模式下基址限长都不管",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeTssDescriptor": {
+      "summary": "把 TSS 的基址和限长编成 CPU 要的 16 字节描述符",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeUserCodeDescriptor": {
+      "summary": "编出用户代码段描述符，DPL 3、L=1",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::MakeUserDataDescriptor": {
+      "summary": "编出用户数据段描述符，DPL 3、D=0",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::operator|(SegmentAccess, SegmentAccess)": {
+      "summary": "把两份访问字节取值或起来返回",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::operator|(SegmentFlags, SegmentFlags)": {
+      "summary": "把两份标志位取值或起来返回",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::gdt::StoreGdtSnapshot": {
+      "summary": "把当前 GDTR 读进调用者给的快照",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::Halt": {
+      "summary": "停住 CPU 不再回来，中断状态照原样",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::HasRdrand": {
+      "summary": "查 CPUID 第 1 叶，看有没有 RDRAND 指令",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::HasSmap": {
+      "summary": "查 CPUID 第 7 叶，报告 CPU 支不支持 SMAP",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::HasSmep": {
+      "summary": "查 CPUID 第 7 叶，报告 CPU 支不支持 SMEP",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::idt::EncodeGate": {
+      "summary": "把处理函数地址和选择子编成 16 字节中断门",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::idt::InstallGate": {
+      "summary": "把编好的门写进中断表的指定向量",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::idt::LoadIdt": {
+      "summary": "一条 lidt 把这张中断表交给 CPU",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::InvalidatePage": {
+      "summary": "让一个页的 TLB 记录作废，改完映射要调",
+      "category": "TLB 维护"
+    },
+    "cinux::arch::irq::InstallApicBackend": {
+      "summary": "把中断服务接到固件给的 APIC 拓扑，就绪返回 true",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::irq::InstallIrqStubs": {
+      "summary": "给 16 条 IRQ 装入口，顺便占好定时器的位子",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::irq::InstallLocalInterrupts": {
+      "summary": "装上本地定时器和重调度的中断入口",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::IrqLockPolicy::enter": {
+      "summary": "把 rflags 快照存进槽里，再关中断",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::IrqLockPolicy::exit": {
+      "summary": "快照里中断开着才恢复，否则一直关着",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::IsCanonicalAddress": {
+      "summary": "判断地址高 17 位是否一致，写 MSR 前挡一层",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::isr::ArmRecoverableFault": {
+      "summary": "把一次异常挂成可恢复，已有挂着的返回 false",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::isr::InstallExceptionStubs": {
+      "summary": "给 32 个异常向量装桩，带错误码的分开装",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::isr::InstallPageFaultDiagnoser": {
+      "summary": "把解决函数拒掉的缺页交给唯一的诊断函数",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::isr::InstallPageFaultResolver": {
+      "summary": "给每个缺页装一个先问一遍的解决函数",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::isr::ReportFault": {
+      "summary": "报一次异常，能恢复就跳回，其余打印现场停机",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::isr::TakeRecoveredVector": {
+      "summary": "取上次恢复的向量号，没恢复过返回 256",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::LoadCr3": {
+      "summary": "把新页表根写进 CR3，切到那个地址空间",
+      "category": "TLB 维护"
+    },
+    "cinux::arch::per_cpu::InstallKernelGs": {
+      "summary": "把 GS 基址指到本 CPU 的数据块，两个基址都对",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::LoadTaskAddressRegs": {
+      "summary": "把换入任务的 FS 和 GS 基址写进 MSR",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::PerCpu::self": {
+      "summary": "取当前 CPU 的那块每 CPU 数据",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::ReadGsBase": {
+      "summary": "读回 GS 现在解析到的地址",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::ReadKernelGsBase": {
+      "summary": "读回 IA32_KERNEL_GSBASE 里的值",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::StoreTaskAddressRegs": {
+      "summary": "把换出任务的 FS 和 GS 基址存进两层引用",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::WriteFsBase": {
+      "summary": "把任务的 FS 基址立刻写进 MSR",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::per_cpu::WriteKernelGsBase": {
+      "summary": "写进 IA32_KERNEL_GSBASE，留给下次换任务",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::Pic::ack": {
+      "summary": "给正在服务的那条中断线回一个应答",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::Pic::remap": {
+      "summary": "把两片 8259 挪到 0x20 和 0x28，线全先关",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::Pic::unmask": {
+      "summary": "打开一条 IRQ 线，从片的线顺带开主片级联",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::RandomWord": {
+      "summary": "从共享发生器取一个字，还没播种就返回 0",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadCpuId": {
+      "summary": "问 CPUID 一次，带回四个回答字",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadCr0": {
+      "summary": "读 CR0 现在的开关位",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadCr2": {
+      "summary": "读上次缺页的地址，只在 14 号向量里有意义",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadCr3": {
+      "summary": "读 CR3 里的页表根物理地址",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadCr4": {
+      "summary": "读 CR4 里这颗 CPU 的功能开关",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadFirmwareString": {
+      "summary": "按名字读固件字符串，缺失、超长或格式坏返回 false",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReadMsr": {
+      "summary": "读一个 MSR，拼回完整 64 位值",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::ReloadCr3": {
+      "summary": "把 CR3 原值再写一遍，冲掉非全局 TLB 项",
+      "category": "TLB 维护"
+    },
+    "cinux::arch::RestoreFpu": {
+      "summary": "从对齐的镜像恢复浮点状态",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::RestoreIrq": {
+      "summary": "按快照恢复中断，存的时候开着才开",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::SaveAndDisableIrq": {
+      "summary": "存下 rflags 再关中断，快照留给 RestoreIrq",
+      "category": "中断与 IDT"
+    },
+    "cinux::arch::SaveFpu": {
+      "summary": "把当前浮点状态存进对齐的镜像",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::SeedKernelRandom": {
+      "summary": "用这台机器自己的事实播种共享发生器",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::smp::BootSecondaryCpus": {
+      "summary": "启动从 CPU 并等它们报上线，全到返回 true",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::smp::EnableSecondaryDispatch": {
+      "summary": "把初始化好的调度器交给从 CPU 的空转循环",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::smp::Mechanisms": {
+      "summary": "取某颗已上线 CPU 的机制快照",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::smp::NotifyRunnable": {
+      "summary": "有新活可跑时叫醒其他 CPU",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::smp::OnlineCpuCount": {
+      "summary": "数已经初始化完成的 CPU，含主 CPU",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::Stac": {
+      "summary": "置上 RFLAGS.AC，打开一条 SMAP 访问窗口",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::TryRdrand": {
+      "summary": "取一个 64 位硬件随机数，成功返回 true",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::tss::LoadTaskRegister": {
+      "summary": "把任务寄存器指到启动 TSS，选择子 0x18",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::tss::ReadTaskRegister": {
+      "summary": "读回任务寄存器里现在的选择子",
+      "category": "段与 GDT"
+    },
+    "cinux::arch::tss::Tss::self": {
+      "summary": "取当前 CPU 的任务状态段",
+      "category": "每 CPU 状态"
+    },
+    "cinux::arch::usermode::EnableFastSystemCalls": {
+      "summary": "打开 EFER.SCE 并设好 STAR，让系统调用可用",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::WriteCr0": {
+      "summary": "整字写进 CR0，调用者只该翻自己那几位",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::WriteCr4": {
+      "summary": "整字写进 CR4，不认识的位会让整条写失败",
+      "category": "MSR 与控制寄存器"
+    },
+    "cinux::arch::WriteMsr": {
+      "summary": "把 64 位值写进指定的 MSR",
+      "category": "MSR 与控制寄存器"
+    },
+    "ContextSwitch": {
+      "summary": "存下换出任务、换进下一个，正常不返回",
+      "category": "每 CPU 状态"
+    },
+    "JumpToRing3": {
+      "summary": "用 sysretq 掉进三环，之后不回来",
+      "category": "段与 GDT"
+    },
+    "TaskTrampoline": {
+      "summary": "新任务的第一条指令，开中断后跳进任务入口",
+      "category": "每 CPU 状态"
+    }
+  }
+}

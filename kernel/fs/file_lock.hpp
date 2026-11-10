@@ -84,7 +84,6 @@ public:
     /**
      * @brief         Drops every lock this open holds, wherever it holds them.
      * @param[in,out] file   The open letting go.
-     * @return        None
      * @note          LOCK_UN and the final-close observer share this exit;
      *          an open with no lock leaves nothing behind.
      * @since         0.1.0
@@ -112,7 +111,6 @@ private:
     /**
      * @brief         The final-close trampoline: drop the dead open's locks, then run the chain.
      * @param[in]     file   The open whose last descriptor just closed.
-     * @return        None
      * @note          Installed by compare-exchange, so an observer that
      *                arrived earlier (a readiness registry, say) still
      *                runs after this one finishes. Observers that arrive

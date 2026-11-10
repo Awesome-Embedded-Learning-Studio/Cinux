@@ -1,0 +1,41 @@
+{
+  "group": "kernel_interrupt",
+  "namespace": "cinux::interrupt::Irq",
+  "intro": "设备线与消息向量两套座位，分发时就地应答芯片",
+  "categories": [
+    "座位与开门",
+    "消息向量池",
+    "中断分发",
+    "芯片注入"
+  ],
+  "functions": {
+    "cinux::interrupt::Irq::dispatch": {
+      "summary": "跑该线上坐好的处理函数，再向芯片应答，未安置也照常应答",
+      "category": "中断分发"
+    },
+    "cinux::interrupt::Irq::dispatch_message": {
+      "summary": "跑消息向量上的处理函数，未安置的向量静默丢弃",
+      "category": "中断分发"
+    },
+    "cinux::interrupt::Irq::enable_line": {
+      "summary": "在注入的芯片上打开一条设备线，座位没安置也先开着",
+      "category": "座位与开门"
+    },
+    "cinux::interrupt::Irq::init": {
+      "summary": "注入中断芯片，把开门和应答接到这家芯片上",
+      "category": "芯片注入"
+    },
+    "cinux::interrupt::Irq::init_message_range": {
+      "summary": "交给服务一段消息向量区间，标明第一个座位和总数",
+      "category": "消息向量池"
+    },
+    "cinux::interrupt::Irq::register_handler": {
+      "summary": "在一条设备线上安置处理函数，传空指针即清掉这个座位",
+      "category": "座位与开门"
+    },
+    "cinux::interrupt::Irq::seat_message": {
+      "summary": "占下一个空消息向量，返回向量号，没注入区间或池满报错",
+      "category": "消息向量池"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "group": "base_region",
+  "namespace": "cinux::base::memory",
+  "intro": "半开内存区间的重叠判定，端点相碰不算重叠。",
+  "categories": [
+    "区间重叠判定",
+    "半开边界"
+  ],
+  "functions": {
+    "is_intersects": {
+      "summary": "判断两个半开区间是否至少共享一个字节",
+      "category": "区间重叠判定",
+      "example": "#include <cinux/region/memory_region.hpp>\n\nusing namespace cinux::base::memory;\n\nvoid Example() {\n    constexpr MemoryRegion first_page{0x1000, 0x2000};\n    constexpr MemoryRegion shared_tail{0x1F00, 0x3000};\n    static_assert(first_page.is_intersects(shared_tail));\n    // true · 两个区间在 0x1F00..0x2000 这一段重叠\n\n    constexpr MemoryRegion next_page{0x2000, 0x3000};\n    static_assert(!first_page.is_intersects(next_page));\n    // false · 端点 0x2000 相碰不算重叠\n}"
+    }
+  }
+}

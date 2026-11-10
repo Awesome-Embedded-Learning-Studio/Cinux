@@ -143,7 +143,6 @@ public:
 
     /**
      * @brief         Drops this hold early; destruction runs empty after.
-     * @return        None.
      * @since         0.1.0
      * @ingroup       base_ptr
      */

@@ -1,0 +1,97 @@
+{
+  "group": "base_bit_ops",
+  "namespace": "cinux::base::bit",
+  "intro": "位段切片、字段读写与位图管理的常用位操作",
+  "categories": [
+    "位段切片",
+    "字段读写",
+    "位测试与掩码",
+    "范围标记",
+    "位图管理"
+  ],
+  "functions": {
+    "BitAt": {
+      "summary": "返回覆盖某一位、宽度为一的位段",
+      "category": "字段读写"
+    },
+    "adopt": {
+      "summary": "接管已有位图存储，保留原比特并重算置位数",
+      "category": "位图管理"
+    },
+    "clear_range": {
+      "summary": "把从 base 开始的连续 count 位清零",
+      "category": "范围标记"
+    },
+    "find_clear_run": {
+      "summary": "找第一段够长的连续空位，返回起始下标或无效值",
+      "category": "位图管理"
+    },
+    "init": {
+      "summary": "绑定调用方提供的字数组，并把所有位清零",
+      "category": "位图管理"
+    },
+    "set_all": {
+      "summary": "把容量内所有位置一，末尾超出容量的位不置",
+      "category": "范围标记"
+    },
+    "set_range": {
+      "summary": "把从 base 开始的连续 count 位置一",
+      "category": "范围标记"
+    },
+    "words_for": {
+      "summary": "算出容纳给定比特数需要多少个 64 位字",
+      "category": "位图管理",
+      "example": "#include <cinux/bit_ops/bitmap.hpp>\n\nusing namespace cinux::base::bit;\n\nvoid Example() {\n    constexpr auto kWords = Bitmap::words_for(100);  // kWords = 2 · 100 位要两个 64 位字\n    static_assert(kWords == 2);\n    static_assert(Bitmap::words_for(64) == 1);  // 恰好一个字\n}"
+    },
+    "BitMask": {
+      "summary": "用现成的字值直接构造掩码，不改动任何比特",
+      "category": "位测试与掩码"
+    },
+    "deposit": {
+      "summary": "先清掉位段再写入值，段外相邻位保持原样",
+      "category": "字段读写"
+    },
+    "extract": {
+      "summary": "把位段右对齐取出，返回该字段的值",
+      "category": "字段读写",
+      "example": "#include <cinux/bit_ops/bitmask.hpp>\n\nusing namespace cinux::base::bit;\n\nvoid Example() {\n    constexpr BitMask<unsigned> kStatus{0xABCD1234u};\n\n    constexpr auto kField = kStatus.extract(BitRange{.low = 8, .width = 8});\n    // kField = 0x12 · 第 15..8 位，右对齐取出\n    static_assert(kField == 0x12u);\n}"
+    },
+    "field_mask": {
+      "summary": "生成宽度为 width、右对齐的全一掩码",
+      "category": "字段读写"
+    },
+    "has": {
+      "summary": "检查掩码里是否有任意一位置位",
+      "category": "位测试与掩码"
+    },
+    "operator|": {
+      "summary": "合并两个掩码的置位，返回并集",
+      "category": "位测试与掩码"
+    },
+    "HighByte": {
+      "summary": "取整数第 15 到 8 位，返回高字节",
+      "category": "位段切片"
+    },
+    "HighNibble": {
+      "summary": "取整数第 7 到 4 位，返回高半字节",
+      "category": "位段切片"
+    },
+    "LowByte": {
+      "summary": "取整数最低 8 位，返回低字节",
+      "category": "位段切片",
+      "example": "#include <cinux/bit_ops/bit_ops.hpp>\n\nusing namespace cinux::base::bit;\n\nvoid Example() {\n    constexpr auto kLow = LowByte(0xABCDu);  // kLow = 0xCD · 205，只留最低 8 位\n    static_assert(kLow == 0xCDu);\n}"
+    },
+    "LowNibble": {
+      "summary": "取整数最低 4 位，返回低半字节",
+      "category": "位段切片"
+    },
+    "MaskBit": {
+      "summary": "在指定位上生成只含该位的掩码",
+      "category": "位测试与掩码"
+    },
+    "NibbleAt": {
+      "summary": "从指定起始位取出连续四位",
+      "category": "位段切片"
+    }
+  }
+}

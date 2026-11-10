@@ -1,0 +1,31 @@
+{
+  "group": "base_async",
+  "namespace": "cinux::base",
+  "intro": "把异步完成登记成一次性回调，触发后自动清空",
+  "categories": [
+    "回调登记",
+    "状态查询",
+    "完成触发"
+  ],
+  "functions": {
+    "arm": {
+      "summary": "登记一个完成处理函数及其所属对象",
+      "category": "回调登记",
+      "example": "#include <cinux/async.hpp>\n\nusing namespace cinux::base;\n\nstruct DiskSlot {\n    unsigned long last_status = 0;\n    unsigned long last_length = 0;\n};\n\nvoid OnDone(DiskSlot& slot, unsigned long status, unsigned long length) {\n    slot.last_status = status;\n    slot.last_length = length;\n}\n\nvoid Example() {\n    DiskSlot slot;\n    AsyncCallback<DiskSlot> done;\n\n    done.arm(&OnDone, &slot);\n    // done.armed() == true · 回调已经登记，等完成中断来触发\n    const bool waiting = done.armed();\n    (void)waiting;\n\n    // 同一个回调再登记一次会顶掉旧的，不会叠成两个\n    done.arm(&OnDone, &slot);\n}"
+    },
+    "armed": {
+      "summary": "查询当下是否登记着待触发的回调",
+      "category": "状态查询"
+    },
+    "disarm": {
+      "summary": "清掉已登记的回调，不触发它",
+      "category": "回调登记",
+      "example": "#include <cinux/async.hpp>\n\nusing namespace cinux::base;\n\nstruct DiskSlot {\n    unsigned long last_status = 0;\n};\n\nvoid OnDone(DiskSlot& slot, unsigned long status, unsigned long length) {\n    slot.last_status = status;\n    (void)length;\n}\n\nvoid Example() {\n    DiskSlot slot;\n    AsyncCallback<DiskSlot> done;\n    done.arm(&OnDone, &slot);\n\n    done.disarm();\n    // done.armed() == false · 登记清掉了，回调不会被触发\n    // slot.last_status 仍是 0，因为 OnDone 一次都没跑\n    const bool cleared = !done.armed();\n    (void)cleared;\n}"
+    },
+    "invoke": {
+      "summary": "触发一次回调，触发前先清掉登记",
+      "category": "完成触发",
+      "example": "#include <cinux/async.hpp>\n\nusing namespace cinux::base;\n\nstruct DiskSlot {\n    unsigned long last_status = 0;\n    unsigned long last_length = 0;\n    int calls = 0;\n};\n\nvoid OnDone(DiskSlot& slot, unsigned long status, unsigned long length) {\n    slot.last_status = status;\n    slot.last_length = length;\n    ++slot.calls;\n}\n\nvoid Example() {\n    DiskSlot slot;\n    AsyncCallback<DiskSlot> done;\n    done.arm(&OnDone, &slot);\n\n    done.invoke(0, 4096);\n    // slot.last_status = 0，slot.last_length = 4096，slot.calls 变成 1\n    // done.armed() == false · 触发前先清空登记\n\n    done.invoke(0, 4096);\n    // 第二次触发碰到空座，处理器不再跑，slot.calls 还是 1\n    const bool empty = !done.armed();\n    (void)empty;\n}"
+    }
+  }
+}

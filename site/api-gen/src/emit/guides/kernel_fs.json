@@ -1,0 +1,461 @@
+{
+  "group": "kernel_fs",
+  "namespace": "cinux::fs",
+  "intro": "让内核用一套路径和节点接口访问设备、内存盘和 ext2 盘",
+  "categories": [
+    "ext2 布局",
+    "设备节点",
+    "打开文件表",
+    "目录树",
+    "路径解析",
+    "挂载管理",
+    "管道",
+    "进程信息"
+  ],
+  "functions": {
+    "cinux::fs::DevFs::adopt_open": {
+      "summary": "打开时决定入表的节点，克隆设备换成新的主节点",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::frame_at": {
+      "summary": "给出映射偏移对应的物理页帧，不支持或越界就报错",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::ioctl": {
+      "summary": "把一次提问转给设备，设备没有提问接口回 -ENOTTY",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::lookup": {
+      "summary": "按相对路径找节点，名字没有就报 kNotFound",
+      "category": "目录树"
+    },
+    "cinux::fs::DevFs::make_dir": {
+      "summary": "建目录的请求一律回 kNotSupported",
+      "category": "目录树"
+    },
+    "cinux::fs::DevFs::make_file": {
+      "summary": "建文件的请求一律回 kNotSupported",
+      "category": "目录树"
+    },
+    "cinux::fs::DevFs::ops_of": {
+      "summary": "取节点背后的设备操作表，谁把它放进树里都认",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::read": {
+      "summary": "从设备读一段数据，偏移忽略，根目录报错",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::read_dir": {
+      "summary": "按序号取 dev 根目录的一项，越过末尾返回 false",
+      "category": "目录树"
+    },
+    "cinux::fs::DevFs::readable": {
+      "summary": "问设备现在读不读得动，没有就绪回调的设备总是可以",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::register_device": {
+      "summary": "把设备按名字挂进扁平命名空间，重名或表满时报错",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::release": {
+      "summary": "放掉一次打开对设备的占用，与 retain 配对",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::retain": {
+      "summary": "为一次打开占住设备节点，转给设备的持有回调",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::set_dynamic_lookup": {
+      "summary": "装上查表落空后用的解析器，传空指针卸载",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::set_open_adopter": {
+      "summary": "装上打开时换节点的回调，传空指针卸载",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::stat": {
+      "summary": "读出节点元数据，根是目录，设备填字符设备号",
+      "category": "设备节点"
+    },
+    "cinux::fs::DevFs::unlink": {
+      "summary": "删节点的请求一律回 kNotSupported",
+      "category": "目录树"
+    },
+    "cinux::fs::DevFs::write": {
+      "summary": "把数据写给设备，偏移忽略，根目录时报错",
+      "category": "设备节点"
+    },
+    "cinux::fs::ext2::DecodeBlockSize": {
+      "summary": "把超级块里的移位数换算成块字节数",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::DirEntryLength": {
+      "summary": "算出一条目录项占的长度，按 4 字节对齐",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::adopt_open": {
+      "summary": "打开时原样交回节点，磁盘后端没有克隆打开",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::Ext2": {
+      "summary": "绑定块缓存和时钟，时钟为空时时间戳写零",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::ioctl": {
+      "summary": "盘上的节点都不是设备，一律回 -ENOTTY",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::lookup": {
+      "summary": "按相对路径逐级找节点，元数据读不动报 kIOError",
+      "category": "目录树"
+    },
+    "cinux::fs::ext2::Ext2::make_dir": {
+      "summary": "在磁盘上建目录并返回新节点，父目录不存在就报错",
+      "category": "目录树"
+    },
+    "cinux::fs::ext2::Ext2::make_file": {
+      "summary": "在磁盘上建文件并返回新节点，父目录不存在就报错",
+      "category": "目录树"
+    },
+    "cinux::fs::ext2::Ext2::mount": {
+      "summary": "读并校验超级块和组描述符，挂载前必须先跑一次",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::read": {
+      "summary": "读文件字节并返回长度，空洞读回零，越层报不支持",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::read_dir": {
+      "summary": "按序号取一条目录项，越过末尾返回 false",
+      "category": "目录树"
+    },
+    "cinux::fs::ext2::Ext2::readable": {
+      "summary": "总是返回真，盘上的字节随时可读",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::release": {
+      "summary": "打开关闭时被调用，盘上 inode 不靠引用保活",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::retain": {
+      "summary": "打开时占住节点，盘上 inode 总在表里，不用做事",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::stat": {
+      "summary": "读出节点在盘上的元数据，读不动报 kIOError",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::Ext2::unlink": {
+      "summary": "删文件或只剩点目录的空目录，根不给删",
+      "category": "目录树"
+    },
+    "cinux::fs::ext2::Ext2::write": {
+      "summary": "按偏移写文件字节并增长文件，空间不够就报错",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::GroupOf": {
+      "summary": "由 inode 号算出它落在哪个块组，从 0 数起",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::IndexOfInode": {
+      "summary": "算出 inode 在本组 inode 表里的下标",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::IsDirectoryMode": {
+      "summary": "看 i_mode 的类型段是不是目录",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::IsRegularMode": {
+      "summary": "看 i_mode 的类型段是不是普通文件",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::IsSymlinkMode": {
+      "summary": "看 i_mode 的类型段是不是符号链接",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::ext2::MapFileBlock": {
+      "summary": "给出文件块用的 i_block 槽和索引，超出双层报不支持",
+      "category": "ext2 布局"
+    },
+    "cinux::fs::FileTable::~FileTable": {
+      "summary": "析构时关掉表里所有还开着的描述符",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::adopt": {
+      "summary": "把已有的打开挂进表，表满报 kOutOfMemory",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::adopt_at": {
+      "summary": "挂到指定描述符上，号被占报 kAlreadyExists",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::adopt_from": {
+      "summary": "从下限起找最小空位挂上打开，没有空位就报错",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::alloc": {
+      "summary": "为一次打开分配描述符号，表满报 kOutOfMemory",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::cloexec": {
+      "summary": "查一个描述符的执行位，号越界返回假",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::close_all": {
+      "summary": "关掉表里所有活着的描述符，重复调用无害",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::close_on_exec": {
+      "summary": "exec 成功后清掉全部执行位，顺带放掉这些打开",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::FileTable": {
+      "summary": "空表起步，不持有任何描述符",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::free": {
+      "summary": "释放描述符供重用，号越界报 kInvalidArgument",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::get": {
+      "summary": "取一条打开的持有引用，号越界或空位各报一错",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::set_cloexec": {
+      "summary": "设置或清掉描述符的执行位，号越界就报错",
+      "category": "打开文件表"
+    },
+    "cinux::fs::FileTable::shared": {
+      "summary": "交出打开的共享持有，跨表保住同一个游标",
+      "category": "打开文件表"
+    },
+    "cinux::fs::RamFs::adopt_open": {
+      "summary": "打开时原样交回节点，内存盘没有克隆打开",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::ioctl": {
+      "summary": "内存盘上的节点都不是设备，一律回 -ENOTTY",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::lookup": {
+      "summary": "按相对路径找节点，名字没有或中途遇到文件就报错",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::make_dir": {
+      "summary": "在内存树里建目录并返回新节点，父目录不存在就报错",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::make_file": {
+      "summary": "在内存树里建文件并返回新节点，父目录不存在就报错",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::read": {
+      "summary": "读文件字节并返回长度，越界返回零，目录报错",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::read_dir": {
+      "summary": "按创建顺序取一个子项，越过末尾返回 false",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::readable": {
+      "summary": "总是返回真，内存里的字节随时可读",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::release": {
+      "summary": "放掉打开对节点的引用，最后一个引用一放就销毁",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::retain": {
+      "summary": "占住节点，删掉后仍活到引用全部放完",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::stat": {
+      "summary": "读出节点元数据，时间戳总是零，内存盘不记时钟",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::unlink": {
+      "summary": "删文件或空目录，根和带斜杠的路径都拒绝",
+      "category": "目录树"
+    },
+    "cinux::fs::RamFs::write": {
+      "summary": "按偏移写文件字节并增长缓冲，空洞补零",
+      "category": "目录树"
+    },
+    "cinux::fs::AdoptConsoleForeground": {
+      "summary": "指定前台进程组，让控制台键盘归它所有，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::DirNode::adopt": {
+      "summary": "把一个已填好名字的节点收为最新子项，无返回值",
+      "category": "目录树"
+    },
+    "cinux::fs::DirNode::child_at": {
+      "summary": "按序号取子节点，越界返回空指针",
+      "category": "目录树"
+    },
+    "cinux::fs::DirNode::disown": {
+      "summary": "按名字摘下子节点交给调用者删，没有返回空",
+      "category": "目录树"
+    },
+    "cinux::fs::DirNode::find": {
+      "summary": "按名字找子节点，找不到返回空指针",
+      "category": "目录树"
+    },
+    "cinux::fs::DirNode::named": {
+      "summary": "比较节点名与给定名字是否逐字节相同，返回布尔值",
+      "category": "目录树"
+    },
+    "cinux::fs::EraseFs": {
+      "summary": "把某类后端擦成统一的 FsOps 函数表",
+      "category": "挂载管理"
+    },
+    "cinux::fs::FileLocks::attempt": {
+      "summary": "按操作字加共享或独占锁，冲突返 kWouldBlock",
+      "category": "进程信息"
+    },
+    "cinux::fs::FileLocks::final_close": {
+      "summary": "最后一次关闭时清掉该打开在表里的锁，无返回值",
+      "category": "进程信息"
+    },
+    "cinux::fs::FileLocks::release": {
+      "summary": "放掉该打开持有的全部锁，没有锁时什么也不做",
+      "category": "进程信息"
+    },
+    "cinux::fs::FileWorld::init": {
+      "summary": "挂上根卷和 /dev 设备表，无返回值，只跑一次",
+      "category": "挂载管理"
+    },
+    "cinux::fs::FileWorld::mount_tmpfs": {
+      "summary": "在目标目录挂 tmpfs，失败返回挂载表的形状或空间错误",
+      "category": "挂载管理"
+    },
+    "cinux::fs::FileWorld::mounts_text": {
+      "summary": "把挂载表写进缓冲，返回写出的字节数",
+      "category": "挂载管理"
+    },
+    "cinux::fs::FileWorld::resolve": {
+      "summary": "解析绝对路径，返回命中的后端和余下路径，失败返解析错",
+      "category": "路径解析"
+    },
+    "cinux::fs::FileWorld::seat_console_streams": {
+      "summary": "给文件表装好 0 到 2 号控制台流，失败返查找错",
+      "category": "设备节点"
+    },
+    "cinux::fs::FileWorld::umount_tmpfs": {
+      "summary": "摘掉挂在此处的 tmpfs，没有返回 kNotFound",
+      "category": "挂载管理"
+    },
+    "cinux::fs::MakeDeviceId": {
+      "summary": "把主次设备号打包成一个数，返回打包结果",
+      "category": "设备节点"
+    },
+    "cinux::fs::OpenFile::OpenFile": {
+      "summary": "记下一次打开并挂上后端，引用计数从一算起，无返回值",
+      "category": "进程信息"
+    },
+    "cinux::fs::Pipe::add_writer": {
+      "summary": "记下一个写端到来，管道创建时每个写端调一次",
+      "category": "管道"
+    },
+    "cinux::fs::Pipe::drop_writer": {
+      "summary": "记下一个写端离开，最后一个会唤醒所有读者",
+      "category": "管道"
+    },
+    "cinux::fs::Pipe::identity": {
+      "summary": "返回这条管道的唯一编号，两端答同一个数",
+      "category": "管道"
+    },
+    "cinux::fs::Pipe::push_available": {
+      "summary": "往管道追加一个字节，返回 Ok 或阻塞、断管、IO 错",
+      "category": "管道"
+    },
+    "cinux::fs::Pipe::try_push": {
+      "summary": "非阻塞写若干字节，返回写入数或阻塞、断管错",
+      "category": "管道"
+    },
+    "cinux::fs::PipeOps": {
+      "summary": "返回管道两端共用的接口表指针",
+      "category": "管道"
+    },
+    "cinux::fs::ProcFs::ioctl": {
+      "summary": "对任何句柄都答 -ENOTTY，进程事实不是设备",
+      "category": "进程信息"
+    },
+    "cinux::fs::ProcFs::release": {
+      "summary": "释放描述符对节点的占用，本实现什么也不做",
+      "category": "进程信息"
+    },
+    "cinux::fs::ProcFs::retain": {
+      "summary": "给打开的描述符加节点引用，本实现什么也不做",
+      "category": "进程信息"
+    },
+    "cinux::fs::ProcFs::set_source": {
+      "summary": "装上本实例要回答的进程事实源，只借用不复制",
+      "category": "进程信息"
+    },
+    "cinux::fs::ReadFilePrefix": {
+      "summary": "读文件至多 limit 字节，返回缓冲与字节数，短读算错",
+      "category": "路径解析"
+    },
+    "cinux::fs::ReadWholeFile": {
+      "summary": "读完整个文件，返回缓冲和字节数，短读算 IO 错",
+      "category": "路径解析"
+    },
+    "cinux::fs::RegisterBuiltinDevices": {
+      "summary": "注册 null 和 zero 两个纯计算设备，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::RegisterConsoleDevice": {
+      "summary": "把控制台注册进设备模型和 devfs，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::RegisterFramebufferDevice": {
+      "summary": "注册 /dev/fb0，把显存帧记成硬件所有，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::RegisterInputDevices": {
+      "summary": "注册 event0 和 event1 两个输入设备，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::RegisterPtyDevices": {
+      "summary": "注册 ptmx 和伪终端对解析器，无返回值",
+      "category": "设备节点"
+    },
+    "cinux::fs::SplitDeviceId": {
+      "summary": "把打包的设备号还原成主次号，返回还原结果",
+      "category": "设备节点"
+    },
+    "cinux::fs::UstarReader::next": {
+      "summary": "取归档下一个条目，读完返假，截断报参数错",
+      "category": "目录树"
+    },
+    "cinux::fs::UstarReader::UstarReader": {
+      "summary": "把读取游标指到归档首字节，无返回值",
+      "category": "目录树"
+    },
+    "cinux::fs::Vfs::mount": {
+      "summary": "把后端挂到前缀上，失败返参数、重复或表满",
+      "category": "挂载管理"
+    },
+    "cinux::fs::Vfs::mounts_text": {
+      "summary": "把挂载表写成文本，返回写入的字节数",
+      "category": "挂载管理"
+    },
+    "cinux::fs::Vfs::resolve": {
+      "summary": "解析绝对路径，返回后端和余下路径，失败返参数或未找到",
+      "category": "路径解析"
+    },
+    "cinux::fs::Vfs::unmount": {
+      "summary": "按挂载点摘掉后端，失败返形状错或未找到",
+      "category": "挂载管理"
+    },
+    "cinux::fs::WalkPath": {
+      "summary": "从根沿路径走，返回末节点，失败返未找到或不是目录",
+      "category": "路径解析"
+    },
+    "cinux::fs::WireKernelProcSource": {
+      "summary": "把内核自己的进程事实接给该 procfs，无返回值",
+      "category": "进程信息"
+    }
+  }
+}

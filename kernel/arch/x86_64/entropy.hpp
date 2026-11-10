@@ -26,7 +26,6 @@ namespace cinux::arch {
  * @brief         Seeds the shared generator from this machine's own
  *                facts.
  *
- * @return        None.
  * @note          Runs once, early in the boot; before it runs, draws
  *                answer zero and every layout stays at its compiled-in
  *                seat — degraded but honest, never a trap.

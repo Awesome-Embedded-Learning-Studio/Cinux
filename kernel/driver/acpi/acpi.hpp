@@ -126,7 +126,6 @@ struct Fadt {
 /**
  * @brief         Cuts the power through the PM1a control register.
  * @param[in]     fadt   The table FindFadt handed back.
- * @return        None
  * @note          Sleep type zero with the enable bit set is QEMU's S5
  *                encoding; real firmware spells the type in the DSDT's
  *                \_S5 package, a later station's parse. The write is

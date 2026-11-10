@@ -27,7 +27,6 @@ namespace cinux::proc {
 /**
  * @brief         Seats the current-task fault resolver into the reporter.
  *
- * @return        None.
  * @note          After this runs, every page fault is offered to CoW
  *                and then to demand filling before it dies. Safe before
  *                the first task exists: with no current task the seat

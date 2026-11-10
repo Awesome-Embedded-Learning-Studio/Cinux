@@ -166,7 +166,6 @@ bool SendSignal(Task& target, int number);
  *
  * @param[in]     pgid     The group's id.
  * @param[in]     number   The signal to deliver.
- * @return        None
  * @note          The walk covers the whole task roll; members gone
  *                before their turn simply miss the news. Terminals
  *                use this for what their foreground group is owed.

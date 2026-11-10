@@ -63,7 +63,6 @@ static_assert(offsetof(Tss, io_bitmap_end) == 0x66, "the I/O bitmap offset lives
 
 /**
  * @brief         Point the task register at the boot TSS.
- * @return        None.
  * @note          ltr with selector 0x18; the descriptor was already
  *                encoded by LoadOwnedGdt. Safe only while interrupts
  *                are off, which is also when every bring-up runs.

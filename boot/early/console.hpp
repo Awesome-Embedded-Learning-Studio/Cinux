@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-namespace cinux::console {
+namespace cinux::boot_early {
 
 /** @brief COM1 register block base. */
 constexpr uint16_t kCom1Base = 0x3F8;
@@ -54,7 +54,6 @@ constexpr PortWrite kInitSequence[] = {
  *
  * @param[in]     port   Destination port.
  * @param[in]     value  Byte to emit.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -85,7 +84,6 @@ inline uint8_t InB(uint16_t port) {
 /**
  * @brief         Programs COM1 for polling output.
  *
- * @return        None
  * @note          Idempotent: 115200 8N1, FIFOs on, interrupts off.
  * @warning       None
  * @throws        None
@@ -102,7 +100,6 @@ inline void InitConsole() {
  * @brief         Sends one character, waiting for the line to be ready.
  *
  * @param[in]     character   Byte to transmit.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -120,7 +117,6 @@ inline void PutChar(char character) {
  * @brief         Sends a NUL-terminated string.
  *
  * @param[in]     text   String to emit.
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -137,7 +133,6 @@ inline void PutString(const char* text) {
 /**
  * @brief         Parks the current world forever.
  *
- * @return        None
  * @note          None
  * @warning       None
  * @throws        None
@@ -150,4 +145,4 @@ inline void PutString(const char* text) {
     }
 }
 
-}  // namespace cinux::console
+}  // namespace cinux::boot_early

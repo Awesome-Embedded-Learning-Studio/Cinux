@@ -38,7 +38,6 @@ struct KallsymEntry {
  * @param[in]     table    Sorted ascending by addr; caller-owned storage
  *                         that must outlive every later lookup.
  * @param[in]     count    Entry count; zero installs an empty table.
- * @return        None.
  * @note          The one seam for every injection source: a host test
  *                hands a hand-built array, the kernel image points this
  *                at its carried-in section. Installing twice simply
@@ -91,7 +90,6 @@ extern const unsigned long long kBuiltInKallsymsCount __attribute__((weak));
 
 /**
  * @brief         Install the built-in table when the image carries one.
- * @return        None.
  * @note          The bring-up seam: call once early so that even the first
  *                assertion or fault dumps names. A no-op in images without
  *                a table.

@@ -424,6 +424,8 @@ public:
     /**
      * @brief         Places a backend at a path prefix.
      *
+ * @param[in]     type_name   Diagnostic label for the mount.
+ * @param[in]     lifetime   Lease holding the mount alive; may be null.
      * @param[in]     prefix   Mount point; must start with '/', carry no
      *                        trailing '/' unless it is exactly "/", and
      *                        stay under kFsPathMax.

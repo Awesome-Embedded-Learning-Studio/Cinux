@@ -26,7 +26,7 @@ namespace cinux::debug {
 /**
  * @brief         Print the panic aftermath and park the machine.
  * @param[in]     frame_base   rbp of the frame the walk starts from.
- * @return        None. Does not return.
+ * @note          Does not return.
  * @note          Three sections follow the caller's reason line: the
  *                backtrace (named when a symbol table is installed,
  *                raw addresses otherwise), the current task (or the

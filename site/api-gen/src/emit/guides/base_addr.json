@@ -1,0 +1,16 @@
+{
+  "group": "base_addr",
+  "namespace": "cinux::base",
+  "intro": "把物理地址做成独立类型，避免与长度和页号混用",
+  "categories": [
+    "地址偏移",
+    "地址类型"
+  ],
+  "functions": {
+    "offset": {
+      "summary": "返回比当前地址高若干字节的新地址",
+      "category": "地址偏移",
+      "example": "#include <cinux/addr.hpp>\n\nusing namespace cinux::base;\n\nvoid Example() {\n    // 0x1000 起的物理页，往后挪 0x200 字节\n    constexpr PhysAddr kPage{0x1000};\n\n    constexpr PhysAddr kInside = kPage.offset(0x200);\n    // kInside.raw = 0x1200 · 页内偏移加在地址上，类型仍是物理地址\n    static_assert(kInside.raw == 0x1200);\n\n    constexpr PhysAddr kNext = kPage.offset(4096);\n    // kNext.raw = 0x2000 · 整页挪过去，落在下一页的页首\n    static_assert(kNext.raw == 0x2000);\n}"
+    }
+  }
+}

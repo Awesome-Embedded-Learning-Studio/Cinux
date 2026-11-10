@@ -81,7 +81,6 @@ static_assert(offsetof(PerCpu, syscall_frame) == 24, "assembly banks the frame a
 /**
  * @brief         Point both GS bases at the per-CPU block.
  * @param[in]     cpu_id Logical processor index in the static array.
- * @return        None.
  * @note          Bring-up only. IA32_GS_BASE is the one live MSR in
  *                every ring from here on — the block never leaves it,
  *                and the entry assembly addresses the block with no
@@ -99,7 +98,6 @@ void InstallKernelGs(unsigned int cpu_id = 0);
  * @param[out]    gs_base    Receives the task's own GS base, read from
  *                           IA32_KERNEL_GSBASE where the switch staged
  *                           it.
- * @return        None.
  * @note          Call only while the outgoing task still holds the
  *                CPU, and only from kernel context — IA32_GS_BASE
  *                never changes rings, so the staging MSR is the sole
@@ -115,7 +113,6 @@ void StoreTaskAddressRegs(unsigned long long& fs_base, unsigned long long& gs_ba
  * @param[in]     gs_base    The task's own GS base, staged into
  *                           IA32_KERNEL_GSBASE for the next save and
  *                           the entry path's benefit.
- * @return        None.
  * @note          The FS write takes effect for the running code at
  *                once; kernel code keeps off FS-relative addressing,
  *                so the outgoing task is unaffected until the switch.
@@ -128,7 +125,6 @@ void LoadTaskAddressRegs(unsigned long long fs_base, unsigned long long gs_base)
  * @brief         Make a value the live FS base.
  * @param[in]     base   The canonical address FS-relative addressing
  *                       resolves through from now on.
- * @return        None.
  * @note          The arch_prctl path's immediate write: the calling
  *                task is the one holding the CPU, so its context word
  *                and this MSR move together.
@@ -140,7 +136,6 @@ void WriteFsBase(unsigned long long base);
 /**
  * @brief         Stage a value as the task's own GS base.
  * @param[in]     base   The canonical address to track for this task.
- * @return        None.
  * @note          Lands in IA32_KERNEL_GSBASE, the staging MSR — the
  *                live IA32_GS_BASE stays on the per-CPU block in
  *                every ring, so the next switch saves exactly what

@@ -40,7 +40,6 @@ namespace cinux::driver {
  *
  * @param[in]     words   The 256 identify words as the drive wrote them.
  * @param[out]    model   Forty bytes of room; the string lands NUL-ended.
- * @return        None
  * @note          The drive strings are byte-swapped per word, so the
  *                      copy un-swaps as it goes.
  * @warning       None

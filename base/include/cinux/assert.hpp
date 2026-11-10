@@ -27,7 +27,6 @@ namespace cinux::base::safety {
  * @param[in]     k_message   Description of the violated condition.
  * @param[in]     loc         Capture point of the failed check; defaults
  *                            to the caller's location.
- * @return        None
  * @note          Marked [[noreturn]]. Defined once per world and selected
  *                at link time; the host definition prints to stderr
  *                (unbuffered, so output survives abort) and aborts. The
@@ -47,7 +46,6 @@ namespace cinux::base::safety {
  * @param[in]     condition_result   Condition to verify.
  * @param[in]     k_message          Description used in the failure report.
  * @param[in]     loc                Capture point; defaults to the caller.
- * @return        None
  * @note          Inline on purpose: a single forwarding branch, kept at the
  *                call site so the default source_location argument captures
  *                the actual checking location.

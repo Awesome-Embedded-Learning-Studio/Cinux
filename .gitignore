@@ -53,6 +53,7 @@ coverage/
 *.gcov
 
 node_modules/
+.pnpm-store/
 site/.vitepress/dist/
 site/.vitepress/cache/
 site/.vitepress/.temp/
@@ -65,3 +66,8 @@ dist-single/
 .venv/
 meta/site/.vitepress/config/.search-cache/
 .note/
+# api-gen 中间产物与生成数据
+site/api-gen/xml/
+site/api-gen/dist/
+site/api-gen/generated/
+document/api/

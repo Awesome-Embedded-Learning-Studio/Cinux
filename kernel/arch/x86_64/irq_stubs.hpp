@@ -25,7 +25,6 @@ namespace cinux::arch::irq {
 /**
  * @brief         Arms all sixteen IRQ gates and seats the heartbeat.
  *
- * @return        None
  * @note          Safe to call once the table is live (lidt already
  *                done): gates take effect as they are written. The
  *                timer's seat in the dispatch table is filled here,

@@ -97,7 +97,6 @@ inline unsigned long LoadWord(unsigned long address) {
  *
  * @param[in]     address   Linear address to write.
  * @param[in]     value     Word to store.
- * @return        None
  * @note          volatile by contract: the write must land before any
  *                world switch that consumes it.
  * @warning       None

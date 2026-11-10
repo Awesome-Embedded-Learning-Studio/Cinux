@@ -14,6 +14,9 @@ namespace cinux::syscall {
 long long HandleEventfd2(const SyscallFrame& frame);
 /**
  * @brief Answer readiness when the open belongs to an event counter.
+ * @param[in] file The eventfd open description being polled.
+ * @param[in] events Poll event bits the caller cares about.
+ * @param[out] ready Receives the bits that are ready now.
  * @param[out] write_sequence Optional successful-write sequence for edge notifications.
  * @return true for an event counter, false for another open description.
  */

@@ -40,7 +40,6 @@ unsigned long long SaveAndDisableIrq();
 /**
  * @brief         Put the interrupt state back as the snapshot found it.
  * @param[in]     snapshot   What SaveAndDisableIrq handed out.
- * @return        None.
  * @note          Interrupts return only if they were on at the
  *                matching save; the no-op host definition keeps the
  *                contract by doing nothing at all.

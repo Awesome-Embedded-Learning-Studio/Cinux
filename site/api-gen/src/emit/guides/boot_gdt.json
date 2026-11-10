@@ -1,0 +1,33 @@
+{
+  "group": "boot_gdt",
+  "namespace": "cinux::boot::gdt",
+  "intro": "造启动用的 GDT 描述符，供保护模式与长模式切换",
+  "categories": [
+    "整表构建",
+    "平坦描述符",
+    "长模式描述符",
+    "实模式返回段"
+  ],
+  "functions": {
+    "MakeBootGdt": {
+      "summary": "拼出六项启动 GDT，返回 48 字节的表值",
+      "category": "整表构建"
+    },
+    "MakeCode16Descriptor": {
+      "summary": "造 16 位代码段描述符，供远跳切回实模式",
+      "category": "实模式返回段"
+    },
+    "MakeFlatDescriptor": {
+      "summary": "按给定访问字节造基址零、限长 4GB 的平坦描述符",
+      "category": "平坦描述符"
+    },
+    "MakeLongCodeDescriptor": {
+      "summary": "造长模式 64 位代码段描述符，L=1、D=0",
+      "category": "长模式描述符"
+    },
+    "MakeLongDataDescriptor": {
+      "summary": "造长模式数据段描述符，基址为零、D=0",
+      "category": "长模式描述符"
+    }
+  }
+}

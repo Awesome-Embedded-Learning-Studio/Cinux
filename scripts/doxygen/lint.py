@@ -966,6 +966,14 @@ def check_function_blocks(content: str, file: Path) -> List[Violation]:
             # This is NOT okay: "@return     SomeType"
             return_lines = [line for line in block.splitlines() if "@return" in line]
             for line in return_lines:
+                # Placeholder @return (None/void) on a void function: doxygen warns
+                # "documented return type ... does not return anything". Drop it.
+                import re as _re
+                if _re.match(r'^\s*\*?\s*@return\s*(None|void)[.。]?\s*$', line, _re.IGNORECASE):
+                    violations.append(
+                        Violation(file, "Void function has placeholder @return (remove the line)", name)
+                    )
+                    break
                 # Remove @return and common words to see if there's an actual type mentioned
                 cleaned = re.sub(r'@return\s*', '', line)
                 cleaned = re.sub(r'\b(void|null|none|nothing)\b', '', cleaned, flags=re.IGNORECASE)
