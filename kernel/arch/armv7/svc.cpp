@@ -33,40 +33,6 @@ extern "C" unsigned long CurrentFdMask();
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
 
-long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
-    if ((CurrentFdMask() & (1UL << fd)) == 0 || fd != 0) {
-        return cinux::armv7::errno::kBadFd;
-    }
-    if (count == 0) {
-        return cinux::armv7::errno::kFault;
-    }
-    const cinux::arch::IrqGuard kGuard;
-    if (!cinux::arch::UserRangeIsMapped(buffer, count)) {
-        return cinux::armv7::errno::kFault;
-    }
-    const auto kFrequency = cinux::armv7::TimerFrequency();
-    const auto kStart     = cinux::armv7::TimerCounter();
-    while (!cinux::armv7::UartReceiveReady()) {
-        if ((cinux::armv7::TimerCounter() - kStart) >
-            (static_cast<unsigned long long>(kFrequency) / 5U)) {
-            return 0;  // 200 ms with nothing to read
-        }
-    }
-    unsigned long received = 0;
-    while (received < count && cinux::armv7::UartReceiveReady()) {
-        const char          kChar = cinux::armv7::UartReadChar();
-        const unsigned char kByte = static_cast<unsigned char>(kChar);
-        if (!cinux::arch::CopyToUser(buffer + received, &kByte, 1)) {
-            return cinux::armv7::errno::kFault;
-        }
-        ++received;
-        if (kChar == '\n' || kChar == '\r') {
-            break;
-        }
-    }
-    return static_cast<long>(received);
-}
-
 long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
     if (fd > 2 || (CurrentFdMask() & (1UL << fd)) == 0 || (fd != 1 && fd != 2)) {
         return cinux::armv7::errno::kBadFd;
@@ -95,16 +61,11 @@ struct Answer {
     long (*handler)(unsigned long* arguments);
 };
 
-long answer_read(unsigned long* arguments) {
-    return do_read(arguments[0], arguments[1], arguments[2]);
-}
-
 long answer_write(unsigned long* arguments) {
     return do_write(arguments[0], arguments[1], arguments[2]);
 }
 
 const Answer kAnswers[] = {
-    {cinux::armv7::syscall_nr::kRead, "read", &answer_read},
     {cinux::armv7::syscall_nr::kWrite, "write", &answer_write},
 };
 
@@ -122,6 +83,7 @@ bool traps_to_scheduler(unsigned long number) {
     return number == cinux::armv7::syscall_nr::kExit ||
            number == cinux::armv7::syscall_nr::kBrk ||
            number == cinux::armv7::syscall_nr::kClose ||
+           number == cinux::armv7::syscall_nr::kRead ||
            number == cinux::armv7::syscall_nr::kMmap ||
            number == cinux::armv7::syscall_nr::kMunmap ||
            number == cinux::armv7::syscall_nr::kWait ||

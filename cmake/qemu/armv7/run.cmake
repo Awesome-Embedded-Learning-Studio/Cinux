@@ -66,7 +66,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_SVC=svc write"
             "-DEXPECTED_ROTATE=all user tasks done"
             "-DEXPECTED_TASK_DONE=task 0 exited with status 7"
-            "-DEXPECTED_READ=svc read 0 bytes"
+            "-DEXPECTED_READ=read timed out"
             "-DEXPECTED_FAULTED=task 1 faulted"
             "-DEXPECTED_PREEMPT=preempt to task"
             "-DEXPECTED_REFUSED=svc write refused -14 at 80000000"

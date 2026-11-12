@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
@@ -38,6 +39,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
@@ -74,6 +76,9 @@ struct UserTask {
     unsigned long            break_top;     // grow-only user heap break
     unsigned long            fd_mask;       // bit per open descriptor
     unsigned long            mmap_top;      // grow-only anonymous window
+    bool                     read_pending;   // a read is parked, waiting for input
+    unsigned long            read_buf;       // its destination
+    unsigned long            read_count;     // how many bytes it asked for
 };
 
 constexpr unsigned long kTaskCount   = 4;
@@ -81,6 +86,7 @@ constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kMmapBase    = 0x40010000UL;
 constexpr unsigned long kMmapLimit   = 0x40100000UL;
+constexpr unsigned long kReadTicks   = 3;  // default wait for input, 300 ms
 constexpr unsigned long kWaitTicks  = 20;  // default deadline when the caller passes 0
 
 UserTask                g_tasks[kTaskCount];
@@ -412,6 +418,9 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.break_top     = kBrkBase;
     task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
     task.mmap_top      = kMmapBase;
+    task.read_pending  = false;
+    task.read_buf      = 0;
+    task.read_count    = 0;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -589,6 +598,24 @@ void wake_waiters_of(unsigned long target) {
     }
 }
 
+/// Copies a line (or up to `count` bytes) from the console into a user
+/// buffer. Returns the byte count, or -1 when the pointer is refused.
+long DrainConsole(unsigned long buffer, unsigned long count) {
+    unsigned long received = 0;
+    while (received < count && cinux::armv7::UartReceiveReady()) {
+        const char          kChar = cinux::armv7::UartReadChar();
+        const unsigned char kByte = static_cast<unsigned char>(kChar);
+        if (!cinux::arch::CopyToUser(buffer + received, &kByte, 1)) {
+            return -1;
+        }
+        ++received;
+        if (kChar == '\n' || kChar == '\r') {
+            break;
+        }
+    }
+    return static_cast<long>(received);
+}
+
 /// Returns one task's space to the allocator. Called only after the
 /// scheduler has switched away from it, so its tables are not active.
 void teardown_space(unsigned long index) {
@@ -622,6 +649,38 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
         wake_waiters_of(g_current);
+    }
+
+    if (number == cinux::armv7::syscall_nr::kRead) {
+        const unsigned long kFd    = g_user_trap.r0;
+        const unsigned long kBuf   = g_user_trap.r1;
+        const unsigned long kCount = g_user_trap.r2;
+        if ((g_tasks[g_current].fd_mask & (1UL << kFd)) == 0 || kFd != 0) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            return &g_tasks[g_current].trap;
+        }
+        if (kCount == 0 || !cinux::arch::UserRangeIsMapped(kBuf, kCount)) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kFault);
+            return &g_tasks[g_current].trap;
+        }
+        if (cinux::armv7::UartReceiveReady()) {
+            const long kBytes = DrainConsole(kBuf, kCount);
+            cinux::print::Println("[armv7] read %d bytes", static_cast<int>(kBytes));
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(kBytes);
+            return &g_tasks[g_current].trap;
+        }
+        // Nothing yet: park until input arrives or the deadline passes.
+        const unsigned long kTimeout = g_user_trap.r3 == 0 ? kReadTicks : g_user_trap.r3;
+        g_tasks[g_current].read_pending  = true;
+        g_tasks[g_current].read_buf      = kBuf;
+        g_tasks[g_current].read_count    = kCount;
+        g_tasks[g_current].state         = TaskState::kBlocked;
+        g_tasks[g_current].wait_mask     = 0;
+        g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
+        g_tasks[g_current].trap.r0       = 0;
+        cinux::print::Println("[armv7] read waits for input");
     }
 
     if (number == cinux::armv7::syscall_nr::kMmap) {
@@ -831,8 +890,15 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     bool woke = false;
     for (auto& task : g_tasks) {
         if (task.state == TaskState::kBlocked) {
+            const unsigned long kIndex = &task - &g_tasks[0];
             task.state         = TaskState::kRunnable;
-            task.trap.r0       = task.wait_mask == 0 ? 0 : static_cast<unsigned long>(-2);
+            if (task.read_pending) {
+                task.read_pending = false;
+                task.trap.r0      = 0;
+                cinux::print::Println("[armv7] task %u read timed out", kIndex);
+            } else {
+                task.trap.r0 = task.wait_mask == 0 ? 0 : static_cast<unsigned long>(-2);
+            }
             task.wait_mask     = 0;
             task.wait_deadline = 0;
             woke               = true;
@@ -866,11 +932,24 @@ extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number) {
 extern "C" void SchedulerOnTick(unsigned long ticks) {
     g_tick_now = ticks;
     for (auto& task : g_tasks) {
+        if (task.state == TaskState::kBlocked && task.read_pending &&
+            cinux::armv7::UartReceiveReady()) {
+            const long kBytes = DrainConsole(task.read_buf, task.read_count);
+            task.read_pending = false;
+            task.state        = TaskState::kRunnable;
+            task.trap.r0      = static_cast<unsigned long>(kBytes);
+            cinux::print::Println("[armv7] read %d bytes after waiting", static_cast<int>(kBytes));
+            continue;
+        }
         if (task.state == TaskState::kBlocked && task.wait_deadline <= ticks) {
             task.state         = TaskState::kRunnable;
             task.wait_target   = kTaskCount;
             const unsigned long kIndex = &task - &g_tasks[0];
-            if (task.wait_mask == 0) {
+            if (task.wait_mask == 0 && task.read_pending) {
+                task.read_pending = false;
+                task.trap.r0      = 0;
+                cinux::print::Println("[armv7] task %u read timed out", kIndex);
+            } else if (task.wait_mask == 0) {
                 task.trap.r0 = 0;
                 cinux::print::Println("[armv7] task %u woke from sleep", kIndex);
             } else {
