@@ -160,6 +160,22 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
         user_write(note, note_length);
     }
+    if (task_id == 0) {
+        // Reap the other two before leaving: each returns -1 until the
+        // target task has ended, and preemption keeps letting them run.
+        unsigned long status = 0;
+        for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+            const long first = user_syscall3(
+                cinux::armv7::syscall_nr::kWait, 1,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+            const long second = user_syscall3(
+                cinux::armv7::syscall_nr::kWait, 2,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+            if (first == 0 && second == 0) {
+                break;
+            }
+        }
+    }
     {
         // Inside the user window but never mapped: the repair hook fills it
         // and the store is retried on the new page.
@@ -462,6 +478,17 @@ extern "C" bool SchedulerRunning() {
     return g_running;
 }
 
+extern "C" bool TaskIsDone(unsigned long index) {
+    return index < kTaskCount && g_tasks[index].state == TaskState::kDone;
+}
+
+extern "C" unsigned long TaskExitStatus(unsigned long index) {
+    if (index >= kTaskCount || g_tasks[index].state != TaskState::kDone) {
+        return 0;
+    }
+    return g_tasks[index].exit_status;
+}
+
 extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap) {
     if (!g_running) {
         return trap;
@@ -485,7 +512,8 @@ extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
 
 /// A user task died on an abort: mark it, run the other one, or go home.
 extern "C" [[noreturn]] void c_user_faulted() {
-    g_tasks[g_current].state = TaskState::kDone;
+    g_tasks[g_current].state       = TaskState::kDone;
+    g_tasks[g_current].exit_status = 0xDEADUL;
     cinux::print::Println("[armv7] task %u faulted", g_current);
     const unsigned long kOld  = g_current;
     const unsigned long kNext = next_runnable(g_current);

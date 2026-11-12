@@ -22,5 +22,6 @@ inline constexpr unsigned long kExit        = 1;
 inline constexpr unsigned long kRead        = 3;
 inline constexpr unsigned long kWrite       = 4;
 inline constexpr unsigned long kSchedYield  = 158;
+inline constexpr unsigned long kWait        = 114;
 
 }  // namespace cinux::armv7::syscall_nr
