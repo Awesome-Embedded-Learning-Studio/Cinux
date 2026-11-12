@@ -12,6 +12,7 @@ add_executable(arm_image
     mmu.cpp
     fdt.cpp
     assert_hook.cpp
+    selfcheck.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
     libc_support.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)

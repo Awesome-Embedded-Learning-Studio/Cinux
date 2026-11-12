@@ -12,6 +12,7 @@
 
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
+#include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/arch/page.hpp"
@@ -101,10 +102,18 @@ extern "C" [[noreturn]] void kmain() {
             info.e820[0]     = cinux::boot::E820Entry{.base = range.base,
                                                       .length = range.size,
                                                       .type   = cinux::boot::kE820Usable};
+            extern unsigned char __fiq_stack_top[];
+            info.kernel_paddr    = 0x80000000UL;
+            info.kernel_mem_size = reinterpret_cast<unsigned long>(__fiq_stack_top) - 0x80000000UL;
+            info.kernel_file_size = info.kernel_mem_size;
+            info.kernel_entry     = 0x80000000UL;
             if (cinux::mm::Pmm::self().init(info)) {
                 cinux::armv7::UartWrite("[armv7] pmm free pages ");
                 PrintUnsigned(cinux::mm::Pmm::self().free_page_count());
                 cinux::armv7::UartWrite("\n");
+                cinux::armv7::UartWrite(cinux::armv7::RunPmmSelfCheck()
+                                            ? "[armv7] selfcheck pmm ok\n"
+                                            : "[armv7] selfcheck pmm FAILED\n");
             } else {
                 cinux::armv7::UartWrite("[armv7] pmm refused init\n");
             }

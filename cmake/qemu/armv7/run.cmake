@@ -28,5 +28,6 @@ add_test(NAME arm_boot
             -DEXPECTED_TICK=tick 1
             -DEXPECTED_MEMORY=dtb memory 0x80000000
             -DEXPECTED_PMM=pmm free pages
+            -DEXPECTED_SELFCHECK=selfcheck pmm ok
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
