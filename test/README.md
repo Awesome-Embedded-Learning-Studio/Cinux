@@ -23,3 +23,19 @@ ctest --test-dir build/test -L arch
 ctest --test-dir build/test -L capability
 ctest --test-dir build/test -R ^kernel_test_
 ```
+
+## 端口镜像里的自检
+
+armv7 那条车道没有把自检拆成"一文件一 QEMU"，而是把整条端口的自检收在
+`kernel/arch/armv7/selfcheck.cpp` 与 `user_mode.cpp` 里，由 `arm_boot` 一次
+启动逐条断言。它们算架构测试：断言的是这套端口上的机制能不能用（两级表的
+翻译、陷阱帧的往返、时间片能不能换人），换端口要按 ISA 重写。
+
+跑法：
+
+```bash
+cmake -S . -B build-armv7 -G Ninja -DCINUX_ARCHITECTURE=armv7
+ctest --test-dir build-armv7
+```
+
+x86 的能力测试与架构测试不受影响，还是上面那三条命令。
