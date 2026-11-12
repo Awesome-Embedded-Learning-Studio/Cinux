@@ -170,6 +170,20 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     {
+        // No table entry: the dispatcher must refuse it, not guess.
+        const long kUnknown = user_syscall3(0xFFFFUL, 0, 0, 0);
+        if (kUnknown == -1) {
+            char          note[24];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('u'); NOTE('n'); NOTE('k'); NOTE('n'); NOTE('o'); NOTE('w');
+            NOTE('n'); NOTE(' '); NOTE('r'); NOTE('e'); NOTE('f'); NOTE('u');
+            NOTE('s'); NOTE('e'); NOTE('d'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
+    }
+    {
         const long kPid = user_syscall3(cinux::armv7::syscall_nr::kGetPid, 0, 0, 0);
         if (static_cast<unsigned long>(kPid) == task_id) {
             char          note[16];
