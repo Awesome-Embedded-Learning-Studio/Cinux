@@ -54,6 +54,13 @@ if(EXPECTED_BLOCK2 AND NOT serial_out MATCHES "${EXPECTED_BLOCK2}")
     message(FATAL_ERROR
         "arm_boot: the second waiter never blocked.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_CLOSE AND NOT serial_out MATCHES "${EXPECTED_CLOSE}")
+    message(FATAL_ERROR "arm_boot: nothing was ever closed.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_EBADF AND NOT serial_out MATCHES "${EXPECTED_EBADF}")
+    message(FATAL_ERROR
+        "arm_boot: a closed descriptor was still writable.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_BRK AND NOT serial_out MATCHES "${EXPECTED_BRK}")
     message(FATAL_ERROR
         "arm_boot: brk never grew the heap.\nstdout:\n${serial_out}")

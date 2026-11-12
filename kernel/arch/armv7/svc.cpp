@@ -27,11 +27,17 @@
 namespace {
 
 constexpr unsigned long kChunkBytes = 64;
+constexpr long          kEbadf      = -9;
+
+extern "C" unsigned long CurrentFdMask();
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
 
 long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
-    if (fd != 0 || count == 0) {
+    if ((CurrentFdMask() & (1UL << fd)) == 0 || fd != 0) {
+        return kEbadf;
+    }
+    if (count == 0) {
         return -1;
     }
     const cinux::arch::IrqGuard kGuard;
@@ -62,8 +68,8 @@ long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
 }
 
 long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
-    if (fd != 1 && fd != 2) {
-        return -1;
+    if (fd > 2 || (CurrentFdMask() & (1UL << fd)) == 0 || (fd != 1 && fd != 2)) {
+        return kEbadf;
     }
     const cinux::arch::IrqGuard kGuard;
     char                      chunk[kChunkBytes];
@@ -115,6 +121,7 @@ const Answer* find_answer(unsigned long number) {
 bool traps_to_scheduler(unsigned long number) {
     return number == cinux::armv7::syscall_nr::kExit ||
            number == cinux::armv7::syscall_nr::kBrk ||
+           number == cinux::armv7::syscall_nr::kClose ||
            number == cinux::armv7::syscall_nr::kWait ||
            number == cinux::armv7::syscall_nr::kSleep ||
            number == cinux::armv7::syscall_nr::kSchedYield;
@@ -143,9 +150,9 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     unsigned long arguments[3] = {trap->r0, trap->r1, trap->r2};
     const long    kResult      = kAnswer->handler(arguments);
     if (kResult < 0) {
-        cinux::print::Println("[armv7] svc %s refused %X + %u", kAnswer->name, arguments[1],
-                              arguments[2]);
-        trap->r0 = ~0UL;
+        cinux::print::Println("[armv7] svc %s refused %d at %X + %u", kAnswer->name,
+                              static_cast<int>(kResult), arguments[1], arguments[2]);
+        trap->r0 = static_cast<unsigned long>(kResult);
     } else {
         cinux::print::Println("[armv7] svc %s %u bytes", kAnswer->name,
                               static_cast<unsigned long>(kResult));

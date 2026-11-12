@@ -68,6 +68,7 @@ struct UserTask {
     unsigned long            wait_mask;     // bit per awaited task
     unsigned long            wait_deadline; // ticks; valid while blocked
     unsigned long            break_top;     // grow-only user heap break
+    unsigned long            fd_mask;       // bit per open descriptor
 };
 
 constexpr unsigned long kTaskCount   = 4;
@@ -188,6 +189,22 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+        }
+    }
+    if (task_id == 0) {
+        char probe[4] = {'x', '\n', 0, 0};
+        static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose, 2, 0, 0));
+        const long kRefused = user_syscall3(
+            cinux::armv7::syscall_nr::kWrite, 2,
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(probe)), 1);
+        if (kRefused == -9) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('e'); NOTE('b'); NOTE('a'); NOTE('d'); NOTE('f'); NOTE(' ');
+            NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
         }
     }
     {
@@ -340,6 +357,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_mask     = 0;
     task.wait_deadline = 0;
     task.break_top     = kBrkBase;
+    task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -552,6 +570,18 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         wake_waiters_of(g_current);
     }
 
+    if (number == cinux::armv7::syscall_nr::kClose) {
+        const unsigned long kFd = g_user_trap.r0;
+        if (kFd <= 2) {
+            g_tasks[g_current].fd_mask &= ~(1UL << kFd);
+            cinux::print::Println("[armv7] close %u", kFd);
+            g_tasks[g_current].trap.r0 = 0;
+        } else {
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-9);
+        }
+        return &g_tasks[g_current].trap;
+    }
+
     if (number == cinux::armv7::syscall_nr::kBrk) {
         // Grow-only: round up to a page, map what is new, refuse past the
         // window or below the base by reporting the current break.
@@ -699,6 +729,10 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
             task.wait_mask = 0;
         }
     }
+}
+
+extern "C" unsigned long CurrentFdMask() {
+    return g_tasks[g_current].fd_mask;
 }
 
 extern "C" unsigned long CurrentTaskIndex() {

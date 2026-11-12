@@ -26,5 +26,6 @@ inline constexpr unsigned long kWait        = 114;
 inline constexpr unsigned long kSleep       = 162;
 inline constexpr unsigned long kGetPid      = 20;
 inline constexpr unsigned long kBrk         = 45;
+inline constexpr unsigned long kClose       = 6;
 
 }  // namespace cinux::armv7::syscall_nr
