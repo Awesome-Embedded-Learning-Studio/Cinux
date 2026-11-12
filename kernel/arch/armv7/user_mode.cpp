@@ -64,6 +64,7 @@ struct UserTask {
     TaskState                state;
     unsigned long            exit_status;
     unsigned long            wait_target;   // valid while blocked
+    unsigned long            wait_mask;     // bit per awaited task
     unsigned long            wait_deadline; // ticks; valid while blocked
 };
 
@@ -172,7 +173,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         // Waiting on itself can never be satisfied: it must time out.
         unsigned long status = 0;
         const long    kSelf  = user_syscall3(
-            cinux::armv7::syscall_nr::kWait, 0,
+            cinux::armv7::syscall_nr::kWait, 1UL,
             static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 5);
         if (kSelf == -2) {
             char          note[32];
@@ -197,9 +198,9 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                 task_id == 0 ? kTargets[index] : kTargets[1];
             for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
                 const long kResult = user_syscall3(
-                    cinux::armv7::syscall_nr::kWait, kTarget,
+                    cinux::armv7::syscall_nr::kWait, 1UL << kTarget,
                     static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
-                if (kResult == 0) {
+                if (kResult >= 0) {
                     break;
                 }
             }
@@ -277,6 +278,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.state       = TaskState::kRunnable;
     task.exit_status = 0;
     task.wait_target   = kTaskCount;
+    task.wait_mask     = 0;
     task.wait_deadline = 0;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
@@ -445,10 +447,11 @@ namespace {
 /// Wakes the tasks blocked on `target`; each one re-asks on return.
 void wake_waiters_of(unsigned long target) {
     for (auto& task : g_tasks) {
-        if (task.state == TaskState::kBlocked && task.wait_target == target) {
-            task.state       = TaskState::kRunnable;
+        if (task.state == TaskState::kBlocked && ((task.wait_mask >> target) & 1UL) != 0) {
+            task.state         = TaskState::kRunnable;
             task.wait_target   = kTaskCount;
-    task.wait_deadline = 0;
+            task.wait_mask     = 0;
+            task.wait_deadline = 0;
             cinux::print::Println("[armv7] wake a waiter of %u", target);
         }
     }
@@ -490,12 +493,19 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kWait) {
-        const unsigned long kTarget = g_user_trap.r0;
-        if (kTarget < kTaskCount && g_tasks[kTarget].state == TaskState::kDone) {
-            const unsigned long kStatus = g_tasks[kTarget].exit_status;
+        const unsigned long kMask = g_user_trap.r0;
+        unsigned long       kDone = kTaskCount;
+        for (unsigned long index = 0; index < kTaskCount; ++index) {
+            if (((kMask >> index) & 1UL) != 0 && g_tasks[index].state == TaskState::kDone) {
+                kDone = index;
+                break;
+            }
+        }
+        if (kDone != kTaskCount) {
+            const unsigned long kStatus = g_tasks[kDone].exit_status;
             if (cinux::arch::CopyToUser(g_user_trap.r1, &kStatus, sizeof(kStatus))) {
-                cinux::print::Println("[armv7] wait %u -> %X", kTarget, kStatus);
-                g_tasks[g_current].trap.r0 = 0;
+                cinux::print::Println("[armv7] wait %u -> %X", kDone, kStatus);
+                g_tasks[g_current].trap.r0 = kDone;
             } else {
                 g_tasks[g_current].trap.r0 = ~0UL;
             }
@@ -506,10 +516,10 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kTimeout =
             g_user_trap.r2 == 0 ? kWaitTicks : g_user_trap.r2;
         g_tasks[g_current].state         = TaskState::kBlocked;
-        g_tasks[g_current].wait_target   = kTarget;
+        g_tasks[g_current].wait_mask     = kMask;
         g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
         g_tasks[g_current].trap.r0       = ~0UL;
-        cinux::print::Println("[armv7] task %u blocks on %u", g_current, kTarget);
+        cinux::print::Println("[armv7] task %u blocks on %X", g_current, kMask);
     }
 
     const unsigned long kOld  = g_current;
@@ -528,6 +538,29 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     if (g_tasks[g_current].state == TaskState::kRunnable) {
         // The others finished; this task keeps running.
         return &g_tasks[g_current].trap;
+    }
+
+    // Nothing runnable but someone still waits: wake them as expired so
+    // they can observe the timeout instead of hanging forever.
+    bool woke = false;
+    for (auto& task : g_tasks) {
+        if (task.state == TaskState::kBlocked) {
+            task.state         = TaskState::kRunnable;
+            task.wait_mask     = 0;
+            task.wait_deadline = 0;
+            task.trap.r0       = static_cast<unsigned long>(-2);
+            woke               = true;
+        }
+    }
+    if (woke) {
+        const unsigned long kRetry = next_runnable(g_current);
+        if (kRetry != kTaskCount) {
+            g_current = kRetry;
+            cinux::print::Println("[armv7] switch to task %u", kRetry);
+            cinux::arch::space::SwitchRoot(g_tasks[kRetry].space->root());
+            cinux::arch::per_cpu::self().slice_ticks = 1;
+            return &g_tasks[kRetry].trap;
+        }
     }
 
     g_running = false;
