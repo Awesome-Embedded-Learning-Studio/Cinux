@@ -70,15 +70,23 @@ enum class TaskState : unsigned char { kRunnable, kBlocked, kDone };
 enum class FdKind : unsigned long {
     kConsoleIn  = 0,
     kConsoleOut = 1,
+    kFile       = 2,
 };
 
 struct FdEntry {
-    bool          open   = false;
-    FdKind        kind   = FdKind::kConsoleIn;
-    unsigned long offset = 0;
+    bool                 open   = false;
+    FdKind               kind   = FdKind::kConsoleIn;
+    unsigned long        offset = 0;
+    const unsigned char* data   = nullptr;  // file contents, if any
+    unsigned long        size   = 0;
 };
 
 constexpr unsigned long kMaxFds = 8;
+
+/// The one file this port has without a filesystem: enough to prove that
+/// open, read and close walk real bytes.
+constexpr unsigned char kHelloFile[] = "hello\n";
+constexpr unsigned long kHelloSize   = sizeof(kHelloFile) - 1;
 
 struct UserTask {
     cinux::arch::UserTrap    trap;
@@ -328,6 +336,53 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+        }
+    }
+    if (task_id == 0) {
+        // Filled element by element: an initializer-only array turns into
+        // a constant in kernel .rodata, which user mode cannot read.
+        char name[8];
+        name[0] = '/'; name[1] = 'h'; name[2] = 'e'; name[3] = 'l';
+        name[4] = 'l'; name[5] = 'o'; name[6] = 0;   name[7] = 0;
+        const long kFd = user_syscall3(
+            cinux::armv7::syscall_nr::kOpen,
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(name)), 0, 0);
+        if (kFd >= 3) {
+            char buf[8];
+            for (unsigned long index = 0; index < 8; ++index) {
+                buf[index] = 0;
+            }
+            const long kBytes = user_syscall3(
+                cinux::armv7::syscall_nr::kRead,
+                static_cast<unsigned long>(kFd),
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(buf)), 6);
+            const bool kSawIt = kBytes == 6 && buf[0] == 'h' && buf[1] == 'e' &&
+                                buf[2] == 'l' && buf[3] == 'l' && buf[4] == 'o';
+            if (kSawIt) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('f'); NOTE('i'); NOTE('l'); NOTE('e'); NOTE(' '); NOTE('o');
+                NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+            static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                            static_cast<unsigned long>(kFd), 0, 0));
+        }
+        char missing[4];
+        missing[0] = '/'; missing[1] = 'n'; missing[2] = 0; missing[3] = 0;
+        const long kMissing   = user_syscall3(
+            cinux::armv7::syscall_nr::kOpen,
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(missing)), 0, 0);
+        if (kMissing == static_cast<long>(cinux::armv7::errno::kNoEnt)) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('e'); NOTE('n'); NOTE('o'); NOTE('e'); NOTE('n'); NOTE('t'); NOTE(' ');
+            NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
         }
     }
     if (task_id == 0) {
@@ -1081,12 +1136,72 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         wake_waiters_of(g_current);
     }
 
+    if (number == cinux::armv7::syscall_nr::kOpen) {
+        char path[16] = {};
+        if (!cinux::arch::CopyFromUser(path, g_user_trap.r0, sizeof(path) - 1)) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kFault);
+            return &g_tasks[g_current].trap;
+        }
+        unsigned long length = 0;
+        while (length < sizeof(path) && path[length] != '\0') {
+            ++length;
+        }
+        const bool kKnown = length == 6 && path[0] == '/' && path[1] == 'h' &&
+                            path[2] == 'e' && path[3] == 'l' && path[4] == 'l' &&
+                            path[5] == 'o';
+        if (!kKnown) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kNoEnt);
+            cinux::print::Println("[armv7] open refused");
+            return &g_tasks[g_current].trap;
+        }
+        unsigned long slot = kMaxFds;
+        for (unsigned long index = 3; index < kMaxFds; ++index) {
+            if (!g_tasks[g_current].fds[index].open) {
+                slot = index;
+                break;
+            }
+        }
+        if (slot == kMaxFds) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
+            return &g_tasks[g_current].trap;
+        }
+        g_tasks[g_current].fds[slot].open   = true;
+        g_tasks[g_current].fds[slot].kind   = FdKind::kFile;
+        g_tasks[g_current].fds[slot].offset = 0;
+        g_tasks[g_current].fds[slot].data   = kHelloFile;
+        g_tasks[g_current].fds[slot].size   = kHelloSize;
+        cinux::print::Println("[armv7] open hello as %u", slot);
+        g_tasks[g_current].trap.r0 = slot;
+        return &g_tasks[g_current].trap;
+    }
+
     if (number == cinux::armv7::syscall_nr::kRead) {
         const unsigned long kFd    = g_user_trap.r0;
         const unsigned long kBuf   = g_user_trap.r1;
         const unsigned long kCount = g_user_trap.r2;
-        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open ||
-            g_tasks[g_current].fds[kFd].kind != FdKind::kConsoleIn) {
+        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            return &g_tasks[g_current].trap;
+        }
+        if (g_tasks[g_current].fds[kFd].kind == FdKind::kFile) {
+            FdEntry&            file = g_tasks[g_current].fds[kFd];
+            const unsigned long left = file.size - file.offset;
+            const unsigned long take = kCount < left ? kCount : left;
+            if (take == 0 ||
+                !cinux::arch::CopyToUser(kBuf, file.data + file.offset, take)) {
+                g_tasks[g_current].trap.r0 = 0;
+                return &g_tasks[g_current].trap;
+            }
+            file.offset += take;
+            cinux::print::Println("[armv7] file read %u", take);
+            g_tasks[g_current].trap.r0 = take;
+            return &g_tasks[g_current].trap;
+        }
+        if (g_tasks[g_current].fds[kFd].kind != FdKind::kConsoleIn) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             return &g_tasks[g_current].trap;

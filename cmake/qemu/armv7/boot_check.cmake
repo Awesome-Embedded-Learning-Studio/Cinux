@@ -67,6 +67,10 @@ expect_literal(EXPECTED_CLOSE "nothing was ever closed.")
 
 expect_literal(EXPECTED_EBADF "a closed descriptor was still writable.")
 expect_literal(EXPECTED_FDRANGE "an out-of-table descriptor was accepted.")
+expect_literal(EXPECTED_OPEN "the built-in file never opened.")
+expect_literal(EXPECTED_FILEREAD "no bytes came out of the file.")
+expect_literal(EXPECTED_FILEOK "the file contents were wrong.")
+expect_literal(EXPECTED_ENOENT "a missing name was accepted.")
 
 expect_literal(EXPECTED_MMAP "the anonymous mapping never appeared.")
 expect_literal(EXPECTED_HINTTOOK "a taken hint was accepted.")

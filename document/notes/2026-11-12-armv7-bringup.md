@@ -214,7 +214,10 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
     引号；顺便逐条核对：三十四条期望在输出里都能按整句找到，也都有对应的
     检查分支，其中一条早就不存在的 `svc write matched` 换成现在的
     `svc write`。
-23. 断言用 `MATCHES` 比对，期望串因此被当成正则。`mmap` 那行写成
+23. 用户代码里 `char name[8] = {...}` 这种只初始化、之后再没改过的局部数组，
+    会被编译器优化成只读数据放进内核的 .rodata；用户态照这个地址读就缺页。
+    现在这类字符串一律逐元素赋值，让它落在用户栈上。
+24. 断言用 `MATCHES` 比对，期望串因此被当成正则。`mmap` 那行写成
     `mmap 40010000 + 2000`，加号成了量词，本地看着对、测试却红。现在换成
     `string(FIND)` 的字面量查找，串里有什么就比什么，失败时把期望串与整段
     输出一起打出来。
@@ -334,6 +337,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
 | 78 | getticks | `getticks 3`、睡三个 tick 之后变大（`ticks ok`） |
+| 5 | open | 内建只读文件：`open hello as 3`、`file read 6`、`file ok`；不存在的名字回 ENOENT（`enoent ok`） |
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |

@@ -22,6 +22,9 @@ namespace cinux::armv7::errno {
 /// A pointer the kernel refused to touch.
 inline constexpr long kFault = -14;  // EFAULT
 
+/// No such file.
+inline constexpr long kNoEnt = -2;  // ENOENT
+
 /// A descriptor that is not open in this task.
 inline constexpr long kBadFd = -9;  // EBADF
 

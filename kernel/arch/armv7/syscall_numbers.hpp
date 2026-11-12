@@ -19,6 +19,7 @@
 namespace cinux::armv7::syscall_nr {
 
 inline constexpr unsigned long kExit        = 1;
+inline constexpr unsigned long kOpen        = 5;
 inline constexpr unsigned long kFork        = 2;
 inline constexpr unsigned long kRead        = 3;
 inline constexpr unsigned long kWrite       = 4;
