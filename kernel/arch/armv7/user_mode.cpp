@@ -86,6 +86,7 @@ struct UserTask {
 
 constexpr unsigned long kTaskCount   = 8;
 constexpr unsigned long kInitialTasks = 4;
+constexpr unsigned long kNoParent     = 0xFFUL;  // reported as "no parent"
 constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kMmapBase    = 0x40010000UL;
@@ -585,6 +586,17 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                             break;
                         }
                     }
+                    const long kParent = user_syscall3(
+                        cinux::armv7::syscall_nr::kGetPpid, 0, 0, 0);
+                    if (kParent == 0) {
+                        char          note[24];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('o'); NOTE('r'); NOTE('p'); NOTE('h'); NOTE('a');
+                        NOTE('n'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
                     static_cast<void>(
                         user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
                     for (;;) {
@@ -931,6 +943,13 @@ void teardown_space(unsigned long index) {
     delete g_tasks[index].space;
     g_tasks[index].space  = nullptr;
     g_tasks[index].in_use = false;  // the slot is free for a later fork
+    for (unsigned long child = 0; child < kTaskCount; ++child) {
+        if (g_tasks[child].parent == index) {
+            // Its parent is gone: reparent to the boot task, or to nobody
+            // when the boot task itself is the one leaving.
+            g_tasks[child].parent = index == 0 ? kNoParent : 0;
+        }
+    }
 }
 
 /// The next runnable task after `from`, or kTaskCount when there is none.
@@ -1342,7 +1361,8 @@ extern "C" unsigned long CurrentTaskIndex() {
 }
 
 extern "C" unsigned long CurrentTaskParent() {
-    return g_tasks[g_current].parent;
+    const unsigned long kParent = g_tasks[g_current].parent;
+    return kParent == kNoParent ? 0UL : kParent;
 }
 
 extern "C" bool SchedulerRunning() {

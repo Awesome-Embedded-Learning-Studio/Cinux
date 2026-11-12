@@ -81,6 +81,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_HANDLERINH=handler inherited ok"
             "-DEXPECTED_GETPPID=getppid 0"
             "-DEXPECTED_PPIDOK=ppid ok"
+            "-DEXPECTED_ORPHAN=orphan ok"
             "-DEXPECTED_FDINH=fd inherited ok"
             "-DEXPECTED_BRKINH=brk inherited ok"
             "-DEXPECTED_NOSLOT=fork refused, no free slot"
