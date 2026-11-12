@@ -10,6 +10,7 @@ add_executable(arm_image
     irq.cpp
     vectors.S
     mmu.cpp
+    fdt.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
 target_compile_options(arm_image PRIVATE
@@ -43,3 +44,17 @@ set_target_properties(arm_image PROPERTIES
     OUTPUT_NAME "arm"
     SUFFIX ".elf"
     LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/link.ld)
+
+# The board's device tree: a minimal blob the lane loads at a fixed address.
+find_program(CINUX_DTC dtc)
+if(NOT CINUX_DTC)
+    message(FATAL_ERROR "armv7 lane: dtc not found in PATH")
+endif()
+add_custom_command(
+    OUTPUT ${CINUX_ARM_DTB}
+    COMMAND ${CINUX_DTC} -I dts -O dtb -o ${CINUX_ARM_DTB}
+            ${CMAKE_CURRENT_SOURCE_DIR}/qemu.dts
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu.dts
+    COMMENT "Compiling the bring-up device tree")
+add_custom_target(arm_dtb DEPENDS ${CINUX_ARM_DTB})
+add_dependencies(arm_image arm_dtb)

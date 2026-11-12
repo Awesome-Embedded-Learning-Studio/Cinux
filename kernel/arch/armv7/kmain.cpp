@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
 #include "kernel/arch/armv7/mmu.hpp"
@@ -72,6 +73,21 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartWrite("[armv7] mmu on\n");
     cinux::armv7::UartWrite(cinux::armv7::TwoLevelDemo() ? "[armv7] two-level page ok\n"
                                                         : "[armv7] two-level page FAILED\n");
+    {
+        constexpr unsigned long kDtbAddress = 0x80100000UL;
+        cinux::armv7::MemoryRange range{};
+        if (cinux::armv7::ReadMemoryRange(kDtbAddress, range)) {
+            cinux::armv7::UartWrite("[armv7] dtb memory 0x");
+            PrintHex(range.base);
+            cinux::armv7::UartWrite(" + 0x");
+            PrintHex(range.size);
+            cinux::armv7::UartWrite("\n");
+        } else {
+            cinux::armv7::UartWrite("[armv7] dtb missing or unreadable, first word 0x");
+            PrintHex(*reinterpret_cast<volatile unsigned long*>(kDtbAddress));
+            cinux::armv7::UartWrite("\n");
+        }
+    }
     asm volatile("cpsie if" ::: "memory");
     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
     for (;;) {

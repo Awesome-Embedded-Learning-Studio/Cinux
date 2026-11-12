@@ -40,6 +40,8 @@ endmacro()
 
 macro(cinux_arch_lane)
     enable_testing()
+    # Shared with the QEMU run targets below; the image build compiles it.
+    set(CINUX_ARM_DTB ${CMAKE_BINARY_DIR}/armv7-qemu.dtb)
     add_subdirectory(kernel/arch/armv7)
     include(${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/run.cmake)
     set(CINUX_ARCH_LANE_TERMINAL ON)
