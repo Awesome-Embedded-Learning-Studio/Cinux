@@ -154,4 +154,51 @@ inline unsigned long LowBits(unsigned long virtual_address, unsigned char width)
         Entry{static_cast<std::uint32_t>(virtual_address)}.extract(BitRange{.low = 0, .width = width}));
 }
 
+/**
+ * @brief         Reports whether a level holds 4 KiB leaves.
+ * @param[in]     level   The level asked about.
+ * @return        true for level 2.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool IsLeafLevel(WalkLevel level) {
+    return level == kLeafLevel;
+}
+
+/**
+ * @brief         Reports whether a level may hold a large leaf.
+ * @param[in]     level   The level asked about.
+ * @return        true for level 1, where sections live.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool HasLargeLeaf(WalkLevel level) {
+    return level == WalkLevel::kL1;
+}
+
+/**
+ * @brief         Names the physical field of a level's large leaf.
+ * @param[in]     level   The level whose field is wanted.
+ * @return        Bits 31:20 for a section.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+constexpr BitRange LargeLeafPhys(WalkLevel /*level*/) {
+    return BitRange{.low = 20, .width = 12};
+}
+
+/**
+ * @brief         Reads the next-level table a pointer names.
+ * @param[in]     slot   A table-pointer entry.
+ * @return        The table's physical address.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline unsigned long EntryTarget(const Entry& slot) {
+    return TableTarget(slot);
+}
+
+/// Slots of level 1 below the 3 GiB user boundary.
+constexpr unsigned int kUserHalfSlots = 3072;
+
 }  // namespace cinux::arch::page

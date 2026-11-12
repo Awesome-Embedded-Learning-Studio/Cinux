@@ -9,8 +9,8 @@ add_executable(arm_image
     gic.cpp
     irq.cpp
     vectors.S
-    mmu.cpp
     fdt.cpp
+    vmm_bringup.cpp
     assert_hook.cpp
     selfcheck.cpp
     console.cpp

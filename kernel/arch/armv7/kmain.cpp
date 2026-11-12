@@ -12,6 +12,7 @@
 
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/mm/layout.hpp"
+#include "kernel/mm/vmm.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/boot/boot_info.hpp"
@@ -84,10 +85,6 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::GicInit();
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
     cinux::armv7::TimerEnable();
-    cinux::armv7::MmuEnable();
-    cinux::armv7::UartWrite("[armv7] mmu on\n");
-    cinux::armv7::UartWrite(cinux::armv7::TwoLevelDemo() ? "[armv7] two-level page ok\n"
-                                                        : "[armv7] two-level page FAILED\n");
     {
         constexpr unsigned long kDtbAddress = 0x81000000UL;
         cinux::armv7::MemoryRange range{};
@@ -114,6 +111,11 @@ extern "C" [[noreturn]] void kmain() {
             info.kernel_file_size = info.kernel_mem_size;
             info.kernel_entry     = 0x80000000UL;
             if (cinux::mm::Pmm::self().init(info)) {
+                cinux::mm::BringUpAddressSpace(info);
+                cinux::armv7::UartWrite("[armv7] mmu on\n");
+                cinux::armv7::UartWrite(cinux::armv7::TwoLevelDemo()
+                                            ? "[armv7] two-level page ok\n"
+                                            : "[armv7] two-level page FAILED\n");
                 cinux::armv7::UartWrite("[armv7] pmm free pages ");
                 PrintUnsigned(cinux::mm::Pmm::self().free_page_count());
                 cinux::armv7::UartWrite("\n");
