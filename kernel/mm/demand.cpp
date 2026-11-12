@@ -20,7 +20,7 @@
 #include "kernel/arch/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -66,7 +66,7 @@ using arch::page::Entry;
     if (!space.map_user(page, kFrame.value(), kBits)) {
         return false;
     }
-    arch::InvalidatePage(page);
+    arch::space::InvalidatePage(page);
     return true;
 }
 
@@ -120,7 +120,7 @@ FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned
                 return FillOutcome::kUnhandled;
             }
             Pmm::self().retain_frame(base::PhysAddr{kPhysical});
-            arch::InvalidatePage(kPage);
+            arch::space::InvalidatePage(kPage);
             return FillOutcome::kFilled;
         }
         if (kRegion->kind == VmaKind::kDevice) {
@@ -143,7 +143,7 @@ FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned
                 Pmm::self().free_page(kFrame);
                 return FillOutcome::kUnhandled;
             }
-            cinux::arch::InvalidatePage(kPage);
+            cinux::arch::space::InvalidatePage(kPage);
             return FillOutcome::kFilled;
         }
         kept = *kRegion;
@@ -196,7 +196,7 @@ FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned
             return FillOutcome::kUnhandled;
         }
     }
-    cinux::arch::InvalidatePage(kPage);
+    cinux::arch::space::InvalidatePage(kPage);
     return FillOutcome::kFilled;
 }
 

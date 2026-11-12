@@ -7,7 +7,7 @@
 #include "cinux/ptr.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -154,7 +154,7 @@ void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
     if (kFrameBytes == 0 || info.framebuffer.physical == 0) {
         return;
     }
-    Entry* const        kPml4     = table_at(cinux::arch::ReadCr3());
+    Entry* const        kPml4     = table_at(cinux::arch::space::ActiveRoot());
     unsigned long const kPdptPhys = SeedPantry::self().take_page();
     if (kPdptPhys == 0) {
         return;
@@ -222,7 +222,7 @@ bool MapDeviceWindow(uint64_t physical, unsigned long bytes) {
 
 const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& handoff) {
     HandoffArchive::self().store(handoff);
-    Entry* const kPml4 = table_at(cinux::arch::ReadCr3());
+    Entry* const kPml4 = table_at(cinux::arch::space::ActiveRoot());
 
     unsigned long const kPdptPhys = SeedPantry::self().take_page();
     if (kPdptPhys == 0) {
@@ -252,9 +252,9 @@ const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& ha
         }
     }
 
-    direct_table_at(cinux::arch::ReadCr3())[0] = Entry{};
-    cinux::arch::ReloadCr3();
-    KernelRoot::self().capture(cinux::arch::ReadCr3());
+    direct_table_at(cinux::arch::space::ActiveRoot())[0] = Entry{};
+    cinux::arch::space::RefreshRoot();
+    KernelRoot::self().capture(cinux::arch::space::ActiveRoot());
     return &HandoffArchive::self().record();
 }
 

@@ -9,7 +9,7 @@
 #include "kernel/arch/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/hardware_frames.hpp"
 #include "kernel/mm/layout.hpp"
@@ -126,7 +126,7 @@ bool MarkPageShared(unsigned long root, unsigned long virtual_address) {
     const unsigned long long kTarget = walk::EntryTarget(kLeaf);
     Pmm::self().retain_frame(cinux::base::PhysAddr{kTarget});
     *kSlot.entry = cinux::arch::page::MakeTableEntry(kTarget, shared_flags(kLeaf));
-    cinux::arch::InvalidatePage(virtual_address);
+    cinux::arch::space::InvalidatePage(virtual_address);
     return true;
 }
 
@@ -137,7 +137,7 @@ bool TryResolvePageFault(unsigned long long address, unsigned long long error_co
         return false;
     }
     cinux::mm::KernelTables world;
-    const SlotAt            kSlot = FindSlot(world, cinux::arch::ReadCr3(), address);
+    const SlotAt            kSlot = FindSlot(world, cinux::arch::space::ActiveRoot(), address);
     if (kSlot.entry == nullptr || kSlot.level != walk::WalkLevel::kPageTable) {
         return false;
     }
@@ -150,7 +150,7 @@ bool TryResolvePageFault(unsigned long long address, unsigned long long error_co
     const unsigned long long kCompany = release_share(kTarget);
     if (kCompany == 0) {
         *kSlot.entry = cinux::arch::page::MakeTableEntry(kTarget, private_flags(kLeaf, true));
-        cinux::arch::InvalidatePage(address);
+        cinux::arch::space::InvalidatePage(address);
         return true;
     }
     const cinux::base::PhysAddr kCopy = cinux::mm::Pmm::self().allocate_page();
@@ -161,7 +161,7 @@ bool TryResolvePageFault(unsigned long long address, unsigned long long error_co
     const auto* const kSource = reinterpret_cast<const void*>(cinux::mm::DirectMapVirt(kTarget));
     cinux::base::CopyBytes(kDestination, kSource, cinux::arch::page::kSize);
     *kSlot.entry = cinux::arch::page::MakeTableEntry(kCopy.raw, private_flags(kLeaf, true));
-    cinux::arch::InvalidatePage(address);
+    cinux::arch::space::InvalidatePage(address);
     return true;
 }
 
@@ -205,8 +205,8 @@ AddressSpace* CloneSharedSpace(const AddressSpace& parent, const VmaStore* range
         descend(cinux::base::PtrAt<Entry>(cinux::mm::DirectMapVirt(kTarget)),
                 walk::WalkLevel::kPdpt, kBase, kContext);
     }
-    if (arch::ReadCr3() == kParentRoot) {
-        arch::LoadCr3(kParentRoot);
+    if (arch::space::ActiveRoot() == kParentRoot) {
+        arch::space::SwitchRoot(kParentRoot);
     }
     return kChild;
 }

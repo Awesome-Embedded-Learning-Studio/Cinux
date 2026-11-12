@@ -27,7 +27,7 @@
 #include "kernel/arch/x86_64/firmware_config.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/tty/console_tty.hpp"
@@ -230,7 +230,7 @@ void enter_initial_process() {
     proc::Task* const kSelf = proc::Scheduler::self().current();
     kSelf->user_root        = seats.root;
     asm volatile("cli" : : : "memory");
-    cinux::arch::LoadCr3(seats.root);
+    cinux::arch::space::SwitchRoot(seats.root);
     JumpToRing3(seats.entry, seats.rsp);
 }
 

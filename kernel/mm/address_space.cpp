@@ -7,7 +7,7 @@
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -103,7 +103,7 @@ unsigned long AddressSpace::translate(unsigned long virtual_address) const {
 
 void AddressSpace::activate() const {
     if (root_ != 0) {
-        cinux::arch::LoadCr3(root_);
+        cinux::arch::space::SwitchRoot(root_);
     }
 }
 

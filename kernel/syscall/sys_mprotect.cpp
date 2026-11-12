@@ -4,7 +4,7 @@
 #include "cinux/result.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/vma.hpp"
@@ -66,7 +66,7 @@ long long HandleMprotect(const SyscallFrame& frame) {
             bits = bits | cinux::arch::page::kCow;
         }
         *kSlot.entry = cinux::arch::page::MakeTableEntry(mm::walk::EntryTarget(kLeaf), bits);
-        cinux::arch::InvalidatePage(spot);
+        cinux::arch::space::InvalidatePage(spot);
     }
     return 0;
 }

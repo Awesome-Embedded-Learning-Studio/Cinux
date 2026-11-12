@@ -6,7 +6,7 @@
 #include "kernel/arch/instructions.hpp"
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/arch/per_cpu_config.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/arch/x86_64/tss.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -33,8 +33,8 @@ void arm_task_entry(const Task& task) {
     cinux::arch::per_cpu::PerCpu::self().kernel_rsp = kStackTop;
     unsigned long long const kRoot =
         (task.user_root != 0) ? task.user_root : cinux::mm::KernelPageRoot();
-    if (cinux::arch::ReadCr3() != kRoot) {
-        cinux::arch::LoadCr3(kRoot);
+    if (cinux::arch::space::ActiveRoot() != kRoot) {
+        cinux::arch::space::SwitchRoot(kRoot);
     }
 }
 
@@ -66,8 +66,8 @@ public:
     }
 
     void return_to_main(Task& outgoing) {
-        if (cinux::arch::ReadCr3() != cinux::mm::KernelPageRoot()) {
-            cinux::arch::LoadCr3(cinux::mm::KernelPageRoot());
+        if (cinux::arch::space::ActiveRoot() != cinux::mm::KernelPageRoot()) {
+            cinux::arch::space::SwitchRoot(cinux::mm::KernelPageRoot());
         }
         swap_address_regs(&outgoing, nullptr);
         ContextSwitch(&outgoing.ctx, &main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],

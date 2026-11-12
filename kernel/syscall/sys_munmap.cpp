@@ -4,7 +4,7 @@
 #include "cinux/result.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -33,7 +33,7 @@ base::Result<void> ReclaimUserSpan(const proc::Task& self, unsigned long start,
         const mm::walk::Entry kOld = mm::walk::UnmapPage(tables, self.space->root(), spot);
         if (kOld.has(cinux::arch::page::kPresent)) {
             mm::cow::ReleaseFrame(mm::walk::EntryTarget(kOld));
-            cinux::arch::InvalidatePage(spot);
+            cinux::arch::space::InvalidatePage(spot);
         }
     }
     return {};
