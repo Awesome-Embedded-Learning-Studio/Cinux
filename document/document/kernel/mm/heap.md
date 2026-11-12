@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-这一页我们跟着一次 `new` 的旅程，把内核的堆子系统完整走一遍。堆管的是比页更小的那层分配：物理页归 PMM（物理内存管理器，管物理页的分配和归还）管，虚拟区间的事归 VMM（虚拟内存管理器）管，两者各自有单独的一页可以去看，各页的名字是 pmm.md 与 vmm.md，而代码里到处要的 `new` 一个对象、开一块缓冲区，落到的就是这里。实现分成了两层，`Heap` 这个类只懂的是算术，一段连续虚拟内存怎么切成块、怎么记空闲、怎么合并，全是它的话，页表它是一个字都不碰的。把页真正映射进来、再把全局 `new`/`delete` 接过来的，是 runtime 层的职责。这么拆的理由在头文件的注释里写得明白：不碰页表的代码可以直接链进 host 测试，`test/unit/test_heap.cpp` 拿一块普通的缓冲区就能把分配语义整个验证一遍，同一个类在内核里跑得通了，在测试的缓冲区里也照样是跑得起来的。
+这一页我们跟着一次 `new` 的旅程，把内核的堆子系统完整走一遍。堆管的是比页更小的那层分配：物理页归 PMM（物理内存管理器，管物理页的分配和归还）管，虚拟区间的事归 VMM（虚拟内存管理器）管，两者各自有单独的一页可以去看，各页的名字是 pmm.md 与 vmm.md，而代码里到处要的 `new` 一个对象、开一块缓冲区，落到的就是这里。实现分成了两层，`Heap` 这个类只懂的是算术，一段连续虚拟内存怎么切成块、怎么记空闲、怎么合并，全是它的话，页表它是一个字都不碰的。把页真正映射进来、再把全局 `new`/`delete` 接过来的，是 runtime 层的职责。这么拆的理由在头文件的注释里写得明白：不碰页表的代码可以直接链进 host 测试，`test/unit/mm/test_heap.cpp` 拿一块普通的缓冲区就能把分配语义整个验证一遍，同一个类在内核里跑得通了，在测试的缓冲区里也照样是跑得起来的。
 
 ## 块的形状：Header、Footer 与空闲链
 
@@ -161,4 +161,4 @@ void operator delete(void* block) noexcept {
 - `kernel/mm/heap_config.hpp` — 首批映射字节数与下界守卫页常量
 - `kernel/mm/layout.hpp` — kHeapBase 与堆、直接映射、vmalloc 的表项次序
 - `kernel/init/init_sequence.cpp` — bring-up 里 heap 一站的启动顺序
-- `test/unit/test_heap.cpp` — 堆语义的 host 测试，六个用例：init 开张、分配对齐与 free_bytes 的数值、free 合拢、first-fit 复用、拒绝路径、grow
+- `test/unit/mm/test_heap.cpp` — 堆语义的 host 测试，六个用例：init 开张、分配对齐与 free_bytes 的数值、free 合拢、first-fit 复用、拒绝路径、grow

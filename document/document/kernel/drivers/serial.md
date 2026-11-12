@@ -30,7 +30,7 @@
 
 引导序列 `kInitSteps` 的表里，serial 这个名字占的是第一行，PMM（物理内存管理器、管物理页的分配和归还）这样的重头角色，都排在它的后面。这一步的实现就是一行 `SerialInit`，它是一个不可能答失败的步骤，RunInitSequence 里失败停机的机关与它无关。串口开得这么早是有讲究的，图的是后面任何一步出事的时候，还有一条说话的路在。我们把这样安排的理由记下，下一节看打印链怎么把它用起来。
 
-这个内核的打印链我们顺着捋一遍。`print::Println` 把参数交给了格式化引擎，结果写进一个 192 字节的栈缓冲，整串字符随后交给了 `console::PutString`，它的 `put_char` 给每个字符发两份，串口与文字屏幕各拿各的份。文字屏幕没就绪的时候，`put_char` 是安静的无操作，screen.hpp 的文件头注释说了这样安排的道理，console 才敢无条件地扇出。次序也是刻意的，console.hpp 给 `InitConsole` 的注释写的是串口在前面，调试不用等一块就绪的屏幕。生产世界的两步分开了走，串口占的是引导序列的第一行，文字屏幕的 init 排在第五步，中间的任何一步真打了失败行，字能走的就只剩串口一条路。ktest 的测试世界（test/kernel/test_main.cpp）把 `SerialInit` 放在了 PMM 的 init 之前，用的想法与生产世界是同一个，屏幕就绪之前的报错行打的就是串口。
+这个内核的打印链我们顺着捋一遍。`print::Println` 把参数交给了格式化引擎，结果写进一个 192 字节的栈缓冲，整串字符随后交给了 `console::PutString`，它的 `put_char` 给每个字符发两份，串口与文字屏幕各拿各的份。文字屏幕没就绪的时候，`put_char` 是安静的无操作，screen.hpp 的文件头注释说了这样安排的道理，console 才敢无条件地扇出。次序也是刻意的，console.hpp 给 `InitConsole` 的注释写的是串口在前面，调试不用等一块就绪的屏幕。生产世界的两步分开了走，串口占的是引导序列的第一行，文字屏幕的 init 排在第五步，中间的任何一步真打了失败行，字能走的就只剩串口一条路。ktest 的测试世界（test/kernel/kernel/test_main.cpp）把 `SerialInit` 放在了 PMM 的 init 之前，用的想法与生产世界是同一个，屏幕就绪之前的报错行打的就是串口。
 
 引导的世界自带一份一样的表，我们把 boot 的世界也看一眼。kernel/arch/x86_64/boot/early/console.hpp 里躺着同一个 0x3F8 的基址、同一组偏移常量与同一张七行写表，文件头的注释交代了这样复制的缘由：boot 镜像混着 16、32、64 位的代码，它的控制台做成了头内联的形状，每个编译的世界拿自己的一份实例，内核树保留驱动版的控制台，而拷贝本身只归 boot。内核接手的时候，`SerialInit` 把同一组寄存器再编程了一遍，这两次编程做的是同一组写表，`SerialInit` 是幂等的，而做两遍也无妨。
 
@@ -56,4 +56,4 @@ console.cpp 是串口今天最大的客户。它的 `put_char` 把字符交给�
 - `kernel/boot/print.hpp` — 打印链走到 PutString 的那一截
 - `kernel/syscall/sys_reboot.cpp` — 断电之前的 Flush
 - `kernel/arch/x86_64/boot/early/console.hpp` — boot 世界的同表拷贝
-- `test/kernel/test_main.cpp` — ktest 世界的接线
+- `test/kernel/kernel/test_main.cpp` — ktest 世界的接线

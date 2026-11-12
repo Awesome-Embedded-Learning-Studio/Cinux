@@ -164,4 +164,4 @@ Main 接手后的头一件事是把内置的 kallsyms（内核符号表）装好
 - `kernel/arch/x86_64/entry.S`、`kernel/arch/x86_64/entry.cpp` — 内核入口与 KernelStart
 - `kernel/kernel.cpp`、`kernel/init/init_sequence.cpp` — Main 的开场与初始化序列
 - `kernel/arch/x86_64/boot/CMakeLists.txt`、`cmake/boot/stage2_size_check.cmake` — 磁盘拼装与 stage2 尺寸检查
-- `test/unit/test_layout.cpp`、`test/unit/test_gdt.cpp`、`test/unit/test_e820.cpp`、`test/unit/test_vesa.cpp`、`test/unit/test_image.cpp`、`test/unit/test_page.cpp` — host 侧的形状与断言
+- `test/arch/x86_64/test_layout.cpp`、`test/arch/x86_64/test_gdt.cpp`、`test/arch/x86_64/test_e820.cpp`、`test/arch/x86_64/test_vesa.cpp`、`test/unit/loader/test_image.cpp`、`test/unit/mm/test_page.cpp` — host 侧的形状与断言

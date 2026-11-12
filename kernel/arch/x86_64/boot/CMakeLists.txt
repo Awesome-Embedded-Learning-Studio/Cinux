@@ -86,7 +86,8 @@ add_cinux_image(boot_image
 
 foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)
     string(REPLACE ":" ";" entry_parts "${entry}")
-    list(GET entry_parts 0 ktest)
+    list(GET entry_parts 0 ktest_path)
+    get_filename_component(ktest "${ktest_path}" NAME)
     add_cinux_image(boot_ktest_${ktest}
         ${CMAKE_BINARY_DIR}/boot/cinux_ktest_${ktest}.img
         ${CMAKE_BINARY_DIR}/kernel/cinux_ktest_${ktest}.bin

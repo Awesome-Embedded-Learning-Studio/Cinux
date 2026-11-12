@@ -116,5 +116,5 @@ RegisterInputDevices(
 - `kernel/syscall/sys_read.cpp` — 设备读的让出循环与非阻塞短路
 - `third_party/vesper/src/host/evdev_input.hpp`、`evdev_input.cpp` — 打开、独占、翻译与 SYN_DROPPED 重建
 - `third_party/vesper/examples/fbdev_desktop.cpp` — 桌面的两路输入与键盘靠前
-- `test/unit/test_input.cpp`、`test/unit/test_input_node.cpp`、`test/kernel/test_keyboard.cpp` — 事件流、座位与注入字节的测试
+- `test/unit/drivers/test_input.cpp`、`test/unit/drivers/test_input_node.cpp`、`test/kernel/drivers/test_keyboard.cpp` — 事件流、座位与注入字节的测试
 - `user/rootfs/buildroot/overlay/etc/init.d/desktop` — gui 会话的拉起命令

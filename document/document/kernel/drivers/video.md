@@ -73,7 +73,7 @@ TextConsole 的家在 `kernel/console/screen.hpp`，它把字体、光标与帧�
 
 屏幕在打印链里只占一半的位置。print::Println 的格式化与缓冲、进门闸与第五步的次序，[串口驱动](serial.md)那一页已经讲过了，我们只认两件事。console::PutString 的 put_char 给每个字符发两份，串口的一份、文字屏幕的一份。串口排在第一行而屏幕的点亮排在第五步的道理，console.hpp 给 InitConsole 的注释说了，调试不等一块就绪的屏幕。
 
-ktest 的测试世界（test/kernel/test_main.cpp）调的是 console::InitConsole，一句话把 SerialInit 与 TextConsole::init 一起办了，生产世界分两步走的是同一个次序。屏幕活着的凭证我们在 kernel.cpp 里也见过，bootinfo 一行打印 fb 的宽高与位深，屏幕就绪的时候再补一行 screen console 的列数与行数。
+ktest 的测试世界（test/kernel/kernel/test_main.cpp）调的是 console::InitConsole，一句话把 SerialInit 与 TextConsole::init 一起办了，生产世界分两步走的是同一个次序。屏幕活着的凭证我们在 kernel.cpp 里也见过，bootinfo 一行打印 fb 的宽高与位深，屏幕就绪的时候再补一行 screen console 的列数与行数。
 
 ## fb0 的座位与用户态画布的分工
 
@@ -102,4 +102,4 @@ fb0 的座位立在文件世界起来的时候。落座的次序、硬件页登�
 - `kernel/mm/hardware_frames.hpp` — 硬件帧登记
 - `kernel/fs/file_world.cpp` — RegisterFramebufferDevice 的调用处
 - `kernel/CMakeLists.txt` — 字体资源的 objcopy 接线
-- `test/unit/test_vesa.cpp`、`test/unit/test_page.cpp`、`test/unit/test_image.cpp`、`test/kernel/test_console.cpp` — host 侧的形状、窗口规划与租约测试
+- `test/arch/x86_64/test_vesa.cpp`、`test/unit/mm/test_page.cpp`、`test/unit/loader/test_image.cpp`、`test/kernel/drivers/test_console.cpp` — host 侧的形状、窗口规划与租约测试

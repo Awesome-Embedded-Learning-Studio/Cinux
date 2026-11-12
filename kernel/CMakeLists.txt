@@ -199,7 +199,7 @@ function(add_cinux_ktest name stage)
     cinux_kernel_compile_settings(${ktest_core})
 
     add_executable(cinux_ktest_${name}_unsym EXCLUDE_FROM_ALL
-        ${CMAKE_SOURCE_DIR}/test/kernel/test_main.cpp
+        ${CMAKE_SOURCE_DIR}/test/kernel/kernel/test_main.cpp
         $<TARGET_OBJECTS:${ktest_core}>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
         ${CMAKE_SOURCE_DIR}/test/framework/framework_kernel.cpp
@@ -215,7 +215,7 @@ function(add_cinux_ktest name stage)
     cinux_kallsyms_bridge(cinux_ktest_${name}_unsym ${kallsyms_source})
 
     add_executable(cinux_ktest_${name} EXCLUDE_FROM_ALL
-        ${CMAKE_SOURCE_DIR}/test/kernel/test_main.cpp
+        ${CMAKE_SOURCE_DIR}/test/kernel/kernel/test_main.cpp
         $<TARGET_OBJECTS:${ktest_core}>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
         ${CMAKE_SOURCE_DIR}/test/framework/framework_kernel.cpp
@@ -251,7 +251,11 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/debug/kernel.gdb.in
 
 foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)
     string(REPLACE ":" ";" entry_parts "${entry}")
-    list(GET entry_parts 0 ktest)
+    list(GET entry_parts 0 ktest_path)
     list(GET entry_parts 1 ktest_stage)
-    add_cinux_ktest(${ktest} ${ktest_stage} ${CMAKE_SOURCE_DIR}/test/kernel/test_${ktest}.cpp)
+    get_filename_component(ktest "${ktest_path}" NAME)
+    string(REPLACE "/" ";" ktest_path_parts "${ktest_path}")
+    list(GET ktest_path_parts 0 ktest_module)
+    add_cinux_ktest(${ktest} ${ktest_stage}
+        ${CMAKE_SOURCE_DIR}/test/kernel/${ktest_module}/test_${ktest}.cpp)
 endforeach()

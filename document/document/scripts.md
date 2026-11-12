@@ -66,7 +66,7 @@ host 测试这层的家是 test/CMakeLists.txt，登记的活由 add_cinux_test 
 
 机内的这层叫 ktest（kernel test 的缩写，讲整套基建的是 [内核测试基建](kernel/test.md)，这里只管它怎么编目），编目的文件是 kernel_catalog.cmake，cmake/test/ 是它的家，每条登记是名字:阶段的形状，我们对照文件头注释就能认出这个约定。阶段只有六个合法的值（`exceptions`、`irq`、`keyboard`、`mm`、`proc`、`block`），写的是这个测试内核在用例开跑之前要把初始化阶梯爬到哪一级，一条登记对应的是一个测试文件、一个内核、一张镜像与一次启动四件套。今天的登记数是 22。每场用例在 CTest 里的名字是一条腿，block、smp、smp_pipe 三个是明确要求双核的，双核场跑一遍也就够了，CINUX_KTESTS_DUAL_CPU 把它们限在了 CPU2 一条腿上，其余的各注册 CPU1 与 CPU2 两条腿。
 
-腿上的内核由 add_cinux_ktest 造，造法我们也过一遍。整个 kernel 树为它再编了一遍（挂着 EXCLUDE_FROM_ALL），链接的是 `test/kernel/test_main.cpp` 与 `test/framework/framework_kernel.cpp`，宏 KTEST_STAGE_阶段名 定下了爬梯档位，kallsyms 的桥照走，末了由 add_cinux_image 拼出它自己的镜像。CTest 侧的每条腿是一个用例，名字有着 kernel_test_名字_cpuN 的形状，超时给的是 120 秒，挂着的是 RESOURCE_LOCK cinux_qemu，所以并行的 ctest 到了 QEMU 面前还是会排队。test_kernel 目标按 -j 1 跑全部的机内用例，我们开再大的并发也用不上。
+腿上的内核由 add_cinux_ktest 造，造法我们也过一遍。整个 kernel 树为它再编了一遍（挂着 EXCLUDE_FROM_ALL），链接的是 `test/kernel/kernel/test_main.cpp` 与 `test/framework/framework_kernel.cpp`，宏 KTEST_STAGE_阶段名 定下了爬梯档位，kallsyms 的桥照走，末了由 add_cinux_image 拼出它自己的镜像。CTest 侧的每条腿是一个用例，名字有着 kernel_test_名字_cpuN 的形状，超时给的是 120 秒，挂着的是 RESOURCE_LOCK cinux_qemu，所以并行的 ctest 到了 QEMU 面前还是会排队。test_kernel 目标按 -j 1 跑全部的机内用例，我们开再大的并发也用不上。
 
 机内用例的判卷人名字是 run_kernel_tests.cmake，它的家安在 cmake/test/，我们把判法读一遍。进门验的是 /dev/kvm，可读可写缺一样的话就 FATAL_ERROR，源码注释写的是只用 -accel kvm，没有 TCG（QEMU 的纯软件模拟后端）的回退。判卷靠的是退出码的协议，源码注释把换算的规则写得清清楚楚，内核经 isa-debug-exit 退了场，交给端口的字节是失败数加一，QEMU 进程的退出码是它的两倍加一，3 的意思是全过，其余的数值能反推失败个数，退出码 1 是没摸到退出端口的早死，挂死另有报的法子。卷面的复核也少不了，串口日志里必须有 `Results: N passed, 0 failed` 的总结，N 的下限是一，空跑与截断的假绿都拦了下来，失败时串口日志整个附在了报错的后面。
 

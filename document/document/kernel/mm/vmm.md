@@ -70,4 +70,4 @@ FillPage 的本体在 `kernel/mm/demand.cpp`，我们只看它和页表的接触
 - `kernel/arch/x86_64/registers.hpp` — ReloadCr3、InvalidatePage（invlpg）
 - `kernel/proc/fault_resolve.cpp`、`kernel/mm/demand.cpp` — 缺页 resolver 与按需填充
 - `kernel/init/init_sequence.cpp` — 接管在启动序列里的位置
-- `test/unit/test_vmm.cpp`、`test/kernel/test_vmm.cpp` — 两个世界下的游走测试
+- `test/unit/mm/test_vmm.cpp`、`test/kernel/mm/test_vmm.cpp` — 两个世界下的游走测试

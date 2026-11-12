@@ -48,7 +48,7 @@ concept TickSource = requires(Backend& backend, cinux::base::Hertz rate) {
 
 频率的旋钮 kTickHz 住在 `kernel/time/tick_config.hpp`，我们认到的值是 100_Hz。tick_config.hpp 的文件头注释把分居的道理交代了，服务的旋钮进 config 文件，器件的事实留在驱动里，调系统的动作因此永远是动一个常量、碰不到类的脸。
 
-init 的动作一气呵成，我们把它的两拍分开数。注册会把计数清了零，跟着按 kTickHz 把设备开了起来，注释对早开的态度很宽，中断的总闸还关着的时候，设备振得再早也是白振的，这样的早开是无害的。这一点我们拿测试守着，`test/kernel/test_tick.cpp` 的两个用例，一个等的是三拍到位，另一个在闸关着的时候空转一圈、计数一格都不动，两头的说法都有实证。
+init 的动作一气呵成，我们把它的两拍分开数。注册会把计数清了零，跟着按 kTickHz 把设备开了起来，注释对早开的态度很宽，中断的总闸还关着的时候，设备振得再早也是白振的，这样的早开是无害的。这一点我们拿测试守着，`test/kernel/time/test_tick.cpp` 的两个用例，一个等的是三拍到位，另一个在闸关着的时候空转一圈、计数一格都不动，两头的说法都有实证。
 
 数拍的口 on_interrupt 我们也要看一眼，它的实现只有一行 fetch_add，内存序取的是 relaxed。inline 的缘由注释交代了，它要在调用者那座无 SSE 的中断孤岛（整条路径不碰向量寄存器）里实例化，进门时中断已经是关着的，所以路径越短越好。计数器上的 static_assert 我们也数到了，atomic<unsigned long long> 必须是无锁的，注释的立场是 IRQ 的计数器不许调带锁的运行时。since_boot() 把计数读了出去，服务开张之前答的是零。
 
@@ -104,4 +104,4 @@ since_boot_ns() 的读法我们也要认一下，头文件的注释说底数取�
 - `kernel/arch/x86_64/platform/hpet/hpet.hpp`、`hpet.cpp`、`hpet_layout.hpp` — 钟面定位、init 的核对与开关、纳秒折算
 - `kernel/syscall/sys_clock.cpp` — MonotonicNanoseconds 的两条分支
 - `kernel/arch/x86_64/platform/ps2/controller_host.cpp` — host_delay 到 wait_microseconds 的接线
-- `test/kernel/test_tick.cpp`、`test_main.cpp` — 三拍到位、关闸无声两个用例与测试侧的接线
+- `test/kernel/time/test_tick.cpp`、`test_main.cpp` — 三拍到位、关闸无声两个用例与测试侧的接线

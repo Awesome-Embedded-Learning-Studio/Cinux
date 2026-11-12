@@ -112,5 +112,5 @@ RegisterInputDevices(
 - `kernel/fs/file_world.cpp` — 两条流的接线与 event1 的归属
 - `kernel/init/init_sequence.cpp` — keyboard 与 pointer 两个引导步骤及其失败态度
 - `kernel/arch/x86_64/irq_guard.hpp`、`vector_config.hpp` — 中断快照开关、0x20 起的向量分配
-- `test/unit/test_input.cpp`、`test/kernel/test_keyboard.cpp` — 解码器的 host 测试与内核态里鼠标的出场
+- `test/unit/drivers/test_input.cpp`、`test/kernel/drivers/test_keyboard.cpp` — 解码器的 host 测试与内核态里鼠标的出场
 - `third_party/vesper/src/host/evdev_input.cpp` — 桌面读 event1 的那一头

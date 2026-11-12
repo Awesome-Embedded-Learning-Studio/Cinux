@@ -106,7 +106,7 @@ concept SwitchSink = requires(Sink& sink, Task& outgoing, Task& incoming) {
 
 我们把四个动词各自管的事读一遍。switch_tasks 负责任务到任务的交接。enter_from_main 管的，是内核 Main 头一回交出 CPU 的时刻。return_to_main 负责的是在最后一个任务退干净之后，把 CPU 还回 Main 的手里。reclaim 负责还一个死任务的内存。调度器管的只是语义，名册、状态、挑选和回收时机都是它的话，寄存器、页表和内存归还都是 sink 的话，两边谁也不知道对方怎么干活。
 
-内核装的是 task_runtime.cpp 里的 KernelSwitchSink，InstallKernelSwitchSink() 这么一调，spawn、yield、exit 操作的就都是真寄存器图像了。它的 switch_tasks 是从 arm_task_entry 开始的：把 TSS（任务状态段）的 rsp0 和 per-CPU 的 kernel_rsp 都指到 incoming 的栈顶，下次从 ring 3 打进来的时候就有栈可落了。CR3 是按需换的，带着用户世界的任务换它自己的根，没有的就回内核的根。随后的 swap_address_regs 换的是 FS/GS，把 incoming 的 on_cpu 写成本核的编号，最后一步是 ContextSwitch 的跳转，outgoing 的 on_cpu 在汇编里被释放成 -1。reclaim 的自旋等的就是 on_cpu 归 -1，因为另一个核可能还在这个任务的上下文里收尾，等到它归了 -1，4 页物理内存就按 kStackOrder 还给了 PMM，控制块也跟着被 delete 掉了。host 测试装的是记录版，我们在 test/unit/test_scheduler.cpp 里能看到 RecordingSink 把每次决策记成流再逐条断言，同一份目标代码不碰机器就验证了调度语义，这正是接缝存在的理由。
+内核装的是 task_runtime.cpp 里的 KernelSwitchSink，InstallKernelSwitchSink() 这么一调，spawn、yield、exit 操作的就都是真寄存器图像了。它的 switch_tasks 是从 arm_task_entry 开始的：把 TSS（任务状态段）的 rsp0 和 per-CPU 的 kernel_rsp 都指到 incoming 的栈顶，下次从 ring 3 打进来的时候就有栈可落了。CR3 是按需换的，带着用户世界的任务换它自己的根，没有的就回内核的根。随后的 swap_address_regs 换的是 FS/GS，把 incoming 的 on_cpu 写成本核的编号，最后一步是 ContextSwitch 的跳转，outgoing 的 on_cpu 在汇编里被释放成 -1。reclaim 的自旋等的就是 on_cpu 归 -1，因为另一个核可能还在这个任务的上下文里收尾，等到它归了 -1，4 页物理内存就按 kStackOrder 还给了 PMM，控制块也跟着被 delete 掉了。host 测试装的是记录版，我们在 test/unit/proc/test_scheduler.cpp 里能看到 RecordingSink 把每次决策记成流再逐条断言，同一份目标代码不碰机器就验证了调度语义，这正是接缝存在的理由。
 
 入册的口子就是 seat，我们跟着它的检查顺序走。它查的是 sink 已装、类已注册，空类的任务会被指到最早注册的类，任务指了一个没注册的类就会被 Check 当场拦下（Check 是这个内核的运行时断言，命中了就停机报告）。initial_process 为真的时候它会扫一遍名册、确认 pid 1 还没被占用、然后发 1，其余情况发的号都从 next_pid_ 递增。tgid 的取值就地等于 pid。状态在这里被置成了 kBlocked，任务上的是全体名册 tasks_，父亲还在的任务还要上后代名册 offspring_。runnable 为真的时候它会向自己的类入行，成功了才变 kReady。行满了也不炸、也不停机，新来的任务就留在了 kBlocked，这一次的拒绝会计进 ready_refusals()，源码注释对它的态度是满行算负载，停的只是这个新来的任务，机器继续跑它的。
 
@@ -201,4 +201,4 @@ current() 的读取只在 IrqGuard 下发生，读的是 per-CPU 的 current 指
 - `kernel/arch/x86_64/per_cpu.hpp` — per-CPU 块：current、slice_ticks、rotate_due、queue_depth 等
 - `kernel/arch/x86_64/irq_stubs.cpp` — heartbeat 与三个中断出口上的 maybe_preempt
 - `kernel/kernel.cpp` — 类注册、sink 安装、抢占开关、Main 的 idle 循环
-- `test/unit/test_scheduler.cpp` — RecordingSink 与调度语义的 host 测试
+- `test/unit/proc/test_scheduler.cpp` — RecordingSink 与调度语义的 host 测试

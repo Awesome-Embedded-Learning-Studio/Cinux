@@ -189,4 +189,4 @@ endfunction()
 - `base/include/cinux/async.hpp`、`region/memory_region.hpp` — 回调板子与区间描述
 - `test/CMakeLists.txt` — add_cinux_test 的骨架与各测试的源文件名单
 - `test/framework/assert_host.cpp` — 断言钩子的 host 定义
-- `test/unit/test_format.cpp`、`test_bitmap.cpp` 等 — 纯 base 直链的样例
+- `test/unit/base/test_format.cpp`、`test_bitmap.cpp` 等 — 纯 base 直链的样例

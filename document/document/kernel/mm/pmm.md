@@ -45,4 +45,4 @@ Pmm 的家底就是三个数组成员。bitmap_ 是个不自带存储的 Bitmap�
 - `kernel/boot/boot_info.hpp` — E820 数组与内核镜像的交接记录
 - `kernel/init/init_sequence.cpp` — Pmm::self().init 在启动序列里的调用点
 - `kernel/mm/cow.cpp`、`kernel/mm/demand.cpp`、`kernel/syscall/sys_shm.cpp` — 共享计数的三个消费方
-- `test/unit/test_pmm.cpp` — 用假 BootInfo 驱动的 host 测试
+- `test/unit/mm/test_pmm.cpp` — 用假 BootInfo 驱动的 host 测试
