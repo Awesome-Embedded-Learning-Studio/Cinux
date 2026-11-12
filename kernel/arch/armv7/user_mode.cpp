@@ -59,7 +59,7 @@ extern "C" unsigned char __user_text_end[];
 namespace {
 
 constexpr unsigned long kTaskACode  = 0x40001000UL;
-constexpr unsigned long kTaskAStack = 0x40002000UL;
+constexpr unsigned long kTaskAStack = 0x40004000UL;  // code gets the pages before it
 constexpr unsigned long kTaskBCode  = 0x40003000UL;
 constexpr unsigned long kTaskBStack = 0x40004000UL;
 
@@ -483,6 +483,45 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+            {
+                const long kGrand = user_syscall0(cinux::armv7::syscall_nr::kFork);
+                if (kGrand == 0) {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('g'); NOTE('r'); NOTE('a'); NOTE('n'); NOTE('d'); NOTE('c');
+                    NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' '); NOTE('o');
+                    NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                    static_cast<void>(
+                        user_syscall3(cinux::armv7::syscall_nr::kExit, 4, 0, 0));
+                    for (;;) {
+                    }
+                }
+                unsigned long grand_status = 0;
+                for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                    const long kResult = user_syscall3(
+                        cinux::armv7::syscall_nr::kWait,
+                        1UL << static_cast<unsigned long>(kGrand),
+                        static_cast<unsigned long>(
+                            reinterpret_cast<std::uintptr_t>(&grand_status)),
+                        200);
+                    if (kResult >= 0) {
+                        if (grand_status == 4UL) {
+                            char          note[24];
+                            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                            NOTE('t'); NOTE('w'); NOTE('o'); NOTE(' '); NOTE('l');
+                            NOTE('e'); NOTE('v'); NOTE('e'); NOTE('l'); NOTE('s');
+                            NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                            user_write(note, note_length);
+                        }
+                        break;
+                    }
+                }
+            }
             if (*kSharedPage == 0x2222UL) {
                 char          note[24];
                 unsigned long note_length = 0;
@@ -721,19 +760,32 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         task.trap.spsr = 0x10UL;
         return true;
     }
-    const auto kCodeFrame  = cinux::mm::Pmm::self().allocate_page();
     const auto kStackFrame = cinux::mm::Pmm::self().allocate_page();
-    if (kCodeFrame.raw == 0 || kStackFrame.raw == 0) {
+    if (kStackFrame.raw == 0) {
         return false;
     }
+    // The user section outgrew one page once the self-check grew; copy it
+    // into as many frames as it needs and map them back to back.
     const unsigned long kTextBytes =
         static_cast<unsigned long>(__user_text_end - __user_text_start);
-    auto* const code = reinterpret_cast<unsigned char*>(kCodeFrame.raw);
-    for (unsigned long offset = 0; offset < kTextBytes; ++offset) {
-        code[offset] = __user_text_start[offset];
+    const unsigned long kCodePages =
+        (kTextBytes + cinux::arch::page::kSize - 1) / cinux::arch::page::kSize;
+    for (unsigned long index = 0; index < kCodePages; ++index) {
+        const auto kCodeFrame = cinux::mm::Pmm::self().allocate_page();
+        if (kCodeFrame.raw == 0) {
+            return false;
+        }
+        auto* const code = reinterpret_cast<unsigned char*>(kCodeFrame.raw);
+        for (unsigned long offset = 0; offset < cinux::arch::page::kSize; ++offset) {
+            const unsigned long source = index * cinux::arch::page::kSize + offset;
+            code[offset] = source < kTextBytes ? __user_text_start[source] : 0U;
+        }
+        if (!task.space->map_user(code_va + index * cinux::arch::page::kSize,
+                                  kCodeFrame.raw)) {
+            return false;
+        }
     }
-    if (!task.space->map_user(code_va, kCodeFrame.raw) ||
-        !task.space->map_user(stack_va, kStackFrame.raw)) {
+    if (!task.space->map_user(stack_va, kStackFrame.raw)) {
         return false;
     }
     if (g_shared_frame != 0 &&
