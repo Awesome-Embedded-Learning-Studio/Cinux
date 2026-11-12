@@ -124,6 +124,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_WRITEFILE=writefile ok"
             "-DEXPECTED_NOSLOTOPEN=open refused, no free slot"
             "-DEXPECTED_APPEND=append ok"
+            "-DEXPECTED_FSTAT=size 8 writable 1"
+            "-DEXPECTED_FSTATOK=fstat ok"
             "-DEXPECTED_SHAREDFILE=shared ok"
             "-DEXPECTED_LSEEKBAD=refused, whence 0"
             "-DEXPECTED_READBAD=read refused 80000000"

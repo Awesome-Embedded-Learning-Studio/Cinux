@@ -578,6 +578,24 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                         user_write(note, note_length);
                     }
                 }
+                {
+                    unsigned long info[2] = {0, 0};
+                    const long kStat = user_syscall3(
+                        cinux::armv7::syscall_nr::kFstat,
+                        static_cast<unsigned long>(kScrFd),
+                        static_cast<unsigned long>(
+                            reinterpret_cast<std::uintptr_t>(&info[0])),
+                        0);
+                    if (kStat == 0 && info[0] == 8 && info[1] == 1) {
+                        char          note[16];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('f'); NOTE('s'); NOTE('t'); NOTE('a'); NOTE('t'); NOTE(' ');
+                        NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
+                }
                 const long kBadSeek = user_syscall3(
                     cinux::armv7::syscall_nr::kLseek, static_cast<unsigned long>(kScrFd),
                     static_cast<unsigned long>(-1), 0);
@@ -1479,6 +1497,28 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
         wake_waiters_of(g_current);
+    }
+
+    if (number == cinux::armv7::syscall_nr::kFstat) {
+        const unsigned long kFd = g_user_trap.r0;
+        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            cinux::print::Println("[armv7] fstat %u refused", kFd);
+            return &g_tasks[g_current].trap;
+        }
+        const FdEntry&      file = g_tasks[g_current].fds[kFd];
+        const unsigned long info[2] = {file.size,
+                                       file.writable ? 1UL : 0UL};
+        if (!cinux::arch::CopyToUser(g_user_trap.r1, info, sizeof(info))) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kFault);
+            return &g_tasks[g_current].trap;
+        }
+        cinux::print::Println("[armv7] fstat %u size %u writable %u", kFd, file.size,
+                              static_cast<unsigned>(file.writable));
+        g_tasks[g_current].trap.r0 = 0;
+        return &g_tasks[g_current].trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kLseek) {
