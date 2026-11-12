@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/proc/fpu_gate.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/scheduler.hpp"

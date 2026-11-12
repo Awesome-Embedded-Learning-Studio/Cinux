@@ -1,7 +1,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/own.hpp"
 #include "cinux/text.hpp"
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/arch/x86_64/halt.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
 #include "kernel/arch/per_cpu.hpp"

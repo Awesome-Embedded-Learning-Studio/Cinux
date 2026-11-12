@@ -2,7 +2,7 @@
 
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/proc/proc_config.hpp"
 
 namespace cinux::proc {

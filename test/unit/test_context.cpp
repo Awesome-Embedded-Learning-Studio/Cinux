@@ -1,7 +1,7 @@
 #include <cstddef>
 
 #include "../framework/framework.hpp"
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/task.hpp"
 #include "test_assert.hpp"

@@ -23,7 +23,7 @@
 
 #include "cinux/container/self_list.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/fs_context.hpp"
