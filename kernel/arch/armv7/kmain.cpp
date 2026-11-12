@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
 #include "kernel/arch/armv7/mmu.hpp"
 #include "kernel/arch/armv7/timer.hpp"
@@ -53,7 +54,9 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartInit();
     cinux::armv7::UartWrite("\nCinux armv7: alive on i.MX6ULL\n");
 
-    cinux::armv7::UartWrite("[armv7] timer: freq ");
+    cinux::armv7::UartWrite("[armv7] page ");
+    PrintUnsigned(cinux::arch::page::kSize);
+    cinux::armv7::UartWrite(" bytes, timer: freq ");
     PrintUnsigned(cinux::armv7::TimerFrequency());
     cinux::armv7::UartWrite(" Hz, counter 0x");
     PrintHex(cinux::armv7::TimerCounter());
@@ -67,6 +70,8 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::TimerEnable();
     cinux::armv7::MmuEnable();
     cinux::armv7::UartWrite("[armv7] mmu on\n");
+    cinux::armv7::UartWrite(cinux::armv7::TwoLevelDemo() ? "[armv7] two-level page ok\n"
+                                                        : "[armv7] two-level page FAILED\n");
     asm volatile("cpsie if" ::: "memory");
     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
     for (;;) {

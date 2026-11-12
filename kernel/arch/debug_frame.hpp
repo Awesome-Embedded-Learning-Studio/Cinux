@@ -14,4 +14,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/debug_frame.hpp"
+#include "cinux/port/debug_frame.hpp"

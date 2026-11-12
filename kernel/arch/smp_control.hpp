@@ -15,4 +15,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/smp_control.hpp"
+#include "cinux/port/smp_control.hpp"

@@ -35,7 +35,10 @@ target_link_options(arm_image PRIVATE
     -Wl,--no-warn-rwx-segments
     -lgcc)
 
-target_include_directories(arm_image PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(arm_image PRIVATE
+    ${CMAKE_BINARY_DIR}/generated
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/base/include)
 set_target_properties(arm_image PROPERTIES
     OUTPUT_NAME "arm"
     SUFFIX ".elf"

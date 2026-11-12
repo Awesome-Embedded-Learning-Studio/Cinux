@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/space_layout.hpp"
+#include "cinux/port/space_layout.hpp"
 
 namespace cinux::arch::space {
 

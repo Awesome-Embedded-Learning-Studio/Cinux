@@ -15,4 +15,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/per_cpu_config.hpp"
+#include "cinux/port/per_cpu_config.hpp"

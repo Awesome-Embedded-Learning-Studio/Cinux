@@ -14,8 +14,10 @@
   CP15 的寄存器选择子是关键：TVAL 是 opc2=0，CTL 是 1，CVAL 是 2。
 - `gic.cpp`：GIC-400 的 distributor 与 CPU interface，定时器挂在 PPI 29/30。
 - `vectors.S` 与 `irq.cpp`：异常向量表，IRQ 与 FIQ 都进同一个 C 处理函数。
-- `mmu.cpp`：短描述符的段映射。低 512 MiB 当设备内存（UART、GIC），
-  0x80000000 起的 256 MiB 当普通可执行内存，开 MMU 后串口与中断继续工作。
+- `mmu.cpp`：短描述符的地址映射。低 512 MiB 当设备内存（UART、GIC），
+  0x80000000 起的 256 MiB 当普通可执行内存；另外在 0x40000000 挂一张
+  第二级小页表，把一页映射到静态缓冲上，写穿一次验证两级翻译真的在走。
+  开 MMU 后串口、中断与两级映射都继续工作。
 
 ## 验收
 
@@ -33,10 +35,20 @@
 三是 CP15 的选择子。c14,c2 的 opc2 写错一位，读到的是别的寄存器，看起来
 像定时器不工作。
 
+## 端口转发
+
+中立头 `kernel/arch/<名字>.hpp` 现在不含 ISA 路径，它引用
+`cinux/port/<名字>.hpp`。这个文件由根构建按 `CINUX_ARCHITECTURE` 生成，
+内容是 include 当前端口的实现。x86_64 与 armv7 因此可以共存，换端口不改
+共享文件。
+
+armv7 目前实现了 page、space_layout、space_control、irq_guard、halt、
+instructions 六个中立头；其余等着最小核心真正开始编译时再补。
+
 ## 还没接的
 
-- 两级页表与用户空间：现在只有 1 MiB 段的恒等映射，没有第二级表，
-  也没有 USER 域。
+- 用户态：第二级表已经会走，但还没有切到 PL0 的路径，也没有 USER 域
+  的完整权限矩阵。
 - `platform/clock`、`platform/interrupt` 这些中立接口还没接上这一层，
   现在的实现是就地写的。
 - 没有把内核核心链进来。mm、proc、syscall 还等着自己的 armv7 实现。

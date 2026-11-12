@@ -39,6 +39,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # The lane attaches its sources and run targets here. A lane that owns the
 # rest of the configure (no hosted kernel, no Buildroot rootfs, no host
 # tests) sets CINUX_ARCH_LANE_TERMINAL and the root returns.
+# One generated shim per neutral arch header, pointing at the selected
+# port's implementation. Neutral headers include "cinux/port/<name>.hpp",
+# so a port coexists instead of editing shared files.
+set(CINUX_PORT_HEADERS
+    abi context cpuid debug_frame firmware halt init instructions irq_guard isr
+    kernel_stack msr page page_entry page_walk_shape per_cpu per_cpu_config random
+    smp_control space_control space_layout syscall_abi user_access user_entry)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated/cinux/port)
+foreach(port_header IN LISTS CINUX_PORT_HEADERS)
+    file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/generated/cinux/port/${port_header}.hpp
+         CONTENT "#pragma once\n#include \"kernel/arch/${CINUX_ARCHITECTURE}/${port_header}.hpp\"\n")
+endforeach()
+
 cinux_arch_lane()
 if(CINUX_ARCH_LANE_TERMINAL)
     return()

@@ -17,4 +17,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "cinux/port/irq_guard.hpp"

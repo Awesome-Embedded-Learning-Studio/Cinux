@@ -15,4 +15,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/user_entry.hpp"
+#include "cinux/port/user_entry.hpp"

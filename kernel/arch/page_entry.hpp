@@ -16,4 +16,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "cinux/port/page_entry.hpp"

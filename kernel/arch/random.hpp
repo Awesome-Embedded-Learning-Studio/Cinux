@@ -14,4 +14,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/random.hpp"
+#include "cinux/port/random.hpp"

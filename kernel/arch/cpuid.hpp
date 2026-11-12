@@ -15,4 +15,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/cpuid.hpp"
+#include "cinux/port/cpuid.hpp"

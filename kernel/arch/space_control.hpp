@@ -16,4 +16,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/space_control.hpp"
+#include "cinux/port/space_control.hpp"

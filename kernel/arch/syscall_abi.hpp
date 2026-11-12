@@ -15,4 +15,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/syscall_abi.hpp"
+#include "cinux/port/syscall_abi.hpp"
