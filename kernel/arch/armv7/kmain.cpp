@@ -12,6 +12,7 @@
 
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/mm/layout.hpp"
+#include "kernel/mm/heap_runtime.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
@@ -127,6 +128,13 @@ extern "C" [[noreturn]] void kmain() {
                 cinux::print::Println(cinux::armv7::RunHeapSelfCheck()
                                           ? "[armv7] selfcheck heap ok"
                                           : "[armv7] selfcheck heap FAILED");
+                if (cinux::mm::BringUpHeap()) {
+                    auto* const probe = new unsigned long(0x114514UL);
+                    cinux::print::Println("[armv7] paged heap live, probe %X", *probe);
+                    delete probe;
+                } else {
+                    cinux::print::Println("[armv7] paged heap FAILED");
+                }
             } else {
                 cinux::armv7::UartWrite("[armv7] pmm refused init\n");
             }

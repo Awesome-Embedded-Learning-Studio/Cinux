@@ -24,6 +24,10 @@ namespace cinux::arch::space {
 using cinux::base::operator""_KiB;
 using cinux::base::operator""_MiB;
 
+/// The kernel heap window's virtual base: just past the managed RAM, so
+/// the heap's virtual pages never collide with the identity map.
+inline constexpr unsigned long kHeapBase = 0x90000000UL;
+
 /// Highest user-visible address plus one: the classic 3 GiB split.
 inline constexpr unsigned long kUserTop = 0xC0000000UL;
 
