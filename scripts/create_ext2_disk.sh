@@ -16,6 +16,25 @@ is_elf() {
     [ -f "$1" ] && [ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]
 }
 
+# BusyBox init opens /dev/console before it seats any respawn entry. The
+# volume has no devtmpfs behind it (the kernel's device model registers
+# "console" but no /dev node shows up in the assembled tree), so an empty
+# /dev makes init give up silently: the guest stops right after the last
+# kernel log line with no prompt and no error. Seat the nodes here.
+#
+# debugfs mknod takes a path relative to the current directory; passing
+# "/dev/console" creates a root entry whose name literally contains a
+# slash, which is why the script switches into /dev first.
+seat_dev_nodes() {
+    local image=$1
+    debugfs -w -f - "$image" <<'NODES'
+cd /dev
+mknod console c 5 1
+mknod null c 1 3
+NODES
+    echo "[ext2-disk] /dev nodes seated (console, null)"
+}
+
 # The glibc ecosystem volume bakes from one assembled directory tree:
 # seed files, the glibc BusyBox with its hardlinked applets, the teaching
 # ELF set, the glibc runtime pair BusyBox needs beyond the toolchain
@@ -94,6 +113,7 @@ bake_glibc_volume() {
     cp -a "${staging}/." "$assemble/"
     truncate -s 192M "$image"
     mkfs.ext2 -q -F -b 1024 -O none -N 16384 -d "$assemble" "$image"
+    seat_dev_nodes "$image"
     echo "[ext2-disk] glibc volume baked from ${assemble} (busybox + as/ld toolchain, 192M/16384 inodes)"
 }
 
@@ -150,6 +170,7 @@ mkfs.ext2 -q -F -b 1024 -O none -N 512 "$image"
 debugfs -w -R 'mkdir /etc' "$image" >/dev/null 2>&1
 debugfs -w -R 'mkdir /bin' "$image" >/dev/null 2>&1
 debugfs -w -R 'mkdir /dev' "$image" >/dev/null 2>&1
+seat_dev_nodes "$image"
 debugfs -w -R 'mkdir /lib' "$image" >/dev/null 2>&1
 debugfs -w -R 'mkdir /proc' "$image" >/dev/null 2>&1
 debugfs -w -R 'mkdir /root' "$image" >/dev/null 2>&1
