@@ -20,6 +20,7 @@
 #include <cstdint>
 
 #include "kernel/arch/armv7/context.hpp"
+#include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
@@ -41,9 +42,9 @@ constexpr unsigned long kTaskBCode  = 0x40003000UL;
 constexpr unsigned long kTaskBStack = 0x40004000UL;
 
 struct UserTask {
-    cinux::arch::CpuContext context;
-    unsigned long           root;
-    bool                    done;
+    cinux::arch::UserTrap trap;
+    unsigned long         root;
+    bool                  done;
 };
 
 UserTask                g_tasks[2];
@@ -97,12 +98,15 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     unsigned long length = 0;
 #define PUSH_CHAR(c) buffer[length++] = (c)
     PUSH_CHAR('0' + static_cast<char>(task_id));
+    PUSH_CHAR(':');
+    PUSH_CHAR('?');
     PUSH_CHAR('['); PUSH_CHAR('a'); PUSH_CHAR('r'); PUSH_CHAR('m'); PUSH_CHAR('v');
     PUSH_CHAR('7'); PUSH_CHAR(']'); PUSH_CHAR(' '); PUSH_CHAR('u'); PUSH_CHAR('s');
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
     PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR('\n');
 #undef PUSH_CHAR
     for (unsigned long round = 0; round < 3; ++round) {
+        buffer[2] = static_cast<char>('0' + round);
         user_write(buffer, length);
         if (round != 2) {
             static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kSchedYield));
@@ -191,17 +195,17 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         code_va + static_cast<unsigned long>(
                       reinterpret_cast<std::uintptr_t>(&user_entry_stub) -
                       reinterpret_cast<std::uintptr_t>(__user_text_start));
-    task.context      = cinux::arch::CpuContext{};
-    task.context.lr   = kEntry;
-    task.context.sp   = stack_va + cinux::arch::page::kSize;
-    task.context.spsr = 0x10UL;  // user mode
+    task.trap      = cinux::arch::UserTrap{};
+    task.trap.lr   = kEntry;
+    task.trap.sp   = stack_va + cinux::arch::page::kSize;
+    task.trap.spsr = 0x10UL;  // user mode
     return true;
 }
 
 }  // namespace
 
 extern "C" {
-cinux::arch::CpuContext g_user_save_area;
+cinux::arch::UserTrap g_user_trap;
 }
 
 namespace cinux::armv7 {
@@ -215,7 +219,7 @@ bool RunUserModeSelfCheck() {
     g_current = 0;
     cinux::print::Println("[armv7] task 0 starts on its own table");
     cinux::arch::space::SwitchRoot(g_tasks[0].root);
-    cinux::arch::EnterUserModeWithReturn(g_tasks[0].context.lr, g_tasks[0].context.sp, &g_main);
+    cinux::arch::EnterUserModeWithReturn(g_tasks[0].trap.lr, g_tasks[0].trap.sp, &g_main);
     cinux::arch::space::SwitchRoot(g_kernel_root);
     return g_tasks[0].done && g_tasks[1].done;
 }
@@ -226,10 +230,10 @@ namespace {
 
 /// Picks the next runnable task and hands its frame back to the stub.
 /// Never returns when nothing is runnable: it resumes the kernel instead.
-cinux::arch::CpuContext* schedule_next(unsigned long number) {
-    cinux::arch::CpuContext& running = g_tasks[g_current].context;
-    for (unsigned long word = 0; word < 11; ++word) {
-        (&running.r4)[word] = (&g_user_save_area.r4)[word];
+cinux::arch::UserTrap* schedule_next(unsigned long number) {
+    cinux::arch::UserTrap& running = g_tasks[g_current].trap;
+    for (unsigned long word = 0; word < 16; ++word) {
+        (&running.r0)[word] = (&g_user_trap.r0)[word];
     }
     if (number == cinux::armv7::syscall_nr::kExit) {
         g_tasks[g_current].done = true;
@@ -241,12 +245,12 @@ cinux::arch::CpuContext* schedule_next(unsigned long number) {
         g_current = other;
         cinux::print::Println("[armv7] switch to task %u", other);
         cinux::arch::space::SwitchRoot(g_tasks[other].root);
-        return &g_tasks[other].context;
+        return &g_tasks[other].trap;
     }
 
     if (!g_tasks[g_current].done) {
         // The other one finished; this task keeps running.
-        return &g_tasks[g_current].context;
+        return &g_tasks[g_current].trap;
     }
 
     g_running = false;
@@ -258,11 +262,11 @@ cinux::arch::CpuContext* schedule_next(unsigned long number) {
 
 }  // namespace
 
-extern "C" cinux::arch::CpuContext* c_schedule_from_user(unsigned long number) {
+extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number) {
     return schedule_next(number);
 }
 
-extern "C" void ResumeUserFrame(cinux::arch::CpuContext* frame);
+extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
 
 /// A user task died on an abort: mark it, run the other one, or go home.
 extern "C" [[noreturn]] void c_user_faulted() {
@@ -274,7 +278,7 @@ extern "C" [[noreturn]] void c_user_faulted() {
         cinux::print::Println("[armv7] switch to task %u", other);
         cinux::arch::space::SwitchRoot(g_tasks[other].root);
         asm volatile("cps #0x13" ::: "memory");
-        ResumeUserFrame(&g_tasks[other].context);
+        ResumeTrap(&g_tasks[other].trap);
     }
     g_running = false;
     cinux::print::Println("[armv7] all user tasks done");

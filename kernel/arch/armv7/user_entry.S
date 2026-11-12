@@ -27,16 +27,18 @@ EnterUserModeWithReturn:
     mov     lr, r0
     movs    pc, lr                  @ exception return into user mode
 
-.global ResumeUserFrame
-ResumeUserFrame:
-    ldr     r1, [r0, #32]           @ user sp
-    ldr     r2, [r0, #40]           @ SPSR
-    ldr     lr, [r0, #36]           @ user pc
+.global ResumeTrap
+ResumeTrap:
+    mov     r3, r0
+    ldr     r1, [r3, #52]           @ user sp
+    ldr     r2, [r3, #60]           @ SPSR
+    ldr     r12, [r3, #56]          @ user pc
     cps     #0x1F
     mov     sp, r1
     cps     #0x13
     msr     spsr_cxsf, r2
-    ldmia   r0, {r4-r11}
+    mov     lr, r12
+    ldmia   r3, {r0-r12}
     movs    pc, lr
 
 .section .user_text, "ax"
