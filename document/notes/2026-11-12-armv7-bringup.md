@@ -7,11 +7,11 @@
 
 | 项 | 现在的样子 |
 | --- | --- |
-| 系统调用 | 15 个号：exit 1、fork 2、read 3、write 4、close 6、getpid 20、brk 45、getppid 64、signal 67、getticks 78、mmap 90、munmap 91、wait 114、sched_yield 158、sleep 162 |
+| 系统调用 | 17 个号：exit 1、fork 2、read 3、write 4、open 5、close 6、lseek 19、getpid 20、brk 45、getppid 64、signal 67、getticks 78、mmap 90、munmap 91、wait 114、sched_yield 158、sleep 162 |
 | 任务槽 | 8 条：开机 4 条，后 4 条留给 fork，退出后回收复用 |
 | 用户地址 | 代码 0x40001000（预留三页）、栈 0x40004000、按需窗口 0x40009000、brk 0x4000C000 到 0x40010000、mmap 0x40010000 到 0x40100000 |
 | 用户代码段 | 4180 字节、两页；链接期断言不超过三页 |
-| 断言 | arm_boot 82 条期望，全按字面量比对；同名 `-D` 在配置期直接报错 |
+| 断言 | arm_boot 100 条期望，全按字面量比对；同名 `-D` 在配置期直接报错 |
 | 其它验证 | x86 宿主 86 个测试、内核镜像大小核对 |
 | 复跑 | `scripts/check-armv7.sh --repeat N`，失败自动留档 |
 
@@ -137,7 +137,8 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 地址提示与回收 | `mmap hint 40020000 is taken`、`munmap 40020000 pages 1`、用户侧 `mmap hint ok` |
 | 只读映射 | `ro copy at 40030000`、用户侧 `ro copy ok` |
 | 参数检查 | `mmap flags 2 refused`、用户侧 `flags refused` |
-| 描述符 | `close 2`、`svc write refused -9 at`、用户侧 `ebadf ok` |
+| 描述符 | `close 2`、`svc write refused -9 at`、用户侧 `ebadf ok`、越界回 EBADF（`fd range ok`） |
+| 文件 | 只读 `/hello` 与可写 `/scratch`；`open`、`lseek`、只读拒写、开满回 ENOMEM 都有自检 |
 | 等任意一条 | `task 3 blocks on 4`、返回先结束那条的下标 |
 | 等待超时 | `task 0 wait timed out`、用户侧 `self wait timed out` |
 | 睡眠 | `task 0 sleeps 3 ticks`、`task 0 woke from sleep`、用户侧 `slept` |
