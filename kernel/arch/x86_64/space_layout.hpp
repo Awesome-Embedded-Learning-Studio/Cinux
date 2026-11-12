@@ -27,6 +27,8 @@
 namespace cinux::arch::space {
 
 using cinux::base::operator""_GiB;
+using cinux::base::operator""_KiB;
+using cinux::base::operator""_MiB;
 
 /** @brief Bytes one PML4 entry spans; every reserved region is sized in whole entries. */
 inline constexpr unsigned long kPageTableSpan = 512_GiB;
@@ -63,6 +65,19 @@ inline constexpr unsigned long kModuleBase      = 0xFFFFFFFFC0000000UL;
 
 /** @brief Highest user-visible address plus one; the CPU's canonical boundary. */
 inline constexpr unsigned long kUserTop = 0x0000800000000000UL;
+
+// The user-space seats this kernel promises. They are policy, but the
+// policy is written against this CPU's user top and page size, so it
+// travels with the port rather than with the memory subsystem.
+inline constexpr unsigned long kUserNullTop         = 64_KiB;
+inline constexpr unsigned long kUserInterpreterBase = 256_MiB;
+inline constexpr unsigned long kUserExecImageBase   = 512_MiB;
+inline constexpr unsigned long kUserBrkMmapSplit    = 0x0000400000000000UL;
+inline constexpr unsigned long kUserMmapTop         = 0x00007F8000000000UL;
+inline constexpr unsigned long kUserStackTop        = kUserTop - cinux::arch::page::kSize;
+inline constexpr unsigned long kUserStackBytes      = 1_MiB;
+inline constexpr unsigned long kUserStackBottom =
+    kUserStackTop - kUserStackBytes - cinux::arch::page::kSize;
 
 /**
  * @brief         Turns a physical address into its direct-map alias.

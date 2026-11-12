@@ -4,6 +4,7 @@
 #include "framework_kernel.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -25,7 +26,7 @@ using cinux::mm::walk::UnmapPage;
 
 TEST("vmm: the user half of the live root is dead") {
     const auto* const kPml4 = cinux::base::PtrAt<Entry>(DirectMapVirt(cinux::arch::ReadCr3()));
-    for (unsigned long slot = 0; slot < cinux::mm::kDirectMapSlot; ++slot) {
+    for (unsigned long slot = 0; slot < cinux::arch::space::kDirectMapSlot; ++slot) {
         ASSERT_EQ(kPml4[slot].raw, 0ULL);
     }
 }
@@ -33,9 +34,9 @@ TEST("vmm: the user half of the live root is dead") {
 TEST("vmm: the live root translates image and direct map") {
     KernelTables        tables;
     unsigned long const kRoot = cinux::arch::ReadCr3();
-    ASSERT_EQ(TranslatePage(tables, kRoot, cinux::mm::kKernelImageBase + 2_MiB), 2_MiB);
+    ASSERT_EQ(TranslatePage(tables, kRoot, cinux::arch::space::kKernelImageBase + 2_MiB), 2_MiB);
     ASSERT_EQ(TranslatePage(tables, kRoot, DirectMapVirt(2_MiB)), 2_MiB);
-    ASSERT_EQ(TranslatePage(tables, kRoot, cinux::mm::kHeapBase), 0UL);
+    ASSERT_EQ(TranslatePage(tables, kRoot, cinux::arch::space::kHeapBase), 0UL);
 }
 
 TEST("vmm: a page lives in the heap window only while mapped") {
@@ -43,7 +44,7 @@ TEST("vmm: a page lives in the heap window only while mapped") {
     unsigned long const         kRoot = cinux::arch::ReadCr3();
     cinux::base::PhysAddr const kPage = cinux::mm::Pmm::self().allocate_page();
     ASSERT_TRUE(kPage != cinux::base::PhysAddr{});
-    unsigned long const kSpot = cinux::mm::kHeapBase + 4_KiB;
+    unsigned long const kSpot = cinux::arch::space::kHeapBase + 4_KiB;
     ASSERT_TRUE(MapPage(tables, kRoot, kSpot, kPage.raw));
     // NOLINTNEXTLINE(clang-analyzer-optin.core.FixedAddressDereference)
     *cinux::base::PtrAt<unsigned long>(kSpot) = 0x114514UL;

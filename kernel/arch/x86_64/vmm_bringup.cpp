@@ -17,6 +17,20 @@
 
 namespace cinux::mm {
 
+using cinux::arch::space::kDirectMapBase;
+using cinux::arch::space::kDirectMapSlot;
+using cinux::arch::space::kHeapBase;
+using cinux::arch::space::kIoremapBase;
+using cinux::arch::space::kIoremapSlot;
+using cinux::arch::space::kKernelImageBase;
+using cinux::arch::space::kKernelImagePdpt;
+using cinux::arch::space::kKernelSlot;
+using cinux::arch::space::kModuleBase;
+using cinux::arch::space::kModulePdpt;
+using cinux::arch::space::kPageTableSpan;
+using cinux::arch::space::kVmallocBase;
+using cinux::arch::space::kVmallocSlot;
+
 namespace {
 
 using cinux::arch::page::Entry;

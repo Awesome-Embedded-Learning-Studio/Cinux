@@ -1,5 +1,6 @@
 #include "framework.hpp"
 #include "kernel/arch/page.hpp"
+#include "kernel/arch/space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "test_assert.hpp"
 
@@ -8,19 +9,19 @@ using cinux::mm::DirectMapVirt;
 using cinux::mm::IoremapVirt;
 using cinux::mm::IsDirectMap;
 using cinux::mm::IsKernelHalf;
-using cinux::mm::kDirectMapBase;
-using cinux::mm::kHeapBase;
-using cinux::mm::kIoremapBase;
-using cinux::mm::kKernelImageBase;
-using cinux::mm::kModuleBase;
-using cinux::mm::kPageTableSpan;
+using cinux::arch::space::kDirectMapBase;
+using cinux::arch::space::kHeapBase;
+using cinux::arch::space::kIoremapBase;
+using cinux::arch::space::kKernelImageBase;
+using cinux::arch::space::kModuleBase;
+using cinux::arch::space::kPageTableSpan;
 using cinux::mm::kUserBrkMmapSplit;
 using cinux::mm::kUserMmapTop;
 using cinux::mm::kUserNullTop;
 using cinux::mm::kUserStackBottom;
 using cinux::mm::kUserStackTop;
 using cinux::mm::kUserTop;
-using cinux::mm::kVmallocBase;
+using cinux::arch::space::kVmallocBase;
 
 TEST("mm layout: kernel regions are disjoint and ordered") {
     ASSERT_TRUE(kDirectMapBase < kHeapBase);

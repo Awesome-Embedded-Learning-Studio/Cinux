@@ -11,6 +11,7 @@
  */
 
 #include "kernel/arch/page_walk.hpp"
+#include "kernel/mm/layout.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/boot/boot_info.hpp"
@@ -74,6 +75,8 @@ extern "C" [[noreturn]] void kmain() {
                   "the bring-up image walks two levels");
     static_assert(cinux::arch::page::EntriesAt(cinux::arch::page::WalkLevel::kL1) == 4096,
                   "level 1 holds 4096 entries");
+    static_assert(cinux::mm::kUserMmapTop < cinux::mm::kUserStackBottom,
+                  "the user seats keep their order on a 32-bit address space");
 
     extern int _vectors[];
     asm volatile("mcr p15, 0, %0, c12, c0, 0" : : "r"(_vectors));  // VBAR

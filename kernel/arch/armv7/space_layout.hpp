@@ -16,10 +16,27 @@
 
 #pragma once
 
+#include "cinux/literal_types.hpp"
+#include "kernel/arch/armv7/page.hpp"
+
 namespace cinux::arch::space {
+
+using cinux::base::operator""_KiB;
+using cinux::base::operator""_MiB;
 
 /// Highest user-visible address plus one: the classic 3 GiB split.
 inline constexpr unsigned long kUserTop = 0xC0000000UL;
+
+// The user-space seats for a 32-bit address space.
+inline constexpr unsigned long kUserNullTop         = 64_KiB;
+inline constexpr unsigned long kUserInterpreterBase = 0x10000000UL;  // 256 MiB
+inline constexpr unsigned long kUserExecImageBase   = 0x20000000UL;  // 512 MiB
+inline constexpr unsigned long kUserBrkMmapSplit    = 0x40000000UL;  // 1 GiB
+inline constexpr unsigned long kUserMmapTop         = 0xB0000000UL;  // 2.75 GiB
+inline constexpr unsigned long kUserStackTop        = kUserTop - cinux::arch::page::kSize;
+inline constexpr unsigned long kUserStackBytes      = 1_MiB;
+inline constexpr unsigned long kUserStackBottom =
+    kUserStackTop - kUserStackBytes - cinux::arch::page::kSize;
 
 /**
  * @brief         Identity translation on this port.

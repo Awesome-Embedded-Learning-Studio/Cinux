@@ -9,6 +9,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/mm/heap.hpp"
 #include "kernel/mm/heap_config.hpp"
+#include "kernel/arch/space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -41,7 +42,7 @@ bool map_heap_pages(unsigned long spot, unsigned long bytes) {
 }  // namespace
 
 bool BringUpHeap() {
-    unsigned long const kBase = kHeapBase + kHeapLowerGuardBytes;
+    unsigned long const kBase = cinux::arch::space::kHeapBase + kHeapLowerGuardBytes;
     if (!map_heap_pages(kBase, kHeapInitialBytes)) {
         return false;
     }

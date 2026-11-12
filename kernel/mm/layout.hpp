@@ -33,28 +33,6 @@ namespace cinux::mm {
 using cinux::base::operator""_KiB;
 using cinux::base::operator""_MiB;
 
-/** @brief Bytes one top-level table entry spans. */
-using cinux::arch::space::kPageTableSpan;
-
-/** @brief Top-level slots of the kernel's fixed windows. */
-using cinux::arch::space::kDirectMapSlot;
-using cinux::arch::space::kHeapSlot;
-using cinux::arch::space::kIoremapSlot;
-using cinux::arch::space::kKernelSlot;
-using cinux::arch::space::kVmallocSlot;
-
-/** @brief Bases of the kernel's fixed windows. */
-using cinux::arch::space::kDirectMapBase;
-using cinux::arch::space::kHeapBase;
-using cinux::arch::space::kIoremapBase;
-using cinux::arch::space::kKernelImageBase;
-using cinux::arch::space::kModuleBase;
-using cinux::arch::space::kVmallocBase;
-
-/** @brief Sub-slots of the kernel image window. */
-using cinux::arch::space::kKernelImagePdpt;
-using cinux::arch::space::kModulePdpt;
-
 /** @brief Highest user-visible address plus one. */
 using cinux::arch::space::kUserTop;
 
@@ -66,27 +44,21 @@ using cinux::arch::space::IsDirectMap;
 using cinux::arch::space::IsKernelHalf;
 
 /** @brief Null-trap guard: user mappings never start below this address. */
-inline constexpr unsigned long kUserNullTop         = 64_KiB;
-/** @brief Fixed load base for the dynamic interpreter a PT_INTERP names;
-           deterministic on purpose, ASLR is a later station's question. */
-inline constexpr unsigned long kUserInterpreterBase = 256_MiB;
-/** @brief Floor for a position-independent main image's load bias; the
-           per-exec slide stays inside one mebibyte above it, keeping the
-           seat clear of the interpreter's base below. */
-inline constexpr unsigned long kUserExecImageBase   = 512_MiB;
-/** @brief Default boundary between the program-plus-brk area and the mmap area. */
-inline constexpr unsigned long kUserBrkMmapSplit    = 0x0000400000000000UL;
+using cinux::arch::space::kUserNullTop;
+/** @brief Fixed load base for the dynamic interpreter a PT_INTERP names. */
+using cinux::arch::space::kUserInterpreterBase;
+/** @brief Floor for a position-independent main image's load bias. */
+using cinux::arch::space::kUserExecImageBase;
+/** @brief Boundary between the program-plus-brk area and the mmap area. */
+using cinux::arch::space::kUserBrkMmapSplit;
 /** @brief Default top of the mmap area; allocations grow down from here. */
-inline constexpr unsigned long kUserMmapTop         = 0x00007F8000000000UL;
+using cinux::arch::space::kUserMmapTop;
 /** @brief Upper edge of the default main stack; the page above stays unmapped. */
-inline constexpr unsigned long kUserStackTop        = kUserTop - cinux::arch::page::kSize;
-/** @brief How far the main stack may grow down from its top: one megabyte
-           of address range, filled page by page on demand. */
-inline constexpr unsigned long kUserStackBytes      = 1_MiB;
-/** @brief Lower edge of the stack's registered range: the stack span plus
-           one guard page below it, which demand filling refuses to map. */
-inline constexpr unsigned long kUserStackBottom =
-    kUserStackTop - kUserStackBytes - cinux::arch::page::kSize;
+using cinux::arch::space::kUserStackTop;
+/** @brief How far the main stack may grow down from its top. */
+using cinux::arch::space::kUserStackBytes;
+/** @brief Lower edge of the stack's registered range, guard page included. */
+using cinux::arch::space::kUserStackBottom;
 
 static_assert(kUserStackTop + cinux::arch::page::kSize == kUserTop,
               "one guard page separates the stack top from user top");
