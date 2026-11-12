@@ -39,7 +39,7 @@ set(CMAKE_JOB_POOL_COMPILE cinux_compile)
 set(CMAKE_JOB_POOL_LINK cinux_link)
 
 include(cmake/test/kernel_catalog.cmake)
-add_subdirectory(boot)
+add_subdirectory(kernel/arch/x86_64/boot)
 add_subdirectory(base)
 add_subdirectory(user)
 add_subdirectory(kernel)

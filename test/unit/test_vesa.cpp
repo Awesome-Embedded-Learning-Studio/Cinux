@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "boot/vesa/vesa.hpp"
+#include "kernel/arch/x86_64/boot/vesa/vesa.hpp"
 
 using cinux::boot::MakeSample;
 using cinux::boot::MatchesRequest;

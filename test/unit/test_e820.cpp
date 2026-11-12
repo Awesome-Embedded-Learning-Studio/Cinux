@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "boot/e820/e820.hpp"
+#include "kernel/arch/x86_64/boot/e820/e820.hpp"
 
 using cinux::boot::ClassifyEntry;
 using cinux::boot::EntryType;

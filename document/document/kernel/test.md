@@ -46,7 +46,7 @@ ktest 的名单我们到 `cmake/test/kernel_catalog.cmake` 里看。一条登记
 
 梯级管的是用例开跑之前内核装到哪一层这件事，说了算的是 `test/kernel/test_main.cpp` 里编译条件的分组，我们把它当地图用。MM 这一组装的是串口、PMM、地址空间与异常表，NX 位、uaccess、console 与堆也是这一组的。串口排的是整条链的头一个位子，PMM 起不来的时候，那句 `[ktest] pmm init failed` 报的就是它，[串口驱动](drivers/serial.md) 是整条链的头一环。IRQ 组在这之上装的是 PIC 的重映射与中断桩，PIT、Tick、APIC 后端与 IRQ 线 0 也在它的名单里，[PIT 定时器](drivers/pit.md) 有它的专页。PROC 组再装两个调度类与内核的切换 sink，sink 是调度器把每次切换报出去的那一头，[进程与调度器](proc/process_and_scheduler.md) 讲过这套记录的做法。keyboard 梯级挂的是键盘的初始化与 attach，[键盘驱动](drivers/keyboard.md) 是它的正页。block 梯级把中断打开之后走的是 PCI 与 AHCI，它要的 ext2 测试盘不在的话，打印完提示就停机了。exceptions 是最素的一档，装的是帧缓冲的接线与 console 的初始化，selfcheck 那场住的就是这一档，查的是 GDT、IDT、可恢复的 ud2 与 kallsyms 四件事。可恢复的 ud2，说的是触发 ud2 之后从处理口恢复执行的自检。kallsyms 是 panic 回溯用的内核符号表。MM 这一组装完的时候，`Main` 打出的下一行就是 `[ktest] kernel test world alive`，proc、keyboard、block 这三档在它之后还会各打一行梯级的报行，报行都打完了，然后 `RunKernelTests()` 就上场了。
 
-构建的管线在 `kernel/CMakeLists.txt` 的 `add_cinux_ktest` 里。整份内核核心源码打成的是 OBJECT 库，它出的只是目标文件，库文件是它不单独出的。接上的是 `test_main.cpp`、`framework_kernel.cpp`、字体 blob（内核显示字库的二进制）与这一场的用例文件，还有一个自动生成的 kallsyms 桥，panic 回溯要用的符号表就从它编进内核。编译定义给的是 `KTEST_STAGE_<大写梯级>` 与 `ENTRY_SYMBOL=KernelEntry` 这一对。ELF 削成 .bin 的活归 `objcopy`，boot 侧的 `add_cinux_image` 把 .bin 包成 `boot_ktest_<名字>` 的磁盘镜像，每张镜像依赖的都是 `ext2_ktest_img`，QEMU 挂盘参数里的 `boot/ext2.img` 也被换成了 `boot/ext2_ktest.img`，块梯级要的盘就从它来。镜像与正式内核走的是同一条引导链，差别出在入口之后装多少层的取舍里，[引导链](../boot.md) 是那半边的故事。
+构建的管线在 `kernel/CMakeLists.txt` 的 `add_cinux_ktest` 里。整份内核核心源码打成的是 OBJECT 库，它出的只是目标文件，库文件是它不单独出的。接上的是 `test_main.cpp`、`framework_kernel.cpp`、字体 blob（内核显示字库的二进制）与这一场的用例文件，还有一个自动生成的 kallsyms 桥，panic 回溯要用的符号表就从它编进内核。编译定义给的是 `KTEST_STAGE_<大写梯级>` 与 `ENTRY_SYMBOL=KernelEntry` 这一对。ELF 削成 .bin 的活归 `objcopy`，boot 侧的 `add_cinux_image` 把 .bin 包成 `boot_ktest_<名字>` 的磁盘镜像，每张镜像依赖的都是 `ext2_ktest_img`，QEMU 挂盘参数里的 `kernel/arch/x86_64/boot/ext2.img` 也被换成了 `kernel/arch/x86_64/boot/ext2_ktest.img`，块梯级要的盘就从它来。镜像与正式内核走的是同一条引导链，差别出在入口之后装多少层的取舍里，[引导链](../boot.md) 是那半边的故事。
 
 heap 那场 ktest 的用例今天有三场。头一场验的是 `new` 与 `delete` 的往返，第二场拿 100 KiB 的大块把 span（堆占着的那一整段虚拟内存）顶高一截，第三场看的是释放后的槽位被下一次分配复用，三场的判定都靠断言收尾。旧页写过 1000 次随机 alloc/free 加 double-free panic 的说法，它在今天的用例里是找不到的，本页按现在的源码把 heap 的样貌改了过来。
 
@@ -77,6 +77,6 @@ build 目录配好了之后，`cmake --build <build> --target test_host` 把 hos
 - `test/mock/`、`test/tools/` — 内存盘与引用计数的玩具、CI 闸门自检
 - `test/CMakeLists.txt` — `add_cinux_test`、Threads 名单、`test_host` 与 `test_kernel` 目标、ktest 的 CTest 腿
 - `cmake/test/kernel_catalog.cmake` — ktest 名单与梯级
-- `kernel/CMakeLists.txt` 的 `add_cinux_ktest`、`boot/CMakeLists.txt`、`kernel/arch/x86_64/kernel.ld` — ktest 内核的装配、镜像与 `.test_cases` 围栏
+- `kernel/CMakeLists.txt` 的 `add_cinux_ktest`、`kernel/arch/x86_64/boot/CMakeLists.txt`、`kernel/arch/x86_64/kernel.ld` — ktest 内核的装配、镜像与 `.test_cases` 围栏
 - `cmake/test/run_kernel_tests.cmake` — QEMU 的运行与退出码核对
 - `test/ctest-baseline.json`、`scripts/checks/test-inventory.py`、`scripts/checks/run-cell.sh` — 注册基线、核对与整套 cell

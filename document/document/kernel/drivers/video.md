@@ -30,11 +30,11 @@ struct [[gnu::packed]] FramebufferInfo {
 
 packed 是刻意的，文件头的注释说明了缘由，引导世界用 32 位的形状写记录，内核用 64 位的形状读它，两边的填充规则不一样，索性把填充禁了。test_image.cpp 用断言把 48 字节的大小与记录在整份交接记录 BootInfo 里的 2576 偏移看了起来，我们把数字记在这里，哪天字段动过而版本号没跟上，断的就是测试。
 
-交接的路径我们也跟一遍。记录的本体 g_boot_info 住在 stage2 的数据里，stage2 把它的地址写进交接信箱（kHandoffMailboxInfo 这个字），世界开关的落点从信箱取出地址递给内核，读取的动作发生在引导侧的长模式入口 boot/lm/lm.cpp 里，地址进了内核入口之后，BringUpAddressSpace 再把它归档进了 HandoffArchive，此后内核用的都是自己的存档。
+交接的路径我们也跟一遍。记录的本体 g_boot_info 住在 stage2 的数据里，stage2 把它的地址写进交接信箱（kHandoffMailboxInfo 这个字），世界开关的落点从信箱取出地址递给内核，读取的动作发生在引导侧的长模式入口 kernel/arch/x86_64/boot/lm/lm.cpp 里，地址进了内核入口之后，BringUpAddressSpace 再把它归档进了 HandoffArchive，此后内核用的都是自己的存档。
 
 ## 显存的两级映射窗口
 
-第一级窗口是引导世界搭的。我们在 boot/lm/page_tables.cpp 里读 BuildHandoffDoors，它调的是 PlanDeviceDoors，算出盖住物理基址到物理基址加行距乘高这一跨度需要几条 1 GiB 的大页条目，结尾跨过 1 GiB 边界的时候向外取整，条目写进引导页表的低位身份区，也就是虚拟地址就等于物理地址的那一段页表。test_page.cpp 给这套规划留了断言，0xFD000000 起的 3 MiB 落在第 3 号窗口、一条就够，跨界的落两条，零尺寸答的是零条。
+第一级窗口是引导世界搭的。我们在 kernel/arch/x86_64/boot/lm/page_tables.cpp 里读 BuildHandoffDoors，它调的是 PlanDeviceDoors，算出盖住物理基址到物理基址加行距乘高这一跨度需要几条 1 GiB 的大页条目，结尾跨过 1 GiB 边界的时候向外取整，条目写进引导页表的低位身份区，也就是虚拟地址就等于物理地址的那一段页表。test_page.cpp 给这套规划留了断言，0xFD000000 起的 3 MiB 落在第 3 号窗口、一条就够，跨界的落两条，零尺寸答的是零条。
 
 第二级窗口是内核自己搭的。MapFramebufferDoor 在地址空间这一步（引导序列的第三行）里跑，把同样的跨度接进了 ioremap 区，占的是 PML4 的第 259 号槽位。kIoremapBase 的值定在 0xFFFF818000000000，IoremapVirt 把物理地址原样加上了这个基址，layout.hpp 的注释说第一阶段照搬物理偏移，为的是帧缓冲这样的早期消费者不必等一个分配器。窗口里的每条 2 MiB 大页都带着可写位，缓存禁用位倒是没有带，我们把同一个文件里的 MapDeviceWindow 拉来对照，它给别的设备窗口都加了 kCacheDisable，读寄存器的设备要的是不缓存的访问，显存的窗口没有把它带上。vmm.hpp 给 MapFramebufferDoor 的警告是它必须赶在任何代码经由这个别名碰显存之前跑完，注释还说了这一块可以单独被测试内核借用，要的是屏幕而不是整套接管。
 
@@ -83,10 +83,10 @@ fb0 的座位立在文件世界起来的时候。落座的次序、硬件页登�
 
 ## 源码位置
 
-- `boot/stage2.cpp` — 模式切换的落点与交接记录的填写
-- `boot/lm/page_tables.cpp` — BuildHandoffDoors 里帧的身份窗口
-- `boot/layout.hpp` — 交接信箱字 kHandoffMailboxInfo 与 world switch 的注释
-- `boot/lm/lm.cpp` — 长模式入口，从信箱取出地址经 rdi 递给内核
+- `kernel/arch/x86_64/boot/stage2.cpp` — 模式切换的落点与交接记录的填写
+- `kernel/arch/x86_64/boot/lm/page_tables.cpp` — BuildHandoffDoors 里帧的身份窗口
+- `kernel/arch/x86_64/boot/layout.hpp` — 交接信箱字 kHandoffMailboxInfo 与 world switch 的注释
+- `kernel/arch/x86_64/boot/lm/lm.cpp` — 长模式入口，从信箱取出地址经 rdi 递给内核
 - `kernel/boot/boot_info.hpp` — FramebufferInfo 与 BootInfo 交接记录
 - `kernel/mm/layout.hpp` — kIoremapBase 与 IoremapVirt
 - `kernel/mm/vmm.cpp`、`kernel/mm/vmm.hpp` — MapFramebufferDoor 搭 ioremap 别名

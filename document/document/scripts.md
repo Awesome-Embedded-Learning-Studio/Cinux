@@ -4,7 +4,7 @@
 
 这一页我们把构建的链条从头走到尾。从一份源码到一张能开机的镜像，中间要经过的脚本与构建目标都住在仓库的两个地方，cmake/ 下的模块管编排，scripts/ 里的实干脚本等着被调用。我们按链条的次序讲完这一页，你打开仓库里任何一份脚本，都应该说得出它是给谁用的、产物落在了哪里。
 
-旧页的几处事实已经过期，我们按现在的代码树一一纠正。旧页列过的 build_image.sh、debug_qemu.sh、launch_qemu_debug.sh、qemu_test_wrapper.sh、run_all_tests.sh.in、append_crc32.py、check_memory_layout.py、generate_large_elf.py，这些在今天的树里都找不到了。磁盘拼装的活儿有了新去处，如今由 add_cinux_image 接管了，它的家在 boot/CMakeLists.txt。成品是 1 MiB 的 cinux.img，MBR 占的是 0 号扇区，stage2 占 LBA 1 起的 28 个扇区，而内核从 LBA 32 进镜像。旧页写的 16 号起放 mini.bin 是退役前的老布局，本页不再保留这样的行。至于镜像上电之后是怎么跑起来的，[引导链](boot.md)那一页已经写过了，本页管的是链条之外的建设与驾驶。
+旧页的几处事实已经过期，我们按现在的代码树一一纠正。旧页列过的 build_image.sh、debug_qemu.sh、launch_qemu_debug.sh、qemu_test_wrapper.sh、run_all_tests.sh.in、append_crc32.py、check_memory_layout.py、generate_large_elf.py，这些在今天的树里都找不到了。磁盘拼装的活儿有了新去处，如今由 add_cinux_image 接管了，它的家在 kernel/arch/x86_64/boot/CMakeLists.txt。成品是 1 MiB 的 cinux.img，MBR 占的是 0 号扇区，stage2 占 LBA 1 起的 28 个扇区，而内核从 LBA 32 进镜像。旧页写的 16 号起放 mini.bin 是退役前的老布局，本页不再保留这样的行。至于镜像上电之后是怎么跑起来的，[引导链](boot.md)那一页已经写过了，本页管的是链条之外的建设与驾驶。
 
 有几处边界我们不在这里展开，base 库与 host 测试的分工归 [内核库](kernel/lib.md)，arch 目录拆分的细节归 [x86_64 架构层](kernel/arch.md)，调度语义在 host 侧的验证见 [进程与调度器](kernel/proc/process_and_scheduler.md)。
 
@@ -20,7 +20,7 @@ base 的 CMakeLists 是挑卡目录里最短的一份，我们顺路进去，看
 
 引导件怎么造，我们头一站就到 add_cinux_boot_binary 的门口，它的家安在了 cmake/boot/boot_target.cmake。收的三个参数是目标名、位数与链接脚本，依次传了进去，链接时挂上警告卡与对应位数的 boot 卡，-nostdlib、-no-pie、自己的 .ld。收尾的 objcopy 是 binutils 家族里的工具，干的活是把 ELF 折成平铺的二进制，折出来的就是 target.bin，我们后面的流程里到处会碰见它。MBR 就是这么造出来的，用的是 16 位与 mbr.ld，外加 --gc-sections 把没人引用的段剪掉了。
 
-MBR 是头一层的活，stage2 的组成要多几件。boot_pm 是一个 OBJECT 类型的库，装着保护模式进出与 32 位搬运的几个源文件，kernel/driver 的 io.cpp 被它收编了，serial.cpp 也一并进来了，引导世界要用串口的时候，就借了内核驱动的源码一程。lm_blob 是一段单独链接的 64 位代码，用的是自己的 lm.ld 与 -mcmodel=small，objcopy 把它转成 elf32-i386 的目标文件，段名改成了 .lm_blob，16 位的 stage2 把它当数据背在身上，跳进去的那一刻机器就进了长模式。stage2_size_check 是一个 ALL 类型的目标，它用正则从 boot/layout.hpp 里抠出了 .sectors 的数值，我们今天看到的值是 28，stage2.bin 一旦超过 28 个扇区的话就 FATAL_ERROR，报错文本指了路，去抬高 kStage2Spot 的扇区数，MBR 的 DAP（磁盘地址包，INT 0x13 扩展读用的参数包）会跟着走。改 layout.hpp 的话配置会自己重来，CMAKE_CONFIGURE_DEPENDS 也把它看住了。
+MBR 是头一层的活，stage2 的组成要多几件。boot_pm 是一个 OBJECT 类型的库，装着保护模式进出与 32 位搬运的几个源文件，kernel/driver 的 io.cpp 被它收编了，serial.cpp 也一并进来了，引导世界要用串口的时候，就借了内核驱动的源码一程。lm_blob 是一段单独链接的 64 位代码，用的是自己的 lm.ld 与 -mcmodel=small，objcopy 把它转成 elf32-i386 的目标文件，段名改成了 .lm_blob，16 位的 stage2 把它当数据背在身上，跳进去的那一刻机器就进了长模式。stage2_size_check 是一个 ALL 类型的目标，它用正则从 kernel/arch/x86_64/boot/layout.hpp 里抠出了 .sectors 的数值，我们今天看到的值是 28，stage2.bin 一旦超过 28 个扇区的话就 FATAL_ERROR，报错文本指了路，去抬高 kStage2Spot 的扇区数，MBR 的 DAP（磁盘地址包，INT 0x13 扩展读用的参数包）会跟着走。改 layout.hpp 的话配置会自己重来，CMAKE_CONFIGURE_DEPENDS 也把它看住了。
 
 stage2 说完了，镜像里剩下的两个座位归 add_cinux_image 填，我们跟着四条 dd 命令走一遍。它造一张 1 MiB 的空盘，mbr.bin 写到了 0 号扇区，stage2.bin 落在了 LBA 1 起的位置，kernel.bin 落在了 LBA 32 上，对上的正是 layout.hpp 里定下的数。常数的名字是 kKernelImageLba，家安在了 layout.hpp 里。主线产物写在了 build/boot/cinux.img 里，目标的名字是 boot_image，再往上的 cinux_image 挂了 ALL，日常构建顺手就有了。每个机内测试内核也各有一张拼出来的盘，目标的名字成了 boot_ktest_名字.img，内核换成了 cinux_ktest_名字.bin。至于座位背后的道理，[引导链](boot.md)在磁盘布局一节讲过了。
 
@@ -128,7 +128,7 @@ pnpm check:links
 - `CMakeLists.txt` — 项目入口，编译器门槛，旗标卡 include 与子目录次序
 - `cmake/compilers/` — warning_standard、boot_modes、kernel_modes 三张旗标卡
 - `cmake/checks/options.cmake` — ASan、TSan、lockdep、UBSan 四个开关
-- `boot/CMakeLists.txt`、`cmake/boot/` — mbr、stage2、lm_blob、尺寸检查与镜像拼装
+- `kernel/arch/x86_64/boot/CMakeLists.txt`、`cmake/boot/` — mbr、stage2、lm_blob、尺寸检查与镜像拼装
 - `kernel/CMakeLists.txt` — 内核与 ktest 的编译、资源 blob 内嵌、kallsyms 桥
 - `cmake/kernel/image_size_check.cmake` — 镜像头尺寸验收
 - `cmake/debug/kernel.gdb.in` — run_debug 的 GDB 脚本

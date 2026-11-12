@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "boot/layout.hpp"
+#include "kernel/arch/x86_64/boot/layout.hpp"
 
 using cinux::boot::kLmEntryVma;
 using cinux::boot::kLowFree;

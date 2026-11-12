@@ -18,15 +18,15 @@
 
 ### 串口与打印
 
-`kernel/mini/driver/serial` 与 `kernel/mini/lib/kprintf` 是它开口说话的两件装备。我们把 `kprintf.h` 注释里的格式说明符读一遍：整数的 %d 与 %u，十六进制的 %x 与 %X，字符串与指针的 %s 与 %p，字符与百分号的 %c 与 %%，外加二进制的 %b。宽度写法则是 %Nd 与 %0Nd 这么两种，右对齐的空格与零都补得上。现在的去处分两半。引导世界的播报走 `boot/early/console.hpp` 与 `boot/early/print.hpp`，COM1 配的是 115200 8N1，这样安排的道理在 [引导链](../boot.md) 一页里写过，内核侧的串口则由 `kernel/drivers/serial` 接管，`kernel/init/init_sequence.cpp` 的序列里，serial 站的是头一步。
+`kernel/mini/driver/serial` 与 `kernel/mini/lib/kprintf` 是它开口说话的两件装备。我们把 `kprintf.h` 注释里的格式说明符读一遍：整数的 %d 与 %u，十六进制的 %x 与 %X，字符串与指针的 %s 与 %p，字符与百分号的 %c 与 %%，外加二进制的 %b。宽度写法则是 %Nd 与 %0Nd 这么两种，右对齐的空格与零都补得上。现在的去处分两半。引导世界的播报走 `kernel/arch/x86_64/boot/early/console.hpp` 与 `kernel/arch/x86_64/boot/early/print.hpp`，COM1 配的是 115200 8N1，这样安排的道理在 [引导链](../boot.md) 一页里写过，内核侧的串口则由 `kernel/drivers/serial` 接管，`kernel/init/init_sequence.cpp` 的序列里，serial 站的是头一步。
 
 ### 物理内存
 
-`mm/pmm.cpp` 里住的是一张静态位图分配器（`s_bitmap` 数组），分配的时候扫位图，找的是头一个空下来的位。`init(const void*)` 收到的是引导递来的裸指针，它就是解析的入口，内存清单顺着它解析了出来，我们按它的判断读：类型为 1 的可用区才收，低 1 MB 的区整段滤掉，源码注释写明了缘由，那一段是留给引导程序的，余下的按页对齐标成了可用。现在的收集与交接换了主人：`boot/bios.cpp` 的 `CollectMemoryMap` 循环问 E820（BIOS 报内存底细的接口，一条记录说一段内存的起点、长度与用途），`boot/e820/e820.hpp` 管条目的归档，清单装进 `kernel/boot/boot_info.hpp` 的 BootInfo 递给内核，`kernel/mm` 的 PMM 再从交接记录把空闲位图搭起来。E820 收集的来龙去脉，我们在 [引导链](../boot.md) 一页里写过，位图怎么搭起来的则归 [物理内存管理](mm/pmm.md) 一页。
+`mm/pmm.cpp` 里住的是一张静态位图分配器（`s_bitmap` 数组），分配的时候扫位图，找的是头一个空下来的位。`init(const void*)` 收到的是引导递来的裸指针，它就是解析的入口，内存清单顺着它解析了出来，我们按它的判断读：类型为 1 的可用区才收，低 1 MB 的区整段滤掉，源码注释写明了缘由，那一段是留给引导程序的，余下的按页对齐标成了可用。现在的收集与交接换了主人：`kernel/arch/x86_64/boot/bios.cpp` 的 `CollectMemoryMap` 循环问 E820（BIOS 报内存底细的接口，一条记录说一段内存的起点、长度与用途），`kernel/arch/x86_64/boot/e820/e820.hpp` 管条目的归档，清单装进 `kernel/boot/boot_info.hpp` 的 BootInfo 递给内核，`kernel/mm` 的 PMM 再从交接记录把空闲位图搭起来。E820 收集的来龙去脉，我们在 [引导链](../boot.md) 一页里写过，位图怎么搭起来的则归 [物理内存管理](mm/pmm.md) 一页。
 
 ### 中断、GDT 与页表
 
-`arch/x86_64/` 目录里住的主要是这么几样：`gdt` 与 `idt` 各是一对 .hpp 加 .cpp，外加的是 `interrupts.S` 与 `paging.hpp`。IDT（管异常与中断的中断描述符表）是个简化过的版本，`idt.cpp` 的文件头注释写明，配上的只有 #BP(3) 与 #PF(14) 两个向量，断点与页错误各配了一个桩，桩的 C 侧处理函数住在 `exception_handlers.cpp`（它的文件头写明了这件事），干的是把寄存器打上串口的活，打完了让程序接着跑。剩下的两样里，`boot.S` 管的是入口，`crt_stub.cpp` 留到下一节的 C++ 运行时里讲。`paging.hpp` 搭的是两路映射，`linker.ld` 的注释说了，身份映射与高半区映射指的是同一批物理页。现在的接法变了：引导世界不开中断、也不装 IDT，stage2 进门就把中断关了。GDT（全局描述符表）、TSS（任务状态段）、IDT 与异常桩的装配，全数落在了内核入口的 `kernel/arch/x86_64/entry.S` 与 `entry.cpp` 两个文件里。交接期的页表归 `boot/lm/page_tables.cpp` 的 `BuildHandoffDoors`，内核接手后的地址空间则归 `kernel/mm`。这几处的走读，我们在 [引导链](../boot.md) 一页里都能读到。
+`arch/x86_64/` 目录里住的主要是这么几样：`gdt` 与 `idt` 各是一对 .hpp 加 .cpp，外加的是 `interrupts.S` 与 `paging.hpp`。IDT（管异常与中断的中断描述符表）是个简化过的版本，`idt.cpp` 的文件头注释写明，配上的只有 #BP(3) 与 #PF(14) 两个向量，断点与页错误各配了一个桩，桩的 C 侧处理函数住在 `exception_handlers.cpp`（它的文件头写明了这件事），干的是把寄存器打上串口的活，打完了让程序接着跑。剩下的两样里，`boot.S` 管的是入口，`crt_stub.cpp` 留到下一节的 C++ 运行时里讲。`paging.hpp` 搭的是两路映射，`linker.ld` 的注释说了，身份映射与高半区映射指的是同一批物理页。现在的接法变了：引导世界不开中断、也不装 IDT，stage2 进门就把中断关了。GDT（全局描述符表）、TSS（任务状态段）、IDT 与异常桩的装配，全数落在了内核入口的 `kernel/arch/x86_64/entry.S` 与 `entry.cpp` 两个文件里。交接期的页表归 `kernel/arch/x86_64/boot/lm/page_tables.cpp` 的 `BuildHandoffDoors`，内核接手后的地址空间则归 `kernel/mm`。这几处的走读，我们在 [引导链](../boot.md) 一页里都能读到。
 
 ### 磁盘与加载
 
@@ -40,7 +40,7 @@
 
 ## 为什么退场
 
-`49ddfb0` 的提交说明写的是 `feat: Migrate the refator version of Cinux` 一句话，动机却没有落成文字的痕迹，我们把可观察的事实摆出来。而在同一笔提交里，`kernel/mini` 的 45 个文件全部删掉了，`boot/` 的 26 个新文件进了场。磁盘镜像里的 mini.bin 没有了，LBA 32 上直接放的是验收过的完整内核。当年的小内核就被装在 `0x20000` 这个地址，[引导链](../boot.md) 一页在功能概述的第二段把这件事记成了一句话：装到 `0x20000` 的小内核没有了，磁盘镜像从 LBA 32 读进来的是带验收的完整内核。
+`49ddfb0` 的提交说明写的是 `feat: Migrate the refator version of Cinux` 一句话，动机却没有落成文字的痕迹，我们把可观察的事实摆出来。而在同一笔提交里，`kernel/mini` 的 45 个文件全部删掉了，`kernel/arch/x86_64/boot/` 的 26 个新文件进了场。磁盘镜像里的 mini.bin 没有了，LBA 32 上直接放的是验收过的完整内核。当年的小内核就被装在 `0x20000` 这个地址，[引导链](../boot.md) 一页在功能概述的第二段把这件事记成了一句话：装到 `0x20000` 的小内核没有了，磁盘镜像从 LBA 32 读进来的是带验收的完整内核。
 
 它当过的那个角色，我们再拿新旧两链对一遍：旧链是 stage2 把 mini 装进了内存，mini 再去磁盘上找它的大内核，两段加载的中间还坐着小内核这一整个内核。新链的 stage2 自己验收、自己搬运，加载器要回答的问题（装到哪、多大、入口在哪），在构建期就写进镜像头里了。旧 `ata.hpp` 注释给它的那句定位，说的是小内核拿这个驱动去加载大内核，这句话放在新链的任何文件上都套不上了。
 
@@ -50,7 +50,7 @@
 
 - git 提交 `cde30d1`（2026-05-25，`migrate from old Cinux`） — `kernel/mini` 的 45 个文件随旧仓库迁入
 - git 提交 `49ddfb0`（2026-10-31，`feat: Migrate the refator version of Cinux`） — `kernel/mini` 全目录 45 个文件删除，旧文用 `git show 49ddfb0^:kernel/mini/文件路径` 回看
-- `boot/` — 引导链本体，链条走读见 [引导链](../boot.md)
+- `kernel/arch/x86_64/boot/` — 引导链本体，链条走读见 [引导链](../boot.md)
 - `kernel/arch/x86_64/entry.S`、`kernel/arch/x86_64/entry.cpp` — 内核入口，GDT、TSS、IDT 与异常桩在这里装配
 - `kernel/boot/boot_info.hpp`、`kernel/boot/image_header.hpp` — 交接记录与镜像头，构建与装载两侧共用的格式
 - `kernel/init/init_sequence.cpp` — 内核侧初始化序列，serial、pmm、address space 三步接住引导递来的活

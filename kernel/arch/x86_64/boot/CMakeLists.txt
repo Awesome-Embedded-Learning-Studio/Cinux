@@ -46,7 +46,7 @@ add_executable(stage2
     pm/pm_switch.cpp
     load/ferry.cpp
     load/loader.cpp
-    early/libc.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/lm_blob.o
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
@@ -67,11 +67,12 @@ add_custom_target(stage2_size_check ALL
 
 function(add_cinux_image name image_file kernel_bin kernel_dep)
     add_custom_target(${name}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/boot
         COMMAND ${CMAKE_COMMAND} -E remove ${image_file}
         COMMAND dd if=/dev/zero of=${image_file} bs=1M count=1 status=none
-        COMMAND dd if=${CMAKE_BINARY_DIR}/boot/mbr.bin
+        COMMAND dd if=${CMAKE_CURRENT_BINARY_DIR}/mbr.bin
                 of=${image_file} bs=512 count=1 conv=notrunc status=none
-        COMMAND dd if=${CMAKE_BINARY_DIR}/boot/stage2.bin
+        COMMAND dd if=${CMAKE_CURRENT_BINARY_DIR}/stage2.bin
                 of=${image_file} bs=512 seek=1 conv=notrunc status=none
         COMMAND dd if=${kernel_bin}
                 of=${image_file} bs=512 seek=32 conv=notrunc status=none

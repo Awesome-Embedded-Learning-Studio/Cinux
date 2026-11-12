@@ -1,7 +1,7 @@
 #include <cstddef>
 
 #include "../framework/framework.hpp"
-#include "boot/gdt/gdt.hpp"
+#include "kernel/arch/x86_64/boot/gdt/gdt.hpp"
 #include "cinux/bit_ops/bit_ops.hpp"
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/tss.hpp"

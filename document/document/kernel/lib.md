@@ -34,7 +34,7 @@ void* memmove(void* destination, const void* source, unsigned long bytes) {
 
 文件的末尾还有一个不显眼的落点，`std::terminate` 的定义安在这里。异常在这个内核里是关着的（编译旗标 `-fno-exceptions`），可标准库的头文件里依然留着 throw 的字样，真被走到的那一刻需要一个去处，注释把这层写成了 freestanding（不带操作系统与完整标准库的编译环境）世界对头文件的供给，这里的供给是 `Halt()`，机器当场就停了下来。还有一个编译事实我们照实记录，`kernel/CMakeLists.txt` 把 `mem.cpp` 放进了无 SSE 的孤岛名单，整份文件是按 `-mgeneral-regs-only` 编译的，向量寄存器不在它的世界里。
 
-引导世界还带着自己的一份 `boot/early/libc.cpp`，里面是 `strlen` 与 64 位除法的两个 C 名字落点，它的名字也在内核镜像的编译名单里。不过它的服务对象是引导的早期阶段，那一层归 [引导链](../boot.md) 的故事，这个部分是本页没有认领的，我们把它摆出来，图的只是边界的完整。
+引导世界还带着自己的一份 `kernel/arch/x86_64/boot/early/libc.cpp`，里面是 `strlen` 与 64 位除法的两个 C 名字落点，它的名字也在内核镜像的编译名单里。不过它的服务对象是引导的早期阶段，那一层归 [引导链](../boot.md) 的故事，这个部分是本页没有认领的，我们把它摆出来，图的只是边界的完整。
 
 ## 断言的接缝
 

@@ -23,6 +23,10 @@ endforeach()
 list(SORT CINUX_KERNEL_PORTABLE_SOURCES)
 list(SORT CINUX_KERNEL_ARCH_SOURCES)
 
+# The boot chain under kernel/arch/<isa>/boot speaks 16- and 32-bit worlds
+# of its own; it builds as separate boot targets, never into the kernel.
+list(FILTER CINUX_KERNEL_ARCH_SOURCES EXCLUDE REGEX "/arch/${CINUX_ARCHITECTURE}/boot/")
+
 # Packet processing nests on a 16 KiB thread stack. Reject accidental
 # connection-control-block temporaries before they corrupt a caller's stack.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
@@ -37,7 +41,7 @@ set(CINUX_KERNEL_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
     ${CMAKE_SOURCE_DIR}/base/src/path.cpp
-    ${CMAKE_SOURCE_DIR}/boot/early/libc.cpp)
+    ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
 set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
