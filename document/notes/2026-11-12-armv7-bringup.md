@@ -42,9 +42,11 @@
 - 地址空间的生与死：`KernelTables::take_root` 与 `release_root` 由端口给
   尺寸与对齐，`AddressSpace::teardown` 按 `IsUserSlot` 找用户槽并把帧、
   表页、根表还回去；自检验的是拆完空闲页数回到原点。
-- 调度：两条用户任务，各自的空间、用户栈与帧；时间片一个 tick，从用户态
-  来的中断里递减，到零就让出。另有 `task_switch.cpp` 的两条内核侧任务轮转，
-  是最早那次预演，留着当上下文切换的独立自检。
+- 调度：三条用户任务，第一条的空间自己建，后两条由它克隆；栈页在克隆之后
+  私有化，参数写各自的下标。任务收在 `UserTask` 数组里，装空间、陷阱帧、
+  状态与退出码；`next_runnable` 是唯一的选择逻辑，让出、抢占、故障共用。
+  时间片一个 tick，从用户态来的中断里递减，到零就让出。另有
+  `task_switch.cpp` 的两条内核侧任务轮转，留作上下文切换的独立自检。
 - 平台缝：`kernel/platform/<名字>.hpp` 只 include `cinux/platform/<名字>.hpp`，
   这个文件由根构建按 `CINUX_ARCHITECTURE` 生成，指向该端口的聚合头。七条
   中立头（bus、clock、firmware、interrupt、io、ps2）都走这条缝。
@@ -53,8 +55,12 @@
   钩子只认两段窗口：按需补页的 0x40009000，以及共享页的写时复制。
 - 写时复制：共享帧映射成用户只读（AP 0b10），写故障时复制一页、当前空间
   改指副本并给可写、旧帧账减一；`cow_release.cpp` 的小表只记被共享的帧。
-  自检里两条任务共享 0x40008000，各自写、跑过若干次抢占再读回，都报
+  三条任务共享 0x40008000，各自写、跑过若干次抢占再读回，都报
   `task N keeps its page`。
+- 克隆：`clone_space.hpp` 遍历父空间的用户槽，子空间为每张二级表新开一张，
+  叶子帧逐页 Retain，父子都降到用户只读。自检里父空间挂一页并克隆，两边
+  翻译到同一帧、账本是两位主人；拆子空间之后父空间仍可翻译；再拆父空间，
+  空闲页数回到原点。只支持小页叶子，用户窗口里出现段就拒绝克隆。
 
 ## 两条陷阱帧路径
 
@@ -89,12 +95,13 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 地址空间的拆分 | `space teardown ok` |
 | 共享帧的账本 | `cow ledger ok` |
 | 一帧挂进两个空间 | `shared frame ok` |
+| 用户子树的克隆 | `fork clone ok` |
 | 两条内核任务轮转 | `two tasks ok` |
 | 两条用户任务与抢占 | `preempt to task`、`task 0 exited with status 7`、`task 1 faulted` |
 | 坏指针 | `svc write refused 80000000 + 8` |
 | 读 | `svc read 0 bytes` |
 | 按需补页 | `fault repaired at 40009000` |
-| 写时复制 | `cow copy at 40008000`、`task N keeps its page` |
+| 写时复制 | `cow copy at 40008000`、`task 0/1/2 keeps its page` |
 | 用户态往返 | `user mode round trip ok` |
 | 内核态缺页 | `kernel fault probe`、`data abort at 51000000 status 805 code 2` |
 
@@ -175,9 +182,10 @@ firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC �
 
 - 系统调用只有 exit、read、write、sched_yield 四条，read 只认 fd 0、
   write 只认 1 与 2，还没有文件描述符表。
-- 写时复制只在自检里用：两个空间共享一帧、写故障复制，这条链通了；还没有
-  fork，也就没有真正的父子共享。内核侧那段等 tick 的空转也先换成了缺页
-  探针，内核态中断在用户阶段之后的开中断路径还没重新验。
+- 克隆只在自检与三条任务里用：子树能克隆、写时复制能各写各的，但还没有
+  进程概念，也没有等待子任务与退出码的传递；退出码只打印，不交给谁。
+- 内核侧那段等 tick 的空转换成了缺页探针。内核态中断在用户阶段之后重新开
+  中断的那条路径还没重新验过，这是上一轮留下的欠账。
 - 内核调度器没有接进来。现在的两条用户任务是自检里的小调度，帧、根表与
   时间片都能用，但任务结构、生命周期与阻塞还没长出来。
 - `abi`、`random`、`smp_control` 这些中立头还没有 armv7 版。
