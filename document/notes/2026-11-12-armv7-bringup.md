@@ -11,7 +11,7 @@
 | 任务槽 | 8 条：开机 4 条，后 4 条留给 fork，退出后回收复用 |
 | 用户地址 | 代码 0x40001000（预留三页）、栈 0x40004000、按需窗口 0x40009000、brk 0x4000C000 到 0x40010000、mmap 0x40010000 到 0x40100000 |
 | 用户代码段 | 4180 字节、两页；链接期断言不超过三页 |
-| 断言 | arm_boot 104 条期望，全按字面量比对；同名 `-D` 在配置期直接报错 |
+| 断言 | arm_boot 107 条期望，全按字面量比对；同名 `-D` 在配置期直接报错 |
 | 其它验证 | x86 宿主 86 个测试、内核镜像大小核对 |
 | 复跑 | `scripts/check-armv7.sh --repeat N`，失败自动留档 |
 
@@ -378,7 +378,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 2 | fork | 连 fork 两次：`fork 0 -> 4`、`fork 0 -> 5`、`child one ok`、`child two ok`、两条都以 3 退出；写时复制：两次 `cow copy at 40040000`、`cow after two forks`；继承：`fd inherited ok`（父任务关掉的 2 号在子任务里也是关的）、`brk inherited ok`（子任务的断点接着父任务的 0x4000E000）；槽位复用：子任务退出后再 fork 回到 4 号；孤儿：父任务先退之后子任务的 ppid 仍读作 0（`orphan ok`）；处理函数继承：父任务登记过处理函数，复用的子任务踩 `0x51000010` 也进处理函数（`fault handled at 51000010`、`handler inherited ok`、以 9 退出）；占满八条后第五次被拒（`fork refused, no free slot`、`no slot ok`），四条停着的子任务在父任务结束后各自退出 |
 | 3 | read | `read timed out`（有数据那条未覆盖） |
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
-| 6 | close | `close 2`、`ebadf ok` |
+| 6 | close | `close 2`、`ebadf ok`；文件槽回收：`close 3`、`reopen ok`（关掉后再开拿回同一编号） |
 | 19 | lseek | `lseek 3 -> 0`、用户侧 `lseek ok`（读三字节、回零、再读六字节）；同一文件开两次各读各的（`multi open ok`）；开满 3 到 7 之后再开回 ENOMEM（`full ok`） |
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
