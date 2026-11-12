@@ -439,36 +439,6 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             }
         }
         {
-            char name[8];
-            name[0] = '/'; name[1] = 'r'; name[2] = 'e'; name[3] = 'a';
-            name[4] = 'd'; name[5] = 'm'; name[6] = 'e'; name[7] = 0;
-            const long kReadmeFd = user_syscall3(
-                cinux::armv7::syscall_nr::kOpen,
-                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(name)), 0, 0);
-            if (kReadmeFd >= 3) {
-                char back[8];
-                for (unsigned long index = 0; index < 8; ++index) {
-                    back[index] = 0;
-                }
-                const long kBytes = user_syscall3(
-                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kReadmeFd),
-                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(back)), 8);
-                if (kBytes == 8 && back[0] == 'r' && back[1] == 'e' && back[2] == 'a' &&
-                    back[3] == 'd' && back[4] == 'm' && back[5] == 'e' &&
-                    back[6] == '!' && back[7] == '\n') {
-                    char          note[16];
-                    unsigned long note_length = 0;
-#define NOTE(c) note[note_length++] = (c)
-                    NOTE('r'); NOTE('e'); NOTE('a'); NOTE('d'); NOTE('m'); NOTE('e');
-                    NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
-#undef NOTE
-                    user_write(note, note_length);
-                }
-                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
-                                                static_cast<unsigned long>(kReadmeFd), 0, 0));
-            }
-        }
-        {
             // Writable file, with every step reported.
             char scratch[10];
             scratch[0] = '/'; scratch[1] = 's'; scratch[2] = 'c'; scratch[3] = 'r';
