@@ -35,6 +35,8 @@ inline constexpr std::uint32_t kUcr3 = 0x88;
 inline constexpr std::uint32_t kUcr4 = 0x8C;
 inline constexpr std::uint32_t kUfcr = 0x90;
 inline constexpr std::uint32_t kUsr2 = 0x98;
+/// USR2 bit 0: a byte is waiting in URXD.
+inline constexpr std::uint32_t kUsr2Rdr = 1U << 0U;
 inline constexpr std::uint32_t kUbir = 0xA4;
 inline constexpr std::uint32_t kUbmr = 0xA8;
 }  // namespace uart_reg
@@ -47,5 +49,11 @@ void UartPutChar(char character);
 
 /// Sends a NUL-terminated string.
 void UartWrite(const char* text);
+
+/// Reports whether a received byte is waiting in URXD.
+[[nodiscard]] bool UartReceiveReady();
+
+/// Takes the waiting byte; only call after UartReceiveReady.
+[[nodiscard]] char UartReadChar();
 
 }  // namespace cinux::armv7

@@ -39,7 +39,8 @@ add_test(NAME arm_boot
             -DEXPECTED_USER=user mode round trip ok
             -DEXPECTED_SVC=svc write matched
             -DEXPECTED_ROTATE=all user tasks done
-            -DEXPECTED_TASK_DONE=task 0 done
+            -DEXPECTED_TASK_DONE=task 0 exited with status 7
+            -DEXPECTED_READ=svc read 0 bytes
             -DEXPECTED_FAULTED=task 1 faulted
             -DEXPECTED_PREEMPT=preempt to task
             -DEXPECTED_REFUSED=svc write refused 80000000

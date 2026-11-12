@@ -117,11 +117,18 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         }
 
     }
+    {
+        char       line[16];
+        const long kReceived = user_syscall3(
+            cinux::armv7::syscall_nr::kRead, 0,
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(line)), sizeof(line));
+        static_cast<void>(kReceived);
+    }
     if (task_id != 0) {
         // A foreign task's code page: this task's table has nothing there.
         static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x40001000UL));
     }
-    static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kExit));
+    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 7, 0, 0));
     for (;;) {
         asm volatile("wfi");
     }
@@ -213,7 +220,8 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
     if (number == cinux::armv7::syscall_nr::kExit) {
         g_tasks[g_current].done = true;
-        cinux::print::Println("[armv7] task %u done", g_current);
+        cinux::print::Println("[armv7] task %u exited with status %u", g_current,
+                              g_user_trap.r0);
     }
 
     const unsigned long other = g_current == 0 ? 1 : 0;

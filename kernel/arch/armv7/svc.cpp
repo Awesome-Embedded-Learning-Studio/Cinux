@@ -17,6 +17,7 @@
 
 #include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/armv7/timer.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
@@ -48,10 +49,51 @@ long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
     return static_cast<long>(count);
 }
 
+/// Reads one line from the console into a user buffer, or 0 on timeout.
+long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
+    if (fd != 0 || count == 0) {
+        return -1;
+    }
+    const cinux::arch::IrqGuard kGuard;
+    if (!cinux::arch::UserRangeIsMapped(buffer, count)) {
+        return -1;
+    }
+    const auto kFrequency = cinux::armv7::TimerFrequency();
+    const auto kStart     = cinux::armv7::TimerCounter();
+    while (!cinux::armv7::UartReceiveReady()) {
+        if ((cinux::armv7::TimerCounter() - kStart) >
+            (static_cast<unsigned long long>(kFrequency) / 5U)) {
+            return 0;  // 200 ms with nothing to read
+        }
+    }
+    unsigned long received = 0;
+    while (received < count && cinux::armv7::UartReceiveReady()) {
+        const char          kChar = cinux::armv7::UartReadChar();
+        const unsigned char kByte = static_cast<unsigned char>(kChar);
+        if (!cinux::arch::CopyToUser(buffer + received, &kByte, 1)) {
+            return -1;
+        }
+        ++received;
+        if (kChar == '\n' || kChar == '\r') {
+            break;
+        }
+    }
+    return static_cast<long>(received);
+}
+
 }  // namespace
 
 extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* frame) {
     switch (number) {
+    case cinux::armv7::syscall_nr::kRead: {
+        const long result = do_read(frame[0], frame[1], frame[2]);
+        if (result < 0) {
+            cinux::print::Println("[armv7] svc read refused %X + %u", frame[1], frame[2]);
+            return ~0UL;
+        }
+        cinux::print::Println("[armv7] svc read %u bytes", static_cast<unsigned long>(result));
+        return static_cast<unsigned long>(result);
+    }
     case cinux::armv7::syscall_nr::kWrite: {
         const long result = do_write(frame[0], frame[1], frame[2]);
         if (result < 0) {

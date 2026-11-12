@@ -59,6 +59,16 @@ void UartPutChar(char character) {
                   static_cast<std::uint32_t>(static_cast<unsigned char>(character)));
 }
 
+bool UartReceiveReady() {
+    auto* const base = reinterpret_cast<volatile std::uint32_t*>(kUart1Base);
+    return (base[uart_reg::kUsr2 / 4U] & uart_reg::kUsr2Rdr) != 0;
+}
+
+char UartReadChar() {
+    auto* const base = reinterpret_cast<volatile std::uint32_t*>(kUart1Base);
+    return static_cast<char>(base[uart_reg::kUrxd / 4U] & 0xFFU);
+}
+
 void UartWrite(const char* text) {
     for (const char* cursor = text; *cursor != '\0'; ++cursor) {
         UartPutChar(*cursor);
