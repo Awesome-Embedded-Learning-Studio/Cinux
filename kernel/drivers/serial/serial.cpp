@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "kernel/arch/x86_64/platform/io.hpp"
+#include "kernel/platform/io.hpp"
 
 namespace cinux::driver {
 

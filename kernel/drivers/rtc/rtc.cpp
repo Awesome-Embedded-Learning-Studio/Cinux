@@ -15,7 +15,7 @@
 #include <stdint.h>
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/arch/x86_64/platform/io.hpp"
+#include "kernel/platform/io.hpp"
 
 namespace cinux::driver {
 

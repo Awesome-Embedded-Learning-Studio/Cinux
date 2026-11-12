@@ -3,11 +3,11 @@
 #include <stdint.h>
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/arch/x86_64/platform/io.hpp"
+#include "kernel/platform/io.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
 #include "kernel/drivers/input/input_config.hpp"
 #include "kernel/drivers/keyboard/scancode.hpp"
-#include "kernel/arch/x86_64/platform/ps2/controller.hpp"
+#include "kernel/platform/ps2.hpp"
 #include "kernel/interrupt/irq.hpp"
 
 
