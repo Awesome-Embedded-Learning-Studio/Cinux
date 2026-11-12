@@ -19,6 +19,8 @@ constexpr unsigned char kHelloFile[] = "hello\n";
 constexpr unsigned long kHelloSize   = sizeof(kHelloFile) - 1;
 constexpr unsigned char kMotdFile[]  = "hi there\n";
 constexpr unsigned long kMotdSize    = sizeof(kMotdFile) - 1;
+constexpr unsigned char kReadmeFile[] = "readme!\n";
+constexpr unsigned long kReadmeSize   = sizeof(kReadmeFile) - 1;
 
 unsigned char g_scratch[64];  // zeroed at boot
 unsigned long g_scratch_len = 0;
@@ -33,6 +35,7 @@ struct Entry {
 constexpr Entry kEntries[] = {
     {"/hello", 6, kHelloFile, kHelloSize},
     {"/motd", 5, kMotdFile, kMotdSize},
+    {"/readme", 7, kReadmeFile, kReadmeSize},
 };
 
 }  // namespace
