@@ -22,6 +22,9 @@ namespace cinux::armv7::errno {
 /// A pointer the kernel refused to touch.
 inline constexpr long kFault = -14;  // EFAULT
 
+/// The file has no room left.
+inline constexpr long kNoSpc = -28;  // ENOSPC
+
 /// No such file.
 inline constexpr long kNoEnt = -2;  // ENOENT
 

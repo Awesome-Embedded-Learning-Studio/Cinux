@@ -31,10 +31,15 @@ constexpr unsigned long kChunkBytes = 64;
 
 extern "C" bool CurrentFdReadable(unsigned long fd);
 extern "C" bool CurrentFdWritable(unsigned long fd);
+extern "C" bool CurrentFdIsFile(unsigned long fd);
+extern "C" long FileWrite(unsigned long fd, unsigned long buffer, unsigned long count);
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
 
 long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
+    if (CurrentFdIsFile(fd)) {
+        return FileWrite(fd, buffer, count);
+    }
     if (!CurrentFdWritable(fd)) {
         return cinux::armv7::errno::kBadFd;
     }

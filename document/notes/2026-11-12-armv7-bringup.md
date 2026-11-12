@@ -303,7 +303,16 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 改完祖孙三代一次通过：`grandchild ok`、`task 6 exited with status 4`
 与 `two levels ok`，页数仍回原点。
 
-## 可写文件那条没做成
+## 可写文件：第二次做成了
+
+上一轮加可写文件时，那次 open 既没有成功行也没有拒绝行。复盘下来是自检块
+放得太晚：前面那轮"把 3 到 7 号槽占满"的检查把表填住，open 走了"没有空槽"
+那条分支，而那条分支当时不打印任何东西，于是整块静默跳过。
+
+这次先把它放到最早的位置，并且每一步都在用户侧写一行（打开失败、写失败、
+比对结果）。一次就通：`open scratch as`、`file write 6`、`writefile ok`。
+
+## 可写文件那条没做成（第一版）
 
 想加一个可写的内存文件（/scratch）：内核里一块 bss 缓冲、描述符记可写位、
 write 按偏移写进去、再读回来。加进去之后那次 open 在串口里既没有成功行也
@@ -352,7 +361,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
 | 78 | getticks | `getticks 3`、睡三个 tick 之后变大（`ticks ok`） |
-| 5 | open | 内建只读文件：`open hello as 3`、`file read 6`、`file ok`；不存在的名字回 ENOENT（`enoent ok`） |
+| 5 | open | 内建只读文件：`open hello as 3`、`file read 6`、`file ok`；不存在的名字回 ENOENT（`enoent ok`）；可写文件：`open scratch as`、`file write 6`、`writefile ok` |
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |

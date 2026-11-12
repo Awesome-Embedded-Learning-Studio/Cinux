@@ -77,14 +77,18 @@ struct FdEntry {
     bool                 open   = false;
     FdKind               kind   = FdKind::kConsoleIn;
     unsigned long        offset = 0;
-    const unsigned char* data   = nullptr;  // file contents, if any
-    unsigned long        size   = 0;
+    const unsigned char* data     = nullptr;  // file contents, if any
+    unsigned long        size     = 0;
+    bool                 writable = false;
 };
 
 constexpr unsigned long kMaxFds = 8;
 
 /// The one file this port has without a filesystem: enough to prove that
 /// open, read and close walk real bytes.
+unsigned char g_scratch_file[64];  // writable, zeroed at boot
+unsigned long g_scratch_len = 0;
+
 constexpr unsigned char kHelloFile[] = "hello\n";
 constexpr unsigned long kHelloSize   = sizeof(kHelloFile) - 1;
 
@@ -394,6 +398,73 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             }
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
+        }
+        {
+            // Writable file, with every step reported.
+            char scratch[10];
+            scratch[0] = '/'; scratch[1] = 's'; scratch[2] = 'c'; scratch[3] = 'r';
+            scratch[4] = 'a'; scratch[5] = 't'; scratch[6] = 'c'; scratch[7] = 'h';
+            scratch[8] = 0;   scratch[9] = 0;
+            const long kScrFd = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(scratch)), 0, 0);
+            if (kScrFd < 3) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('s'); NOTE('c'); NOTE('r'); NOTE(' '); NOTE('o'); NOTE('p');
+                NOTE('e'); NOTE('n'); NOTE(' '); NOTE('b'); NOTE('a'); NOTE('d');
+                NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            } else {
+                char payload[6];
+                payload[0] = 'a'; payload[1] = 'b'; payload[2] = 'c';
+                payload[3] = '1'; payload[4] = '2'; payload[5] = '3';
+                const long kWrote = user_syscall3(
+                    cinux::armv7::syscall_nr::kWrite, static_cast<unsigned long>(kScrFd),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(payload)), 6);
+                if (kWrote != 6) {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('s'); NOTE('c'); NOTE('r'); NOTE(' '); NOTE('w'); NOTE('r');
+                    NOTE('i'); NOTE('t'); NOTE('e'); NOTE(' '); NOTE('b'); NOTE('a');
+                    NOTE('d'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                                static_cast<unsigned long>(kScrFd), 0, 0));
+                char back[6];
+                for (unsigned long index = 0; index < 6; ++index) {
+                    back[index] = 0;
+                }
+                const long kBackBytes = user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kScrFd),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(back)), 6);
+                const bool kOk = kBackBytes == 6 && back[0] == 'a' && back[1] == 'b' &&
+                                 back[2] == 'c' && back[3] == '1' && back[4] == '2' &&
+                                 back[5] == '3';
+                {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    if (kOk) {
+                        NOTE('w'); NOTE('r'); NOTE('i'); NOTE('t'); NOTE('e'); NOTE('f');
+                        NOTE('i'); NOTE('l'); NOTE('e'); NOTE(' '); NOTE('o'); NOTE('k');
+                    } else {
+                        NOTE('w'); NOTE('r'); NOTE('i'); NOTE('t'); NOTE('e'); NOTE('f');
+                        NOTE('i'); NOTE('l'); NOTE('e'); NOTE(' '); NOTE('b'); NOTE('a');
+                        NOTE('d');
+                    }
+                    NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kScrFd), 0, 0));
+            }
         }
         {
             char second[8];
@@ -1277,10 +1348,13 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
             return &g_tasks[g_current].trap;
         }
-        const bool kKnown = length == 6 && path[0] == '/' && path[1] == 'h' &&
+        const bool kHello = length == 6 && path[0] == '/' && path[1] == 'h' &&
                             path[2] == 'e' && path[3] == 'l' && path[4] == 'l' &&
                             path[5] == 'o';
-        if (!kKnown) {
+        const bool kScratch = length == 8 && path[0] == '/' && path[1] == 's' &&
+                              path[2] == 'c' && path[3] == 'r' && path[4] == 'a' &&
+                              path[5] == 't' && path[6] == 'c' && path[7] == 'h';
+        if (!kHello && !kScratch) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoEnt);
             cinux::print::Println("[armv7] open refused");
@@ -1298,12 +1372,13 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
             return &g_tasks[g_current].trap;
         }
-        g_tasks[g_current].fds[slot].open   = true;
-        g_tasks[g_current].fds[slot].kind   = FdKind::kFile;
-        g_tasks[g_current].fds[slot].offset = 0;
-        g_tasks[g_current].fds[slot].data   = kHelloFile;
-        g_tasks[g_current].fds[slot].size   = kHelloSize;
-        cinux::print::Println("[armv7] open hello as %u", slot);
+        g_tasks[g_current].fds[slot].open     = true;
+        g_tasks[g_current].fds[slot].kind     = FdKind::kFile;
+        g_tasks[g_current].fds[slot].offset   = 0;
+        g_tasks[g_current].fds[slot].data     = kHello ? kHelloFile : g_scratch_file;
+        g_tasks[g_current].fds[slot].size     = kHello ? kHelloSize : g_scratch_len;
+        g_tasks[g_current].fds[slot].writable = !kHello;
+        cinux::print::Println("[armv7] open %s as %u", kHello ? "hello" : "scratch", slot);
         g_tasks[g_current].trap.r0 = slot;
         return &g_tasks[g_current].trap;
     }
@@ -1703,6 +1778,32 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
             task.wait_mask = 0;
         }
     }
+}
+
+extern "C" bool CurrentFdIsFile(unsigned long fd) {
+    return fd < kMaxFds && g_tasks[g_current].fds[fd].open &&
+           g_tasks[g_current].fds[fd].kind == FdKind::kFile;
+}
+
+extern "C" long FileWrite(unsigned long fd, unsigned long buffer, unsigned long count) {
+    if (!CurrentFdIsFile(fd) || !g_tasks[g_current].fds[fd].writable) {
+        return cinux::armv7::errno::kBadFd;
+    }
+    FdEntry&            file = g_tasks[g_current].fds[fd];
+    const unsigned long room = sizeof(g_scratch_file) - file.offset;
+    if (room == 0 || count > room) {
+        return cinux::armv7::errno::kNoSpc;
+    }
+    if (!cinux::arch::CopyFromUser(g_scratch_file + file.offset, buffer, count)) {
+        return cinux::armv7::errno::kFault;
+    }
+    file.offset += count;
+    if (file.offset > g_scratch_len) {
+        g_scratch_len = file.offset;
+    }
+    file.size          = g_scratch_len;
+    cinux::print::Println("[armv7] file write %u", count);
+    return static_cast<long>(count);
 }
 
 extern "C" bool CurrentFdReadable(unsigned long fd) {
