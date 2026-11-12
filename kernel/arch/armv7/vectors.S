@@ -56,26 +56,28 @@ _vec2: cmp  r7, #158
 
 @ IRQ: the return address needs the four-byte correction before saving.
 _vec6: sub  lr, lr, #4
+       stmdb sp!, {r3}             @ park r3 while the mode is checked
        mrs  r3, spsr
        and  r3, r3, #0x1F
        cmp  r3, #0x10              @ only a user interrupt may preempt
        bne  _irq_plain
-       mov  r1, #0                 @ interrupt
-       mov  r2, #0xD2              @ back to IRQ mode, interrupts masked
-       b    _trap_save
+       ldmia sp!, {r3}
+       b    _irq_trap_save
 _irq_plain:
+       add  sp, sp, #4
+       push {r0-r3, lr}            @ the kernel's own registers survive
        mov  r0, #6
-       b    _dispatch
+       bl   c_exception_dispatch
+       pop  {r0-r3, lr}
+       movs pc, lr
 
 @ Trapping svc: lr is already the user's return address.
 _svc_trap:
-       mov  r1, #1                 @ supervisor call
-       mov  r2, #0xD3              @ back to supervisor mode, interrupts masked
 
 @ Save the interrupted world into g_user_trap, let C choose the frame
 @ to resume, then restore it. r12 is parked on the supervisor stack
 @ because it is both the base and one of the saved registers.
-_trap_save:
+_svc_trap_save:
        stmdb sp!, {r12}
        ldr   r12, =g_user_trap
        stmia r12, {r0-r11}
@@ -86,9 +88,38 @@ _trap_save:
        str   r3, [r12, #60]        @ the trapping mode's SPSR
        cps   #0x1F                 @ System mode reads the user bank's sp
        mov   r3, sp
-       msr   cpsr_c, r2            @ back to the mode we came from
+       cps   #0x13                 @ back to supervisor mode
        str   r3, [r12, #52]
        mov   r0, r12
+       mov   r1, #1                @ supervisor call
+       bl    c_trap_entry
+       mov   r3, r0
+       ldr   r1, [r3, #52]         @ user sp
+       ldr   r2, [r3, #60]         @ SPSR
+       ldr   r12, [r3, #56]        @ user pc
+       cps   #0x1F
+       mov   sp, r1
+       cps   #0x13
+       msr   spsr_cxsf, r2
+       mov   lr, r12
+       ldmia r3, {r0-r12}
+       movs  pc, lr
+
+_irq_trap_save:
+       stmdb sp!, {r12}
+       ldr   r12, =g_user_trap
+       stmia r12, {r0-r11}
+       ldr   r3, [sp], #4
+       str   r3, [r12, #48]
+       str   lr, [r12, #56]        @ the trapping mode's lr
+       mrs   r3, spsr
+       str   r3, [r12, #60]        @ the trapping mode's SPSR
+       cps   #0x1F                 @ System mode reads the user bank's sp
+       mov   r3, sp
+       cps   #0x12                 @ back to IRQ mode
+       str   r3, [r12, #52]
+       mov   r0, r12
+       mov   r1, #0                @ interrupt
        bl    c_trap_entry
        mov   r3, r0
        ldr   r1, [r3, #52]         @ user sp
@@ -113,7 +144,7 @@ _abort_trap_save:
        str   r3, [r12, #60]        @ the trapping mode's SPSR
        cps   #0x1F                 @ System mode reads the user bank's sp
        mov   r3, sp
-       msr   cpsr_c, r2            @ back to the mode we came from
+       cps   #0x13                 @ back to supervisor mode
        str   r3, [r12, #52]
        mov   r0, r12
        mov   r1, #2
