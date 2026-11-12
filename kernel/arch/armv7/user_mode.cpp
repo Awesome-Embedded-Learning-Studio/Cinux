@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/ramfs.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
@@ -39,6 +40,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/ramfs.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
@@ -83,29 +85,6 @@ struct FdEntry {
 };
 
 constexpr unsigned long kMaxFds = 8;
-
-/// The one file this port has without a filesystem: enough to prove that
-/// open, read and close walk real bytes.
-unsigned char g_scratch_file[64];  // writable, zeroed at boot
-unsigned long g_scratch_len = 0;
-
-constexpr unsigned char kHelloFile[] = "hello\n";
-constexpr unsigned long kHelloSize   = sizeof(kHelloFile) - 1;
-constexpr unsigned char kMotdFile[]  = "hi there\n";
-constexpr unsigned long kMotdSize    = sizeof(kMotdFile) - 1;
-
-/// The read-only files this port knows by name.
-struct BuiltinFile {
-    const char*          name;
-    unsigned long        name_length;
-    const unsigned char* data;
-    unsigned long        size;
-};
-
-constexpr BuiltinFile kBuiltinFiles[] = {
-    {"/hello", 6, kHelloFile, kHelloSize},
-    {"/motd", 5, kMotdFile, kMotdSize},
-};
 
 struct UserTask {
     cinux::arch::UserTrap    trap;
@@ -1506,27 +1485,12 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
             return &g_tasks[g_current].trap;
         }
-        const BuiltinFile* found = nullptr;
-        for (const auto& entry : kBuiltinFiles) {
-            if (length != entry.name_length) {
-                continue;
-            }
-            bool same = true;
-            for (unsigned long index = 0; index < length; ++index) {
-                if (path[index] != entry.name[index]) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same) {
-                found = &entry;
-                break;
-            }
-        }
+        cinux::armv7::ramfs::File known{};
+        const bool kFound  = cinux::armv7::ramfs::Lookup(path, length, known);
         const bool kScratch = length == 8 && path[0] == '/' && path[1] == 's' &&
                               path[2] == 'c' && path[3] == 'r' && path[4] == 'a' &&
                               path[5] == 't' && path[6] == 'c' && path[7] == 'h';
-        if (found == nullptr && !kScratch) {
+        if (!kFound && !kScratch) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoEnt);
             cinux::print::Println("[armv7] open refused");
@@ -1548,11 +1512,10 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].fds[slot].open     = true;
         g_tasks[g_current].fds[slot].kind     = FdKind::kFile;
         g_tasks[g_current].fds[slot].offset   = 0;
-        g_tasks[g_current].fds[slot].data     = found != nullptr ? found->data : g_scratch_file;
-        g_tasks[g_current].fds[slot].size     = found != nullptr ? found->size : g_scratch_len;
-        g_tasks[g_current].fds[slot].writable = found == nullptr;
-        cinux::print::Println("[armv7] open %s as %u",
-                              found != nullptr ? found->name + 1 : "scratch", slot);
+        g_tasks[g_current].fds[slot].data     = known.data;
+        g_tasks[g_current].fds[slot].size     = known.size;
+        g_tasks[g_current].fds[slot].writable = known.writable;
+        cinux::print::Println("[armv7] open %s as %u", kFound ? path + 1 : "scratch", slot);
         g_tasks[g_current].trap.r0 = slot;
         return &g_tasks[g_current].trap;
     }
@@ -1966,18 +1929,19 @@ extern "C" long FileWrite(unsigned long fd, unsigned long buffer, unsigned long 
         return cinux::armv7::errno::kBadFd;
     }
     FdEntry&            file = g_tasks[g_current].fds[fd];
-    const unsigned long room = sizeof(g_scratch_file) - file.offset;
-    if (room == 0 || count > room) {
+    const auto&         scratch = cinux::armv7::ramfs::Scratch();
+    const unsigned long room  = scratch.size < 64 ? 64 : scratch.size;
+    if (file.offset >= room || count > room - file.offset) {
         return cinux::armv7::errno::kNoSpc;
     }
-    if (!cinux::arch::CopyFromUser(g_scratch_file + file.offset, buffer, count)) {
+    auto* const target =
+        const_cast<unsigned char*>(scratch.data) + file.offset;
+    if (!cinux::arch::CopyFromUser(target, buffer, count)) {
         return cinux::armv7::errno::kFault;
     }
     file.offset += count;
-    if (file.offset > g_scratch_len) {
-        g_scratch_len = file.offset;
-    }
-    file.size          = g_scratch_len;
+    cinux::armv7::ramfs::ScratchGrew(file.offset);
+    file.size = cinux::armv7::ramfs::Scratch().size;
     cinux::print::Println("[armv7] file write %u", count);
     return static_cast<long>(count);
 }
