@@ -16,6 +16,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/platform/msi/msi_layout.hpp"
-#include "kernel/arch/x86_64/platform/msi/msix.hpp"
-#include "kernel/arch/x86_64/platform/apic/local_apic.hpp"
+#include "cinux/platform/interrupt.hpp"

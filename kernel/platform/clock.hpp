@@ -16,5 +16,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/platform/hpet/hpet.hpp"
-#include "kernel/arch/x86_64/platform/pit/pit.hpp"
+#include "cinux/platform/clock.hpp"

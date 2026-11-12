@@ -52,6 +52,15 @@ foreach(port_header IN LISTS CINUX_PORT_HEADERS)
          CONTENT "#pragma once\n#include \"kernel/arch/${CINUX_ARCHITECTURE}/${port_header}.hpp\"\n")
 endforeach()
 
+# Same shim story for the platform face: a neutral platform header names no
+# port, the generated file points at the selected port's aggregate.
+set(CINUX_PLATFORM_HEADERS clock interrupt io)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated/cinux/platform)
+foreach(platform_header IN LISTS CINUX_PLATFORM_HEADERS)
+    file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/generated/cinux/platform/${platform_header}.hpp
+         CONTENT "#pragma once\n#include \"kernel/arch/${CINUX_ARCHITECTURE}/platform/${platform_header}.hpp\"\n")
+endforeach()
+
 cinux_arch_lane()
 if(CINUX_ARCH_LANE_TERMINAL)
     return()
