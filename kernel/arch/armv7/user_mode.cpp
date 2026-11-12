@@ -106,6 +106,8 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
     PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR('\n');
 #undef PUSH_CHAR
+    // A pointer into the kernel's own memory must be refused, not read.
+    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kWrite, 1, 0x80000000UL, 8));
     for (unsigned long round = 0; round < 20; ++round) {
         buffer[2] = static_cast<char>('0' + (round % 10));
         user_write(buffer, length);

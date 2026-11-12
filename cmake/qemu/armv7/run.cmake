@@ -42,6 +42,7 @@ add_test(NAME arm_boot
             -DEXPECTED_TASK_DONE=task 0 done
             -DEXPECTED_FAULTED=task 1 faulted
             -DEXPECTED_PREEMPT=preempt to task
+            -DEXPECTED_REFUSED=svc write refused 80000000
             -DEXPECTED_USERFAULT=user fault caught at 40001000 code 4
             -DEXPECTED_FAULT=data abort at 51000000 status 805 code 2
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log

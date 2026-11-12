@@ -1,0 +1,136 @@
+/**
+ * @file    user_access.hpp
+ * @brief   Checking a user pointer before the kernel touches it.
+ *
+ * Two things must hold before the kernel reads or writes a pointer that
+ * came from user mode: the whole range must lie below the user top, and
+ * every page in it must be present *and* user-accessible in the active
+ * table. The second check is the one that matters here: this port's
+ * kernel image sits at 0x80000000, below the 3 GiB user top, so a range
+ * check alone would happily hand the kernel its own memory.
+ *
+ * @author  Charliechen114514
+ * @date    2026-11-12
+ * @version 0.1
+ * @since   0.1.0
+ * @ingroup kernel_arch
+ * @copyright Copyright (c) 2026
+ */
+
+#pragma once
+
+#include "kernel/arch/armv7/page_entry.hpp"
+#include "kernel/arch/armv7/page_walk_shape.hpp"
+#include "kernel/arch/armv7/space_control.hpp"
+#include "kernel/arch/armv7/space_layout.hpp"
+
+namespace cinux::arch {
+
+namespace detail {
+
+/// The AP field of a small page is bits 5:4; sections keep it at 15:10.
+inline bool EntryIsUser(const page::Entry& entry, page::WalkLevel level) {
+    const unsigned long shift = level == page::WalkLevel::kL1 ? 10UL : 4UL;
+    const unsigned long ap    = (entry.raw >> shift) & 0x3UL;
+    return ap == 0x3UL || ap == 0x2UL;
+}
+
+}  // namespace detail
+
+/**
+ * @brief         Checks that one page is mapped and user-accessible.
+ * @param[in]     address   Page-aligned user address.
+ * @return        true when the active table maps it for user mode.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline bool UserPageIsMapped(unsigned long address) {
+    const auto* const l1 =
+        reinterpret_cast<const page::Entry*>(space::ActiveRoot());
+    const page::Entry kL1 = l1[(address >> 20U) & 0xFFFUL];
+    if (!page::DescriptorPresent(kL1)) {
+        return false;
+    }
+    if (page::DescriptorIsLeaf(kL1, page::WalkLevel::kL1)) {
+        return detail::EntryIsUser(kL1, page::WalkLevel::kL1);
+    }
+    const auto* const l2 =
+        reinterpret_cast<const page::Entry*>(page::TableTarget(kL1));
+    const page::Entry kL2 = l2[(address >> 12U) & 0xFFUL];
+    if (!page::DescriptorPresent(kL2) ||
+        !page::DescriptorIsLeaf(kL2, page::WalkLevel::kL2)) {
+        return false;
+    }
+    return detail::EntryIsUser(kL2, page::WalkLevel::kL2);
+}
+
+/**
+ * @brief         Checks a whole user range: below the top, no overflow,
+ *                every page mapped for user mode.
+ * @param[in]     address   First byte.
+ * @param[in]     length    Byte count.
+ * @return        true when the kernel may touch the range.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline bool UserRangeIsMapped(unsigned long address, unsigned long length) {
+    if (length == 0) {
+        return true;
+    }
+    const unsigned long kTop = address + length;
+    if (kTop < address || kTop > space::kUserTop) {
+        return false;
+    }
+    const unsigned long kFirstPage = address & ~(page::kSize - 1UL);
+    const unsigned long kLastPage  = (kTop - 1UL) & ~(page::kSize - 1UL);
+    for (unsigned long page = kFirstPage; page <= kLastPage; page += page::kSize) {
+        if (!UserPageIsMapped(page)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief         Copies a user buffer into kernel memory.
+ * @param[out]    destination   Kernel buffer.
+ * @param[in]     source        User address.
+ * @param[in]     length        Byte count.
+ * @return        false when the user range is not usable.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline bool CopyFromUser(void* destination, unsigned long source, unsigned long length) {
+    if (!UserRangeIsMapped(source, length)) {
+        return false;
+    }
+    auto* const out  = static_cast<unsigned char*>(destination);
+    const auto* in   = reinterpret_cast<const unsigned char*>(source);
+    for (unsigned long index = 0; index < length; ++index) {
+        out[index] = in[index];
+    }
+    return true;
+}
+
+/**
+ * @brief         Copies kernel memory out to a user buffer.
+ * @param[in]     destination   User address.
+ * @param[in]     source        Kernel buffer.
+ * @param[in]     length        Byte count.
+ * @return        false when the user range is not usable.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline bool CopyToUser(unsigned long destination, const void* source, unsigned long length) {
+    if (!UserRangeIsMapped(destination, length)) {
+        return false;
+    }
+    auto* const out  = reinterpret_cast<unsigned char*>(destination);
+    const auto* in   = static_cast<const unsigned char*>(source);
+    for (unsigned long index = 0; index < length; ++index) {
+        out[index] = in[index];
+    }
+    return true;
+}
+
+}  // namespace cinux::arch

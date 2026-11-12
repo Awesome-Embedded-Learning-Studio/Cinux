@@ -19,20 +19,33 @@
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/boot/print.hpp"
 
 namespace {
 
-unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
+constexpr unsigned long kChunkBytes = 64;
+
+/// Copies a user buffer in chunks and writes it; refuses bad pointers.
+long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
     if (fd != 1 && fd != 2) {
-        return static_cast<unsigned long>(-1);
+        return -1;
     }
     const cinux::arch::IrqGuard kGuard;
-    const auto* bytes = reinterpret_cast<const char*>(buffer);
-    for (unsigned long index = 0; index < count; ++index) {
-        cinux::armv7::UartPutChar(bytes[index]);
+    char chunk[kChunkBytes];
+    unsigned long offset = 0;
+    while (offset < count) {
+        const unsigned long kTake =
+            (count - offset) < kChunkBytes ? (count - offset) : kChunkBytes;
+        if (!cinux::arch::CopyFromUser(chunk, buffer + offset, kTake)) {
+            return -1;
+        }
+        for (unsigned long index = 0; index < kTake; ++index) {
+            cinux::armv7::UartPutChar(chunk[index]);
+        }
+        offset += kTake;
     }
-    return count;
+    return static_cast<long>(count);
 }
 
 }  // namespace
@@ -40,9 +53,13 @@ unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long cou
 extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* frame) {
     switch (number) {
     case cinux::armv7::syscall_nr::kWrite: {
-        const unsigned long result = do_write(frame[0], frame[1], frame[2]);
-        cinux::print::Println("[armv7] svc write %u bytes", result);
-        return result;
+        const long result = do_write(frame[0], frame[1], frame[2]);
+        if (result < 0) {
+            cinux::print::Println("[armv7] svc write refused %X + %u", frame[1], frame[2]);
+            return ~0UL;
+        }
+        cinux::print::Println("[armv7] svc write %u bytes", static_cast<unsigned long>(result));
+        return static_cast<unsigned long>(result);
     }
     case cinux::armv7::syscall_nr::kSchedYield:
         return 0;
