@@ -62,6 +62,10 @@ if(EXPECTED_REPAIR AND NOT serial_out MATCHES "${EXPECTED_REPAIR}")
     message(FATAL_ERROR
         "arm_boot: the demand page was never repaired.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_FORK AND NOT serial_out MATCHES "${EXPECTED_FORK}")
+    message(FATAL_ERROR
+        "arm_boot: the user subtree clone failed.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_SHARED AND NOT serial_out MATCHES "${EXPECTED_SHARED}")
     message(FATAL_ERROR
         "arm_boot: the shared frame did not survive.\nstdout:\n${serial_out}")

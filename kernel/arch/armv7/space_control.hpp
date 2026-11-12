@@ -36,6 +36,13 @@ inline void RefreshRoot() {
 }
 
 /// Drops one page's translation.
+/// Drops every translation; used after a table-wide change such as a fork.
+inline void InvalidateAll() {
+    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0));
+    asm volatile("dsb");
+    asm volatile("isb");
+}
+
 inline void InvalidatePage(unsigned long virtual_address) {
     asm volatile("mcr p15, 0, %0, c8, c7, 1" : : "r"(virtual_address));  // TLBIMVA
     asm volatile("dsb");

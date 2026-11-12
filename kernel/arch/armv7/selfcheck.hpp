@@ -40,6 +40,9 @@ namespace cinux::armv7 {
 /// other translating it, and tearing both must return every page.
 [[nodiscard]] bool RunSharedSpaceSelfCheck();
 
+/// Clones a user subtree, checks both sides share it, then tears both down.
+[[nodiscard]] bool RunForkSelfCheck();
+
 /// Builds an address space, maps one frame, tears it down, and checks that
 /// the allocator got the frame and the tables back.
 [[nodiscard]] bool RunSpaceSelfCheck();

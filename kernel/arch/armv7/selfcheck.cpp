@@ -6,6 +6,7 @@
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/context.hpp"
@@ -193,6 +194,41 @@ bool RunSharedSpaceSelfCheck() {
         return false;
     }
     cinux::mm::cow::ReleaseFrame(kFrame.raw);
+    return cinux::mm::Pmm::self().free_page_count() == kBefore;
+}
+
+bool RunForkSelfCheck() {
+    const unsigned long kBefore = cinux::mm::Pmm::self().free_page_count();
+    auto* const         parent  = new cinux::mm::AddressSpace{};
+    auto* const         child   = new cinux::mm::AddressSpace{};
+    if (parent == nullptr || child == nullptr || !parent->init() || !child->init()) {
+        return false;
+    }
+    const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    if (!parent->map_user(0x40008000UL, kFrame.raw)) {
+        return false;
+    }
+    if (!cinux::armv7::CloneUserSpace(*parent, *child)) {
+        return false;
+    }
+    if (parent->translate(0x40008000UL) != kFrame.raw ||
+        child->translate(0x40008000UL) != kFrame.raw) {
+        return false;
+    }
+    if (cinux::mm::cow::FrameShares(kFrame.raw) != 2) {
+        return false;
+    }
+    child->teardown();
+    if (parent->translate(0x40008000UL) != kFrame.raw) {
+        return false;  // the parent still owns the shared frame
+    }
+    if (cinux::mm::cow::FrameShares(kFrame.raw) != 1) {
+        return false;
+    }
+    parent->teardown();
     return cinux::mm::Pmm::self().free_page_count() == kBefore;
 }
 

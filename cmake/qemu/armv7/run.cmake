@@ -38,6 +38,7 @@ add_test(NAME arm_boot
             -DEXPECTED_TEARDOWN=space teardown ok
             -DEXPECTED_COW=cow ledger ok
             -DEXPECTED_SHARED=shared frame ok
+            -DEXPECTED_FORK=fork clone ok
             -DEXPECTED_REPAIR=fault repaired at 40009000
             -DEXPECTED_COWCOPY=cow copy at 40008000
             -DEXPECTED_KEEPS=task 1 keeps its page
