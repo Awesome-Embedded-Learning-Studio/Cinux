@@ -2,23 +2,13 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/cpuid.hpp"
-#include "kernel/arch/x86_64/entropy.hpp"
-#include "kernel/arch/x86_64/ex_table.hpp"
+#include "kernel/arch/init.hpp"
 #include "kernel/arch/halt.hpp"
-#include "kernel/arch/x86_64/irq_stubs.hpp"
-#include "kernel/arch/x86_64/pic.hpp"
-#include "kernel/arch/x86_64/protections.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
-#include "kernel/arch/x86_64/smp.hpp"
-#include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/console/screen.hpp"
 #include "kernel/arch/x86_64/platform/acpi/acpi.hpp"
-#include "kernel/arch/x86_64/platform/acpi/madt.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
-#include "kernel/arch/x86_64/platform/apic/local_apic.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/arch/x86_64/platform/hpet/hpet.hpp"
 #include "kernel/drivers/keyboard/keyboard.hpp"
@@ -98,47 +88,36 @@ constexpr InitStep kInitSteps[] = {
         },
     },
     {
-        .name = "local apic mapping",
+        .name = "interrupt controller",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            const auto kTopology =
-                driver::acpi::FindInterruptTopology(driver::acpi::FindRootPointer());
-            if (!driver::LocalApic::self().init(kTopology.local_apic_address)) {
-                return nullptr;
-            }
-            print::Println("[apic] %u processor(s), local id %u, IOAPIC %x, overrides %u",
-                           kTopology.processor_count, driver::LocalApic::self().id(),
-                           kTopology.io_apic_address, kTopology.override_count);
-            return info;
+            return arch::init::BringUpInterruptController(*info) ? info : nullptr;
         },
     },
     {
-        .name = "pic",
+        .name = "legacy interrupt controller",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            arch::Pic::self().remap();
+            arch::init::RemapLegacyInterruptController();
             return info;
         },
     },
     {
         .name = "fast system calls",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            arch::usermode::EnableFastSystemCalls();
-            arch::ex_table::ArmTable();
-            syscall::uaccess::ArmWindows(arch::HasSmap());
+            arch::init::EnableFastPaths();
             return info;
         },
     },
     {
         .name = "kernel random",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            arch::SeedKernelRandom();
+            arch::init::SeedKernelRandom();
             return info;
         },
     },
     {
         .name = "core protections",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            arch::EnableCoreProtections();
-            print::Println("[kern] cr4 %X after core protections", arch::ReadCr4());
+            arch::init::EnableCoreProtections();
             return info;
         },
     },
@@ -152,14 +131,14 @@ constexpr InitStep kInitSteps[] = {
     {
         .name = "irq stubs",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            arch::irq::InstallIrqStubs();
+            arch::init::InstallInterruptStubs();
             return info;
         },
     },
     {
-        .name = "apic interrupt delivery",
+        .name = "interrupt delivery",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            return arch::irq::InstallApicBackend() ? info : nullptr;
+            return arch::init::InstallInterruptDelivery() ? info : nullptr;
         },
     },
     {
@@ -196,7 +175,7 @@ constexpr InitStep kInitSteps[] = {
     {
         .name = "interrupts",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            asm volatile("sti" : : : "memory");
+            arch::init::EnableInterrupts();
             return info;
         },
     },
@@ -278,16 +257,7 @@ constexpr InitStep kInitSteps[] = {
     {
         .name = "secondary processors",
         .run  = +[](const BootInfo* info) -> const BootInfo* {
-            if (!arch::smp::BootSecondaryCpus()) {
-                return nullptr;
-            }
-            print::Println("[smp] %u CPUs online", arch::smp::OnlineCpuCount());
-            for (unsigned int cpu = 0; cpu < arch::smp::OnlineCpuCount(); ++cpu) {
-                const auto& state = arch::smp::Mechanisms(cpu);
-                print::Println("[cpu %u] APIC %u online, LSTAR %llx, EFER %llx, CR4 %llx",
-                               state.cpu_id, state.apic_id, state.lstar, state.efer, state.cr4);
-            }
-            return info;
+            return arch::init::BootSecondaryProcessors() ? info : nullptr;
         },
     },
 };

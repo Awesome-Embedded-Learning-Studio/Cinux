@@ -7,7 +7,7 @@
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/arch/per_cpu_config.hpp"
 #include "kernel/arch/space_control.hpp"
-#include "kernel/arch/x86_64/tss.hpp"
+#include "kernel/arch/kernel_stack.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
@@ -29,7 +29,7 @@ static_assert((1U << static_cast<unsigned>(kStackOrder)) == kStackPages,
 
 void arm_task_entry(const Task& task) {
     unsigned long long const kStackTop              = task.stack_base + kStackBytes;
-    cinux::arch::tss::Tss::self().rsp0              = kStackTop;
+    cinux::arch::SetKernelStackTop(kStackTop);
     cinux::arch::per_cpu::PerCpu::self().kernel_rsp = kStackTop;
     unsigned long long const kRoot =
         (task.user_root != 0) ? task.user_root : cinux::mm::KernelPageRoot();
