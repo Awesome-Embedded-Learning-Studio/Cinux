@@ -12,6 +12,11 @@ _start:
     mrc     p15, 0, r0, c1, c0, 2
     orr     r0, r0, #(0xF << 20)
     mcr     p15, 0, r0, c1, c0, 2
+    @ FPEXC.EN gates execution itself: CPACR only opens the coprocessor's
+    @ door, and without this bit every vldr the compiler emits for moving
+    @ 64-bit constants faults as an undefined instruction.
+    mov     r0, #(1 << 30)
+    vmsr    fpexc, r0
     isb
 
     @ Each exception mode owns a stack; IRQ/FIQ land here, not on the boot stack.

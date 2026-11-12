@@ -27,11 +27,14 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
-#include "kernel/arch/armv7/ramfs.hpp"
+#include "kernel/arch/armv7/user_fs.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
+#include "kernel/fs/file_table.hpp"
+#include "kernel/fs/open_file.hpp"
+#include "kernel/fs/vfs.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/task_switch.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
@@ -40,7 +43,6 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
-#include "kernel/arch/armv7/ramfs.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
@@ -60,6 +62,11 @@ extern "C" unsigned char __user_text_end[];
 
 namespace {
 
+/// Seats the standard streams; defined below, used while building tasks.
+void seat_console(const cinux::base::Shared<cinux::fs::FileTable>& table);
+/// The current task's open at one descriptor, or an empty hold.
+cinux::base::Shared<cinux::fs::OpenFile> current_open(unsigned long fd);
+
 constexpr unsigned long kTaskACode  = 0x40001000UL;
 constexpr unsigned long kTaskAStack = 0x40004000UL;  // code gets the pages before it
 constexpr unsigned long kTaskBCode  = 0x40003000UL;
@@ -75,15 +82,13 @@ enum class FdKind : unsigned long {
     kFile       = 2,
 };
 
-struct FdEntry {
-    bool                 open   = false;
-    FdKind               kind   = FdKind::kConsoleIn;
-    unsigned long        offset = 0;
-    const unsigned char* data     = nullptr;  // file contents, if any
-    unsigned long        size     = 0;
-    bool                 writable = false;
-};
+/// The status bit an open file's flags carry when writes are allowed.
+inline constexpr unsigned long kFdWritable = 0x2;
 
+/// One task's open files: the shared FileTable, same code as the x86
+/// kernel. Console streams sit in seats 0-2, files take the rest; the
+/// table's limit is set to eight so the bring-up behavior (no free slot
+/// past seat 7) is preserved.
 constexpr unsigned long kMaxFds = 8;
 
 struct UserTask {
@@ -95,7 +100,7 @@ struct UserTask {
     unsigned long            wait_mask;     // bit per awaited task
     unsigned long            wait_deadline; // ticks; valid while blocked
     unsigned long            break_top;     // grow-only user heap break
-    FdEntry                  fds[kMaxFds];  // small table, one slot per code
+    cinux::base::Shared<cinux::fs::FileTable> files;  // null until the task seats
     unsigned long            fault_handler; // user fault handler, 0 if none
     unsigned long            parent;        // who forked this task
     unsigned long            mmap_top;      // grow-only anonymous window
@@ -1240,9 +1245,8 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_mask     = 0;
     task.wait_deadline = 0;
     task.break_top     = kBrkBase;
-    task.fds[0] = FdEntry{true, FdKind::kConsoleIn, 0};
-    task.fds[1] = FdEntry{true, FdKind::kConsoleOut, 0};
-    task.fds[2] = FdEntry{true, FdKind::kConsoleOut, 0};
+    task.files = cinux::base::MakeShared<cinux::fs::FileTable>();
+    seat_console(task.files);
     task.fault_handler = 0;
     task.in_use        = true;
     task.parent        = 0;
@@ -1420,6 +1424,7 @@ bool RepairUserPage(unsigned long address, unsigned long status) {
 }
 
 __attribute__((noinline)) bool RunUserModeSelfCheck() {
+    cinux::armv7::userfs::init();
     InstallFaultRepair(&RepairUserPage);
     const auto kShared = cinux::mm::Pmm::self().allocate_page();
     if (kShared.raw == 0) {
@@ -1486,10 +1491,36 @@ void wake_waiters_of(unsigned long target) {
     }
 }
 
+/// Seats the three standard streams: one console-in, two console-out.
+/// The console face keeps no per-seat state, so one shared open per
+/// stream is minted directly into its seat.
+void seat_console(const cinux::base::Shared<cinux::fs::FileTable>& table) {
+    const cinux::fs::FsOps* kFace  = cinux::armv7::userfs::console_ops();
+    const cinux::fs::FsNode  kNode{nullptr, cinux::fs::InodeType::kCharDevice, 0, 0};
+    const auto kIn = cinux::base::MakeShared<cinux::fs::OpenFile>(kFace, nullptr, kNode);
+    static_cast<void>(table->adopt_at(kIn, 0));
+    const auto kOutOne = cinux::base::MakeShared<cinux::fs::OpenFile>(kFace, nullptr, kNode);
+    kOutOne->status_flags = kFdWritable;
+    static_cast<void>(table->adopt_at(kOutOne, 1));
+    const auto kOutTwo = cinux::base::MakeShared<cinux::fs::OpenFile>(kFace, nullptr, kNode);
+    kOutTwo->status_flags = kFdWritable;
+    static_cast<void>(table->adopt_at(kOutTwo, 2));
+}
+
+/// The current task's open at one descriptor, or an empty hold.
+cinux::base::Shared<cinux::fs::OpenFile> current_open(unsigned long fd) {
+    const auto& kTable = g_tasks[g_current].files;
+    if (!kTable.holds()) {
+        return cinux::base::Shared<cinux::fs::OpenFile>{};
+    }
+    const cinux::base::Result<cinux::base::Shared<cinux::fs::OpenFile>> kFound =
+        kTable->get(fd);
+    return kFound.ok() ? kFound.value() : cinux::base::Shared<cinux::fs::OpenFile>{};
+}
+
 /// Copies a line (or up to `count` bytes) from the console into a user
 /// buffer. Returns the byte count, or -1 when the pointer is refused.
-long DrainConsole(unsigned long buffer, unsigned long count) {
-    unsigned long received = 0;
+long DrainConsole(unsigned long buffer, unsigned long count) {    unsigned long received = 0;
     while (received < count && cinux::armv7::UartReceiveReady()) {
         const char          kChar = cinux::armv7::UartReadChar();
         const unsigned char kByte = static_cast<unsigned char>(kChar);
@@ -1549,23 +1580,30 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
 
     if (number == cinux::armv7::syscall_nr::kFstat) {
         const unsigned long kFd = g_user_trap.r0;
-        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open) {
+        const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
+        if (!kOpen.holds()) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             cinux::print::Println("[armv7] fstat %u refused", kFd);
             return &g_tasks[g_current].trap;
         }
-        const FdEntry&      file = g_tasks[g_current].fds[kFd];
-        const unsigned long info[2] = {file.size,
-                                       file.writable ? 1UL : 0UL};
-        if (!cinux::arch::CopyToUser(g_user_trap.r1, info, sizeof(info))) {
-            g_tasks[g_current].trap.r0 =
-                static_cast<unsigned long>(cinux::armv7::errno::kFault);
+        cinux::fs::FsStat probed{};
+        if (kOpen->ops->stat(kOpen->backend, kOpen->node, probed).ok()) {
+            const unsigned long info[2] = {probed.size,
+                                           (kOpen->status_flags & kFdWritable) != 0 ? 1UL : 0UL};
+            if (!cinux::arch::CopyToUser(g_user_trap.r1, info, sizeof(info))) {
+                g_tasks[g_current].trap.r0 =
+                    static_cast<unsigned long>(cinux::armv7::errno::kFault);
+                return &g_tasks[g_current].trap;
+            }
+            cinux::print::Println("[armv7] fstat %u size %u writable %u", kFd, probed.size,
+                                  static_cast<unsigned>((kOpen->status_flags & kFdWritable) != 0));
+            g_tasks[g_current].trap.r0 = 0;
             return &g_tasks[g_current].trap;
         }
-        cinux::print::Println("[armv7] fstat %u size %u writable %u", kFd, file.size,
-                              static_cast<unsigned>(file.writable));
-        g_tasks[g_current].trap.r0 = 0;
+        g_tasks[g_current].trap.r0 =
+            static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+        cinux::print::Println("[armv7] fstat %u refused", kFd);
         return &g_tasks[g_current].trap;
     }
 
@@ -1573,16 +1611,18 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kFd     = g_user_trap.r0;
         const long          kOffset = static_cast<long>(g_user_trap.r1);
         const unsigned long kWhence = g_user_trap.r2;
-        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open ||
-            g_tasks[g_current].fds[kFd].kind != FdKind::kFile) {
+        const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
+        if (!kOpen.holds() || kOpen->ops->stat == nullptr ||
+            kOpen->node.type != cinux::fs::InodeType::kFile) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             return &g_tasks[g_current].trap;
         }
-        FdEntry&      file = g_tasks[g_current].fds[kFd];
+        cinux::fs::FsStat probed{};
+        static_cast<void>(kOpen->ops->stat(kOpen->backend, kOpen->node, probed));
         const long    base = kWhence == 0 ? 0L
-                             : kWhence == 1 ? static_cast<long>(file.offset)
-                                            : static_cast<long>(file.size);
+                             : kWhence == 1 ? static_cast<long>(kOpen->offset)
+                                            : static_cast<long>(probed.size);
         const long    next = base + kOffset;
         if (next < 0 || kWhence > 2) {
             g_tasks[g_current].trap.r0 =
@@ -1590,9 +1630,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             cinux::print::Println("[armv7] lseek %u refused, whence %u", kFd, kWhence);
             return &g_tasks[g_current].trap;
         }
-        file.offset = static_cast<unsigned long>(next);
-        cinux::print::Println("[armv7] lseek %u -> %u", kFd, file.offset);
-        g_tasks[g_current].trap.r0 = file.offset;
+        kOpen->offset = static_cast<unsigned long>(next);
+        cinux::print::Println("[armv7] lseek %u -> %u", kFd, kOpen->offset);
+        g_tasks[g_current].trap.r0 = kOpen->offset;
         return &g_tasks[g_current].trap;
     }
 
@@ -1617,38 +1657,43 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
             return &g_tasks[g_current].trap;
         }
-        cinux::armv7::ramfs::File known{};
-        const bool kFound  = cinux::armv7::ramfs::Lookup(path, length, known);
-        const bool kScratch = length == 8 && path[0] == '/' && path[1] == 's' &&
-                              path[2] == 'c' && path[3] == 'r' && path[4] == 'a' &&
-                              path[5] == 't' && path[6] == 'c' && path[7] == 'h';
-        if (!kFound && !kScratch) {
+        const std::string_view kPath{path, length};
+        const bool             kScratch = kPath == "/scratch";
+        const cinux::base::Result<cinux::fs::FsView> kView =
+            cinux::armv7::userfs::vfs().resolve(kPath);
+        cinux::base::Result<cinux::fs::FsNode> node{
+            cinux::base::KernelError::kNotFound};
+        if (kView.ok()) {
+            node = kView.value().ops->lookup_held(kView.value().self, kView.value().rest);
+            if (!node.ok() && node.error() == cinux::base::KernelError::kNotFound && kScratch) {
+                node = kView.value().ops->make_file_held(kView.value().self, kView.value().rest);
+            }
+        }
+        if (!node.ok()) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoEnt);
             cinux::print::Println("[armv7] open refused");
             return &g_tasks[g_current].trap;
         }
-        unsigned long slot = kMaxFds;
-        for (unsigned long index = 3; index < kMaxFds; ++index) {
-            if (!g_tasks[g_current].fds[index].open) {
-                slot = index;
-                break;
-            }
-        }
-        if (slot == kMaxFds) {
+        const cinux::fs::FsOps* const       kOps     = kView.value().ops;
+        void* const                         kBackend = kView.value().self;
+        cinux::fs::OpenOptions              options{};
+        options.status              = kScratch ? kFdWritable : 0;
+        options.limit               = kMaxFds;
+        const cinux::base::Result<unsigned long> kFd =
+            g_tasks[g_current].files->alloc(kOps, kBackend, node.value(), options);
+        kOps->release(kBackend, node.value());
+        if (!kFd.ok()) {
+            // The held reference belongs to the seat the table refused;
+            // give it back before answering.
+            kOps->release(kBackend, node.value());
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
             cinux::print::Println("[armv7] open refused, no free slot");
             return &g_tasks[g_current].trap;
         }
-        g_tasks[g_current].fds[slot].open     = true;
-        g_tasks[g_current].fds[slot].kind     = FdKind::kFile;
-        g_tasks[g_current].fds[slot].offset   = 0;
-        g_tasks[g_current].fds[slot].data     = known.data;
-        g_tasks[g_current].fds[slot].size     = known.size;
-        g_tasks[g_current].fds[slot].writable = known.writable;
-        cinux::print::Println("[armv7] open %s as %u", kFound ? path + 1 : "scratch", slot);
-        g_tasks[g_current].trap.r0 = slot;
+        cinux::print::Println("[armv7] open %s as %u", path + 1, kFd.value());
+        g_tasks[g_current].trap.r0 = kFd.value();
         return &g_tasks[g_current].trap;
     }
 
@@ -1656,26 +1701,45 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kFd    = g_user_trap.r0;
         const unsigned long kBuf   = g_user_trap.r1;
         const unsigned long kCount = g_user_trap.r2;
-        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open) {
+        const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
+        if (!kOpen.holds()) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             return &g_tasks[g_current].trap;
         }
-        if (g_tasks[g_current].fds[kFd].kind == FdKind::kFile) {
-            FdEntry&            file = g_tasks[g_current].fds[kFd];
-            const unsigned long left = file.size - file.offset;
-            const unsigned long take = kCount < left ? kCount : left;
-            if (take == 0 ||
-                !cinux::arch::CopyToUser(kBuf, file.data + file.offset, take)) {
-                g_tasks[g_current].trap.r0 = 0;
-                return &g_tasks[g_current].trap;
+        const bool kIsConsole =
+            kOpen->ops == cinux::armv7::userfs::console_ops();
+        const bool kReadable = kIsConsole && (kOpen->status_flags & kFdWritable) == 0;
+        if (!kIsConsole) {
+            // A regular file: staged through the kernel, the shared ops
+            // doing the clamping against the live size.
+            unsigned long done = 0;
+            while (done < kCount) {
+                unsigned char stage[64];
+                const unsigned long kTake = kCount - done < sizeof(stage) ? kCount - done
+                                                                          : sizeof(stage);
+                const cinux::base::Result<unsigned long> kGot = kOpen->ops->read(
+                    kOpen->backend, kOpen->node, kOpen->offset + done, stage, kTake);
+                if (!kGot.ok() || kGot.value() == 0) {
+                    break;
+                }
+                if (!cinux::arch::CopyToUser(kBuf + done, stage, kGot.value())) {
+                    done = 0;
+                    break;
+                }
+                done += kGot.value();
+                if (kGot.value() < kTake) {
+                    break;
+                }
             }
-            file.offset += take;
-            cinux::print::Println("[armv7] file read %u", take);
-            g_tasks[g_current].trap.r0 = take;
+            kOpen->offset += done;
+            if (done != 0) {
+                cinux::print::Println("[armv7] file read %u", done);
+            }
+            g_tasks[g_current].trap.r0 = done;
             return &g_tasks[g_current].trap;
         }
-        if (g_tasks[g_current].fds[kFd].kind != FdKind::kConsoleIn) {
+        if (!kReadable) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             return &g_tasks[g_current].trap;
@@ -1735,9 +1799,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         child.space         = space;
         child.break_top     = parent.break_top;
         child.mmap_top      = parent.mmap_top;
-        for (unsigned long fd = 0; fd < kMaxFds; ++fd) {
-            child.fds[fd] = parent.fds[fd];
-        }
+        child.files         = parent.files->clone();
         child.fault_handler = parent.fault_handler;
         child.parent        = g_current;
         child.wait_target   = kTaskCount;
@@ -1870,9 +1932,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kClose) {
-        const unsigned long kFd = g_user_trap.r0;
-        if (kFd < kMaxFds && g_tasks[g_current].fds[kFd].open) {
-            g_tasks[g_current].fds[kFd].open = false;
+        const unsigned long     kFd   = g_user_trap.r0;
+        const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
+        if (kOpen.holds() && g_tasks[g_current].files->free(kFd).ok()) {
             cinux::print::Println("[armv7] close %u", kFd);
             g_tasks[g_current].trap.r0 = 0;
         } else {
@@ -2053,45 +2115,57 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
 }
 
 extern "C" bool CurrentFdIsFile(unsigned long fd) {
-    return fd < kMaxFds && g_tasks[g_current].fds[fd].open &&
-           g_tasks[g_current].fds[fd].kind == FdKind::kFile;
+    const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(fd);
+    return kOpen.holds() && kOpen->ops != cinux::armv7::userfs::console_ops();
 }
 
 extern "C" long FileWrite(unsigned long fd, unsigned long buffer, unsigned long count) {
-    if (!CurrentFdIsFile(fd) || !g_tasks[g_current].fds[fd].writable) {
+    const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(fd);
+    if (!kOpen.holds() || kOpen->ops == cinux::armv7::userfs::console_ops() ||
+        (kOpen->status_flags & kFdWritable) == 0) {
         cinux::print::Println("[armv7] write %u refused, read-only", fd);
         return cinux::armv7::errno::kBadFd;
     }
-    FdEntry&            file = g_tasks[g_current].fds[fd];
-    const auto&         scratch = cinux::armv7::ramfs::Scratch();
-    const unsigned long room  = scratch.size < 64 ? 64 : scratch.size;
-    if (file.offset >= room || count > room - file.offset) {
+    // Staged through the kernel; the backend grows the file itself. The
+    // scratch ceiling keeps the bring-up behavior: past 64 bytes the
+    // write is refused with ENOSPC instead of growing forever.
+    cinux::fs::FsStat probed{};
+    static_cast<void>(kOpen->ops->stat(kOpen->backend, kOpen->node, probed));
+    const unsigned long kRoom = probed.size < cinux::armv7::userfs::kScratchRoom
+                                    ? cinux::armv7::userfs::kScratchRoom
+                                    : probed.size;
+    if (kOpen->offset >= kRoom || count > kRoom - kOpen->offset) {
         return cinux::armv7::errno::kNoSpc;
     }
-    auto* const target =
-        const_cast<unsigned char*>(scratch.data) + file.offset;
-    if (!cinux::arch::CopyFromUser(target, buffer, count)) {
-        return cinux::armv7::errno::kFault;
+    unsigned long done = 0;
+    while (done < count) {
+        unsigned char stage[64];
+        const unsigned long kTake = count - done < sizeof(stage) ? count - done : sizeof(stage);
+        if (!cinux::arch::CopyFromUser(stage, buffer + done, kTake)) {
+            return cinux::armv7::errno::kFault;
+        }
+        const cinux::base::Result<unsigned long> kLaid = kOpen->ops->write(
+            kOpen->backend, kOpen->node, kOpen->offset + done, stage, kTake);
+        if (!kLaid.ok()) {
+            return cinux::armv7::errno::kNoSpc;
+        }
+        done += kLaid.value();
     }
-    file.offset += count;
-    cinux::armv7::ramfs::ScratchGrew(file.offset);
-    file.size = cinux::armv7::ramfs::Scratch().size;
-    cinux::print::Println("[armv7] file write %u", count);
-    return static_cast<long>(count);
+    kOpen->offset += done;
+    cinux::print::Println("[armv7] file write %u", done);
+    return static_cast<long>(done);
 }
 
 extern "C" bool CurrentFdReadable(unsigned long fd) {
-    if (fd >= kMaxFds || !g_tasks[g_current].fds[fd].open) {
-        return false;
-    }
-    return g_tasks[g_current].fds[fd].kind == FdKind::kConsoleIn;
+    const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(fd);
+    return kOpen.holds() && kOpen->ops == cinux::armv7::userfs::console_ops() &&
+           (kOpen->status_flags & kFdWritable) == 0;
 }
 
 extern "C" bool CurrentFdWritable(unsigned long fd) {
-    if (fd >= kMaxFds || !g_tasks[g_current].fds[fd].open) {
-        return false;
-    }
-    return g_tasks[g_current].fds[fd].kind == FdKind::kConsoleOut;
+    const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(fd);
+    return kOpen.holds() && kOpen->ops == cinux::armv7::userfs::console_ops() &&
+           (kOpen->status_flags & kFdWritable) != 0;
 }
 
 extern "C" unsigned long CurrentTaskIndex() {

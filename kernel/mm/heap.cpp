@@ -28,10 +28,15 @@ struct Header {
 // The block grammar is pointer-width, not an absolute size: four words of
 // header and two words of footer. On x86-64 that is 32 + 16 bytes, on a
 // 32-bit port 16 + 8; the footer reserves two words but records one.
+// The footer is padded to the payload alignment so a split block's tail
+// starts aligned; on a 32-bit port the raw two words (8 bytes) would
+// leave every later payload 8 bytes off the 16-byte grid.
 constexpr unsigned long kHeaderBytes = 4 * sizeof(unsigned long);
-constexpr unsigned long kFooterBytes = 2 * sizeof(unsigned long);
+constexpr unsigned long kFooterBytes =
+    ((2 * sizeof(unsigned long) + kPayloadAlign - 1) / kPayloadAlign) * kPayloadAlign;
 static_assert(sizeof(Header) == kHeaderBytes, "the header is four words");
 static_assert(kHeaderBytes % kPayloadAlign == 0, "the header keeps payloads aligned");
+static_assert(kFooterBytes % kPayloadAlign == 0, "the footer keeps tail blocks aligned");
 
 unsigned long span_bytes(unsigned long payload) {
     return kHeaderBytes + payload + kFooterBytes;

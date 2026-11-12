@@ -22,7 +22,8 @@ add_executable(arm_image
     assert_hook.cpp
     selfcheck.cpp
     console.cpp
-    ramfs.cpp
+    user_fs.cpp
+    proc_shim.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap_runtime.cpp

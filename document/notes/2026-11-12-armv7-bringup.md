@@ -406,6 +406,40 @@ proc_shim 挂进 arm_image。链接通过，arm.elf 从约 51 万字节涨到 10
 armv7 目录自己的替身 ramfs.cpp 与通用层 kernel/fs/ramfs/ramfs.cpp 并存不冲
 突：第一刀只链不接线，等切 close 时才动。
 
+## 第二刀：六个系统调用全量切到真件
+
+替身 fds[8] 数组退役，UserTask 改持 `base::Shared<fs::FileTable>`，每个任务
+建表后由 seat_console 把 0/1/2 三席直接铸进表里（1/2 带可写位，0 只读），
+fork 走 `clone()` 继承。六个调用全部经过真表：close 走 free、fstat 用
+ops->stat 现场探测、lseek 先查文件型再用 stat 问大小、open 逐字节拷路径后
+经 `vfs().resolve` 与 `lookup_held`，只有 /scratch 用 `make_file_held` 落可
+写节点（held 引用在 alloc 成功与否两条路上都释放），read 沿文件路径分 64 字
+节搬运。控制台三席的读写行组与替身时代逐字节相同，arm_boot 的 107 条期望一
+条没动。替身 ramfs.cpp/ramfs.hpp 删除，镜像里只剩 kernel/fs 这一份实现。
+
+## 三处连环陷阱：错的全不是嫌疑最大的地方
+
+切完之后每个任务创建都崩在 data abort at FFFFFFEC，连环排掉了三个错处才见
+到底。
+
+第一处是 PerCpu 自检留下的 0x5A5A 探针值装在 cpu_id 里没复位，之后每一把自
+旋锁都往 SpinLedger::depth_[0x5A5A] 越界写。自检结束时补一句 block.cpu_id =
+0 即了。
+
+第二处是 seeding 阶段对 make_file 返回的句柄调了 release：那个家族返回的是
+借用句柄、不带引用计数，release 一记就把还在树上的节点删了，第三次 make_file
+遍历目录时踩进已释放又复用的内存。借 held 语义的只有 make_file_held 与
+lookup_held 两条路，open 处理器里那记 release 是对的，保留。
+
+第三处才是 FFFFFFEC 本尊，前后两个真凶叠在一起。一个是通用堆的 footer 在
+32 位下是 8 字节，16 对齐被每次分割悄悄推歪，分配地址出现 8 字节错位（探针
+里新表落在 0x...B8 上直接看见）；footer 补到对齐粒度后 x86 数值不变（16 依
+旧 16），armv7 变 16。另一个是 start.S 只开了 CPACR 的 CP10/CP11 门，没拉
+FPEXC.EN：编译器为搬 64 位常量发的 vldr d16 在没点亮的 VFP 上一律按未定义
+指令炸，异常处理一路连环坠毁。探针定位到具体指令后补一句 vmsr fpexc 便收
+口。地址 0x14 恰是这些越界错位叠出的表象，前面的打印扰动让症状来回变脸，
+正是内存错位的典型做派。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

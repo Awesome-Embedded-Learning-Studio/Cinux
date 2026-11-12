@@ -142,7 +142,14 @@ bool RunPerCpuSelfCheck() {
     if (cinux::arch::per_cpu::self().kernel_stack_top != 0x80002000UL) {
         return false;
     }
-    return cinux::arch::CurrentKernelStack() != 0;
+    if (cinux::arch::CurrentKernelStack() == 0) {
+        return false;
+    }
+    // The block stays installed; leave it speaking for the real core.
+    // A stale probe number here would index the spin ledger past its
+    // four slots and corrupt memory on the first locked call.
+    block.cpu_id = 0;
+    return true;
 }
 
 bool RunCowSelfCheck() {
