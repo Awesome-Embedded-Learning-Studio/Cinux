@@ -390,6 +390,23 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+            {
+                unsigned long info[2] = {0, 0};
+                const long kStat = user_syscall3(
+                    cinux::armv7::syscall_nr::kFstat, static_cast<unsigned long>(kFd),
+                    static_cast<unsigned long>(
+                        reinterpret_cast<std::uintptr_t>(&info[0])),
+                    0);
+                if (kStat == 0 && info[0] == 6 && info[1] == 0) {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('f'); NOTE('s'); NOTE('t'); NOTE('a'); NOTE('t'); NOTE(' ');
+                    NOTE('r'); NOTE('o'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+            }
             char oneByte[2];
             oneByte[0] = 'z';
             oneByte[1] = 0;
@@ -592,6 +609,37 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #define NOTE(c) note[note_length++] = (c)
                         NOTE('f'); NOTE('s'); NOTE('t'); NOTE('a'); NOTE('t'); NOTE(' ');
                         NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
+                }
+                {
+                    const long kBadAddr = user_syscall3(
+                        cinux::armv7::syscall_nr::kFstat,
+                        static_cast<unsigned long>(kScrFd), 0x80000000UL, 0);
+                    if (kBadAddr == static_cast<long>(cinux::armv7::errno::kFault)) {
+                        char          note[24];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('f'); NOTE('s'); NOTE('t'); NOTE('a'); NOTE('t'); NOTE(' ');
+                        NOTE('b'); NOTE('a'); NOTE('d'); NOTE(' '); NOTE('o'); NOTE('k');
+                        NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
+                    unsigned long info[2] = {0, 0};
+                    const long kBadFd = user_syscall3(
+                        cinux::armv7::syscall_nr::kFstat, 9,
+                        static_cast<unsigned long>(
+                            reinterpret_cast<std::uintptr_t>(&info[0])),
+                        0);
+                    if (kBadFd == static_cast<long>(cinux::armv7::errno::kBadFd)) {
+                        char          note[24];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('f'); NOTE('d'); NOTE(' '); NOTE('s'); NOTE('t'); NOTE('a');
+                        NOTE('t'); NOTE(' '); NOTE('b'); NOTE('a'); NOTE('d');
+                        NOTE('\n');
 #undef NOTE
                         user_write(note, note_length);
                     }
