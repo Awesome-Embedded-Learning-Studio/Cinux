@@ -29,6 +29,7 @@
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
@@ -44,9 +45,9 @@ constexpr unsigned long kTaskBCode  = 0x40003000UL;
 constexpr unsigned long kTaskBStack = 0x40004000UL;
 
 struct UserTask {
-    cinux::arch::UserTrap trap;
-    unsigned long         root;
-    bool                  done;
+    cinux::arch::UserTrap      trap;
+    cinux::mm::AddressSpace*   space;
+    bool                       done;
 };
 
 UserTask                g_tasks[2];
@@ -140,28 +141,11 @@ bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned l
     return true;
 }
 
-unsigned long build_task_root() {
-    cinux::mm::KernelTables tables;
-    const unsigned long     block = tables.take_root();
-    if (block == 0) {
-        return 0;
-    }
-    auto* const root = reinterpret_cast<cinux::arch::page::Entry*>(block);
-    const auto* const kernel_root =
-        reinterpret_cast<const cinux::arch::page::Entry*>(cinux::mm::KernelPageRoot());
-    for (unsigned long index = 0; index < 4096; ++index) {
-        root[index] = cinux::arch::space::IsUserSlot(index)
-                          ? cinux::arch::page::Entry{}
-                          : kernel_root[index];
-    }
-    return block;
-}
-
 bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_va) {
     UserTask& task = g_tasks[index];
     task           = UserTask{};
-    task.root      = build_task_root();
-    if (task.root == 0) {
+    task.space     = new cinux::mm::AddressSpace{};
+    if (task.space == nullptr || !task.space->init()) {
         return false;
     }
     const auto kCodeFrame  = cinux::mm::Pmm::self().allocate_page();
@@ -175,8 +159,8 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     for (unsigned long offset = 0; offset < kTextBytes; ++offset) {
         code[offset] = __user_text_start[offset];
     }
-    if (!map_user_page(task.root, code_va, kCodeFrame.raw) ||
-        !map_user_page(task.root, stack_va, kStackFrame.raw)) {
+    if (!task.space->map_user(code_va, kCodeFrame.raw) ||
+        !task.space->map_user(stack_va, kStackFrame.raw)) {
         return false;
     }
     // The task's argument waits at the top of its own stack; the copied
@@ -210,7 +194,7 @@ bool RunUserModeSelfCheck() {
     g_current = 0;
     cinux::arch::per_cpu::self().slice_ticks = 1;
     cinux::print::Println("[armv7] task 0 starts on its own table");
-    cinux::arch::space::SwitchRoot(g_tasks[0].root);
+    cinux::arch::space::SwitchRoot(g_tasks[0].space->root());
     cinux::arch::EnterUserModeWithReturn(g_tasks[0].trap.lr, g_tasks[0].trap.sp, &g_main);
     cinux::arch::space::SwitchRoot(g_kernel_root);
     return g_tasks[0].done && g_tasks[1].done;
@@ -236,7 +220,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     if (!g_tasks[other].done) {
         g_current = other;
         cinux::print::Println("[armv7] switch to task %u", other);
-        cinux::arch::space::SwitchRoot(g_tasks[other].root);
+        cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
         cinux::arch::per_cpu::self().slice_ticks = 1;
         return &g_tasks[other].trap;
     }
@@ -277,7 +261,7 @@ extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap
     }
     g_current = other;
     cinux::print::Println("[armv7] preempt to task %u", other);
-    cinux::arch::space::SwitchRoot(g_tasks[other].root);
+    cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
     cinux::arch::per_cpu::self().slice_ticks = 1;
     return &g_tasks[other].trap;
 }
@@ -292,7 +276,7 @@ extern "C" [[noreturn]] void c_user_faulted() {
     if (!g_tasks[other].done) {
         g_current = other;
         cinux::print::Println("[armv7] switch to task %u", other);
-        cinux::arch::space::SwitchRoot(g_tasks[other].root);
+        cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
         asm volatile("cps #0x13" ::: "memory");
         ResumeTrap(&g_tasks[other].trap);
     }
