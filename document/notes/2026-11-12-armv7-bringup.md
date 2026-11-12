@@ -281,7 +281,7 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |
-| 114 | wait | `blocks on`、`wait N -> DEAD`、`read timed out` 同族的超时 |
+| 114 | wait | `blocks on`、`wait 1 -> DEAD`、`wait 2 -> 9`、用户侧 `status ok` |
 | 67 | signal | `fault handler 40001008 for task 2` |
 | 158 | sched_yield | `yield ok` |
 | 162 | sleep | `sleeps 3 ticks`、`woke from sleep`、`slept` |

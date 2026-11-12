@@ -75,6 +75,8 @@ expect_literal(EXPECTED_YIELD "sched_yield never answered.")
 expect_literal(EXPECTED_HANDLED "the registered fault handler never ran.")
 expect_literal(EXPECTED_HANDLEROK "the fault handler never reported.")
 expect_literal(EXPECTED_HANDLEREXIT "the handler's exit status was lost.")
+expect_literal(EXPECTED_STATUS2 "wait did not report the exited task's status.")
+expect_literal(EXPECTED_STATUSOK "the statuses the user read back were wrong.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 

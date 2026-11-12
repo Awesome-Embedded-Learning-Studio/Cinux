@@ -387,6 +387,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         // Task 0 reaps 1 then 2; task 3 only reaps 2, so a wake aimed at 1
         // must leave it asleep.
         unsigned long status = 0;
+        unsigned long seen[2] = {0UL, 0UL};
         const unsigned long kTargets[] = {1UL, 2UL};
         const unsigned long kCount     = task_id == 0 ? 2UL : 1UL;
         for (unsigned long index = 0; index < kCount; ++index) {
@@ -397,9 +398,19 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                     cinux::armv7::syscall_nr::kWait, 1UL << kTarget,
                     static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
                 if (kResult >= 0) {
+                    seen[task_id == 0 ? index : 0] = status;
                     break;
                 }
             }
+        }
+        if (task_id == 0 && seen[0] == 0xDEADUL && seen[1] == 9UL) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('s'); NOTE('t'); NOTE('a'); NOTE('t'); NOTE('u'); NOTE('s');
+            NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
         }
     }
     {

@@ -68,6 +68,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_HANDLED=fault handled at 51000000"
             "-DEXPECTED_HANDLEROK=handler ok"
             "-DEXPECTED_HANDLEREXIT=task 2 exited with status 9"
+            "-DEXPECTED_STATUS2=wait 2 -> 9"
+            "-DEXPECTED_STATUSOK=status ok"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
