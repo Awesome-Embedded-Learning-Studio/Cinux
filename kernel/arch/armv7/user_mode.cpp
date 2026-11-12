@@ -376,6 +376,8 @@ __attribute__((noinline)) bool RunUserModeSelfCheck() {
     cinux::print::Println("[armv7] task 0 starts on its own table");
     cinux::arch::space::SwitchRoot(g_tasks[0].space->root());
     cinux::arch::EnterUserModeWithReturn(g_tasks[0].trap.lr, g_tasks[0].trap.sp, &g_main);
+after_drop:
+    cinux::mm::cow::ReleaseFrame(g_shared_frame);
     cinux::arch::space::SwitchRoot(g_kernel_root);
     bool all_done = true;
     for (const auto& task : g_tasks) {
@@ -492,7 +494,7 @@ extern "C" [[noreturn]] void c_user_faulted() {
         cinux::print::Println("[armv7] switch to task %u", kNext);
         cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
         teardown_space(kOld);
-        asm volatile("cps#0x13" ::: "memory");
+        asm volatile("cps #0x13" ::: "memory");
         ResumeTrap(&g_tasks[kNext].trap);
     }
     g_running = false;

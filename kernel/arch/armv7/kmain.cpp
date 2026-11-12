@@ -163,7 +163,13 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");
-                    cinux::print::Println(cinux::armv7::RunUserModeSelfCheck()
+                    const unsigned long kPagesBefore =
+                        cinux::mm::Pmm::self().free_page_count();
+                    const bool          kTasksOk = cinux::armv7::RunUserModeSelfCheck();
+                    const unsigned long kPagesAfter = cinux::mm::Pmm::self().free_page_count();
+                    cinux::print::Println("[armv7] tasks pages %u -> %u", kPagesBefore,
+                                          kPagesAfter);
+                    cinux::print::Println((kTasksOk && kPagesAfter == kPagesBefore)
                                               ? "[armv7] user mode round trip ok"
                                               : "[armv7] user mode round trip FAILED");
                     asm volatile("cpsie if" ::: "memory");
