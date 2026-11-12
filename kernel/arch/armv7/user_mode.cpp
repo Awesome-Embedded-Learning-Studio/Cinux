@@ -69,11 +69,14 @@ struct UserTask {
     unsigned long            wait_deadline; // ticks; valid while blocked
     unsigned long            break_top;     // grow-only user heap break
     unsigned long            fd_mask;       // bit per open descriptor
+    unsigned long            mmap_top;      // grow-only anonymous window
 };
 
 constexpr unsigned long kTaskCount   = 4;
 constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
+constexpr unsigned long kMmapBase    = 0x40010000UL;
+constexpr unsigned long kMmapLimit   = 0x40100000UL;
 constexpr unsigned long kWaitTicks  = 20;  // default deadline when the caller passes 0
 
 UserTask                g_tasks[kTaskCount];
@@ -173,6 +176,23 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         }
 #undef NOTE
         user_write(note, note_length);
+    }
+    if (task_id == 0) {
+        const long kMapped = user_syscall3(cinux::armv7::syscall_nr::kMmap, 8192, 0, 0);
+        if (kMapped > 0) {
+            auto* const kSpot = reinterpret_cast<volatile unsigned long*>(
+                static_cast<unsigned long>(kMapped));
+            *kSpot = 0xD00DUL;
+            if (*kSpot == 0xD00DUL) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('m'); NOTE('m'); NOTE('a'); NOTE('p'); NOTE(' '); NOTE('o');
+                NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
     }
     if (task_id == 0) {
         const unsigned long kWant = 0x4000E000UL;  // two pages past the base
@@ -358,6 +378,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_deadline = 0;
     task.break_top     = kBrkBase;
     task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
+    task.mmap_top      = kMmapBase;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -568,6 +589,44 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
         wake_waiters_of(g_current);
+    }
+
+    if (number == cinux::armv7::syscall_nr::kMmap) {
+        // Anonymous mapping, grow-only: r0 is the byte length; the base
+        // comes from a window of its own and is returned in r0.
+        const unsigned long kBytes = g_user_trap.r0;
+        unsigned long&      kTop   = g_tasks[g_current].mmap_top;
+        const unsigned long kWant  = (kBytes + 4095UL) & ~4095UL;
+        if (kTop + kWant <= kMmapLimit) {
+            const unsigned long kBase = kTop;
+            cinux::mm::KernelTables tables;
+            const unsigned long     root = g_tasks[g_current].space->root();
+            unsigned long           spot = kBase;
+            while (spot < kBase + kWant) {
+                const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+                if (kFrame.raw == 0) {
+                    break;
+                }
+                auto* const table = cinux::mm::walk::EnsureLeafTable(
+                    tables, root, spot, cinux::arch::page::kUser);
+                if (table == nullptr) {
+                    cinux::mm::Pmm::self().free_page(kFrame);
+                    break;
+                }
+                table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
+                    cinux::arch::page::MakePageEntry(
+                        kFrame.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+                cinux::arch::space::InvalidatePage(spot);
+                spot += cinux::arch::page::kSize;
+            }
+            kTop += kWant;
+            cinux::print::Println("[armv7] mmap %X len %X", kBase, kWant);
+            g_tasks[g_current].trap.r0 = kBase;
+        } else {
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);  // ENOMEM
+            cinux::print::Println("[armv7] mmap refused %u", kBytes);
+        }
+        return &g_tasks[g_current].trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kClose) {

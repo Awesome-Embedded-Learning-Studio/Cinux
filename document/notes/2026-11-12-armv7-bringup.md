@@ -35,8 +35,11 @@
 - 用户态：`user_mode.cpp` 建每任务的空间与用户页，空间由
   `mm::AddressSpace` 的 init 与 map_user 生成，`user_trap.hpp` 记陷阱帧，
   `user_entry.S` 做进门与恢复。系统调用一律走陷入路径，`svc.cpp` 的两张表
-  决定谁处理：read（3）与 write（4）就地作答、同一张帧返回；exit（1）、
-  wait（114）、sched_yield（158）交给调度器。没登记的号报一行并回 -1。
+  决定谁处理：read（3）、write（4）就地作答、同一张帧返回；getpid（20）、
+  brk（45）、mmap（90）、close（6）、exit（1）、wait（114）、sleep（162）、
+  sched_yield（158）交给调度器。没登记的号报一行并回 -1。返回值分两种：
+  参数或指针不对回 -1，描述符问题回 -9。每任务一张描述符位图（开局 0 到 2
+  开着）与一个只增不减的 brk 窗口（0x4000C000 到 0x40010000）。
 - 用户指针：`user_access.hpp` 先验整段在用户顶以下、不溢出，再逐页看活动表
   里是否对用户可读；`write` 与 `read` 都走它，坏指针返回 -1 而不是把内核
   地址当用户缓冲。
@@ -113,6 +116,9 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 写时复制 | `cow copy at 40008000`、`task 0/1/2 keeps its page` |
 | 任务的建与拆 | `tasks pages 65186 -> 65186` |
 | 等待与挂起 | `task 0 blocks on 1`、`wait 2 -> DEAD` |
+| 自身标识 | `getpid 3`、用户侧 `pid 3 ok` |
+| 扩堆 | `brk -> 4000E000`、用户侧 `brk ok` |
+| 描述符 | `close 2`、`svc write refused -9 at`、用户侧 `ebadf ok` |
 | 等任意一条 | `task 3 blocks on 4`、返回先结束那条的下标 |
 | 等待超时 | `task 0 wait timed out`、用户侧 `self wait timed out` |
 | 睡眠 | `task 0 sleeps 3 ticks`、`task 0 woke from sleep`、用户侧 `slept` |
@@ -250,9 +256,10 @@ firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC �
 - 系统调用只有 exit、read、write、sched_yield 四条，read 只认 fd 0、
   write 只认 1 与 2，还没有文件描述符表。
 - 克隆只在自检与四条任务里用：子树能克隆、写时复制能各写各的，任务结束也
-  会把空间还回去。等待能阻塞、按位图等、按目标唤醒、能超时，sleep 也能用；
-  但还没有进程、会话与信号，调度也还是端口里的迷你实现，没有接上
-  `kernel/proc/scheduler.hpp` 的通用调度器（见上一节）。
+  会把空间还回去。等待能阻塞、按位图等、按目标唤醒、能超时，sleep 也能用。
+  用户堆只有 brk 的只增窗口，mmap 只有匿名映射、没有 munmap；描述符只有
+  0 到 2 三个，没有文件系统。没有进程、会话与信号，调度也还是端口里的迷你
+  实现，没有接上 `kernel/proc/scheduler.hpp` 的通用调度器（见上一节）。
 - 内核态中断在用户阶段之后重新开中断的那条路径已经验过：开中断之后跑两拍
   再触发缺页探针，串口里看得到内核态被服务的那一拍。
 - 内核调度器没有接进来。现在的两条用户任务是自检里的小调度，帧、根表与

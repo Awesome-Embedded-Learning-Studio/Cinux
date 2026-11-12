@@ -61,6 +61,14 @@ if(EXPECTED_EBADF AND NOT serial_out MATCHES "${EXPECTED_EBADF}")
     message(FATAL_ERROR
         "arm_boot: a closed descriptor was still writable.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_MMAP AND NOT serial_out MATCHES "${EXPECTED_MMAP}")
+    message(FATAL_ERROR
+        "arm_boot: the anonymous mapping never appeared.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_MMAPOK AND NOT serial_out MATCHES "${EXPECTED_MMAPOK}")
+    message(FATAL_ERROR
+        "arm_boot: the mapped pages were not writable.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_BRK AND NOT serial_out MATCHES "${EXPECTED_BRK}")
     message(FATAL_ERROR
         "arm_boot: brk never grew the heap.\nstdout:\n${serial_out}")

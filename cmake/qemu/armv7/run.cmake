@@ -53,6 +53,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_UNKNOWN=svc FFFF unknown"
             "-DEXPECTED_BRK=brk -> 4000E000"
             "-DEXPECTED_BRKOK=brk ok"
+            "-DEXPECTED_MMAP=mmap 40010000 len 2000"
+            "-DEXPECTED_MMAPOK=mmap ok"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
