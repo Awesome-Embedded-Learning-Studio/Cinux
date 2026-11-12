@@ -20,7 +20,7 @@
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
 
-extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
+extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap);
 void HandleIrq();
 extern "C" cinux::arch::UserTrap* c_irq_trap(cinux::arch::UserTrap* trap);
 extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap);
@@ -32,7 +32,7 @@ extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsi
         return c_abort_trap(trap);
     }
     if (is_svc != 0) {
-        return c_schedule_from_user(trap->r7);
+        return c_svc_dispatch(trap);
     }
     return c_irq_trap(trap);
 }

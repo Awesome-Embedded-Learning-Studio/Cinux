@@ -41,20 +41,9 @@ _vec7: sub lr, lr, #4
        mov r0, #7
        b   _dispatch
 
-@ Supervisor call, ordinary path: number in r7, arguments in r0-r3.
-_vec2: cmp  r7, #158
-       beq  _svc_trap
-       cmp  r7, #1
-       beq  _svc_trap
-       cmp  r7, #114
-       beq  _svc_trap
-       push {r0-r3, lr}
-       mov  r0, r7
-       mov  r1, sp
-       bl   c_svc_handler
-       str  r0, [sp]
-       pop  {r0-r3, lr}
-       movs pc, lr
+@ Supervisor call: every number takes the trapping path, so the tables in
+@ svc.cpp are the only place that knows which numbers exist.
+_vec2: b _svc_trap
 
 @ IRQ: the return address needs the four-byte correction before saving.
 _vec6: sub  lr, lr, #4
