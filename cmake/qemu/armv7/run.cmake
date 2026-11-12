@@ -47,6 +47,7 @@ add_test(NAME arm_boot
             -DEXPECTED_BLOCK=task 0 blocks on 1
             -DEXPECTED_BLOCK2=task 3 blocks on 2
             -DEXPECTED_WAKE=wake a waiter of 1
+            -DEXPECTED_TIMEOUT=wait timed out
             -DEXPECTED_TASKS=two tasks ok
             -DEXPECTED_USER=user mode round trip ok
             -DEXPECTED_SVC=svc write matched

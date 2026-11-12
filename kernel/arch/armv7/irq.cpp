@@ -41,6 +41,9 @@ void print_unsigned(unsigned long value) {
     }
 }
 
+/// The scheduler gets every tick so a blocked wait can expire.
+extern "C" void SchedulerOnTick(unsigned long ticks);
+
 void serve_tick() {
     const unsigned long interrupt = cinux::armv7::GicAcknowledge();
     cinux::armv7::GicEnd(interrupt);
@@ -51,6 +54,7 @@ void serve_tick() {
         cinux::armv7::UartWrite("\n");
     }
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
+    SchedulerOnTick(g_ticks);
 }
 
 }  // namespace
