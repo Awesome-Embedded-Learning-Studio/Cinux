@@ -16,6 +16,7 @@
  */
 
 #include "kernel/arch/halt.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/boot/print.hpp"
 
 extern "C" void c_data_abort_handler() {
@@ -23,6 +24,10 @@ extern "C" void c_data_abort_handler() {
     unsigned long fault_status  = 0;
     asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(fault_address));  // DFAR
     asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r"(fault_status));   // DFSR
-    cinux::print::Println("[armv7] data abort at %X status %X", fault_address, fault_status);
+    unsigned long spsr = 0;
+    asm volatile("mrs %0, spsr" : "=r"(spsr));
+    const unsigned long long code = cinux::arch::isr::FaultCodeFromStatus(fault_status, spsr);
+    cinux::print::Println("[armv7] data abort at %X status %X code %X", fault_address, fault_status,
+                          code);
     cinux::arch::Halt();
 }
