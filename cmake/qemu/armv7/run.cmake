@@ -17,6 +17,8 @@ add_custom_target(run
     USES_TERMINAL
     COMMENT "Booting the armv7 bring-up image")
 
+# Every -D value that contains a space must be quoted: an unquoted one is
+# split into several arguments and the check only ever sees its first word.
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
             "-DQEMU_PROGRAM=${CINUX_ARM_QEMU}"
@@ -45,7 +47,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_THIRD=task 2 keeps its page"
             "-DEXPECTED_WAIT=wait 1 -> DEAD"
             "-DEXPECTED_BLOCK=task 0 blocks on 1"
-            -DEXPECTED_BLOCK2=task 3 blocks on 4
+            "-DEXPECTED_BLOCK2=task 3 blocks on 4"
             "-DEXPECTED_WAKE=wake a waiter of 1"
             "-DEXPECTED_TIMEOUT=wait timed out"
             "-DEXPECTED_SLEEP=task 0 sleeps 3 ticks"
