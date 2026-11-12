@@ -13,7 +13,7 @@ using cinux::mm::kHeapBase;
 using cinux::mm::kIoremapBase;
 using cinux::mm::kKernelImageBase;
 using cinux::mm::kModuleBase;
-using cinux::mm::kPml4EntrySpan;
+using cinux::mm::kPageTableSpan;
 using cinux::mm::kUserBrkMmapSplit;
 using cinux::mm::kUserMmapTop;
 using cinux::mm::kUserNullTop;
@@ -26,7 +26,7 @@ TEST("mm layout: kernel regions are disjoint and ordered") {
     ASSERT_TRUE(kDirectMapBase < kHeapBase);
     ASSERT_TRUE(kHeapBase < kVmallocBase);
     ASSERT_TRUE(kVmallocBase < kIoremapBase);
-    ASSERT_TRUE(kIoremapBase + kPml4EntrySpan <= kKernelImageBase);
+    ASSERT_TRUE(kIoremapBase + kPageTableSpan <= kKernelImageBase);
     ASSERT_TRUE(kKernelImageBase < kModuleBase);
 }
 

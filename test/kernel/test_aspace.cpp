@@ -116,13 +116,13 @@ TEST("aspace: a fresh space mirrors the kernel half and nothing else") {
     cinux::mm::AddressSpace space;
     ASSERT_TRUE(space.init());
     const Entry* const kFresh = cinux::base::PtrAt<Entry>(cinux::mm::DirectMapVirt(space.root()));
-    for (unsigned long slot = 0; slot < cinux::mm::kDirectMapPml4; ++slot) {
+    for (unsigned long slot = 0; slot < cinux::mm::kDirectMapSlot; ++slot) {
         ASSERT_EQ(kFresh[slot].raw, 0ULL);
     }
     const Entry* const kKernel =
         cinux::base::PtrAt<Entry>(cinux::mm::DirectMapVirt(cinux::mm::KernelPageRoot()));
-    ASSERT_EQ(kFresh[cinux::mm::kDirectMapPml4].raw, kKernel[cinux::mm::kDirectMapPml4].raw);
-    ASSERT_EQ(kFresh[cinux::mm::kKernelPml4].raw, kKernel[cinux::mm::kKernelPml4].raw);
+    ASSERT_EQ(kFresh[cinux::mm::kDirectMapSlot].raw, kKernel[cinux::mm::kDirectMapSlot].raw);
+    ASSERT_EQ(kFresh[cinux::mm::kKernelSlot].raw, kKernel[cinux::mm::kKernelSlot].raw);
 }
 
 TEST("aspace: pages map and translate inside the fresh space") {

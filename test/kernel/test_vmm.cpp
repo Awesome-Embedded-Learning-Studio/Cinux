@@ -25,7 +25,7 @@ using cinux::mm::walk::UnmapPage;
 
 TEST("vmm: the user half of the live root is dead") {
     const auto* const kPml4 = cinux::base::PtrAt<Entry>(DirectMapVirt(cinux::arch::ReadCr3()));
-    for (unsigned long slot = 0; slot < cinux::mm::kDirectMapPml4; ++slot) {
+    for (unsigned long slot = 0; slot < cinux::mm::kDirectMapSlot; ++slot) {
         ASSERT_EQ(kPml4[slot].raw, 0ULL);
     }
 }

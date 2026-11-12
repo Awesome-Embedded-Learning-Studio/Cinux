@@ -35,7 +35,7 @@ bool Hpet::init(const acpi::Rsdp* root) {
         reinterpret_cast<const unsigned char*>(kHeader);  // NOLINT(performance-no-int-to-ptr)
     const auto     kLength = base::ReadWord32(kHeaderBytes, 4);
     const uint64_t kBlock  = hpet::BlockAddress(kHeaderBytes, kLength);
-    if (kBlock == 0 || kBlock > mm::kPml4EntrySpan - hpet::kBlockBytes ||
+    if (kBlock == 0 || kBlock > mm::kPageTableSpan - hpet::kBlockBytes ||
         !mm::MapDeviceWindow(kBlock, hpet::kBlockBytes)) {
         return false;
     }

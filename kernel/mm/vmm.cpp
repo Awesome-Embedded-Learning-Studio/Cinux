@@ -178,7 +178,7 @@ void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
         }
         kPdpt[SlotIndex(window, WalkLevel::kPdpt)] = MakeTableEntry(kDirectoryPhys, kWritable);
     }
-    kPml4[kIoremapPml4] = MakeTableEntry(kPdptPhys, kWritable);
+    kPml4[kIoremapSlot] = MakeTableEntry(kPdptPhys, kWritable);
 }
 
 bool MapDeviceWindow(uint64_t physical, unsigned long bytes) {
@@ -188,14 +188,14 @@ bool MapDeviceWindow(uint64_t physical, unsigned long bytes) {
     KernelTables  world;
     Entry* const  kPml4       = world.table(KernelPageRoot());
     // NOLINTNEXTLINE(clang-analyzer-optin.core.FixedAddressDereference)
-    Entry&        k_pdpt_slot = kPml4[kIoremapPml4];
+    Entry&        k_pdpt_slot = kPml4[kIoremapSlot];
     unsigned long pdpt_phys   = 0;
     if (!k_pdpt_slot.has(cinux::arch::page::kPresent)) {
         pdpt_phys = world.take_page();
         if (pdpt_phys == 0) {
             return false;
         }
-        kPml4[kIoremapPml4] = MakeTableEntry(pdpt_phys, kWritable);
+        kPml4[kIoremapSlot] = MakeTableEntry(pdpt_phys, kWritable);
     } else {
         pdpt_phys = walk::EntryTarget(k_pdpt_slot);
     }
@@ -241,11 +241,11 @@ const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& ha
         table_at(kPdptPhys)[SlotIndex(window, WalkLevel::kPdpt)] =
             MakeTableEntry(kDirectoryPhys, kWritable);
     }
-    kPml4[kDirectMapPml4] = MakeTableEntry(kPdptPhys, kWritable);
+    kPml4[kDirectMapSlot] = MakeTableEntry(kPdptPhys, kWritable);
 
     MapFramebufferDoor(HandoffArchive::self().record());
 
-    Entry* const kSharedPdpt = direct_table_at(EntryTarget(kPml4[kKernelPml4]));
+    Entry* const kSharedPdpt = direct_table_at(EntryTarget(kPml4[kKernelSlot]));
     for (unsigned int i = 0; i < kEntriesPerTable; ++i) {
         if (i != kKernelImagePdpt) {
             kSharedPdpt[i] = Entry{};

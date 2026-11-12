@@ -40,13 +40,13 @@ map、unmap、translate 三个动作的算法只有一份，就住在了 `kernel
 
 这里有个鸡生蛋的难题，vmm_config.hpp 的注释交代了原委。引导门只盖住内核镜像的物理跨度，PMM 管的空闲页则落在这些映射之外，接管期去领页的时候，领回的是一张自己都读不到的表。所以接管期用的每一张表都从一个固定的低位跨度里划，也就是 kSeedTablesSpan 的 0x20000 到 0x40000，种子 pantry（代码里的 SeedPantry）就在这上面顺序切割。跨度的大小我们是按最坏的情况算的，16 GiB 管理上限（pmm_config.hpp 里的 kPmmMaxPhys）要求一张 PDPT（四级页表第二层的指针表）加十五张页目录，再加 ioremap 的一对，余量也留了。这个跨度用一次就永久归了页表所有，位置压在 PMM 低内存保留线的下面，而两边谁也不会把同一个字节给数两次。
 
-我们跟着执行的顺序走一遍。它存档了引导记录，读的是 CR3，也就是装着页表根的控制寄存器，拿到的则是引导的 PML4，四级页表的顶层。然后我们按 1 GiB 一窗扫过物理内存。highest_usable_top 从 e820（引导程序交过来的物理内存清单）里数出可用内存的顶，封顶的线是 kPmmMaxPhys，每个碰到了可用内存的窗（window_touches_usable 查的）就从 pantry 领一张页目录，fill_window_pages 用 2 MiB 大页把整窗填满了、全带上 writable，再挂到一张 pantry 出的 PDPT 上，PDPT 最后坐进 PML4 的第 256 槽，而它就是 kDirectMapPml4。直接映射的换算是定死的，虚拟地址等于 kDirectMapBase 加物理地址，layout.hpp 里的 DirectMapVirt 一行就是全部。
+我们跟着执行的顺序走一遍。它存档了引导记录，读的是 CR3，也就是装着页表根的控制寄存器，拿到的则是引导的 PML4，四级页表的顶层。然后我们按 1 GiB 一窗扫过物理内存。highest_usable_top 从 e820（引导程序交过来的物理内存清单）里数出可用内存的顶，封顶的线是 kPmmMaxPhys，每个碰到了可用内存的窗（window_touches_usable 查的）就从 pantry 领一张页目录，fill_window_pages 用 2 MiB 大页把整窗填满了、全带上 writable，再挂到一张 pantry 出的 PDPT 上，PDPT 最后坐进 PML4 的第 256 槽，而它就是 kDirectMapSlot。直接映射的换算是定死的，虚拟地址等于 kDirectMapBase 加物理地址，layout.hpp 里的 DirectMapVirt 一行就是全部。
 
 直接映射挂好了之后，MapFramebufferDoor 就在存档的记录上跑一遍，把帧缓冲的别名也立起来。再往后我们要做的是两刀清理。内核镜像那个 PDPT（511 槽里的 kKernelImagePdpt 槽）以外的槽全部清零，引导世界塞在内核槽里的东西到此为止。PML4 的第 0 项也清零，低半区整个退出了历史，ReloadCr3 让新的布局生效。最后 KernelRoot 单例把此刻的 CR3 抓拍了下来，KernelPageRoot() 从此答的就是这个值。头文件对这个值的定位说得好，别的地址空间激活以后，CR3 指的是当下活着的那个世界，这个值则是回家的路。前置条件注释也写明了，Pmm::init 要排在它的前面，而中断也得是关着跑的，接管是一次性的仪式，而表也没有谁来跟它抢。
 
 ## 设备窗口：ioremap 别名
 
-设备内存走的是 PML4 第 259 槽 kIoremapPml4。这个槽里的面孔有两张，我们分开认。MapFramebufferDoor 是开场的那个，PML4 的 ioremap 槽直接指一张 PDPT，PDPT 下面的每个 1 GiB 窗各一张页目录，目录里用 2 MiB 大页把帧缓冲盖住了。它的种子表从 pantry 来、不带 PMM、也不拆低半区，注释特意留了话，只要屏幕不要整个接管的测试内核，单跑这个函数也是可以的。
+设备内存走的是 PML4 第 259 槽 kIoremapSlot。这个槽里的面孔有两张，我们分开认。MapFramebufferDoor 是开场的那个，PML4 的 ioremap 槽直接指一张 PDPT，PDPT 下面的每个 1 GiB 窗各一张页目录，目录里用 2 MiB 大页把帧缓冲盖住了。它的种子表从 pantry 来、不带 PMM、也不拆低半区，注释特意留了话，只要屏幕不要整个接管的测试内核，单跑这个函数也是可以的。
 
 MapDeviceWindow 则是后来装的正式口，我们把它的签名读一遍，收的是物理基址加字节数。它从 KernelPageRoot() 拿的是内核根，缺的 PDPT 和页目录从 KernelTables 领，这时候的 PMM 已经活了。每个 2 MiB 片都带上了 kCacheDisable，寄存器读到的才是设备而不是一份缓存副本。窗口按大页的边界向外取整，跨界的设备区域也能盖全。它编辑的是内核自己的根，注释点破了这手的用意，任务空间的内核半区是从内核自己的根镜像过去的，设备窗口挂了一次，后建的每个地址空间自动继承，谁也不用再单独挂一遍了。一段区间没全部落进活着的页表时它答的就是 false，怎么处置由调用方自己定。
 
