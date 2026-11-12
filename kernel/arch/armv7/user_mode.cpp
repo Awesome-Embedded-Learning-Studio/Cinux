@@ -65,6 +65,21 @@ constexpr unsigned long kTaskBStack = 0x40004000UL;
 
 enum class TaskState : unsigned char { kRunnable, kBlocked, kDone };
 
+
+/// What a descriptor points at. Files will be a third kind.
+enum class FdKind : unsigned long {
+    kConsoleIn  = 0,
+    kConsoleOut = 1,
+};
+
+struct FdEntry {
+    bool          open   = false;
+    FdKind        kind   = FdKind::kConsoleIn;
+    unsigned long offset = 0;
+};
+
+constexpr unsigned long kMaxFds = 8;
+
 struct UserTask {
     cinux::arch::UserTrap    trap;
     cinux::mm::AddressSpace* space;
@@ -74,7 +89,7 @@ struct UserTask {
     unsigned long            wait_mask;     // bit per awaited task
     unsigned long            wait_deadline; // ticks; valid while blocked
     unsigned long            break_top;     // grow-only user heap break
-    unsigned long            fd_mask;       // bit per open descriptor
+    FdEntry                  fds[kMaxFds];  // small table, one slot per code
     unsigned long            fault_handler; // user fault handler, 0 if none
     unsigned long            parent;        // who forked this task
     unsigned long            mmap_top;      // grow-only anonymous window
@@ -86,7 +101,7 @@ struct UserTask {
 
 constexpr unsigned long kTaskCount   = 8;
 constexpr unsigned long kInitialTasks = 4;
-constexpr unsigned long kNoParent     = 0xFFUL;  // reported as "no parent"
+constexpr unsigned long kNoParent = 0xFFUL;  // reported as "no parent"
 constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kMmapBase    = 0x40010000UL;
@@ -317,6 +332,19 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     }
     if (task_id == 0) {
         char probe[4] = {'x', '\n', 0, 0};
+        // Past the table: refused like a closed slot, not a crash.
+        const long kOob = user_syscall3(
+            cinux::armv7::syscall_nr::kWrite, 8,
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(probe)), 1);
+        if (kOob == static_cast<long>(cinux::armv7::errno::kBadFd)) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('f'); NOTE('d'); NOTE(' '); NOTE('r'); NOTE('a'); NOTE('n');
+            NOTE('g'); NOTE('e'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
         static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose, 2, 0, 0));
         const long kRefused = user_syscall3(
             cinux::armv7::syscall_nr::kWrite, 2,
@@ -746,7 +774,9 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_mask     = 0;
     task.wait_deadline = 0;
     task.break_top     = kBrkBase;
-    task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
+    task.fds[0] = FdEntry{true, FdKind::kConsoleIn, 0};
+    task.fds[1] = FdEntry{true, FdKind::kConsoleOut, 0};
+    task.fds[2] = FdEntry{true, FdKind::kConsoleOut, 0};
     task.fault_handler = 0;
     task.in_use        = true;
     task.parent        = 0;
@@ -1055,7 +1085,8 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kFd    = g_user_trap.r0;
         const unsigned long kBuf   = g_user_trap.r1;
         const unsigned long kCount = g_user_trap.r2;
-        if ((g_tasks[g_current].fd_mask & (1UL << kFd)) == 0 || kFd != 0) {
+        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open ||
+            g_tasks[g_current].fds[kFd].kind != FdKind::kConsoleIn) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
             return &g_tasks[g_current].trap;
@@ -1114,7 +1145,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         child.space         = space;
         child.break_top     = parent.break_top;
         child.mmap_top      = parent.mmap_top;
-        child.fd_mask       = parent.fd_mask;
+        for (unsigned long fd = 0; fd < kMaxFds; ++fd) {
+            child.fds[fd] = parent.fds[fd];
+        }
         child.fault_handler = parent.fault_handler;
         child.parent        = g_current;
         child.wait_target   = kTaskCount;
@@ -1249,7 +1282,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     if (number == cinux::armv7::syscall_nr::kClose) {
         const unsigned long kFd = g_user_trap.r0;
         if (kFd <= 2) {
-            g_tasks[g_current].fd_mask &= ~(1UL << kFd);
+            g_tasks[g_current].fds[kFd].open = false;
             cinux::print::Println("[armv7] close %u", kFd);
             g_tasks[g_current].trap.r0 = 0;
         } else {
@@ -1427,8 +1460,18 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
     }
 }
 
-extern "C" unsigned long CurrentFdMask() {
-    return g_tasks[g_current].fd_mask;
+extern "C" bool CurrentFdReadable(unsigned long fd) {
+    if (fd >= kMaxFds || !g_tasks[g_current].fds[fd].open) {
+        return false;
+    }
+    return g_tasks[g_current].fds[fd].kind == FdKind::kConsoleIn;
+}
+
+extern "C" bool CurrentFdWritable(unsigned long fd) {
+    if (fd >= kMaxFds || !g_tasks[g_current].fds[fd].open) {
+        return false;
+    }
+    return g_tasks[g_current].fds[fd].kind == FdKind::kConsoleOut;
 }
 
 extern "C" unsigned long CurrentTaskIndex() {

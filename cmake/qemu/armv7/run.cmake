@@ -111,6 +111,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_FORKCOW=cow copy at 40040000"
             "-DEXPECTED_FORKCOWOK=cow after two forks"
             "-DEXPECTED_EBADF=ebadf ok"
+            "-DEXPECTED_FDRANGE=fd range ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
             "-DEXPECTED_TASKS=two tasks ok"

@@ -66,6 +66,7 @@ expect_literal(EXPECTED_BLOCK2 "the second waiter never blocked.")
 expect_literal(EXPECTED_CLOSE "nothing was ever closed.")
 
 expect_literal(EXPECTED_EBADF "a closed descriptor was still writable.")
+expect_literal(EXPECTED_FDRANGE "an out-of-table descriptor was accepted.")
 
 expect_literal(EXPECTED_MMAP "the anonymous mapping never appeared.")
 expect_literal(EXPECTED_HINTTOOK "a taken hint was accepted.")

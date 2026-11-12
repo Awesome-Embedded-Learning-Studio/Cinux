@@ -29,12 +29,13 @@ namespace {
 
 constexpr unsigned long kChunkBytes = 64;
 
-extern "C" unsigned long CurrentFdMask();
+extern "C" bool CurrentFdReadable(unsigned long fd);
+extern "C" bool CurrentFdWritable(unsigned long fd);
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
 
 long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
-    if (fd > 2 || (CurrentFdMask() & (1UL << fd)) == 0 || (fd != 1 && fd != 2)) {
+    if (!CurrentFdWritable(fd)) {
         return cinux::armv7::errno::kBadFd;
     }
     const cinux::arch::IrqGuard kGuard;
