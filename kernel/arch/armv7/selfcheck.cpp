@@ -1,6 +1,9 @@
 #include "kernel/arch/armv7/selfcheck.hpp"
 
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/heap.hpp"
+#include "kernel/mm/page_walk.hpp"
+#include "kernel/mm/vmm.hpp"
 #include "kernel/mm/pmm.hpp"
 
 namespace cinux::armv7 {
@@ -70,6 +73,22 @@ bool RunHeapSelfCheck() {
     }
     // Double free must be refused rather than corrupting the list.
     return !heap.free(first);
+}
+
+bool RunMapSelfCheck() {
+    cinux::mm::KernelTables tables;
+    const unsigned long      root = cinux::arch::space::ActiveRoot();
+    const auto               frame = cinux::mm::Pmm::self().allocate_page();
+    if (frame.raw == 0) {
+        return false;
+    }
+    constexpr unsigned long kSpot = 0x50000000UL;
+    if (!cinux::mm::walk::MapPage(tables, root, kSpot, frame.raw)) {
+        return false;
+    }
+    auto* const window = reinterpret_cast<volatile unsigned long*>(kSpot);
+    *window            = 0xA5A5A5A5UL;
+    return *window == 0xA5A5A5A5UL;
 }
 
 }  // namespace cinux::armv7

@@ -14,6 +14,14 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_MAP AND NOT serial_out MATCHES "${EXPECTED_MAP}")
+    message(FATAL_ERROR
+        "arm_boot: the mapped-page check never passed.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_FAULT AND NOT serial_out MATCHES "${EXPECTED_FAULT}")
+    message(FATAL_ERROR
+        "arm_boot: the deliberate fault was not reported.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_PAGED AND NOT serial_out MATCHES "${EXPECTED_PAGED}")
     message(FATAL_ERROR
         "arm_boot: the paged heap never came up.\nstdout:\n${serial_out}")

@@ -32,5 +32,7 @@ add_test(NAME arm_boot
             -DEXPECTED_CONSOLE=console up
             -DEXPECTED_HEAP=selfcheck heap ok
             -DEXPECTED_PAGED=paged heap live
+            -DEXPECTED_MAP=mapped page ok
+            -DEXPECTED_FAULT=data abort at 51000000
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)

@@ -36,4 +36,9 @@ SECTIONS
         . += 4K;
         __fiq_stack_top = .;
     }
+
+    .abt_stack (NOLOAD) : ALIGN(8) {
+        . += 4K;
+        __abt_stack_top = .;
+    }
 }

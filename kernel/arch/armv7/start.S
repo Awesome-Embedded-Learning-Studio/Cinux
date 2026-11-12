@@ -19,6 +19,8 @@ _start:
     ldr     sp, =__irq_stack_top
     cps     #0x11               @ FIQ mode
     ldr     sp, =__fiq_stack_top
+    cps     #0x17               @ abort mode
+    ldr     sp, =__abt_stack_top
     cps     #0x13               @ back to supervisor
 
     ldr     sp, =__stack_top

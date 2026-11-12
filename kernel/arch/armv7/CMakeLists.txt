@@ -9,6 +9,7 @@ add_executable(arm_image
     gic.cpp
     irq.cpp
     vectors.S
+    faults.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp

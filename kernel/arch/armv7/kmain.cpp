@@ -132,6 +132,19 @@ extern "C" [[noreturn]] void kmain() {
                     auto* const probe = new unsigned long(0x114514UL);
                     cinux::print::Println("[armv7] paged heap live, probe %X", *probe);
                     delete probe;
+                    cinux::print::Println(cinux::armv7::RunMapSelfCheck()
+                                              ? "[armv7] mapped page ok"
+                                              : "[armv7] mapped page FAILED");
+                    asm volatile("cpsie if" ::: "memory");
+                    cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
+                    // Let a few ticks land before the fault ends the run.
+                    const unsigned long long kWait =
+                        static_cast<unsigned long long>(cinux::armv7::TimerFrequency()) / 4U;
+                    const unsigned long long kStart = cinux::armv7::TimerCounter();
+                    while (cinux::armv7::TimerCounter() - kStart < kWait) {
+                    }
+                    // Deliberately unmapped: the abort reporter should name it.
+                    *reinterpret_cast<volatile unsigned long*>(0x51000000UL) = 0xDEADUL;
                 } else {
                     cinux::print::Println("[armv7] paged heap FAILED");
                 }
@@ -140,8 +153,6 @@ extern "C" [[noreturn]] void kmain() {
             }
         }
     }
-    asm volatile("cpsie if" ::: "memory");
-    cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
     for (;;) {
         asm volatile("wfi");
     }

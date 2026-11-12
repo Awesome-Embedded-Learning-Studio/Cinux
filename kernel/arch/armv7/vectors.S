@@ -11,10 +11,17 @@ _vectors:
     b   _park       @ undefined instruction
     b   _park       @ supervisor call
     b   _park       @ prefetch abort
-    b   _park       @ data abort
+    b   _data_abort_entry
     b   _park       @ reserved
     b   _irq_entry  @ IRQ
     b   _irq_entry  @ FIQ (a secure-state core signals group 0 here)
+
+_data_abort_entry:
+    sub     lr, lr, #8
+    push    {r0-r3, lr}
+    bl      c_data_abort_handler
+    pop     {r0-r3, lr}
+    movs    pc, lr
 
 _irq_entry:
     sub     lr, lr, #4

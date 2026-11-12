@@ -24,4 +24,7 @@ namespace cinux::armv7 {
 /// Exercises the heap allocator over a static arena.
 [[nodiscard]] bool RunHeapSelfCheck();
 
+/// Maps one fresh page through the shared walk and writes through it.
+[[nodiscard]] bool RunMapSelfCheck();
+
 }  // namespace cinux::armv7
