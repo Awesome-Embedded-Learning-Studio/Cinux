@@ -14,6 +14,7 @@
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/boot/boot_info.hpp"
+#include "kernel/boot/print.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
@@ -57,6 +58,8 @@ void PrintHex(unsigned long long value) {
 
 extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartInit();
+    cinux::boot::BootInfo console_seat{};
+    cinux::console::InitConsole(console_seat);
     cinux::armv7::UartWrite("\nCinux armv7: alive on i.MX6ULL\n");
 
     cinux::armv7::UartWrite("[armv7] page ");
@@ -114,6 +117,8 @@ extern "C" [[noreturn]] void kmain() {
                 cinux::armv7::UartWrite(cinux::armv7::RunPmmSelfCheck()
                                             ? "[armv7] selfcheck pmm ok\n"
                                             : "[armv7] selfcheck pmm FAILED\n");
+                cinux::print::Println("[armv7] console up, %u pages managed",
+                                      cinux::mm::Pmm::self().managed_page_count());
             } else {
                 cinux::armv7::UartWrite("[armv7] pmm refused init\n");
             }

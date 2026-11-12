@@ -13,7 +13,10 @@ add_executable(arm_image
     fdt.cpp
     assert_hook.cpp
     selfcheck.cpp
+    console.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
     libc_support.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
@@ -37,8 +40,9 @@ target_link_options(arm_image PRIVATE
     -no-pie
     -T${CMAKE_CURRENT_SOURCE_DIR}/link.ld
     -Wl,--build-id=none
-    -Wl,--no-warn-rwx-segments
-    -lgcc)
+    -Wl,--no-warn-rwx-segments)
+
+target_link_libraries(arm_image PRIVATE gcc)
 
 target_include_directories(arm_image PRIVATE
     ${CMAKE_BINARY_DIR}/generated
