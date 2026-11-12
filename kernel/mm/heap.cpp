@@ -10,8 +10,6 @@ namespace cinux::mm {
 
 namespace {
 
-constexpr unsigned long kHeaderBytes  = 32;
-constexpr unsigned long kFooterBytes  = 16;
 constexpr unsigned long kPayloadAlign = 16;
 constexpr unsigned long kMinPayload   = 16;
 
@@ -26,7 +24,14 @@ struct Header {
     unsigned long next;
     unsigned long spare;
 };
-static_assert(sizeof(Header) == kHeaderBytes);
+
+// The block grammar is pointer-width, not an absolute size: four words of
+// header and two words of footer. On x86-64 that is 32 + 16 bytes, on a
+// 32-bit port 16 + 8; the footer reserves two words but records one.
+constexpr unsigned long kHeaderBytes = 4 * sizeof(unsigned long);
+constexpr unsigned long kFooterBytes = 2 * sizeof(unsigned long);
+static_assert(sizeof(Header) == kHeaderBytes, "the header is four words");
+static_assert(kHeaderBytes % kPayloadAlign == 0, "the header keeps payloads aligned");
 
 unsigned long span_bytes(unsigned long payload) {
     return kHeaderBytes + payload + kFooterBytes;

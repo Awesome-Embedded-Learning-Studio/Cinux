@@ -14,6 +14,10 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_HEAP AND NOT serial_out MATCHES "${EXPECTED_HEAP}")
+    message(FATAL_ERROR
+        "arm_boot: the heap self-check did not pass.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_CONSOLE AND NOT serial_out MATCHES "${EXPECTED_CONSOLE}")
     message(FATAL_ERROR
         "arm_boot: the console path never printed.\nstdout:\n${serial_out}")

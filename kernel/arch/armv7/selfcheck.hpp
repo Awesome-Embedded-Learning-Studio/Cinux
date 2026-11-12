@@ -21,4 +21,7 @@ namespace cinux::armv7 {
 /// Allocates, touches, frees, and refuses an impossible order.
 [[nodiscard]] bool RunPmmSelfCheck();
 
+/// Exercises the heap allocator over a static arena.
+[[nodiscard]] bool RunHeapSelfCheck();
+
 }  // namespace cinux::armv7

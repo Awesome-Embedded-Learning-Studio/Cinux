@@ -15,6 +15,7 @@ add_executable(arm_image
     selfcheck.cpp
     console.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
     libc_support.cpp

@@ -119,6 +119,9 @@ extern "C" [[noreturn]] void kmain() {
                                             : "[armv7] selfcheck pmm FAILED\n");
                 cinux::print::Println("[armv7] console up, %u pages managed",
                                       cinux::mm::Pmm::self().managed_page_count());
+                cinux::print::Println(cinux::armv7::RunHeapSelfCheck()
+                                          ? "[armv7] selfcheck heap ok"
+                                          : "[armv7] selfcheck heap FAILED");
             } else {
                 cinux::armv7::UartWrite("[armv7] pmm refused init\n");
             }
