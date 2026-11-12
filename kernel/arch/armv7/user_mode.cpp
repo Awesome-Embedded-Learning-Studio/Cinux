@@ -367,6 +367,31 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+            char       half[8];
+            for (unsigned long index = 0; index < 8; ++index) {
+                half[index] = 0;
+            }
+            static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                            static_cast<unsigned long>(kFd), 0, 0));
+            const long kPart = user_syscall3(
+                cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kFd),
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(half)), 3);
+            const long kBack = user_syscall3(
+                cinux::armv7::syscall_nr::kLseek, static_cast<unsigned long>(kFd),
+                0, 0);
+            const long kAgain = user_syscall3(
+                cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kFd),
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(buf)), 6);
+            if (kPart == 3 && kBack == 0 && kAgain == 6 && buf[0] == 'h' &&
+                buf[5] == '\n') {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('l'); NOTE('s'); NOTE('e'); NOTE('e'); NOTE('k'); NOTE(' ');
+                NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
         }
@@ -1134,6 +1159,32 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
         wake_waiters_of(g_current);
+    }
+
+    if (number == cinux::armv7::syscall_nr::kLseek) {
+        const unsigned long kFd     = g_user_trap.r0;
+        const long          kOffset = static_cast<long>(g_user_trap.r1);
+        const unsigned long kWhence = g_user_trap.r2;
+        if (kFd >= kMaxFds || !g_tasks[g_current].fds[kFd].open ||
+            g_tasks[g_current].fds[kFd].kind != FdKind::kFile) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            return &g_tasks[g_current].trap;
+        }
+        FdEntry&      file = g_tasks[g_current].fds[kFd];
+        const long    base = kWhence == 0 ? 0L
+                             : kWhence == 1 ? static_cast<long>(file.offset)
+                                            : static_cast<long>(file.size);
+        const long    next = base + kOffset;
+        if (next < 0 || kWhence > 2) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
+            return &g_tasks[g_current].trap;
+        }
+        file.offset = static_cast<unsigned long>(next);
+        cinux::print::Println("[armv7] lseek %u -> %u", kFd, file.offset);
+        g_tasks[g_current].trap.r0 = file.offset;
+        return &g_tasks[g_current].trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kOpen) {

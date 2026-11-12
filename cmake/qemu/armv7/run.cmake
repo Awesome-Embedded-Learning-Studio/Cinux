@@ -116,6 +116,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_FILEREAD=file read 6"
             "-DEXPECTED_FILEOK=file ok"
             "-DEXPECTED_ENOENT=enoent ok"
+            "-DEXPECTED_LSEEK=lseek 3 -> 0"
+            "-DEXPECTED_LSEEKOK=lseek ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
             "-DEXPECTED_TASKS=two tasks ok"

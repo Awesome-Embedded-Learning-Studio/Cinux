@@ -26,6 +26,7 @@ inline constexpr unsigned long kWrite       = 4;
 inline constexpr unsigned long kSchedYield  = 158;
 inline constexpr unsigned long kWait        = 114;
 inline constexpr unsigned long kSleep       = 162;
+inline constexpr unsigned long kLseek       = 19;
 inline constexpr unsigned long kGetPid      = 20;
 inline constexpr unsigned long kBrk         = 45;
 inline constexpr unsigned long kGetPpid     = 64;
