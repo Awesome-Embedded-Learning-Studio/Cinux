@@ -96,7 +96,7 @@ expect_literal(EXPECTED_GETTICKS "getticks never answered.")
 expect_literal(EXPECTED_TICKSOK "the clock did not move across a sleep.")
 expect_literal(EXPECTED_GRANDCHILD "the grandchild never reported.")
 expect_literal(EXPECTED_TWOLEVELS "the second level's reaping failed.")
-expect_literal(EXPECTED_TASK6 "the grandchild's exit status was lost.")
+expect_literal(EXPECTED_GRANDEXIT "the grandchild's exit status was lost.")
 expect_literal(EXPECTED_FDINH "the closed descriptor came back in the child.")
 expect_literal(EXPECTED_BRKINH "the child's heap did not start where the parent's was.")
 expect_literal(EXPECTED_NOSLOT "a ninth task was created.")
@@ -137,7 +137,7 @@ expect_literal(EXPECTED_COWCOPY "the shared page was never copied.")
 
 expect_literal(EXPECTED_REPAIR "the demand page was never repaired.")
 
-expect_literal(EXPECTED_FORK "the user subtree clone failed.")
+expect_literal(EXPECTED_FORKCLONE "the user subtree clone failed.")
 
 expect_literal(EXPECTED_SHARED "the shared frame did not survive.")
 
