@@ -523,6 +523,39 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                 }
             }
         }
+        if (reaped) {
+            // Fill every spare slot; the children park until this task ends.
+            for (unsigned long index = 0; index < 4; ++index) {
+                const long kChild = user_syscall0(cinux::armv7::syscall_nr::kFork);
+                if (kChild == 0) {
+                    unsigned long parked = 0;
+                    for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                        const long kResult = user_syscall3(
+                            cinux::armv7::syscall_nr::kWait, 1UL,
+                            static_cast<unsigned long>(
+                                reinterpret_cast<std::uintptr_t>(&parked)),
+                            0);
+                        if (kResult >= 0) {
+                            break;
+                        }
+                    }
+                    static_cast<void>(
+                        user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
+                    for (;;) {
+                    }
+                }
+            }
+            const long kOverflow = user_syscall0(cinux::armv7::syscall_nr::kFork);
+            if (kOverflow == static_cast<long>(cinux::armv7::errno::kNoMem)) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('n'); NOTE('o'); NOTE(' '); NOTE('s'); NOTE('l'); NOTE('o');
+                NOTE('t'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
         if (reaped && *kSharedPage == 0x1111UL) {
             char          note[32];
             unsigned long note_length = 0;

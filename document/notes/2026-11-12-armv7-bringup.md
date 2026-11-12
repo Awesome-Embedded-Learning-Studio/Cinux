@@ -274,7 +274,7 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 | 号 | 语义 | 覆盖它的自检 |
 | --- | --- | --- |
 | 1 | exit | `task 0 exited with status 7` |
-| 2 | fork | 连 fork 两次：`fork 0 -> 4`、`fork 0 -> 5`、`child one ok`、`child two ok`、两条都以 3 退出；写时复制：两次 `cow copy at 40040000`、`cow after two forks`；槽位复用：子任务退出后再 fork 回到 4 号（`reuse ok`、`slot reused`） |
+| 2 | fork | 连 fork 两次：`fork 0 -> 4`、`fork 0 -> 5`、`child one ok`、`child two ok`、两条都以 3 退出；写时复制：两次 `cow copy at 40040000`、`cow after two forks`；槽位复用：子任务退出后再 fork 回到 4 号（`reuse ok`、`slot reused`）；占满八条后第五次被拒（`fork refused, no free slot`、`no slot ok`），四条停着的子任务在父任务结束后各自退出 |
 | 3 | read | `read timed out`（有数据那条未覆盖） |
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
 | 6 | close | `close 2`、`ebadf ok` |
