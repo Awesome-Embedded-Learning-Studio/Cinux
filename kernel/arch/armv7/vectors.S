@@ -46,6 +46,8 @@ _vec2: cmp  r7, #158
        beq  _svc_trap
        cmp  r7, #1
        beq  _svc_trap
+       cmp  r7, #114
+       beq  _svc_trap
        push {r0-r3, lr}
        mov  r0, r7
        mov  r1, sp

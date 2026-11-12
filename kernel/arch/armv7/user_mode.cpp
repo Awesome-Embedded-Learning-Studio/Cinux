@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
@@ -34,6 +35,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -54,7 +56,7 @@ constexpr unsigned long kTaskAStack = 0x40002000UL;
 constexpr unsigned long kTaskBCode  = 0x40003000UL;
 constexpr unsigned long kTaskBStack = 0x40004000UL;
 
-enum class TaskState : unsigned char { kRunnable, kDone };
+enum class TaskState : unsigned char { kRunnable, kBlocked, kDone };
 
 struct UserTask {
     cinux::arch::UserTrap    trap;
@@ -134,7 +136,9 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 
     // A pointer into the kernel's own memory must be refused, not read.
     static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kWrite, 1, 0x80000000UL, 8));
-    for (unsigned long round = 0; round < 20; ++round) {
+    // Task 0 finishes early so its wait really has to block.
+    const unsigned long kRounds = task_id == 0 ? 2UL : 20UL;
+    for (unsigned long round = 0; round < kRounds; ++round) {
         buffer[2] = static_cast<char>('0' + (round % 10));
         user_write(buffer, length);
         for (volatile unsigned long spin = 0; spin < 6000000UL; ++spin) {
@@ -408,6 +412,15 @@ namespace {
 
 /// Picks the next runnable task and hands its frame back to the stub.
 /// Never returns when nothing is runnable: it resumes the kernel instead.
+/// Wakes every blocked task; each one re-asks for its target on return.
+void wake_blocked() {
+    for (auto& task : g_tasks) {
+        if (task.state == TaskState::kBlocked) {
+            task.state = TaskState::kRunnable;
+        }
+    }
+}
+
 /// Returns one task's space to the allocator. Called only after the
 /// scheduler has switched away from it, so its tables are not active.
 void teardown_space(unsigned long index) {
@@ -440,6 +453,26 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].exit_status = g_user_trap.r0;
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
+        wake_blocked();
+    }
+
+    if (number == cinux::armv7::syscall_nr::kWait) {
+        const unsigned long kTarget = g_user_trap.r0;
+        if (kTarget < kTaskCount && g_tasks[kTarget].state == TaskState::kDone) {
+            const unsigned long kStatus = g_tasks[kTarget].exit_status;
+            if (cinux::arch::CopyToUser(g_user_trap.r1, &kStatus, sizeof(kStatus))) {
+                cinux::print::Println("[armv7] wait %u -> %X", kTarget, kStatus);
+                g_tasks[g_current].trap.r0 = 0;
+            } else {
+                g_tasks[g_current].trap.r0 = ~0UL;
+            }
+            return &g_tasks[g_current].trap;
+        }
+        // Not finished: park this task; when someone ends, wake_blocked
+        // makes it runnable again and it re-asks with -1 in hand.
+        g_tasks[g_current].state    = TaskState::kBlocked;
+        g_tasks[g_current].trap.r0 = ~0UL;
+        cinux::print::Println("[armv7] task %u blocks on %u", g_current, kTarget);
     }
 
     const unsigned long kOld  = g_current;
@@ -515,6 +548,7 @@ extern "C" [[noreturn]] void c_user_faulted() {
     g_tasks[g_current].state       = TaskState::kDone;
     g_tasks[g_current].exit_status = 0xDEADUL;
     cinux::print::Println("[armv7] task %u faulted", g_current);
+    wake_blocked();
     const unsigned long kOld  = g_current;
     const unsigned long kNext = next_runnable(g_current);
     if (kNext != kTaskCount) {

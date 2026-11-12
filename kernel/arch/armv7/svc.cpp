@@ -83,9 +83,6 @@ long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
 
 }  // namespace
 
-extern "C" bool TaskIsDone(unsigned long index);
-extern "C" unsigned long TaskExitStatus(unsigned long index);
-
 extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* frame) {
     switch (number) {
     case cinux::armv7::syscall_nr::kRead: {
@@ -105,19 +102,6 @@ extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* fram
         }
         cinux::print::Println("[armv7] svc write %u bytes", static_cast<unsigned long>(result));
         return static_cast<unsigned long>(result);
-    }
-    case cinux::armv7::syscall_nr::kWait: {
-        const unsigned long kIndex = frame[0];
-        if (!TaskIsDone(kIndex)) {
-            return ~0UL;
-        }
-        const unsigned long kStatus = TaskExitStatus(kIndex);
-        const unsigned long kWord   = kStatus;
-        if (!cinux::arch::CopyToUser(frame[1], &kWord, sizeof(kWord))) {
-            return ~0UL;
-        }
-        cinux::print::Println("[armv7] wait %u -> %X", kIndex, kStatus);
-        return 0;
     }
     case cinux::armv7::syscall_nr::kSchedYield:
         return 0;
