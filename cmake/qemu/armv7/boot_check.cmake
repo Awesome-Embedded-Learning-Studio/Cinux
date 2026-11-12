@@ -7,6 +7,15 @@ execute_process(
     OUTPUT_VARIABLE serial_out
     ERROR_VARIABLE serial_err
     RESULT_VARIABLE run_result)
+file(WRITE ${SERIAL_LOG} "${serial_out}")
+if(NOT EXISTS ${SERIAL_LOG})
+    message(FATAL_ERROR
+        "arm_boot: the runner produced no log (result ${run_result}).")
+endif()
+file(READ ${SERIAL_LOG} serial_out)
+if(serial_out STREQUAL "")
+    message(FATAL_ERROR "arm_boot: the runner produced an empty log.")
+endif()
 
 file(WRITE "${SERIAL_LOG}" "${serial_out}")
 

@@ -86,7 +86,7 @@ constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kMmapBase    = 0x40010000UL;
 constexpr unsigned long kMmapLimit   = 0x40100000UL;
-constexpr unsigned long kReadTicks   = 3;  // default wait for input, 300 ms
+constexpr unsigned long kReadTicks   = 10;  // default wait for input, one second
 constexpr unsigned long kWaitTicks  = 20;  // default deadline when the caller passes 0
 
 UserTask                g_tasks[kTaskCount];

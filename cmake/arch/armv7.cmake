@@ -47,6 +47,8 @@ set(CINUX_LOCKDEP_BOOL false)
 configure_file(${CMAKE_SOURCE_DIR}/cmake/checks/checks_config.hpp.in
     ${CMAKE_BINARY_DIR}/generated/kernel/proc/checks_config.hpp @ONLY)
 
+find_program(CINUX_ARM_PYTHON python3 REQUIRED)
+
 set(CINUX_ARM_DTB ${CMAKE_BINARY_DIR}/armv7-qemu.dtb)
     add_subdirectory(kernel/arch/armv7)
     include(${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/run.cmake)
