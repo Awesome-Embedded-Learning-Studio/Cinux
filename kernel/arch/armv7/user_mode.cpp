@@ -429,64 +429,73 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         static_cast<void>(kReceived);
     }
     if (task_id == 0) {
-        // A page both sides can see before the clone: the child's write
+        // A page both sides can see before the clone: each child's write
         // must get a private copy, the parent's must stay as it was.
         constexpr unsigned long kSharedVa = 0x40040000UL;
         static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kSharedVa, 0));
         auto* const kSharedPage = reinterpret_cast<volatile unsigned long*>(kSharedVa);
         *kSharedPage            = 0x1111UL;
-        const long kChild = user_syscall0(cinux::armv7::syscall_nr::kFork);
-        if (kChild == 0) {
+        // The first child finishes before the second fork: otherwise it
+        // would execute that fork too and grow a grandchild.
+        const long kFirst = user_syscall0(cinux::armv7::syscall_nr::kFork);
+        if (kFirst == 0) {
             *kSharedPage = 0x2222UL;
-            const bool kSaw = (*kSharedPage == 0x2222UL);
-            if (kSaw) {
+            if (*kSharedPage == 0x2222UL) {
                 char          note[24];
                 unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
                 NOTE('c'); NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' ');
-                NOTE('w'); NOTE('r'); NOTE('o'); NOTE('t'); NOTE('e'); NOTE('\n');
+                NOTE('o'); NOTE('n'); NOTE('e'); NOTE(' '); NOTE('o'); NOTE('k');
+                NOTE('\n');
 #undef NOTE
                 user_write(note, note_length);
             }
-            char          note[16];
-            unsigned long note_length = 0;
-#define NOTE(c) note[note_length++] = (c)
-            NOTE('c'); NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' ');
-            NOTE('o'); NOTE('k'); NOTE('\n');
-#undef NOTE
-            user_write(note, note_length);
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
             for (;;) {
             }
         }
-        unsigned long child_status = 0;
-        for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
-            const long kResult = user_syscall3(
-                cinux::armv7::syscall_nr::kWait, 1UL << static_cast<unsigned long>(kChild),
-                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&child_status)), 0);
-            if (kResult >= 0) {
-                if (child_status == 3UL) {
-                    char          note[16];
-                    unsigned long note_length = 0;
+        const long kSecond = user_syscall0(cinux::armv7::syscall_nr::kFork);
+        if (kSecond == 0) {
+            *kSharedPage = 0x3333UL;
+            if (*kSharedPage == 0x3333UL) {
+                char          note[24];
+                unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
-                    NOTE('f'); NOTE('o'); NOTE('r'); NOTE('k'); NOTE(' ');
-                    NOTE('o'); NOTE('k'); NOTE('\n');
+                NOTE('c'); NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' ');
+                NOTE('t'); NOTE('w'); NOTE('o'); NOTE(' '); NOTE('o'); NOTE('k');
+                NOTE('\n');
 #undef NOTE
-                    user_write(note, note_length);
-                    if (*kSharedPage == 0x1111UL) {
-                        char          cow[24];
-                        unsigned long cow_length = 0;
-#define COWNOTE(c) cow[cow_length++] = (c)
-                        COWNOTE('c'); COWNOTE('o'); COWNOTE('w'); COWNOTE(' ');
-                        COWNOTE('a'); COWNOTE('f'); COWNOTE('t'); COWNOTE('e');
-                        COWNOTE('r'); COWNOTE(' '); COWNOTE('f'); COWNOTE('o');
-                        COWNOTE('r'); COWNOTE('k'); COWNOTE('\n');
-#undef COWNOTE
-                        user_write(cow, cow_length);
-                    }
-                }
-                break;
+                user_write(note, note_length);
             }
+            static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
+            for (;;) {
+            }
+        }
+        unsigned long status = 0;
+        bool          reaped = true;
+        const unsigned long kChildren[2] = {static_cast<unsigned long>(kSecond),
+                                            static_cast<unsigned long>(kFirst)};
+        for (unsigned long index = 0; index < 2; ++index) {
+            for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                const long kResult = user_syscall3(
+                    cinux::armv7::syscall_nr::kWait, 1UL << kChildren[index],
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+                if (kResult >= 0) {
+                    reaped = reaped && (status == 3UL);
+                    break;
+                }
+            }
+        }
+        if (reaped && *kSharedPage == 0x1111UL) {
+            char          note[32];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('c'); NOTE('o'); NOTE('w'); NOTE(' '); NOTE('a'); NOTE('f');
+            NOTE('t'); NOTE('e'); NOTE('r'); NOTE(' '); NOTE('t'); NOTE('w');
+            NOTE('o'); NOTE(' '); NOTE('f'); NOTE('o'); NOTE('r'); NOTE('k');
+            NOTE('s'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
         }
     }
     if (task_id == 2) {
