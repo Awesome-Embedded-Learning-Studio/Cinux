@@ -63,9 +63,10 @@ struct UserTask {
     cinux::mm::AddressSpace* space;
     TaskState                state;
     unsigned long            exit_status;
+    unsigned long            wait_target;  // valid while blocked
 };
 
-constexpr unsigned long kTaskCount = 3;
+constexpr unsigned long kTaskCount = 4;
 
 UserTask                g_tasks[kTaskCount];
 cinux::arch::CpuContext g_main;
@@ -164,19 +165,22 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
         user_write(note, note_length);
     }
-    if (task_id == 0) {
-        // Reap the other two before leaving: each returns -1 until the
-        // target task has ended, and preemption keeps letting them run.
+    if (task_id == 0 || task_id == 3) {
+        // Task 0 reaps 1 then 2; task 3 only reaps 2, so a wake aimed at 1
+        // must leave it asleep.
         unsigned long status = 0;
-        for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
-            const long first = user_syscall3(
-                cinux::armv7::syscall_nr::kWait, 1,
-                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
-            const long second = user_syscall3(
-                cinux::armv7::syscall_nr::kWait, 2,
-                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
-            if (first == 0 && second == 0) {
-                break;
+        const unsigned long kTargets[] = {1UL, 2UL};
+        const unsigned long kCount     = task_id == 0 ? 2UL : 1UL;
+        for (unsigned long index = 0; index < kCount; ++index) {
+            const unsigned long kTarget =
+                task_id == 0 ? kTargets[index] : kTargets[1];
+            for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                const long kResult = user_syscall3(
+                    cinux::armv7::syscall_nr::kWait, kTarget,
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+                if (kResult == 0) {
+                    break;
+                }
             }
         }
     }
@@ -249,8 +253,9 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
                 cinux::mm::AddressSpace* parent = nullptr) {
     UserTask& task = g_tasks[index];
     task            = UserTask{};
-    task.state      = TaskState::kRunnable;
+    task.state       = TaskState::kRunnable;
     task.exit_status = 0;
+    task.wait_target = kTaskCount;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -390,6 +395,9 @@ __attribute__((noinline)) bool RunUserModeSelfCheck() {
     if (!setup_task(2, kTaskACode, kTaskAStack, g_tasks[0].space)) {
         return false;
     }
+    if (!setup_task(3, kTaskACode, kTaskAStack, g_tasks[0].space)) {
+        return false;
+    }
     g_running = true;
     g_current = 0;
     cinux::arch::per_cpu::self().slice_ticks = 1;
@@ -412,11 +420,13 @@ namespace {
 
 /// Picks the next runnable task and hands its frame back to the stub.
 /// Never returns when nothing is runnable: it resumes the kernel instead.
-/// Wakes every blocked task; each one re-asks for its target on return.
-void wake_blocked() {
+/// Wakes the tasks blocked on `target`; each one re-asks on return.
+void wake_waiters_of(unsigned long target) {
     for (auto& task : g_tasks) {
-        if (task.state == TaskState::kBlocked) {
-            task.state = TaskState::kRunnable;
+        if (task.state == TaskState::kBlocked && task.wait_target == target) {
+            task.state       = TaskState::kRunnable;
+            task.wait_target = kTaskCount;
+            cinux::print::Println("[armv7] wake a waiter of %u", target);
         }
     }
 }
@@ -453,7 +463,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].exit_status = g_user_trap.r0;
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
-        wake_blocked();
+        wake_waiters_of(g_current);
     }
 
     if (number == cinux::armv7::syscall_nr::kWait) {
@@ -470,8 +480,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         }
         // Not finished: park this task; when someone ends, wake_blocked
         // makes it runnable again and it re-asks with -1 in hand.
-        g_tasks[g_current].state    = TaskState::kBlocked;
-        g_tasks[g_current].trap.r0 = ~0UL;
+        g_tasks[g_current].state       = TaskState::kBlocked;
+        g_tasks[g_current].wait_target = kTarget;
+        g_tasks[g_current].trap.r0     = ~0UL;
         cinux::print::Println("[armv7] task %u blocks on %u", g_current, kTarget);
     }
 
@@ -548,7 +559,7 @@ extern "C" [[noreturn]] void c_user_faulted() {
     g_tasks[g_current].state       = TaskState::kDone;
     g_tasks[g_current].exit_status = 0xDEADUL;
     cinux::print::Println("[armv7] task %u faulted", g_current);
-    wake_blocked();
+    wake_waiters_of(g_current);
     const unsigned long kOld  = g_current;
     const unsigned long kNext = next_runnable(g_current);
     if (kNext != kTaskCount) {

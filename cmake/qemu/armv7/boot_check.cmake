@@ -50,6 +50,14 @@ if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
     message(FATAL_ERROR
         "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_BLOCK2 AND NOT serial_out MATCHES "${EXPECTED_BLOCK2}")
+    message(FATAL_ERROR
+        "arm_boot: the second waiter never blocked.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_WAKE AND NOT serial_out MATCHES "${EXPECTED_WAKE}")
+    message(FATAL_ERROR
+        "arm_boot: the precise wake never happened.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_BLOCK AND NOT serial_out MATCHES "${EXPECTED_BLOCK}")
     message(FATAL_ERROR
         "arm_boot: the waiter never blocked.\nstdout:\n${serial_out}")
