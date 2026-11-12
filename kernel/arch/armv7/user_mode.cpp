@@ -407,6 +407,20 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             }
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
+            const long kReopen = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(name)), 0, 0);
+            if (kReopen == kFd) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('r'); NOTE('e'); NOTE('o'); NOTE('p'); NOTE('e'); NOTE('n');
+                NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+            static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                            static_cast<unsigned long>(kReopen), 0, 0));
         }
         {
             char motd[8];
@@ -436,6 +450,36 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                 }
                 static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                                 static_cast<unsigned long>(kMotdFd), 0, 0));
+            }
+        }
+        {
+            char piece[8];
+            piece[0] = '/'; piece[1] = 'r'; piece[2] = 'e'; piece[3] = 'a';
+            piece[4] = 'd'; piece[5] = 'm'; piece[6] = 'e'; piece[7] = 0;
+            const long kReadmeFd = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(piece)), 0, 0);
+            if (kReadmeFd >= 3) {
+                char text[8];
+                for (unsigned long index = 0; index < 8; ++index) {
+                    text[index] = 0;
+                }
+                const long kBytes = user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kReadmeFd),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(text)), 8);
+                if (kBytes == 8 && text[0] == 'r' && text[1] == 'e' && text[2] == 'a' &&
+                    text[3] == 'd' && text[4] == 'm' && text[5] == 'e' &&
+                    text[6] == '!' && text[7] == '\n') {
+                    char          note[16];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('r'); NOTE('e'); NOTE('a'); NOTE('d'); NOTE('m'); NOTE('e');
+                    NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kReadmeFd), 0, 0));
             }
         }
         {
@@ -1739,12 +1783,14 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
 
     if (number == cinux::armv7::syscall_nr::kClose) {
         const unsigned long kFd = g_user_trap.r0;
-        if (kFd <= 2) {
+        if (kFd < kMaxFds && g_tasks[g_current].fds[kFd].open) {
             g_tasks[g_current].fds[kFd].open = false;
             cinux::print::Println("[armv7] close %u", kFd);
             g_tasks[g_current].trap.r0 = 0;
         } else {
-            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
+            cinux::print::Println("[armv7] close %u refused", kFd);
         }
         return &g_tasks[g_current].trap;
     }
