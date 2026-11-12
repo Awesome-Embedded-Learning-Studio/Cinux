@@ -9,7 +9,7 @@
 #include "cinux/text.hpp"
 #include "kernel/arch/cpuid.hpp"
 #include "kernel/arch/page.hpp"
-#include "kernel/arch/x86_64/smp.hpp"
+#include "kernel/arch/smp_control.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
@@ -119,12 +119,12 @@ void source_memory(void* /*context*/, unsigned long& free_pages, unsigned long& 
 }
 
 bool source_nth_cpu(void* /*context*/, unsigned long ordinal, ProcCpuFacts& into) {
-    if (ordinal >= arch::smp::OnlineCpuCount()) {
+    if (ordinal >= arch::OnlineCpuCount()) {
         return false;
     }
     into               = ProcCpuFacts{};
     into.processor     = ordinal;
-    into.apic_id       = arch::smp::Mechanisms(static_cast<unsigned int>(ordinal)).apic_id;
+    into.apic_id       = arch::CpuHardwareId(static_cast<unsigned int>(ordinal));
     const auto kVendor = arch::ReadCpuId(0, 0);
     base::CopyBytes(into.vendor_id, &kVendor.ebx, sizeof(kVendor.ebx));
     base::CopyBytes(into.vendor_id + sizeof(kVendor.ebx), &kVendor.edx, sizeof(kVendor.edx));

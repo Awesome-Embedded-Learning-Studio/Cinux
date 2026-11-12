@@ -7,7 +7,7 @@
 #include "cinux/memory.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/per_cpu.hpp"
-#include "kernel/arch/x86_64/smp.hpp"
+#include "kernel/arch/smp_control.hpp"
 #include "kernel/proc/futex.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/signals.hpp"
@@ -68,7 +68,7 @@ void Scheduler::QueuePolicy::exit(State& state) {
         local().notify_pending = false;
         state.scheduler.queue_lock_.unlock();
         if (kNotify) {
-            arch::smp::NotifyRunnable();
+            arch::NotifyRunnable();
         }
     }
     arch::RestoreIrq(state.irq);
