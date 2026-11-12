@@ -285,6 +285,7 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
 | 6 | close | `close 2`、`ebadf ok` |
 | 20 | getpid | `getpid 3`、`pid N ok` |
+| 64 | getppid | `getppid 0`、`ppid ok` |
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |

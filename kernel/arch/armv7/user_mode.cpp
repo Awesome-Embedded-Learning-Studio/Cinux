@@ -76,6 +76,7 @@ struct UserTask {
     unsigned long            break_top;     // grow-only user heap break
     unsigned long            fd_mask;       // bit per open descriptor
     unsigned long            fault_handler; // user fault handler, 0 if none
+    unsigned long            parent;        // who forked this task
     unsigned long            mmap_top;      // grow-only anonymous window
     bool                     in_use;         // this slot owns a space
     bool                     read_pending;   // a read is parked, waiting for input
@@ -440,6 +441,16 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         const long kFirst = user_syscall0(cinux::armv7::syscall_nr::kFork);
         if (kFirst == 0) {
             *kSharedPage = 0x2222UL;
+            const long kPpid = user_syscall3(cinux::armv7::syscall_nr::kGetPpid, 0, 0, 0);
+            if (kPpid == 0) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('p'); NOTE('p'); NOTE('i'); NOTE('d'); NOTE(' ');
+                NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
             if (*kSharedPage == 0x2222UL) {
                 char          note[24];
                 unsigned long note_length = 0;
@@ -641,6 +652,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
     task.fault_handler = 0;
     task.in_use        = true;
+    task.parent        = 0;
     task.mmap_top      = kMmapBase;
     task.read_pending  = false;
     task.read_buf      = 0;
@@ -975,6 +987,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         child.mmap_top      = parent.mmap_top;
         child.fd_mask       = parent.fd_mask;
         child.fault_handler = parent.fault_handler;
+        child.parent        = g_current;
         child.wait_target   = kTaskCount;
         child.trap          = parent.trap;
         child.trap.r0       = 0;  // the child's fork returns zero
@@ -1291,6 +1304,10 @@ extern "C" unsigned long CurrentFdMask() {
 
 extern "C" unsigned long CurrentTaskIndex() {
     return g_current;
+}
+
+extern "C" unsigned long CurrentTaskParent() {
+    return g_tasks[g_current].parent;
 }
 
 extern "C" bool SchedulerRunning() {

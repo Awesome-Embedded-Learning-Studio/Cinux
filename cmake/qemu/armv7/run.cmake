@@ -79,6 +79,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_FORKTWOS=cow after two forks"
             "-DEXPECTED_REUSEOK=reuse ok"
             "-DEXPECTED_SLOTREUSED=slot reused"
+            "-DEXPECTED_GETPPID=getppid 0"
+            "-DEXPECTED_PPIDOK=ppid ok"
             "-DEXPECTED_NOSLOT=fork refused, no free slot"
             "-DEXPECTED_NOSLOTOK=no slot ok"
             "-DEXPECTED_TASK6=task 6 exited with status 3"
