@@ -37,6 +37,7 @@ add_test(NAME arm_boot
             -DEXPECTED_PERCPU=per-cpu ok
             -DEXPECTED_TASKS=two tasks ok
             -DEXPECTED_USER=user mode round trip ok
+            -DEXPECTED_SVC=svc write matched
             -DEXPECTED_FAULT=data abort at 51000000 status 805 code 2
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)

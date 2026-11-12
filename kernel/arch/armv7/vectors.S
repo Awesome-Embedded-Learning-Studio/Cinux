@@ -23,6 +23,7 @@ _vec1: mov r0, #1
        b   _dispatch
 _vec2: push {r0-r3, lr}
        mov  r0, r7
+       mov  r1, sp
        bl   c_svc_handler
        str  r0, [sp]
        pop  {r0-r3, lr}

@@ -1,47 +1,74 @@
 /**
  * @file    svc.cpp
- * @brief   The armv7 supervisor-call handler: number in r7, value in r0.
+ * @brief   The armv7 supervisor-call dispatch: number in r7, args in r0-r3.
  *
- * Linux's armv7 ABI puts the syscall number in r7 and the arguments in
- * r0 to r3. The vector stub forwards r7 and stores the handler's return
- * value into the saved r0, so the user side sees it as the call's result.
+ * The vector stub hands over the number and a pointer to the saved
+ * argument quad. The handler writes its answer back through r0; the stub
+ * stores that into the saved slot, so the user side sees it as the call's
+ * result. exit never returns: it swaps the kernel context back in.
  *
  * @author  Charliechen114514
  * @date    2026-11-12
- * @version 0.1
+ * @version 0.2
  * @since   0.1.0
  * @ingroup kernel_arch
  * @copyright Copyright (c) 2026
  */
 
 #include "kernel/arch/armv7/context.hpp"
+#include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/armv7/uart.hpp"
 #include "kernel/boot/print.hpp"
 
 namespace {
 
-constexpr unsigned long kSvcProbe = 0x1337UL;
-constexpr unsigned long kSvcExit  = 0x1338UL;
-
 cinux::arch::CpuContext  g_scratch;
 cinux::arch::CpuContext* g_kernel_return = nullptr;
+volatile bool            g_user_exited   = false;
+
+unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
+    if (fd != 1 && fd != 2) {
+        return static_cast<unsigned long>(-1);
+    }
+    const auto* bytes = reinterpret_cast<const char*>(buffer);
+    for (unsigned long index = 0; index < count; ++index) {
+        cinux::armv7::UartPutChar(bytes[index]);
+    }
+    return count;
+}
 
 }  // namespace
 
-extern "C" void NoteUserExit();
-
 void InstallUserReturnContext(cinux::arch::CpuContext* context) {
     g_kernel_return = context;
+    g_user_exited   = false;
 }
 
-extern "C" unsigned long c_svc_handler(unsigned long number) {
-    if (number == kSvcProbe) {
-        cinux::print::Println("[armv7] svc %X answered %X", number, 0x5A5AUL);
-        return 0x5A5AUL;
+extern "C" bool UserExited() {
+    return g_user_exited;
+}
+
+extern "C" void NoteUserExit() {
+    g_user_exited = true;
+}
+
+extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* frame) {
+    switch (number) {
+    case cinux::armv7::syscall_nr::kExit:
+        if (g_kernel_return != nullptr) {
+            NoteUserExit();
+            cinux::arch::ContextSwitch(&g_scratch, g_kernel_return);
+        }
+        return ~0UL;
+    case cinux::armv7::syscall_nr::kWrite: {
+        const unsigned long result = do_write(frame[0], frame[1], frame[2]);
+        cinux::print::Println("[armv7] svc write %u bytes", result);
+        return result;
     }
-    if (number == kSvcExit && g_kernel_return != nullptr) {
-        cinux::print::Println("[armv7] user exit");
-        NoteUserExit();
-        cinux::arch::ContextSwitch(&g_scratch, g_kernel_return);
+    case cinux::armv7::syscall_nr::kSchedYield:
+        return 0;
+    default:
+        cinux::print::Println("[armv7] svc %X unknown", number);
+        return ~0UL;
     }
-    return ~0UL;
 }
