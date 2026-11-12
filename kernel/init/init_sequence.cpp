@@ -7,7 +7,7 @@
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/console/screen.hpp"
-#include "kernel/arch/x86_64/platform/acpi/acpi.hpp"
+#include "kernel/platform/firmware.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/platform/clock.hpp"
