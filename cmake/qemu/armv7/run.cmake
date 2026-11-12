@@ -55,6 +55,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_BRKOK=brk ok"
             "-DEXPECTED_MMAP=mmap 40010000 len 2000"
             "-DEXPECTED_MMAPOK=mmap ok"
+            "-DEXPECTED_HINTTOOK=mmap hint 40020000 is taken"
+            "-DEXPECTED_HINTOK=mmap hint ok"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"

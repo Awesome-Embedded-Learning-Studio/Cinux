@@ -54,6 +54,8 @@ expect_literal(EXPECTED_CLOSE "nothing was ever closed.")
 expect_literal(EXPECTED_EBADF "a closed descriptor was still writable.")
 
 expect_literal(EXPECTED_MMAP "the anonymous mapping never appeared.")
+expect_literal(EXPECTED_HINTTOOK "a taken hint was accepted.")
+expect_literal(EXPECTED_HINTOK "the hinted mapping did not work.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 

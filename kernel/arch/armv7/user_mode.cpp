@@ -178,6 +178,26 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
+        const long kHinted = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
+                                           0x40020000UL, 0);
+        if (kHinted == static_cast<long>(0x40020000UL)) {
+            auto* const kSpot = reinterpret_cast<volatile unsigned long*>(0x40020000UL);
+            *kSpot            = 0xF00DUL;
+            const long kAgain = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
+                                              0x40020000UL, 0);
+            if (*kSpot == 0xF00DUL && kAgain == -12) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('m'); NOTE('m'); NOTE('a'); NOTE('p'); NOTE(' '); NOTE('h');
+                NOTE('i'); NOTE('n'); NOTE('t'); NOTE(' '); NOTE('o'); NOTE('k');
+                NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
+    }
+    if (task_id == 0) {
         const long kMapped = user_syscall3(cinux::armv7::syscall_nr::kMmap, 8192, 0, 0);
         if (kMapped > 0) {
             auto* const kSpot = reinterpret_cast<volatile unsigned long*>(
@@ -592,40 +612,62 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kMmap) {
-        // Anonymous mapping, grow-only: r0 is the byte length; the base
-        // comes from a window of its own and is returned in r0.
+        // Anonymous mapping. r0 is the byte length, r1 an optional address
+        // hint (0 lets the bump window choose). A hint must sit inside the
+        // window, be page-aligned, and name unmapped pages.
         const unsigned long kBytes = g_user_trap.r0;
+        const unsigned long kHint  = g_user_trap.r1;
         unsigned long&      kTop   = g_tasks[g_current].mmap_top;
         const unsigned long kWant  = (kBytes + 4095UL) & ~4095UL;
-        if (kTop + kWant <= kMmapLimit) {
-            const unsigned long kBase = kTop;
+        unsigned long       kBase  = 0;
+        if (kHint != 0) {
+            if (kHint < kMmapBase || kHint >= kMmapLimit || (kHint & 4095UL) != 0) {
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-22);  // EINVAL
+                cinux::print::Println("[armv7] mmap hint %X refused", kHint);
+                return &g_tasks[g_current].trap;
+            }
             cinux::mm::KernelTables tables;
             const unsigned long     root = g_tasks[g_current].space->root();
-            unsigned long           spot = kBase;
-            while (spot < kBase + kWant) {
-                const auto kFrame = cinux::mm::Pmm::self().allocate_page();
-                if (kFrame.raw == 0) {
-                    break;
+            for (unsigned long spot = kHint; spot < kHint + kWant;
+                 spot += cinux::arch::page::kSize) {
+                if (cinux::mm::walk::TranslatePage(tables, root, spot) != 0) {
+                    g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);  // ENOMEM
+                    cinux::print::Println("[armv7] mmap hint %X is taken", kHint);
+                    return &g_tasks[g_current].trap;
                 }
-                auto* const table = cinux::mm::walk::EnsureLeafTable(
-                    tables, root, spot, cinux::arch::page::kUser);
-                if (table == nullptr) {
-                    cinux::mm::Pmm::self().free_page(kFrame);
-                    break;
-                }
-                table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
-                    cinux::arch::page::MakePageEntry(
-                        kFrame.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
-                cinux::arch::space::InvalidatePage(spot);
-                spot += cinux::arch::page::kSize;
             }
+            kBase = kHint;
+        } else if (kTop + kWant <= kMmapLimit) {
+            kBase = kTop;
             kTop += kWant;
-            cinux::print::Println("[armv7] mmap %X len %X", kBase, kWant);
-            g_tasks[g_current].trap.r0 = kBase;
         } else {
-            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);  // ENOMEM
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
             cinux::print::Println("[armv7] mmap refused %u", kBytes);
+            return &g_tasks[g_current].trap;
         }
+        cinux::mm::KernelTables tables;
+        const unsigned long     root = g_tasks[g_current].space->root();
+        for (unsigned long spot = kBase; spot < kBase + kWant;
+             spot += cinux::arch::page::kSize) {
+            const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+            if (kFrame.raw == 0) {
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
+                return &g_tasks[g_current].trap;
+            }
+            auto* const table = cinux::mm::walk::EnsureLeafTable(
+                tables, root, spot, cinux::arch::page::kUser);
+            if (table == nullptr) {
+                cinux::mm::Pmm::self().free_page(kFrame);
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
+                return &g_tasks[g_current].trap;
+            }
+            table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
+                cinux::arch::page::MakePageEntry(
+                    kFrame.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+            cinux::arch::space::InvalidatePage(spot);
+        }
+        cinux::print::Println("[armv7] mmap %X len %X", kBase, kWant);
+        g_tasks[g_current].trap.r0 = kBase;
         return &g_tasks[g_current].trap;
     }
 
