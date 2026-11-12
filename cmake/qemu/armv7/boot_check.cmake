@@ -14,6 +14,12 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_TASKS_A AND NOT serial_out MATCHES "${EXPECTED_TASKS_A}")
+    message(FATAL_ERROR "arm_boot: task A never ran.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_TASKS_B AND NOT serial_out MATCHES "${EXPECTED_TASKS_B}")
+    message(FATAL_ERROR "arm_boot: task B never ran.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_USERFAULT AND NOT serial_out MATCHES "${EXPECTED_USERFAULT}")
     message(FATAL_ERROR
         "arm_boot: the user permission fault was not caught.\nstdout:\n${serial_out}")
