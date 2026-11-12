@@ -3,6 +3,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/mm/heap.hpp"
 #include "kernel/mm/page_walk.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/mm/pmm.hpp"
 
@@ -89,6 +90,34 @@ bool RunMapSelfCheck() {
     auto* const window = reinterpret_cast<volatile unsigned long*>(kSpot);
     *window            = 0xA5A5A5A5UL;
     return *window == 0xA5A5A5A5UL;
+}
+
+namespace {
+
+cinux::arch::CpuContext  g_ctx_main;
+cinux::arch::CpuContext  g_ctx_other;
+cinux::arch::CpuContext* g_main_pointer = nullptr;
+alignas(8) unsigned char  g_other_stack[4096];
+volatile bool             g_other_ran = false;
+
+/// The other world: note that it ran, then hand the CPU back.
+extern "C" void context_other_entry() {
+    g_other_ran = true;
+    cinux::arch::ContextSwitch(&g_ctx_other, g_main_pointer);
+}
+
+}  // namespace
+
+bool RunContextSelfCheck() {
+    g_other_ran    = false;
+    g_ctx_other    = cinux::arch::CpuContext{};
+    g_ctx_other.sp = reinterpret_cast<unsigned long>(g_other_stack) + sizeof(g_other_stack);
+    g_ctx_other.sp &= ~7UL;
+    g_ctx_other.lr = reinterpret_cast<unsigned long>(&context_other_entry);
+    g_main_pointer = &g_ctx_main;
+
+    cinux::arch::ContextSwitch(&g_ctx_main, &g_ctx_other);
+    return g_other_ran;
 }
 
 }  // namespace cinux::armv7

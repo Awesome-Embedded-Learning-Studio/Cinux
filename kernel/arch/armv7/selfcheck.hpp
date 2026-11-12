@@ -27,4 +27,7 @@ namespace cinux::armv7 {
 /// Maps one fresh page through the shared walk and writes through it.
 [[nodiscard]] bool RunMapSelfCheck();
 
+/// Switches into a hand-built context and checks it switched back.
+[[nodiscard]] bool RunContextSelfCheck();
+
 }  // namespace cinux::armv7

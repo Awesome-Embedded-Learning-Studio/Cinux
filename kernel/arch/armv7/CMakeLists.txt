@@ -9,6 +9,7 @@ add_executable(arm_image
     gic.cpp
     irq.cpp
     vectors.S
+    context_switch.S
     faults.cpp
     exception_dispatch.cpp
     fdt.cpp
