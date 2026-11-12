@@ -18,6 +18,7 @@
 #include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/uart.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/boot/print.hpp"
 
 namespace {
@@ -26,6 +27,7 @@ unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long cou
     if (fd != 1 && fd != 2) {
         return static_cast<unsigned long>(-1);
     }
+    const cinux::arch::IrqGuard kGuard;
     const auto* bytes = reinterpret_cast<const char*>(buffer);
     for (unsigned long index = 0; index < count; ++index) {
         cinux::armv7::UartPutChar(bytes[index]);

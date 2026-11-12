@@ -22,6 +22,7 @@
 #include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/page_walk.hpp"
@@ -105,12 +106,12 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
     PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR('\n');
 #undef PUSH_CHAR
-    for (unsigned long round = 0; round < 3; ++round) {
-        buffer[2] = static_cast<char>('0' + round);
+    for (unsigned long round = 0; round < 20; ++round) {
+        buffer[2] = static_cast<char>('0' + (round % 10));
         user_write(buffer, length);
-        if (round != 2) {
-            static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kSchedYield));
+        for (volatile unsigned long spin = 0; spin < 6000000UL; ++spin) {
         }
+
     }
     if (task_id != 0) {
         // A foreign task's code page: this task's table has nothing there.
@@ -217,6 +218,7 @@ bool RunUserModeSelfCheck() {
     }
     g_running = true;
     g_current = 0;
+    cinux::arch::per_cpu::self().slice_ticks = 1;
     cinux::print::Println("[armv7] task 0 starts on its own table");
     cinux::arch::space::SwitchRoot(g_tasks[0].root);
     cinux::arch::EnterUserModeWithReturn(g_tasks[0].trap.lr, g_tasks[0].trap.sp, &g_main);
@@ -245,6 +247,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_current = other;
         cinux::print::Println("[armv7] switch to task %u", other);
         cinux::arch::space::SwitchRoot(g_tasks[other].root);
+        cinux::arch::per_cpu::self().slice_ticks = 1;
         return &g_tasks[other].trap;
     }
 
@@ -264,6 +267,29 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number) {
     return schedule_next(number);
+}
+
+extern "C" bool SchedulerRunning() {
+    return g_running;
+}
+
+extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap) {
+    if (!g_running) {
+        return trap;
+    }
+    cinux::arch::UserTrap& running = g_tasks[g_current].trap;
+    for (unsigned long word = 0; word < 16; ++word) {
+        (&running.r0)[word] = (&trap->r0)[word];
+    }
+    const unsigned long other = g_current == 0 ? 1 : 0;
+    if (g_tasks[other].done) {
+        return trap;
+    }
+    g_current = other;
+    cinux::print::Println("[armv7] preempt to task %u", other);
+    cinux::arch::space::SwitchRoot(g_tasks[other].root);
+    cinux::arch::per_cpu::self().slice_ticks = 1;
+    return &g_tasks[other].trap;
 }
 
 extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);

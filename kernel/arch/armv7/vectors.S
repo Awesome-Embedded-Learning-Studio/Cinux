@@ -47,13 +47,14 @@ _vec2: cmp  r7, #158
 
 @ IRQ: the return address needs the four-byte correction before saving.
 _vec6: sub  lr, lr, #4
-       mov  r0, #6
-       b    _dispatch
+       mov  r1, #0                 @ interrupt
+       mov  r2, #0xD2              @ back to IRQ mode, interrupts masked
+       b    _trap_save
 
 @ Trapping svc: lr is already the user's return address.
 _svc_trap:
        mov  r1, #1                 @ supervisor call
-       mov  r2, #0x13              @ keep returning to supervisor mode
+       mov  r2, #0xD3              @ back to supervisor mode, interrupts masked
 
 @ Save the interrupted world into g_user_trap, let C choose the frame
 @ to resume, then restore it. r12 is parked on the supervisor stack
