@@ -358,6 +358,32 @@ close 入口 `HandleClose` 直接转发 `FileTable::free`，任意描述符都�
 浅缺口一处：`HandleClose` 本身没有直接用例（`close_range` 有），但它只有
 五行转发，`free` 已被充分覆盖。x86 宿主测试 86/86 通过。
 
+## 中立层试编：fs 在 armv7 工具链下 18 缺 1
+
+审计之后按计划做了"先编不链"。方法：从 build-armv7 的 compile_commands 里
+取 arm-none-eabi-g++ 的完整 flags，剔除 -c/-o 两个参数，逐个编 kernel/fs 全部
+源文件。
+
+结果是 18 个文件里 17 个直接编过：file_table、vfs、ramfs、file_lock、pipe、
+ustar、file_world，连同 ext2 全套与 devfs、procfs 的主体。唯一失败的是
+procfs_init.cpp，它引 kernel/arch/cpuid.hpp，armv7 的生成头找不到对应文件。
+这不是缺一份副本的事：CPUID 的叶与寄存器排布本身就是 x86 语义，procfs 拿它
+填 /proc/cpuinfo。中立做法是把"CPU 事实来源"抽成架构钩子，x86 后端用 CPUID
+填，armv7 后端用 MIDR 或先给桩，等 procfs 上 armv7 时再做。
+
+再往下做了一层：把编出的目标文件用 ld -r 合并看未定义符号。全模块 91 个符
+号，大头是 ext2/devfs/pty 拖来的块设备与输入驱动（Ahci、Nvme、BlockCache、
+Framebuffer、Pty、Tty 一串），armv7 没有磁盘，这些先不链。只链第一刀要的最
+小组合（file_table、vfs、ramfs、file_lock）时，未定义只剩 13 个，对照 armv7
+现有内核的符号表，其中 7 个已经供着：FormatToBuf、AssertionFailed、memcmp、
+memset、__aeabi_uldivmod，以及全套 operator new/delete（armv7 已有内核堆）。
+
+真正要补的只有 6 个：memchr、std::terminate、SpinLockPolicy::enter 与
+exit、Spinlock::retire 与 set_name。前两个各几行，后四个是 irq_guard 之上
+的薄实现。第一刀（把替身的描述符表换成真的 FileTable）的缺口比当初记的
+"fs::FileTable、SendSignal、ClearTidWord 三块"乐观得多：那是把 Task 整个
+接上时的旧清单，只换文件层的话，6 个符号补完就能链。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
