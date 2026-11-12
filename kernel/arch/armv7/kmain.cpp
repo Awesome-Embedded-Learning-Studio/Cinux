@@ -148,6 +148,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunPerCpuSelfCheck()
                                               ? "[armv7] per-cpu ok"
                                               : "[armv7] per-cpu FAILED");
+                    cinux::print::Println(cinux::armv7::RunSpaceSelfCheck()
+                                              ? "[armv7] space teardown ok"
+                                              : "[armv7] space teardown FAILED");
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");

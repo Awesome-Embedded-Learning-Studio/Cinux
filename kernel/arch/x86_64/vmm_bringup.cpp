@@ -166,6 +166,10 @@ unsigned long KernelTables::take_root() {
     return take_page();
 }
 
+void KernelTables::release_root(unsigned long physical) {
+    Pmm::self().free_page(base::PhysAddr{physical});
+}
+
 void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
     unsigned long const kFrameBytes = static_cast<unsigned long>(info.framebuffer.pitch) *
                                       static_cast<unsigned long>(info.framebuffer.height);

@@ -2,6 +2,8 @@
 
 #include "kernel/arch/space_control.hpp"
 #include "kernel/mm/heap.hpp"
+#include "kernel/boot/print.hpp"
+#include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/context.hpp"
 #include "kernel/arch/kernel_stack.hpp"
@@ -136,6 +138,24 @@ bool RunPerCpuSelfCheck() {
         return false;
     }
     return cinux::arch::CurrentKernelStack() != 0;
+}
+
+bool RunSpaceSelfCheck() {
+    const unsigned long kBefore = cinux::mm::Pmm::self().free_page_count();
+    auto* const         space  = new cinux::mm::AddressSpace{};
+    if (space == nullptr || !space->init()) {
+        return false;
+    }
+    const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    if (!space->map_user(0x40001000UL, kFrame.raw)) {
+        return false;
+    }
+    space->teardown();
+    const unsigned long kAfter = cinux::mm::Pmm::self().free_page_count();
+    return kAfter == kBefore;
 }
 
 }  // namespace cinux::armv7

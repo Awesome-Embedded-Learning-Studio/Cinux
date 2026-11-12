@@ -89,11 +89,27 @@ unsigned long KernelTables::take_root() {
         return 0;
     }
     const unsigned long kRoot = kBlock.raw + (kSkip * 4096UL);
-    auto* const         table = cinux::base::PtrAt<unsigned char>(kRoot);
+    // The window is four pages; hand the rest of the block straight back
+    // so a later release of four pages leaves the ledger where it was.
+    for (unsigned long page = 0; page < 8; ++page) {
+        if (page < kSkip || page >= kSkip + 4) {
+            Pmm::self().free_page(
+                cinux::base::PhysAddr{kBlock.raw + (page * 4096UL)});
+        }
+    }
+    auto* const table = cinux::base::PtrAt<unsigned char>(kRoot);
     for (unsigned long offset = 0; offset < 0x4000UL; ++offset) {
         table[offset] = 0;
     }
     return kRoot;
+}
+
+void KernelTables::release_root(unsigned long physical) {
+    // take_root handed out a four-page window inside an aligned block;
+    // the pages outside the window were leaked on purpose there.
+    for (unsigned long page = 0; page < 4; ++page) {
+        Pmm::self().free_page(base::PhysAddr{physical + (page * 4096UL)});
+    }
 }
 
 void MapFramebufferDoor(const cinux::boot::BootInfo& info) {

@@ -33,6 +33,10 @@ namespace cinux::armv7 {
 /// Installs a per-CPU block and reads it back through TPIDRPRW.
 [[nodiscard]] bool RunPerCpuSelfCheck();
 
+/// Builds an address space, maps one frame, tears it down, and checks that
+/// the allocator got the frame and the tables back.
+[[nodiscard]] bool RunSpaceSelfCheck();
+
 /// Runs two tasks that yield to each other and checks the step counts.
 [[nodiscard]] bool RunTaskSelfCheck();
 

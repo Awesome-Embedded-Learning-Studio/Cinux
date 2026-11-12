@@ -23,28 +23,42 @@ using walk::MapPage;
 using walk::MapUserPage;
 using walk::TranslatePage;
 
-constexpr unsigned long kKernelHalfSlots = walk::kUserHalfSlots;
 constexpr unsigned long kSlotBytes       = sizeof(Entry);
 
-constexpr int kLevelsBelowTop = static_cast<int>(sizeof(walk::kUpperLevels) / sizeof(walk::kUpperLevels[0])) - 1;
 constexpr int kLeafTable       = 0;
 
-void release_user_tables(Entry* table, int levels_below) {
-    const auto kLevel = walk::kUpperLevels[kLevelsBelowTop - levels_below];
+constexpr unsigned long kUpperLevelCount =
+    sizeof(walk::kUpperLevels) / sizeof(walk::kUpperLevels[0]);
+
+/// Retires a table and everything under it.
+/// @param level_index  Index into walk::kUpperLevels; one past the end
+///                     means the table holds leaf entries.
+void release_table(Entry* table, unsigned long level_index) {
+    const auto kLevel = (level_index < kUpperLevelCount)
+                            ? walk::kUpperLevels[level_index]
+                            : cinux::arch::page::kLeafLevel;
     for (unsigned long index = 0; index < walk::kEntriesPerTable; ++index) {
         Entry& slot = table[index];
         if (!cinux::arch::page::DescriptorPresent(slot)) {
             continue;
         }
-        unsigned long const kTarget = walk::EntryTarget(slot);
-        if (levels_below == kLeafTable) {
-            cow::ReleaseFrame(kTarget);
+        if (cinux::arch::page::DescriptorIsLeaf(slot, kLevel)) {
+            cow::ReleaseFrame(walk::EntryTarget(slot));
             continue;
         }
-        cinux::base::safety::Check(!cinux::arch::page::DescriptorIsLeaf(slot, kLevel),
-                                   "user half holds a large page");
-        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), levels_below - 1);
-        Pmm::self().free_page(cinux::base::PhysAddr{kTarget});
+        const unsigned long kChild = walk::EntryTarget(slot);
+        auto* const kChildTable = cinux::base::PtrAt<Entry>(DirectMapVirt(kChild));
+        if (level_index + 1U >= kUpperLevelCount) {
+            for (unsigned long leaf = 0; leaf < walk::kEntriesPerTable; ++leaf) {
+                Entry& leaf_slot = kChildTable[leaf];
+                if (cinux::arch::page::DescriptorPresent(leaf_slot)) {
+                    cow::ReleaseFrame(walk::EntryTarget(leaf_slot));
+                }
+            }
+        } else {
+            release_table(kChildTable, level_index + 1U);
+        }
+        Pmm::self().free_page(cinux::base::PhysAddr{kChild});
     }
 }
 
@@ -116,21 +130,23 @@ void AddressSpace::teardown() {
     if (root_ == 0) {
         return;
     }
+    KernelTables tables;
     // NOLINTNEXTLINE(misc-const-correctness) the walk rewrites leaf entries
     auto* const kRoot = cinux::base::PtrAt<Entry>(DirectMapVirt(root_));
-    for (unsigned long index = 0; index < kKernelHalfSlots; ++index) {
+    const unsigned long kTopSlots = cinux::arch::page::EntriesAt(walk::kUpperLevels[0]);
+    for (unsigned long index = 0; index < kTopSlots; ++index) {
+        if (!cinux::arch::space::IsUserSlot(index)) {
+            continue;
+        }
         Entry& slot = kRoot[index];
         if (!cinux::arch::page::DescriptorPresent(slot)) {
             continue;
         }
-        cinux::base::safety::Check(
-            !cinux::arch::page::DescriptorIsLeaf(slot, walk::kUpperLevels[0]),
-            "user half holds a large page");
         unsigned long const kTarget = walk::EntryTarget(slot);
-        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), kLevelsBelowTop);
+        release_table(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), 1U);
         Pmm::self().free_page(cinux::base::PhysAddr{kTarget});
     }
-    Pmm::self().free_page(cinux::base::PhysAddr{root_});
+    tables.release_root(root_);
     root_ = 0;
 }
 

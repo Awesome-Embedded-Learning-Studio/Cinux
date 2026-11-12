@@ -50,6 +50,10 @@ if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
     message(FATAL_ERROR
         "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_TEARDOWN AND NOT serial_out MATCHES "${EXPECTED_TEARDOWN}")
+    message(FATAL_ERROR
+        "arm_boot: the space teardown never balanced.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_PERCPU AND NOT serial_out MATCHES "${EXPECTED_PERCPU}")
     message(FATAL_ERROR
         "arm_boot: the per-CPU block check failed.\nstdout:\n${serial_out}")

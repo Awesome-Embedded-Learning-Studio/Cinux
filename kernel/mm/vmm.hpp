@@ -73,6 +73,16 @@ public:
      * @ingroup       kernel_mm
      */
     unsigned long take_root();
+
+    /**
+     * @brief         Returns a space's top-level table.
+     * @param[in]     physical   What take_root handed out.
+     * @note          The port knows how many pages and how much alignment
+     *                it asked for, so it also knows how much to give back.
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    void release_root(unsigned long physical);
 };
 
 /**
