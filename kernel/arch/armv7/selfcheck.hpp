@@ -30,4 +30,7 @@ namespace cinux::armv7 {
 /// Switches into a hand-built context and checks it switched back.
 [[nodiscard]] bool RunContextSelfCheck();
 
+/// Installs a per-CPU block and reads it back through TPIDRPRW.
+[[nodiscard]] bool RunPerCpuSelfCheck();
+
 }  // namespace cinux::armv7

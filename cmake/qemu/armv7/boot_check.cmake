@@ -14,6 +14,10 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_PERCPU AND NOT serial_out MATCHES "${EXPECTED_PERCPU}")
+    message(FATAL_ERROR
+        "arm_boot: the per-CPU block check failed.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_CONTEXT AND NOT serial_out MATCHES "${EXPECTED_CONTEXT}")
     message(FATAL_ERROR
         "arm_boot: the context switch round trip failed.\nstdout:\n${serial_out}")

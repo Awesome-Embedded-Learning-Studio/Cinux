@@ -4,6 +4,8 @@
 #include "kernel/mm/heap.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/context.hpp"
+#include "kernel/arch/kernel_stack.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/mm/pmm.hpp"
 
@@ -118,6 +120,22 @@ bool RunContextSelfCheck() {
 
     cinux::arch::ContextSwitch(&g_ctx_main, &g_ctx_other);
     return g_other_ran;
+}
+
+bool RunPerCpuSelfCheck() {
+    static cinux::arch::per_cpu::PerCpu block{};
+    block.cpu_id           = 0x5A5AUL;
+    block.kernel_stack_top = 0x80001000UL;
+    cinux::arch::per_cpu::Install(&block);
+    const auto& read_back = cinux::arch::per_cpu::self();
+    if (read_back.cpu_id != 0x5A5AUL || read_back.kernel_stack_top != 0x80001000UL) {
+        return false;
+    }
+    cinux::arch::SetKernelStackTop(0x80002000UL);
+    if (cinux::arch::per_cpu::self().kernel_stack_top != 0x80002000UL) {
+        return false;
+    }
+    return cinux::arch::CurrentKernelStack() != 0;
 }
 
 }  // namespace cinux::armv7

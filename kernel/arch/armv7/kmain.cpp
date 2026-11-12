@@ -138,6 +138,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunContextSelfCheck()
                                               ? "[armv7] context switch ok"
                                               : "[armv7] context switch FAILED");
+                    cinux::print::Println(cinux::armv7::RunPerCpuSelfCheck()
+                                              ? "[armv7] per-cpu ok"
+                                              : "[armv7] per-cpu FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
                     // Let a few ticks land before the fault ends the run.
