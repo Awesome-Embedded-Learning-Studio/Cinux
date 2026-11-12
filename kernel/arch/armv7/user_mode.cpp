@@ -397,9 +397,11 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             const unsigned long kTarget =
                 task_id == 0 ? kTargets[index] : kTargets[1];
             for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                // A long deadline: the waiter must still be parked when
+                // the target ends, so the wake is by target, not by timeout.
                 const long kResult = user_syscall3(
                     cinux::armv7::syscall_nr::kWait, 1UL << kTarget,
-                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 200);
                 if (kResult >= 0) {
                     seen[task_id == 0 ? index : 0] = status;
                     break;
@@ -519,7 +521,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
                 const long kResult = user_syscall3(
                     cinux::armv7::syscall_nr::kWait, 1UL << kChildren[index],
-                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 200);
                 if (kResult >= 0) {
                     reaped = reaped && (status == 3UL);
                     break;
@@ -547,7 +549,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                     1UL << static_cast<unsigned long>(kThird),
                     static_cast<unsigned long>(
                         reinterpret_cast<std::uintptr_t>(&reuse_status)),
-                    0);
+                    200);
                 if (kResult >= 0) {
                     if (kThird == 4 && reuse_status == 3UL) {
                         char          note[24];

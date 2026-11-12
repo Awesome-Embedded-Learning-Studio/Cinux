@@ -29,9 +29,13 @@ function(expect_literal variable message_text)
     endif()
     string(FIND "${serial_out}" "${${variable}}" found_at)
     if(found_at EQUAL -1)
+        # Keep the scene: the next run overwrites SERIAL_LOG.
+        string(TIMESTAMP stamp "%Y%m%d-%H%M%S")
+        set(kept "${SERIAL_LOG}.fail-${stamp}.log")
+        file(WRITE "${kept}" "${serial_out}")
         message(FATAL_ERROR
             "arm_boot: ${message_text} (expected \"${${variable}}\")\n"
-            "stdout:\n${serial_out}\nstderr:\n${serial_err}")
+            "kept: ${kept}\nstdout:\n${serial_out}\nstderr:\n${serial_err}")
     endif()
 endfunction()
 

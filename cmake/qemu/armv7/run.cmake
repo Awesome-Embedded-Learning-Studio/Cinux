@@ -48,7 +48,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_WAIT=wait 1 -> DEAD"
             "-DEXPECTED_BLOCK=task 0 blocks on 1"
             "-DEXPECTED_BLOCK2=task 3 blocks on 4"
-            "-DEXPECTED_WAKE=wake a waiter of 1"
+            "-DEXPECTED_WAKE=wake a waiter of 4"
             "-DEXPECTED_TIMEOUT=wait timed out"
             "-DEXPECTED_SLEEP=task 0 sleeps 3 ticks"
             "-DEXPECTED_PID=pid 3 ok"
