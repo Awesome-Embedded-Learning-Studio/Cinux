@@ -81,6 +81,9 @@ expect_literal(EXPECTED_FORK "fork never produced a child.")
 expect_literal(EXPECTED_CHILD "the child never reported.")
 expect_literal(EXPECTED_CHILDEXIT "the child's exit status was lost.")
 expect_literal(EXPECTED_FORKOK "the parent never reaped the child.")
+expect_literal(EXPECTED_CHILDWROTE "the child never saw its own write.")
+expect_literal(EXPECTED_FORKCOW "the child's write was not copied.")
+expect_literal(EXPECTED_FORKCOWOK "the parent saw the child's value.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 

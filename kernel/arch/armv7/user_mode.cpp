@@ -429,8 +429,25 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         static_cast<void>(kReceived);
     }
     if (task_id == 0) {
+        // A page both sides can see before the clone: the child's write
+        // must get a private copy, the parent's must stay as it was.
+        constexpr unsigned long kSharedVa = 0x40040000UL;
+        static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kSharedVa, 0));
+        auto* const kSharedPage = reinterpret_cast<volatile unsigned long*>(kSharedVa);
+        *kSharedPage            = 0x1111UL;
         const long kChild = user_syscall0(cinux::armv7::syscall_nr::kFork);
         if (kChild == 0) {
+            *kSharedPage = 0x2222UL;
+            const bool kSaw = (*kSharedPage == 0x2222UL);
+            if (kSaw) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('c'); NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' ');
+                NOTE('w'); NOTE('r'); NOTE('o'); NOTE('t'); NOTE('e'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
             char          note[16];
             unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
@@ -456,6 +473,17 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                     NOTE('o'); NOTE('k'); NOTE('\n');
 #undef NOTE
                     user_write(note, note_length);
+                    if (*kSharedPage == 0x1111UL) {
+                        char          cow[24];
+                        unsigned long cow_length = 0;
+#define COWNOTE(c) cow[cow_length++] = (c)
+                        COWNOTE('c'); COWNOTE('o'); COWNOTE('w'); COWNOTE(' ');
+                        COWNOTE('a'); COWNOTE('f'); COWNOTE('t'); COWNOTE('e');
+                        COWNOTE('r'); COWNOTE(' '); COWNOTE('f'); COWNOTE('o');
+                        COWNOTE('r'); COWNOTE('k'); COWNOTE('\n');
+#undef COWNOTE
+                        user_write(cow, cow_length);
+                    }
                 }
                 break;
             }
