@@ -198,10 +198,21 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
 截止拍数、按目标唤醒。它能跑，但和通用调度器是两套。
 
 要用上通用那套，缺的是一处 armv7 的 `SwitchSink`：保存当前任务的世界（陷阱
-帧）、换 TTBR0、再装下一个任务的世界。难点有三个：任务上下文在通用那边是
-不透明的，端口要给出自己的表示；通用调度器的阻塞与唤醒要接上这里的
-kBlocked / wait_mask / 截止；任务入口与退出要接上 `user_entry.S` 与
-`c_schedule_from_user`。
+帧）、换 TTBR0、再装下一个任务的世界。真去看代码之后，阻塞点比原先估的多：
+
+- `SwitchSink` 要四个方法：`switch_tasks`、`enter_from_main`、`return_to_main`、
+  `reclaim`，x86 由 `InstallKernelSwitchSink()` 在 `kernel.cpp` 里注入。
+- `kernel/proc/task_runtime.cpp` 是 x86 味道的：它直接读写 `ctx.fs_base` 与
+  `ctx.gs_base`、用 `StartPlan` 的 rip 语义、调 `StoreTaskAddressRegs` 与
+  `LoadTaskAddressRegs`，还直接摸 `PerCpu::kernel_rsp`。armv7 的上下文是
+  r4 到 r11 加 sp、lr、SPSR，没有段基址，每核块里也没有 `kernel_rsp`。
+- `PrepareTaskContext` 也是同一份文件里的 x86 实现，写的是 rip 与 FXSAVE64
+  的初始值。
+- `Task` 里的上下文类型确实是 arch 给的 `CpuContext`，这一点是好的；坏的
+  是建上下文与切换这两段都被 x86 的具体字段绑住了。
+
+所以接入的路径不是"写个 sink 就完"，而是先把 `task_runtime` 里那两段
+（建上下文、切换）抽成端口实现，再写 sink，最后才谈把用户任务搬过去。
 
 在没做这一步之前，迷你调度器就是这一版的真调度器，笔记与自检都按它写。
 
