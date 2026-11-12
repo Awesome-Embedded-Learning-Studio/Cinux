@@ -1,5 +1,5 @@
 #include "framework.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/lockdep.hpp"
 #include "test_assert.hpp"
 

@@ -6,7 +6,7 @@
 #include "cinux/assert.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
 #include "kernel/arch/irq_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/lockdep.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"

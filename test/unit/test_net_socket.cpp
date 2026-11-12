@@ -13,7 +13,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/drivers/net/loopback.hpp"
 #include "kernel/drivers/net/net_config.hpp"
 #include "kernel/drivers/net/net_device.hpp"

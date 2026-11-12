@@ -9,7 +9,7 @@
 #include "framework_kernel.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
 #include "kernel/arch/irq_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/block/block_cache.hpp"

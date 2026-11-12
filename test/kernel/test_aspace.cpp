@@ -8,7 +8,7 @@
 #include "kernel/arch/x86_64/msr.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/arch/x86_64/tss.hpp"
 #include "kernel/arch/x86_64/platform/acpi/acpi.hpp"
