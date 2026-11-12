@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
@@ -37,6 +38,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/clone_space.hpp"
@@ -193,7 +195,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                 user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kHint, 0);
             const long kTaken = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
                                               kHint, 0);
-            if (kFirstWrite && kAgain == static_cast<long>(kHint) && kTaken == -12) {
+            if (kFirstWrite && kAgain == static_cast<long>(kHint) && kTaken == static_cast<long>(cinux::armv7::errno::kNoMem)) {
                 *kSpot = 0xCAFEUL;
                 if (*kSpot == 0xCAFEUL) {
                     char          note[24];
@@ -248,7 +250,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         const long kRefused = user_syscall3(
             cinux::armv7::syscall_nr::kWrite, 2,
             static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(probe)), 1);
-        if (kRefused == -9) {
+        if (kRefused == static_cast<long>(cinux::armv7::errno::kBadFd)) {
             char          note[16];
             unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
@@ -633,7 +635,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         unsigned long       kBase  = 0;
         if (kHint != 0) {
             if (kHint < kMmapBase || kHint >= kMmapLimit || (kHint & 4095UL) != 0) {
-                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-22);  // EINVAL
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
                 cinux::print::Println("[armv7] mmap hint %X refused", kHint);
                 return &g_tasks[g_current].trap;
             }
@@ -642,7 +644,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             for (unsigned long spot = kHint; spot < kHint + kWant;
                  spot += cinux::arch::page::kSize) {
                 if (cinux::mm::walk::TranslatePage(tables, root, spot) != 0) {
-                    g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);  // ENOMEM
+                    g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
                     cinux::print::Println("[armv7] mmap hint %X is taken", kHint);
                     return &g_tasks[g_current].trap;
                 }
@@ -652,7 +654,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             kBase = kTop;
             kTop += kWant;
         } else {
-            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
             cinux::print::Println("[armv7] mmap refused %u", kBytes);
             return &g_tasks[g_current].trap;
         }
@@ -662,14 +664,14 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
              spot += cinux::arch::page::kSize) {
             const auto kFrame = cinux::mm::Pmm::self().allocate_page();
             if (kFrame.raw == 0) {
-                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
                 return &g_tasks[g_current].trap;
             }
             auto* const table = cinux::mm::walk::EnsureLeafTable(
                 tables, root, spot, cinux::arch::page::kUser);
             if (table == nullptr) {
                 cinux::mm::Pmm::self().free_page(kFrame);
-                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-12);
+                g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
                 return &g_tasks[g_current].trap;
             }
             table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
@@ -688,7 +690,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kAddr  = g_user_trap.r0;
         const unsigned long kBytes = g_user_trap.r1;
         if (kAddr < kMmapBase || (kAddr & 4095UL) != 0 || kBytes == 0) {
-            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-22);
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
             return &g_tasks[g_current].trap;
         }
         const unsigned long kEnd = (kAddr + kBytes + 4095UL) & ~4095UL;
@@ -726,7 +728,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             cinux::print::Println("[armv7] close %u", kFd);
             g_tasks[g_current].trap.r0 = 0;
         } else {
-            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-9);
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kBadFd);
         }
         return &g_tasks[g_current].trap;
     }

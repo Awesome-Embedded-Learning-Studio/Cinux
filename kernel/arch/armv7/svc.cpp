@@ -16,6 +16,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/armv7/errno.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/timer.hpp"
 #include "kernel/arch/armv7/uart.hpp"
@@ -27,7 +28,6 @@
 namespace {
 
 constexpr unsigned long kChunkBytes = 64;
-constexpr long          kEbadf      = -9;
 
 extern "C" unsigned long CurrentFdMask();
 
@@ -35,14 +35,14 @@ extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
 
 long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
     if ((CurrentFdMask() & (1UL << fd)) == 0 || fd != 0) {
-        return kEbadf;
+        return cinux::armv7::errno::kBadFd;
     }
     if (count == 0) {
-        return -1;
+        return cinux::armv7::errno::kFault;
     }
     const cinux::arch::IrqGuard kGuard;
     if (!cinux::arch::UserRangeIsMapped(buffer, count)) {
-        return -1;
+        return cinux::armv7::errno::kFault;
     }
     const auto kFrequency = cinux::armv7::TimerFrequency();
     const auto kStart     = cinux::armv7::TimerCounter();
@@ -57,7 +57,7 @@ long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
         const char          kChar = cinux::armv7::UartReadChar();
         const unsigned char kByte = static_cast<unsigned char>(kChar);
         if (!cinux::arch::CopyToUser(buffer + received, &kByte, 1)) {
-            return -1;
+            return cinux::armv7::errno::kFault;
         }
         ++received;
         if (kChar == '\n' || kChar == '\r') {
@@ -69,7 +69,7 @@ long do_read(unsigned long fd, unsigned long buffer, unsigned long count) {
 
 long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
     if (fd > 2 || (CurrentFdMask() & (1UL << fd)) == 0 || (fd != 1 && fd != 2)) {
-        return kEbadf;
+        return cinux::armv7::errno::kBadFd;
     }
     const cinux::arch::IrqGuard kGuard;
     char                      chunk[kChunkBytes];
@@ -78,7 +78,7 @@ long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
         const unsigned long kTake =
             (count - offset) < kChunkBytes ? (count - offset) : kChunkBytes;
         if (!cinux::arch::CopyFromUser(chunk, buffer + offset, kTake)) {
-            return -1;
+            return cinux::armv7::errno::kFault;
         }
         for (unsigned long index = 0; index < kTake; ++index) {
             cinux::armv7::UartPutChar(chunk[index]);
