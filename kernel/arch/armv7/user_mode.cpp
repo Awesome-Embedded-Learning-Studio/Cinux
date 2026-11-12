@@ -770,6 +770,12 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         static_cast<unsigned long>(__user_text_end - __user_text_start);
     const unsigned long kCodePages =
         (kTextBytes + cinux::arch::page::kSize - 1) / cinux::arch::page::kSize;
+    if (code_va + kCodePages * cinux::arch::page::kSize > stack_va) {
+        cinux::print::Println("[armv7] user text needs %u pages, only %u reserved",
+                              kCodePages,
+                              (stack_va - code_va) / cinux::arch::page::kSize);
+        return false;
+    }
     for (unsigned long index = 0; index < kCodePages; ++index) {
         const auto kCodeFrame = cinux::mm::Pmm::self().allocate_page();
         if (kCodeFrame.raw == 0) {
@@ -914,6 +920,12 @@ __attribute__((noinline)) bool RunUserModeSelfCheck() {
     }
     g_shared_frame = kShared.raw;
     g_kernel_root = cinux::arch::space::ActiveRoot();
+    cinux::print::Println("[armv7] user text %u bytes in %u pages",
+                          static_cast<unsigned>(__user_text_end - __user_text_start),
+                          static_cast<unsigned>(
+                              (static_cast<unsigned long>(__user_text_end - __user_text_start) +
+                               cinux::arch::page::kSize - 1) /
+                              cinux::arch::page::kSize));
     if (!setup_task(0, kTaskACode, kTaskAStack)) {
         return false;
     }
