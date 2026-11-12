@@ -77,6 +77,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_CHILDEXIT5=task 5 exited with status 3"
             "-DEXPECTED_FORK5=fork 0 -> 5"
             "-DEXPECTED_FORKTWOS=cow after two forks"
+            "-DEXPECTED_REUSEOK=reuse ok"
+            "-DEXPECTED_SLOTREUSED=slot reused"
             "-DEXPECTED_FORKCOW=cow copy at 40040000"
             "-DEXPECTED_FORKCOWOK=cow after two forks"
             "-DEXPECTED_EBADF=ebadf ok"

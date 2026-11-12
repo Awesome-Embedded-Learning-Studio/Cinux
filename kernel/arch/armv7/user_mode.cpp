@@ -486,6 +486,43 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                 }
             }
         }
+        if (reaped) {
+            const long kThird = user_syscall0(cinux::armv7::syscall_nr::kFork);
+            if (kThird == 0) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('r'); NOTE('e'); NOTE('u'); NOTE('s'); NOTE('e'); NOTE(' ');
+                NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
+                for (;;) {
+                }
+            }
+            unsigned long reuse_status = 0;
+            for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+                const long kResult = user_syscall3(
+                    cinux::armv7::syscall_nr::kWait,
+                    1UL << static_cast<unsigned long>(kThird),
+                    static_cast<unsigned long>(
+                        reinterpret_cast<std::uintptr_t>(&reuse_status)),
+                    0);
+                if (kResult >= 0) {
+                    if (kThird == 4 && reuse_status == 3UL) {
+                        char          note[24];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('s'); NOTE('l'); NOTE('o'); NOTE('t'); NOTE(' ');
+                        NOTE('r'); NOTE('e'); NOTE('u'); NOTE('s'); NOTE('e');
+                        NOTE('d'); NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
+                    break;
+                }
+            }
+        }
         if (reaped && *kSharedPage == 0x1111UL) {
             char          note[32];
             unsigned long note_length = 0;
@@ -812,7 +849,8 @@ void teardown_space(unsigned long index) {
     }
     g_tasks[index].space->teardown();
     delete g_tasks[index].space;
-    g_tasks[index].space = nullptr;
+    g_tasks[index].space  = nullptr;
+    g_tasks[index].in_use = false;  // the slot is free for a later fork
 }
 
 /// The next runnable task after `from`, or kTaskCount when there is none.
