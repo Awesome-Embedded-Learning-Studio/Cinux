@@ -30,6 +30,7 @@ inline constexpr unsigned long kBrk         = 45;
 inline constexpr unsigned long kGetPpid     = 64;
 inline constexpr unsigned long kClose       = 6;
 inline constexpr unsigned long kSignal      = 67;
+inline constexpr unsigned long kGetTicks    = 78;
 inline constexpr unsigned long kMmap        = 90;
 inline constexpr unsigned long kMunmap      = 91;
 

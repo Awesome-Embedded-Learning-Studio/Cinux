@@ -359,7 +359,18 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         }
     }
     if (task_id == 0) {
-        const long kSlept = user_syscall3(cinux::armv7::syscall_nr::kSleep, 3, 0, 0);
+        const long kBefore = user_syscall3(cinux::armv7::syscall_nr::kGetTicks, 0, 0, 0);
+        const long kSlept  = user_syscall3(cinux::armv7::syscall_nr::kSleep, 3, 0, 0);
+        const long kAfter  = user_syscall3(cinux::armv7::syscall_nr::kGetTicks, 0, 0, 0);
+        if (kSlept == 0 && kAfter > kBefore) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('t'); NOTE('i'); NOTE('c'); NOTE('k'); NOTE('s'); NOTE(' ');
+            NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
         if (kSlept == 0) {
             char          note[16];
             unsigned long note_length = 0;
@@ -1422,6 +1433,10 @@ extern "C" unsigned long CurrentFdMask() {
 
 extern "C" unsigned long CurrentTaskIndex() {
     return g_current;
+}
+
+extern "C" unsigned long CurrentTick() {
+    return g_tick_now;
 }
 
 extern "C" unsigned long CurrentTaskParent() {

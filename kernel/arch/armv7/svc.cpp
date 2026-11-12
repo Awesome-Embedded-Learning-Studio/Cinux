@@ -97,12 +97,18 @@ bool traps_to_scheduler(unsigned long number) {
 
 extern "C" unsigned long CurrentTaskIndex();
 extern "C" unsigned long CurrentTaskParent();
+extern "C" unsigned long CurrentTick();
 
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
     if (kNumber == cinux::armv7::syscall_nr::kGetPid) {
         trap->r0 = CurrentTaskIndex();
         cinux::print::Println("[armv7] getpid %u", trap->r0);
+        return trap;
+    }
+    if (kNumber == cinux::armv7::syscall_nr::kGetTicks) {
+        trap->r0 = CurrentTick();
+        cinux::print::Println("[armv7] getticks %u", trap->r0);
         return trap;
     }
     if (kNumber == cinux::armv7::syscall_nr::kGetPpid) {

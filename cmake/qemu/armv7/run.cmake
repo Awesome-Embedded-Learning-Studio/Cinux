@@ -82,6 +82,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_GETPPID=getppid 0"
             "-DEXPECTED_PPIDOK=ppid ok"
             "-DEXPECTED_ORPHAN=orphan ok"
+            "-DEXPECTED_GETTICKS=getticks"
+            "-DEXPECTED_TICKSOK=ticks ok"
             "-DEXPECTED_GRANDCHILD=grandchild ok"
             "-DEXPECTED_TWOLEVELS=two levels ok"
             "-DEXPECTED_TASK6=task 6 exited with status 4"

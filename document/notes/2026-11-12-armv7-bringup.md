@@ -321,6 +321,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 6 | close | `close 2`、`ebadf ok` |
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
+| 78 | getticks | `getticks 3`、睡三个 tick 之后变大（`ticks ok`） |
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |
