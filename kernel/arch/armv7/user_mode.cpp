@@ -1,16 +1,17 @@
 /**
  * @file    user_mode.cpp
- * @brief   Two user tasks, each with its own first-level table.
+ * @brief   Two user tasks, each with its own table, yielding to each other.
  *
- * Both tasks run the same copied program; what differs is the table the
- * MMU walks. The program writes through svc, then probes a fixed user
- * address: under its own table the probe lands on mapped code, under the
- * other task's table it is unmapped and must fault. That difference is
- * the point of the round.
+ * The svc stub traps a user task by saving its frame (r4-r11, user sp,
+ * user pc, SPSR) into g_user_save_area. c_schedule_from_user copies that
+ * frame into the running task, picks the next runnable one, points TTBR0
+ * at its table, and hands its frame back; the stub restores it through an
+ * exception return. Exiting marks the task done and either starts the
+ * other or resumes the kernel.
  *
  * @author  Charliechen114514
  * @date    2026-11-12
- * @version 0.4
+ * @version 0.6
  * @since   0.1.0
  * @ingroup kernel_arch
  * @copyright Copyright (c) 2026
@@ -31,23 +32,38 @@
 
 extern "C" unsigned char __user_text_start[];
 extern "C" unsigned char __user_text_end[];
-extern "C" bool UserExited();
-void InstallUserReturnContext(cinux::arch::CpuContext* context);
 
 namespace {
 
-constexpr unsigned long kSharedProbe = 0x40001000UL;
-constexpr unsigned long kTaskACode    = 0x40001000UL;
-constexpr unsigned long kTaskAStack   = 0x40002000UL;
-constexpr unsigned long kTaskBCode    = 0x40003000UL;
-constexpr unsigned long kTaskBStack   = 0x40004000UL;
+constexpr unsigned long kTaskACode  = 0x40001000UL;
+constexpr unsigned long kTaskAStack = 0x40002000UL;
+constexpr unsigned long kTaskBCode  = 0x40003000UL;
+constexpr unsigned long kTaskBStack = 0x40004000UL;
 
-cinux::arch::CpuContext g_kernel_return;
+struct UserTask {
+    cinux::arch::CpuContext context;
+    unsigned long           root;
+    bool                    done;
+};
+
+UserTask                g_tasks[2];
+cinux::arch::CpuContext g_main;
+cinux::arch::CpuContext g_scratch;
+unsigned long           g_kernel_root = 0;
+unsigned long           g_current     = 0;
+bool                    g_running     = false;
 
 long user_syscall0(unsigned long number) {
     register unsigned long r7 asm("r7") = number;
     register unsigned long r0 asm("r0") = 0;
-    asm volatile("svc #0" : "+r"(r0) : "r"(r7) : "memory");
+    register unsigned long r1 asm("r1") = 0;
+    register unsigned long r2 asm("r2") = 0;
+    register unsigned long r3 asm("r3") = 0;
+    // A trapping svc keeps no promise about r0-r3; tell the compiler.
+    asm volatile("svc #0"
+                 : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
+                 : "r"(r7)
+                 : "cc", "memory");
     return static_cast<long>(r0);
 }
 
@@ -57,8 +73,19 @@ long user_syscall3(unsigned long number, unsigned long arg0, unsigned long arg1,
     register unsigned long r0 asm("r0") = arg0;
     register unsigned long r1 asm("r1") = arg1;
     register unsigned long r2 asm("r2") = arg2;
-    asm volatile("svc #0" : "+r"(r0) : "r"(r7), "r"(r1), "r"(r2) : "memory");
+    register unsigned long r3 asm("r3") = 0;
+    asm volatile("svc #0"
+                 : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
+                 : "r"(r7)
+                 : "cc", "memory");
     return static_cast<long>(r0);
+}
+
+void user_write(const char* text, unsigned long length) {
+    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kWrite, 1,
+                                    static_cast<unsigned long>(
+                                        reinterpret_cast<std::uintptr_t>(text)),
+                                    length));
 }
 
 /// Runs on a user page; reaches the kernel only through svc.
@@ -69,21 +96,32 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     PUSH_CHAR('['); PUSH_CHAR('a'); PUSH_CHAR('r'); PUSH_CHAR('m'); PUSH_CHAR('v');
     PUSH_CHAR('7'); PUSH_CHAR(']'); PUSH_CHAR(' '); PUSH_CHAR('u'); PUSH_CHAR('s');
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
-    PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR(' '); PUSH_CHAR('v');
-    PUSH_CHAR('i'); PUSH_CHAR('a'); PUSH_CHAR(' '); PUSH_CHAR('s'); PUSH_CHAR('v');
-    PUSH_CHAR('c'); PUSH_CHAR('\n');
+    PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR('\n');
 #undef PUSH_CHAR
-    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kWrite, 1,
-                                    static_cast<unsigned long>(
-                                        reinterpret_cast<std::uintptr_t>(buffer)),
-                                    length));
-    // Under the task's own table this address may be its code; under the
-    // other task's table it is unmapped and faults.
-    static_cast<void>(*reinterpret_cast<volatile unsigned long*>(kSharedProbe));
+    for (unsigned long round = 0; round < 3; ++round) {
+        user_write(buffer, length);
+        if (round != 2) {
+            static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kSchedYield));
+        }
+    }
     static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kExit));
     for (;;) {
         asm volatile("wfi");
     }
+}
+
+/// A first-level table is sixteen contiguous KiB, sixteen-KiB aligned.
+/// Take eight contiguous pages and use the aligned window inside them.
+unsigned long allocate_l1_block() {
+    const auto block = cinux::mm::Pmm::self().allocate_pages(3);
+    if (block.raw == 0) {
+        return 0;
+    }
+    const unsigned long skip = ((0x4000UL - (block.raw & 0x3FFFUL)) & 0x3FFFUL) / 4096UL;
+    if (skip > 4) {
+        return 0;
+    }
+    return block.raw + (skip * 4096UL);
 }
 
 bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned long physical) {
@@ -100,31 +138,6 @@ bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned l
     return true;
 }
 
-/// One 16 KiB-aligned page for a first-level table; TTBR0 requires it.
-unsigned long allocate_l1_block() {
-    // Keep the pages we draw: freeing a rejected page hands it straight
-    // back to the next draw, and the loop would never move.
-    cinux::base::PhysAddr kept[8];
-    unsigned long          kept_count = 0;
-    unsigned long          aligned    = 0;
-    for (unsigned long attempt = 0; attempt < 8; ++attempt) {
-        const auto page = cinux::mm::Pmm::self().allocate_page();
-        if (page.raw == 0) {
-            break;
-        }
-        if ((page.raw & 0x3FFFUL) == 0) {
-            aligned = page.raw;
-            break;
-        }
-        kept[kept_count++] = page;
-    }
-    for (unsigned long index = 0; index < kept_count; ++index) {
-        cinux::mm::Pmm::self().free_page(kept[index]);
-    }
-    return aligned;
-}
-
-/// Builds one task's root: the kernel's own entries, user window cleared.
 unsigned long build_task_root() {
     const unsigned long block = allocate_l1_block();
     if (block == 0) {
@@ -141,50 +154,99 @@ unsigned long build_task_root() {
     return block;
 }
 
-bool run_task(unsigned long root, unsigned long code_va, unsigned long stack_va) {
-    const unsigned long kKernelRoot = cinux::arch::space::ActiveRoot();
-    cinux::arch::space::SwitchRoot(root);
-
+bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_va) {
+    UserTask& task = g_tasks[index];
+    task           = UserTask{};
+    task.root      = build_task_root();
+    if (task.root == 0) {
+        return false;
+    }
     const auto kCodeFrame  = cinux::mm::Pmm::self().allocate_page();
     const auto kStackFrame = cinux::mm::Pmm::self().allocate_page();
     if (kCodeFrame.raw == 0 || kStackFrame.raw == 0) {
-        cinux::arch::space::SwitchRoot(kKernelRoot);
         return false;
     }
     const unsigned long kTextBytes =
         static_cast<unsigned long>(__user_text_end - __user_text_start);
     auto* const code = reinterpret_cast<unsigned char*>(kCodeFrame.raw);
-    for (unsigned long index = 0; index < kTextBytes; ++index) {
-        code[index] = __user_text_start[index];
+    for (unsigned long offset = 0; offset < kTextBytes; ++offset) {
+        code[offset] = __user_text_start[offset];
     }
-    if (!map_user_page(root, code_va, kCodeFrame.raw) ||
-        !map_user_page(root, stack_va, kStackFrame.raw)) {
-        cinux::arch::space::SwitchRoot(kKernelRoot);
+    if (!map_user_page(task.root, code_va, kCodeFrame.raw) ||
+        !map_user_page(task.root, stack_va, kStackFrame.raw)) {
         return false;
     }
-
-    InstallUserReturnContext(&g_kernel_return);
     const unsigned long kEntry =
         code_va + static_cast<unsigned long>(
                       reinterpret_cast<std::uintptr_t>(&user_program) -
                       reinterpret_cast<std::uintptr_t>(__user_text_start));
-    cinux::arch::EnterUserModeWithReturn(kEntry, stack_va + cinux::arch::page::kSize,
-                                         &g_kernel_return);
-    cinux::arch::space::SwitchRoot(kKernelRoot);
-    return UserExited();
+    task.context      = cinux::arch::CpuContext{};
+    task.context.lr   = kEntry;
+    task.context.sp   = stack_va + cinux::arch::page::kSize;
+    task.context.spsr = 0x10UL;  // user mode
+    return true;
 }
 
 }  // namespace
 
+extern "C" {
+cinux::arch::CpuContext g_user_save_area;
+}
+
 namespace cinux::armv7 {
 
 bool RunUserModeSelfCheck() {
-    cinux::print::Println("[armv7] task A on its own table");
-    if (!run_task(build_task_root(), kTaskACode, kTaskAStack)) {
+    g_kernel_root = cinux::arch::space::ActiveRoot();
+    if (!setup_task(0, kTaskACode, kTaskAStack) || !setup_task(1, kTaskBCode, kTaskBStack)) {
         return false;
     }
-    cinux::print::Println("[armv7] task B on its own table");
-    return run_task(build_task_root(), kTaskBCode, kTaskBStack);
+    g_running = true;
+    g_current = 0;
+    cinux::print::Println("[armv7] task 0 starts on its own table");
+    cinux::arch::space::SwitchRoot(g_tasks[0].root);
+    cinux::arch::EnterUserModeWithReturn(g_tasks[0].context.lr, g_tasks[0].context.sp, &g_main);
+    cinux::arch::space::SwitchRoot(g_kernel_root);
+    return g_tasks[0].done && g_tasks[1].done;
 }
 
 }  // namespace cinux::armv7
+
+namespace {
+
+/// Picks the next runnable task and hands its frame back to the stub.
+/// Never returns when nothing is runnable: it resumes the kernel instead.
+cinux::arch::CpuContext* schedule_next(unsigned long number) {
+    cinux::arch::CpuContext& running = g_tasks[g_current].context;
+    for (unsigned long word = 0; word < 11; ++word) {
+        (&running.r4)[word] = (&g_user_save_area.r4)[word];
+    }
+    if (number == cinux::armv7::syscall_nr::kExit) {
+        g_tasks[g_current].done = true;
+        cinux::print::Println("[armv7] task %u done", g_current);
+    }
+
+    const unsigned long other = g_current == 0 ? 1 : 0;
+    if (!g_tasks[other].done) {
+        g_current = other;
+        cinux::print::Println("[armv7] switch to task %u", other);
+        cinux::arch::space::SwitchRoot(g_tasks[other].root);
+        return &g_tasks[other].context;
+    }
+
+    if (!g_tasks[g_current].done) {
+        // The other one finished; this task keeps running.
+        return &g_tasks[g_current].context;
+    }
+
+    g_running = false;
+    cinux::print::Println("[armv7] all user tasks done");
+    cinux::arch::space::SwitchRoot(g_kernel_root);
+    cinux::arch::ContextSwitch(&g_scratch, &g_main);
+    __builtin_unreachable();
+}
+
+}  // namespace
+
+extern "C" cinux::arch::CpuContext* c_schedule_from_user(unsigned long number) {
+    return schedule_next(number);
+}
