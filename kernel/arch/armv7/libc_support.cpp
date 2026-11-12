@@ -1,9 +1,10 @@
 /**
  * @file    libc_support.cpp
- * @brief   The C memory primitives the freestanding armv7 image needs.
+ * @brief   Freestanding runtime stubs the armv7 image still needs.
  *
- * GCC emits calls to these from ordinary code (aggregate zeroing, struct
- * copies), and nothing in a -nostdlib image provides them.
+ * The C memory primitives moved to the shared kernel/lib/mem.cpp now
+ * that the armv7 lane links it; what remains are the atexit
+ * registration stubs static constructors ask for.
  *
  * @author  Charliechen114514
  * @date    2026-11-12
@@ -16,46 +17,15 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C" void* memset(void* destination, int value, std::size_t bytes) {
-    auto*       out  = static_cast<unsigned char*>(destination);
-    const auto  fill = static_cast<unsigned char>(value);
-    for (std::size_t index = 0; index < bytes; ++index) {
-        out[index] = fill;
-    }
-    return destination;
-}
+#include "cinux/assert.hpp"
 
-extern "C" void* memcpy(void* destination, const void* source, std::size_t bytes) {
-    auto*       out = static_cast<unsigned char*>(destination);
-    const auto* in  = static_cast<const unsigned char*>(source);
-    for (std::size_t index = 0; index < bytes; ++index) {
-        out[index] = in[index];
-    }
-    return destination;
-}
+// Static objects with constructors make the compiler register a
+// destructor with the ARM EABI atexit entry point. The kernel never
+// exits, so the registry is accepted and dropped: registration "succeeds"
+// and nothing ever runs.
+extern "C" void* __dso_handle = &__dso_handle;
 
-extern "C" void* memmove(void* destination, const void* source, std::size_t bytes) {
-    auto*       out = static_cast<unsigned char*>(destination);
-    const auto* in  = static_cast<const unsigned char*>(source);
-    if (out < in) {
-        for (std::size_t index = 0; index < bytes; ++index) {
-            out[index] = in[index];
-        }
-    } else {
-        for (std::size_t index = bytes; index > 0; --index) {
-            out[index - 1] = in[index - 1];
-        }
-    }
-    return destination;
-}
-
-extern "C" int memcmp(const void* left, const void* right, std::size_t bytes) {
-    const auto* a = static_cast<const unsigned char*>(left);
-    const auto* b = static_cast<const unsigned char*>(right);
-    for (std::size_t index = 0; index < bytes; ++index) {
-        if (a[index] != b[index]) {
-            return a[index] < b[index] ? -1 : 1;
-        }
-    }
-    return 0;
+extern "C" int __aeabi_atexit(void* /*object*/, void (*)(void*) /*destructor>,
+                              void* /*dso_handle*/) {
+    return 1;  // registration accepted; the table is intentionally absent
 }

@@ -384,6 +384,28 @@ exit、Spinlock::retire 与 set_name。前两个各几行，后四个是 irq_gua
 "fs::FileTable、SendSignal、ClearTidWord 三块"乐观得多：那是把 Task 整个
 接上时的旧清单，只换文件层的话，6 个符号补完就能链。
 
+## 第一刀前半：fs 真件链入 armv7 镜像
+
+六个符号补完的方式比预想的更省：memchr 与 std::terminate 不用新写，通用层
+kernel/lib/mem.cpp 整个文件在 armv7 下直接编过，一套 mem 函数全带上；锁策
+略四件也不用抄，kernel/proc/sync.cpp 本身编过，它引出的 Scheduler 四件
+（current、prepare_to_wait、schedule_blocked、unblock）由新增的
+kernel/arch/armv7/proc_shim.cpp 垫上：current() 返回一个代表主线的静态 Task
+桩，三条睡眠路径一律断言拒绝并留名，走到睡眠锁会大声 halt 而不是静默错。
+
+静态 Task 桩带构造，编译器要注册析构，于是补了 \_\_dso_handle 与
+\_\_aeabi_atexit 两个桩（内核不退出，注册表收下就丢）。libc_support.cpp 里
+旧的 memset/memcpy/memmove/memcmp 与 mem.cpp 多重定义，旧的退役，文件只剩
+atexit 桩。
+
+CMakeLists 把 file_table、vfs、file_lock、通用层 ramfs、sync、mem、
+proc_shim 挂进 arm_image。链接通过，arm.elf 从约 51 万字节涨到 1081028。验
+收：arm_boot 3/3 全绿（断言一条未改，串口行为完全一致，替身照旧服务），x86
+宿主 86/86。
+
+armv7 目录自己的替身 ramfs.cpp 与通用层 kernel/fs/ramfs/ramfs.cpp 并存不冲
+突：第一刀只链不接线，等切 close 时才动。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
