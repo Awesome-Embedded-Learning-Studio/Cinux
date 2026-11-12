@@ -36,6 +36,7 @@ add_test(NAME arm_boot
             -DEXPECTED_CONTEXT=context switch ok
             -DEXPECTED_PERCPU=per-cpu ok
             -DEXPECTED_TEARDOWN=space teardown ok
+            -DEXPECTED_COW=cow ledger ok
             -DEXPECTED_TASKS=two tasks ok
             -DEXPECTED_USER=user mode round trip ok
             -DEXPECTED_SVC=svc write matched

@@ -5,6 +5,8 @@
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
+#include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/mm/cow.hpp"
 #include "kernel/arch/context.hpp"
 #include "kernel/arch/kernel_stack.hpp"
 #include "kernel/arch/per_cpu.hpp"
@@ -138,6 +140,21 @@ bool RunPerCpuSelfCheck() {
         return false;
     }
     return cinux::arch::CurrentKernelStack() != 0;
+}
+
+bool RunCowSelfCheck() {
+    const unsigned long kBefore = cinux::mm::Pmm::self().free_page_count();
+    const auto          kFrame  = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    cinux::mm::cow::RetainFrame(kFrame.raw);
+    cinux::mm::cow::ReleaseFrame(kFrame.raw);
+    if (cinux::mm::Pmm::self().free_page_count() != kBefore - 1) {
+        return false;  // the first release must not return the frame
+    }
+    cinux::mm::cow::ReleaseFrame(kFrame.raw);
+    return cinux::mm::Pmm::self().free_page_count() == kBefore;
 }
 
 bool RunSpaceSelfCheck() {
