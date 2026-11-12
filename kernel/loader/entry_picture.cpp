@@ -11,6 +11,14 @@ namespace {
 
 using arch::page::kSize;
 
+/// One word of the exec initial-stack ABI. The x86_64 System V startup
+/// stack speaks 8-byte words whatever the kernel build's own word width
+/// is; the arch split will move this alias next to the ABI it serves.
+using AbiWord = unsigned long long;
+
+/// Bytes one initial-stack word occupies on the wire.
+constexpr unsigned long kAbiWordBytes = sizeof(AbiWord);
+
 struct PicturePlane {
     unsigned char* page;
     unsigned long  page_base;
@@ -19,20 +27,20 @@ struct PicturePlane {
 };
 
 bool plane_room(const PicturePlane& plane) {
-    return plane.words_at + 16 <= plane.strings_at;
+    return plane.words_at + 2 * kAbiWordBytes <= plane.strings_at;
 }
 
-void put_word(PicturePlane& plane, unsigned long word) {
+void put_word(PicturePlane& plane, AbiWord word) {
     cinux::base::CopyBytes(plane.page + plane.words_at, &word, sizeof(word));
-    plane.words_at += 8;
+    plane.words_at += kAbiWordBytes;
 }
 
 bool put_pair(PicturePlane& plane, unsigned long type, unsigned long value) {
     if (!plane_room(plane)) {
         return false;
     }
-    put_word(plane, type);
-    put_word(plane, value);
+    put_word(plane, static_cast<AbiWord>(type));
+    put_word(plane, static_cast<AbiWord>(value));
     return true;
 }
 
@@ -44,20 +52,20 @@ bool put_string(PicturePlane& plane, const char* text) {
     while (text[length] != '\0') {
         ++length;
     }
-    if (length + 1 + 8 + 16 > plane.strings_at - plane.words_at) {
+    if (length + 1 + kAbiWordBytes + 2 * kAbiWordBytes > plane.strings_at - plane.words_at) {
         return false;
     }
     plane.strings_at -= length + 1;
     cinux::base::CopyBytes(plane.page + plane.strings_at, text, length + 1);
-    const unsigned long kLanded = plane.page_base + plane.strings_at;
+    const AbiWord kLanded = static_cast<AbiWord>(plane.page_base + plane.strings_at);
     cinux::base::CopyBytes(plane.page + plane.words_at, &kLanded, sizeof(kLanded));
-    plane.words_at += 8;
+    plane.words_at += kAbiWordBytes;
     return true;
 }
 
 unsigned long land_randomness(PicturePlane& plane, const EntryFacts& facts) {
     if (facts.randomness == nullptr || facts.random_bytes == 0 ||
-        facts.random_bytes > plane.strings_at - plane.words_at - 16) {
+        facts.random_bytes > plane.strings_at - plane.words_at - 2 * kAbiWordBytes) {
         return 0;
     }
     plane.strings_at -= facts.random_bytes;
@@ -70,7 +78,7 @@ unsigned long land_string(PicturePlane& plane, const char* text) {
     while (text[length] != '\0') {
         ++length;
     }
-    if (length + 1 + 16 > plane.strings_at - plane.words_at) {
+    if (length + 1 + 2 * kAbiWordBytes > plane.strings_at - plane.words_at) {
         return 0;
     }
     plane.strings_at -= length + 1;
@@ -168,7 +176,7 @@ unsigned long EntryPictureBytes(const EntryRuns& runs, const EntryFacts& facts) 
         (runs.arguments != nullptr && runs.arguments[0] != nullptr)) {
         ++pairs;
     }
-    return strings + ((count + 3 + (pairs * 2)) * sizeof(unsigned long));
+    return strings + ((count + 3 + (pairs * 2)) * kAbiWordBytes);
 }
 
 unsigned long WriteEntryPicture(unsigned char* stack_page, unsigned long entry_rsp,

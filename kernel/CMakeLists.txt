@@ -1,4 +1,9 @@
 set(CINUX_ARCHITECTURE "x86_64" CACHE STRING "Architecture directory under kernel/arch")
+if(NOT CINUX_ARCHITECTURE STREQUAL "x86_64")
+    message(FATAL_ERROR
+        "CINUX_ARCHITECTURE='${CINUX_ARCHITECTURE}' has no port under kernel/arch yet; "
+        "only x86_64 builds today.")
+endif()
 
 file(GLOB_RECURSE CINUX_KERNEL_TREE_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/kernel/*.cpp

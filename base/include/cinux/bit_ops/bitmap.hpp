@@ -28,6 +28,12 @@ inline constexpr unsigned long kInvalidIndex = ~0UL;
 /** @brief Storage word type of every bitmap. */
 using WordMask = BitMask<unsigned long>;
 
+static_assert(sizeof(WordMask) == sizeof(unsigned long),
+              "the storage word carries its bits and nothing else");
+
+/** @brief Bits one storage word holds; every width fact here derives from it. */
+inline constexpr unsigned long kWordBits = sizeof(WordMask) * 8;
+
 /**
  * @brief         The one-bit field covering a position.
  *
@@ -56,7 +62,8 @@ public:
      * @brief         Words needed to hold a capacity of bits.
      *
      * @param[in]     bit_capacity   Bit count to cover.
-     * @return        (bit_capacity + 63) / 64; zero capacity needs zero words.
+     * @return        Words covering bit_capacity bits at kWordBits each; zero
+     *                capacity needs zero words.
      * @note          None
      * @warning       None
      * @throws        None
@@ -64,7 +71,7 @@ public:
      * @ingroup       base_bit_ops
      */
     static constexpr unsigned long words_for(unsigned long bit_capacity) {
-        return (bit_capacity + 63) / 64;
+        return (bit_capacity + kWordBits - 1) / kWordBits;
     }
 
     /**
@@ -96,7 +103,9 @@ public:
      * @note          init wipes the words into a fresh empty map; adopt
      *                keeps them — the face for bits read off a disk. The
      *                set count is walked up from the words so later set
-     *                and clear stay honest.
+     *                and clear stay honest. On little-endian targets bit n
+     *                lands in byte n/8, bit n%8, whichever word width the
+     *                builder uses, so disk-format bitmaps adopt unchanged.
      * @since         0.1.0
      * @ingroup       base_bit_ops
      */
@@ -106,9 +115,10 @@ public:
         count_set_                 = 0;
         unsigned long const kWords = words_for(bit_capacity);
         for (unsigned long word_index = 0; word_index < kWords; ++word_index) {
-            unsigned long const kBase = word_index * 64;
+            unsigned long const kBase = word_index * kWordBits;
             unsigned long const kLeft = capacity_ - kBase;
-            auto const          kSpan = static_cast<unsigned char>(kLeft < 64UL ? kLeft : 64UL);
+            auto const          kSpan =
+                static_cast<unsigned char>(kLeft < kWordBits ? kLeft : kWordBits);
             for (unsigned char bit = 0; bit < kSpan; ++bit) {
                 if (words[word_index].has(MaskBit<unsigned long>(bit))) {
                     ++count_set_;
@@ -119,26 +129,26 @@ public:
 
     /** @brief         Marks one bit; already-set bits keep the count honest. */
     void set(unsigned long index) {
-        WordMask& word = words_[index / 64];
-        if (!word.has(MaskBit<unsigned long>(static_cast<unsigned char>(index % 64)))) {
-            word.deposit(BitAt(static_cast<unsigned char>(index % 64)), 1);
+        WordMask& word = words_[index / kWordBits];
+        if (!word.has(MaskBit<unsigned long>(static_cast<unsigned char>(index % kWordBits)))) {
+            word.deposit(BitAt(static_cast<unsigned char>(index % kWordBits)), 1);
             ++count_set_;
         }
     }
 
     /** @brief         Clears one bit; already-clear bits keep the count honest. */
     void clear(unsigned long index) {
-        WordMask& word = words_[index / 64];
-        if (word.has(MaskBit<unsigned long>(static_cast<unsigned char>(index % 64)))) {
-            word.deposit(BitAt(static_cast<unsigned char>(index % 64)), 0);
+        WordMask& word = words_[index / kWordBits];
+        if (word.has(MaskBit<unsigned long>(static_cast<unsigned char>(index % kWordBits)))) {
+            word.deposit(BitAt(static_cast<unsigned char>(index % kWordBits)), 0);
             --count_set_;
         }
     }
 
     /** @brief         Reports whether one bit is set. */
     [[nodiscard]] bool test(unsigned long index) const {
-        return words_[index / 64].has(
-            MaskBit<unsigned long>(static_cast<unsigned char>(index % 64)));
+        return words_[index / kWordBits].has(
+            MaskBit<unsigned long>(static_cast<unsigned char>(index % kWordBits)));
     }
 
     /**
@@ -190,9 +200,10 @@ public:
             return;
         }
         unsigned long const kWords    = words_for(capacity_);
-        unsigned long const kTailBits = static_cast<unsigned char>(capacity_ % 64);
+        unsigned long const kTailBits = static_cast<unsigned char>(capacity_ % kWordBits);
         for (unsigned long word_index = 0; word_index < kWords; ++word_index) {
-            words_[word_index] = WordMask{Ones<unsigned long>(64)};
+            words_[word_index] =
+                WordMask{Ones<unsigned long>(static_cast<unsigned char>(kWordBits))};
         }
         if (kTailBits != 0) {
             words_[kWords - 1] =  // NOLINT(clang-analyzer-security.ArrayBound)
@@ -238,12 +249,13 @@ public:
         unsigned long       run    = 0;
         unsigned long const kWords = words_for(capacity_);
         for (unsigned long word_index = 0; word_index < kWords; ++word_index) {
-            if (words_[word_index].raw == Ones<unsigned long>(64)) {
+            if (words_[word_index].raw ==
+                Ones<unsigned long>(static_cast<unsigned char>(kWordBits))) {
                 run = 0;
                 continue;
             }
-            for (unsigned bit = 0; bit < 64; ++bit) {
-                unsigned long const kIndex = (word_index * 64) + bit;
+            for (unsigned bit = 0; bit < kWordBits; ++bit) {
+                unsigned long const kIndex = (word_index * kWordBits) + bit;
                 if (kIndex >= capacity_) {
                     break;
                 }
