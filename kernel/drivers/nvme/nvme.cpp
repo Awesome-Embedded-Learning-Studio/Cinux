@@ -13,7 +13,7 @@
 #include "kernel/arch/page.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
-#include "kernel/arch/x86_64/platform/hpet/hpet.hpp"
+#include "kernel/platform/clock.hpp"
 #include "kernel/drivers/nvme/nvme_config.hpp"
 #include "kernel/drivers/nvme/nvme_layout.hpp"
 #include "kernel/arch/x86_64/platform/pci/pci.hpp"

@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_clock.hpp"
 
-#include "kernel/arch/x86_64/platform/hpet/hpet.hpp"
+#include "kernel/platform/clock.hpp"
 #include "kernel/drivers/rtc/rtc.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/uaccess.hpp"
