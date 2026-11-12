@@ -14,6 +14,10 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_USERFAULT AND NOT serial_out MATCHES "${EXPECTED_USERFAULT}")
+    message(FATAL_ERROR
+        "arm_boot: the user permission fault was not caught.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_SVC AND NOT serial_out MATCHES "${EXPECTED_SVC}")
     message(FATAL_ERROR
         "arm_boot: the svc write path failed.\nstdout:\n${serial_out}")

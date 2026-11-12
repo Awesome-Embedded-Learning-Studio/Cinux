@@ -47,9 +47,9 @@ alignas(4096) unsigned char g_demo_page[4096];
 unsigned long g_root = 0;
 
 constexpr std::uint32_t kSection = 0x2U;
-constexpr std::uint32_t kDeviceTerms = kSection | (1U << 2U) | (1U << 4U) | (0x3U << 10U);
+constexpr std::uint32_t kDeviceTerms = kSection | (1U << 2U) | (1U << 4U) | (0x1U << 10U);
 constexpr std::uint32_t kNormalTerms =
-    kSection | (1U << 2U) | (1U << 3U) | (1U << 12U) | (0x3U << 10U);
+    kSection | (1U << 2U) | (1U << 3U) | (1U << 12U) | (0x1U << 10U);
 
 void InvalidateTlb() {
     asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0));

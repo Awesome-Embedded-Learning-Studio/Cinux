@@ -30,6 +30,11 @@ extern "C" void c_exception_dispatch(unsigned long vector) {
         HandleDataAbort();
         return;
     }
+    if (vector == 3) {
+        unsigned long ifar = 0;
+        asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(ifar));  // IFAR
+        cinux::print::Println("[armv7] prefetch abort at %X", ifar);
+    }
     cinux::print::Println("[armv7] exception %u unhandled, stopping", vector);
     cinux::arch::Halt();
 }

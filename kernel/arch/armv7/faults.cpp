@@ -16,6 +16,8 @@
  */
 
 #include "kernel/arch/halt.hpp"
+
+extern "C" void ReturnToKernelFromFault();
 #include "kernel/arch/isr.hpp"
 #include "kernel/boot/print.hpp"
 
@@ -27,6 +29,10 @@ void HandleDataAbort() {
     unsigned long spsr = 0;
     asm volatile("mrs %0, spsr" : "=r"(spsr));
     const unsigned long long code = cinux::arch::isr::FaultCodeFromStatus(fault_status, spsr);
+    if ((spsr & 0x1FUL) == 0x10UL) {
+        cinux::print::Println("[armv7] user fault caught at %X code %X", fault_address, code);
+        ReturnToKernelFromFault();
+    }
     cinux::print::Println("[armv7] data abort at %X status %X code %X", fault_address, fault_status,
                           code);
     cinux::arch::Halt();

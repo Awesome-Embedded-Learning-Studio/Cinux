@@ -12,6 +12,11 @@ SECTIONS
         KEEP(*(.text.start))
         *(.text*)
     }
+    .user_text : {
+        __user_text_start = .;
+        *(.user_text*)
+        __user_text_end = .;
+    }
     .rodata : { *(.rodata*) }
     .data   : { *(.data*) }
 

@@ -48,6 +48,14 @@ extern "C" bool UserExited() {
     return g_user_exited;
 }
 
+extern "C" void ReturnToKernelFromFault() {
+    if (g_kernel_return == nullptr) {
+        return;
+    }
+    g_user_exited = true;
+    cinux::arch::ContextSwitch(&g_scratch, g_kernel_return);
+}
+
 extern "C" void NoteUserExit() {
     g_user_exited = true;
 }
