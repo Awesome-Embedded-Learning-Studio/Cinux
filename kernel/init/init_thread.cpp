@@ -23,11 +23,11 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/entropy.hpp"
-#include "kernel/arch/x86_64/firmware_config.hpp"
+#include "kernel/arch/firmware.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/user_entry.hpp"
+#include "kernel/arch/random.hpp"
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/tty/console_tty.hpp"
@@ -143,9 +143,9 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     constexpr unsigned long long kBrkSlideMask  = 0xFFF'000;
     constexpr unsigned long long kMmapSlideMask = 0x3FFF'FF000;
     vmas->seed_heap(cinux::base::math::AlignUp(vmas->max_end(), cinux::arch::page::kSize) +
-                        (arch::RandomWord() & kBrkSlideMask),
+                        (arch::random::Word() & kBrkSlideMask),
                     mm::kUserBrkMmapSplit);
-    vmas->set_mmap_ceiling(mm::kUserMmapTop - (arch::RandomWord() & kMmapSlideMask));
+    vmas->set_mmap_ceiling(mm::kUserMmapTop - (arch::random::Word() & kMmapSlideMask));
     char        interpreter_path[fs::kFsPathMax]{};
     const char* interpreter = nullptr;
     if (loader::ReadInterpreterPath(program.get(), program_bytes, interpreter_path,
@@ -161,15 +161,15 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
         entry = kInterpreter.value().program_entry;
     }
     unsigned char randomness[16]{};
-    const auto    kRandomLow  = arch::RandomWord();
-    const auto    kRandomHigh = arch::RandomWord();
+    const auto    kRandomLow  = arch::random::Word();
+    const auto    kRandomHigh = arch::random::Word();
     base::CopyBytes(randomness, &kRandomLow, sizeof(kRandomLow));
     base::CopyBytes(randomness + sizeof(kRandomLow), &kRandomHigh, sizeof(kRandomHigh));
     facts.randomness                             = randomness;
     facts.random_bytes                           = sizeof(randomness);
     constexpr unsigned long long kStackSlideMask = 0x7FF'000;
     const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::RandomWord() & kStackSlideMask);
+        proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);
     mm::VmaRegion stack_range{};
     stack_range.start      = kStackTop - mm::kUserStackBytes - cinux::arch::page::kSize;
     stack_range.end        = kStackTop;
@@ -188,7 +188,7 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
                           cinux::arch::page::kSize);
     const char* const kShellArgv[2] = {"/sbin/init", nullptr};
     char              boot_environment[128]{};
-    static_cast<void>(arch::ReadFirmwareString("opt/cinux/init-env", boot_environment));
+    static_cast<void>(arch::firmware::ReadString("opt/cinux/init-env", boot_environment));
     const auto        kSeparator          = std::string_view{boot_environment}.find('=');
     const bool        kEnvironmentPresent = kSeparator != std::string_view::npos && kSeparator != 0;
     const char* const kShellEnvp[]        = {

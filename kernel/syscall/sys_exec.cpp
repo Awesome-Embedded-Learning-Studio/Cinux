@@ -14,10 +14,9 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/entropy.hpp"
+#include "kernel/arch/random.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
-#include "kernel/arch/x86_64/rdrand.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
@@ -69,16 +68,13 @@ void note_program_identity(proc::Task& self, const char* path) {
 /// machine without a working draw reports none and the picture omits
 /// the entry.
 const std::uint8_t* draw_entry_random(unsigned char (&bytes)[16]) {
-    if (!arch::HasRdrand()) {
-        return nullptr;
-    }
     unsigned long long word  = 0;
     unsigned long      drawn = 0;
-    if (arch::TryRdrand(word)) {
+    if (arch::random::TryWord(word)) {
         cinux::base::CopyBytes(bytes, &word, sizeof(word));
         ++drawn;
     }
-    if (arch::TryRdrand(word)) {
+    if (arch::random::TryWord(word)) {
         cinux::base::CopyBytes(bytes + sizeof(word), &word, sizeof(word));
         ++drawn;
     }
@@ -94,7 +90,7 @@ unsigned long long image_load_bias(const unsigned char* program, std::size_t pro
         return 0;
     }
     constexpr unsigned long long kExecSlideMask = 0xFF'000;
-    return mm::kUserExecImageBase + (arch::RandomWord() & kExecSlideMask);
+    return mm::kUserExecImageBase + (arch::random::Word() & kExecSlideMask);
 }
 
 struct EntryStaging {
@@ -298,9 +294,9 @@ long long HandleExecve(const SyscallFrame& frame) {
     constexpr unsigned long long kBrkSlideMask  = 0xFFF'000;
     constexpr unsigned long long kMmapSlideMask = 0x3FFF'FF000;
     ranges->seed_heap(cinux::base::math::AlignUp(ranges->max_end(), cinux::arch::page::kSize) +
-                          (arch::RandomWord() & kBrkSlideMask),
+                          (arch::random::Word() & kBrkSlideMask),
                       mm::kUserBrkMmapSplit);
-    ranges->set_mmap_ceiling(mm::kUserMmapTop - (arch::RandomWord() & kMmapSlideMask));
+    ranges->set_mmap_ceiling(mm::kUserMmapTop - (arch::random::Word() & kMmapSlideMask));
     char        interpreter_path[fs::kFsPathMax] = {};
     const char* interpreter                      = nullptr;
     if (loader::ReadInterpreterPath(program.get(), program_size, interpreter_path,
@@ -319,7 +315,7 @@ long long HandleExecve(const SyscallFrame& frame) {
         kDyn.value().program_entry != 0 ? kDyn.value().program_entry : facts.program_entry;
     constexpr unsigned long long kStackSlideMask = 0x7FF'000;
     const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::RandomWord() & kStackSlideMask);
+        proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);
     if (!proc::MapSignalTrampoline(*fresh, *ranges)) {
         return -kEnomem;
     }
