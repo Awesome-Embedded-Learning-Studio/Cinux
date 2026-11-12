@@ -123,6 +123,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_SCRATCH=open scratch as"
             "-DEXPECTED_WRITEFILE=writefile ok"
             "-DEXPECTED_NOSLOTOPEN=open refused, no free slot"
+            "-DEXPECTED_APPEND=append ok"
             "-DEXPECTED_LSEEKBAD=refused, whence 0"
             "-DEXPECTED_READBAD=read refused 80000000"
             "-DEXPECTED_ROWRITE=refused, read-only"

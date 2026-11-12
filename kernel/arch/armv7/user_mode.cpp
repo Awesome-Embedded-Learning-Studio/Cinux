@@ -522,6 +522,39 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                     user_write(note, note_length);
                 }
+                {
+                    // Append: seek to the end, write two more bytes.
+                    const long kEnd = user_syscall3(
+                        cinux::armv7::syscall_nr::kLseek,
+                        static_cast<unsigned long>(kScrFd), 0, 2);
+                    char tail[2];
+                    tail[0] = 'X';
+                    tail[1] = 'Y';
+                    const long kAppended = user_syscall3(
+                        cinux::armv7::syscall_nr::kWrite,
+                        static_cast<unsigned long>(kScrFd),
+                        static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(tail)), 2);
+                    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                                    static_cast<unsigned long>(kScrFd), 0, 0));
+                    char whole[12];
+                    for (unsigned long index = 0; index < 12; ++index) {
+                        whole[index] = 0;
+                    }
+                    const long kWhole = user_syscall3(
+                        cinux::armv7::syscall_nr::kRead,
+                        static_cast<unsigned long>(kScrFd),
+                        static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(whole)), 10);
+                    if (kEnd == 6 && kAppended == 2 && kWhole == 8 && whole[6] == 'X' &&
+                        whole[7] == 'Y') {
+                        char          note[16];
+                        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                        NOTE('a'); NOTE('p'); NOTE('p'); NOTE('e'); NOTE('n'); NOTE('d');
+                        NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                        user_write(note, note_length);
+                    }
+                }
                 const long kBadSeek = user_syscall3(
                     cinux::armv7::syscall_nr::kLseek, static_cast<unsigned long>(kScrFd),
                     static_cast<unsigned long>(-1), 0);
