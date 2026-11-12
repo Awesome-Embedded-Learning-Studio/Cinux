@@ -30,4 +30,16 @@ inline void SetKernelStackTop(unsigned long top) {
     tss::Tss::self().rsp0 = top;
 }
 
+/**
+ * @brief         Reads the kernel stack pointer this CPU is running on.
+ * @return        The live stack pointer.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline unsigned long long CurrentKernelStack() {
+    unsigned long long rsp = 0;  // NOLINT(misc-const-correctness) written by the asm output
+    asm volatile("movq %%rsp, %0" : "=r"(rsp));
+    return rsp;
+}
+
 }  // namespace cinux::arch

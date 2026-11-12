@@ -411,7 +411,7 @@ bool Ahci::issue(uint32_t command, uint64_t lba, uint16_t count, bool write) {
     completion_.rearm();
     volatile HbaPort& port = regs_->ports[port_index_];
     port.interrupt_status  = kWatched.raw;
-    asm volatile("" ::: "memory");
+    std::atomic_signal_fence(std::memory_order_seq_cst);
     port.command_issue = kSlotZero.raw;
     return true;
 }

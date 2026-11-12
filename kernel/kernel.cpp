@@ -60,8 +60,10 @@ void Main(const cinux::boot::BootInfo& boot_info) {
     cinux::init::StartInitThread();
     cinux::arch::init::EnableSecondaryDispatch();
     for (;;) {
-        asm volatile("cli" : : : "memory");
-        cinux::proc::Scheduler::self().run_until_done();
+        {
+            cinux::arch::IrqGuard guard;
+            cinux::proc::Scheduler::self().run_until_done();
+        }
         cinux::arch::EnableIrqAndHalt();
     }
 }

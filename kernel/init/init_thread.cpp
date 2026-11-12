@@ -24,6 +24,7 @@
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
 #include "kernel/arch/firmware.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/user_entry.hpp"
@@ -229,7 +230,7 @@ void enter_initial_process() {
     const ShellSeats& seats = ShellSeats::self();
     proc::Task* const kSelf = proc::Scheduler::self().current();
     kSelf->user_root        = seats.root;
-    asm volatile("cli" : : : "memory");
+    static_cast<void>(cinux::arch::SaveAndDisableIrq());
     cinux::arch::space::SwitchRoot(seats.root);
     cinux::arch::EnterUserMode(seats.entry, seats.rsp);
 }

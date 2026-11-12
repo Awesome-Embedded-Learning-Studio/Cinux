@@ -18,6 +18,7 @@
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/arch/kernel_stack.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/signal.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -47,9 +48,8 @@ namespace {
 /// the stack it is about to hand away, or the frames it touches while
 /// assembling the child can run off the end.
 void guard_spawn_depth(const Task& spawner) {
-    unsigned long long rsp = 0;  // NOLINT(misc-const-correctness) written by the asm output
-    asm volatile("movq %%rsp, %0" : "=r"(rsp));
-    const unsigned long long kUsed = spawner.stack_base + kStackBytes - rsp;
+    const unsigned long long kUsed =
+        spawner.stack_base + kStackBytes - cinux::arch::CurrentKernelStack();
     cinux::base::safety::Check(kUsed < (kStackBytes / 4) * 3,
                                "spawn refused: the caller's kernel stack is nearly spent");
 }
