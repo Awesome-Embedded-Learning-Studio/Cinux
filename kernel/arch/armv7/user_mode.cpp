@@ -529,15 +529,17 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             }
         }
         if (reaped) {
+            const unsigned long kHandler =
+                kTaskACode + (reinterpret_cast<std::uintptr_t>(&user_fault_handler_c) -
+                              reinterpret_cast<std::uintptr_t>(__user_text_start));
+            static_cast<void>(
+                user_syscall3(cinux::armv7::syscall_nr::kSignal, 11, kHandler, 0));
             const long kThird = user_syscall0(cinux::armv7::syscall_nr::kFork);
             if (kThird == 0) {
-                char          note[16];
-                unsigned long note_length = 0;
-#define NOTE(c) note[note_length++] = (c)
-                NOTE('r'); NOTE('e'); NOTE('u'); NOTE('s'); NOTE('e'); NOTE(' ');
-                NOTE('o'); NOTE('k'); NOTE('\n');
-#undef NOTE
-                user_write(note, note_length);
+                // The parent registered a fault handler before this fork:
+                // the child inherits it and must land in it.
+                static_cast<void>(*reinterpret_cast<volatile unsigned long*>(
+                    0x51000010UL));
                 static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
                 for (;;) {
                 }
@@ -551,13 +553,15 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
                         reinterpret_cast<std::uintptr_t>(&reuse_status)),
                     200);
                 if (kResult >= 0) {
-                    if (kThird == 4 && reuse_status == 3UL) {
-                        char          note[24];
+                    if (kThird == 4 && reuse_status == 9UL) {
+                        char          note[32];
                         unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
-                        NOTE('s'); NOTE('l'); NOTE('o'); NOTE('t'); NOTE(' ');
-                        NOTE('r'); NOTE('e'); NOTE('u'); NOTE('s'); NOTE('e');
-                        NOTE('d'); NOTE('\n');
+                        NOTE('h'); NOTE('a'); NOTE('n'); NOTE('d'); NOTE('l');
+                        NOTE('e'); NOTE('r'); NOTE(' '); NOTE('i'); NOTE('n');
+                        NOTE('h'); NOTE('e'); NOTE('r'); NOTE('i'); NOTE('t');
+                        NOTE('e'); NOTE('d'); NOTE(' '); NOTE('o'); NOTE('k');
+                        NOTE('\n');
 #undef NOTE
                         user_write(note, note_length);
                     }

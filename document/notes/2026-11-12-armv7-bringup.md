@@ -294,7 +294,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 号 | 语义 | 覆盖它的自检 |
 | --- | --- | --- |
 | 1 | exit | `task 0 exited with status 7` |
-| 2 | fork | 连 fork 两次：`fork 0 -> 4`、`fork 0 -> 5`、`child one ok`、`child two ok`、两条都以 3 退出；写时复制：两次 `cow copy at 40040000`、`cow after two forks`；继承：`fd inherited ok`（父任务关掉的 2 号在子任务里也是关的）、`brk inherited ok`（子任务的断点接着父任务的 0x4000E000）；槽位复用：子任务退出后再 fork 回到 4 号（`reuse ok`、`slot reused`）；占满八条后第五次被拒（`fork refused, no free slot`、`no slot ok`），四条停着的子任务在父任务结束后各自退出 |
+| 2 | fork | 连 fork 两次：`fork 0 -> 4`、`fork 0 -> 5`、`child one ok`、`child two ok`、两条都以 3 退出；写时复制：两次 `cow copy at 40040000`、`cow after two forks`；继承：`fd inherited ok`（父任务关掉的 2 号在子任务里也是关的）、`brk inherited ok`（子任务的断点接着父任务的 0x4000E000）；槽位复用：子任务退出后再 fork 回到 4 号；处理函数继承：父任务登记过处理函数，复用的子任务踩 `0x51000010` 也进处理函数（`fault handled at 51000010`、`handler inherited ok`、以 9 退出）；占满八条后第五次被拒（`fork refused, no free slot`、`no slot ok`），四条停着的子任务在父任务结束后各自退出 |
 | 3 | read | `read timed out`（有数据那条未覆盖） |
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
 | 6 | close | `close 2`、`ebadf ok` |
