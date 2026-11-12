@@ -3,7 +3,7 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/fs/ramfs/ramfs.hpp"

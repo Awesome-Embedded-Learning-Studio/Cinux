@@ -17,7 +17,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
+#include "kernel/arch/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"

@@ -4,7 +4,7 @@
 #include "cinux/byte_order.hpp"
 #include "cinux/ptr.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/fs/ramfs/ramfs.hpp"
 #include "kernel/fs/vfs.hpp"

@@ -12,7 +12,7 @@
 
 #include "kernel/proc/fault_resolve.hpp"
 
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"

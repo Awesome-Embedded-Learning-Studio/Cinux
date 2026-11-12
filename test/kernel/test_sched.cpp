@@ -8,7 +8,7 @@
 #include "framework_kernel.hpp"
 #include "kernel/arch/context.hpp"
 #include "kernel/arch/irq_guard.hpp"
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/cow.hpp"

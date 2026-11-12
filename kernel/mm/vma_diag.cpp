@@ -1,6 +1,6 @@
 #include "kernel/mm/vma_diag.hpp"
 
-#include "kernel/arch/x86_64/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
+#include "kernel/arch/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/vma.hpp"
 

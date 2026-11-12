@@ -1,6 +1,6 @@
 #include "kernel/proc/fault_diagnose.hpp"
 
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/vma_diag.hpp"
 #include "kernel/proc/scheduler.hpp"

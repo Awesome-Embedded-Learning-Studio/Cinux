@@ -3,7 +3,7 @@
 #include "cinux/literal_types.hpp"
 #include "cinux/ptr.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/address_space.hpp"
