@@ -23,10 +23,10 @@ using walk::MapPage;
 using walk::MapUserPage;
 using walk::TranslatePage;
 
-constexpr unsigned long kKernelHalfSlots = 256;
+constexpr unsigned long kKernelHalfSlots = walk::kUserHalfSlots;
 constexpr unsigned long kSlotBytes       = sizeof(Entry);
 
-constexpr int kPdptLevelsBelow = 2;
+constexpr int kLevelsBelowTop = static_cast<int>(sizeof(walk::kUpperLevels) / sizeof(walk::kUpperLevels[0])) - 1;
 constexpr int kLeafTable       = 0;
 
 void release_user_tables(Entry* table, int levels_below) {
@@ -123,7 +123,7 @@ void AddressSpace::teardown() {
         cinux::base::safety::Check(!slot.has(cinux::arch::page::kLarge),
                                    "user half holds a large page");
         unsigned long const kTarget = walk::EntryTarget(slot);
-        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), kPdptLevelsBelow);
+        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), kLevelsBelowTop);
         Pmm::self().free_page(cinux::base::PhysAddr{kTarget});
     }
     Pmm::self().free_page(cinux::base::PhysAddr{root_});
