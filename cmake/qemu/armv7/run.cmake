@@ -51,6 +51,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_SLEEP=task 0 sleeps 3 ticks"
             "-DEXPECTED_PID=pid 3 ok"
             "-DEXPECTED_UNKNOWN=svc FFFF unknown"
+            "-DEXPECTED_BRK=brk -> 4000E000"
+            "-DEXPECTED_BRKOK=brk ok"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
             "-DEXPECTED_TASKS=two tasks ok"
             "-DEXPECTED_USER=user mode round trip ok"

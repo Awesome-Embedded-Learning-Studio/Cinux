@@ -114,6 +114,7 @@ const Answer* find_answer(unsigned long number) {
 /// Numbers the scheduler owns; the table decides, not a comparison chain.
 bool traps_to_scheduler(unsigned long number) {
     return number == cinux::armv7::syscall_nr::kExit ||
+           number == cinux::armv7::syscall_nr::kBrk ||
            number == cinux::armv7::syscall_nr::kWait ||
            number == cinux::armv7::syscall_nr::kSleep ||
            number == cinux::armv7::syscall_nr::kSchedYield;

@@ -67,9 +67,12 @@ struct UserTask {
     unsigned long            wait_target;   // valid while blocked
     unsigned long            wait_mask;     // bit per awaited task
     unsigned long            wait_deadline; // ticks; valid while blocked
+    unsigned long            break_top;     // grow-only user heap break
 };
 
 constexpr unsigned long kTaskCount   = 4;
+constexpr unsigned long kBrkBase     = 0x4000C000UL;
+constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kWaitTicks  = 20;  // default deadline when the caller passes 0
 
 UserTask                g_tasks[kTaskCount];
@@ -169,6 +172,23 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         }
 #undef NOTE
         user_write(note, note_length);
+    }
+    if (task_id == 0) {
+        const unsigned long kWant = 0x4000E000UL;  // two pages past the base
+        const long          kGot  = user_syscall3(cinux::armv7::syscall_nr::kBrk, kWant, 0, 0);
+        if (static_cast<unsigned long>(kGot) >= kWant) {
+            auto* const kLast = reinterpret_cast<volatile unsigned long*>(0x4000DFFCUL);
+            *kLast            = 0xBEEFUL;
+            if (*kLast == 0xBEEFUL) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('b'); NOTE('r'); NOTE('k'); NOTE(' '); NOTE('o'); NOTE('k');
+                NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
     }
     {
         // No table entry: the dispatcher must refuse it, not guess.
@@ -319,6 +339,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_target   = kTaskCount;
     task.wait_mask     = 0;
     task.wait_deadline = 0;
+    task.break_top     = kBrkBase;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -529,6 +550,38 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
         wake_waiters_of(g_current);
+    }
+
+    if (number == cinux::armv7::syscall_nr::kBrk) {
+        // Grow-only: round up to a page, map what is new, refuse past the
+        // window or below the base by reporting the current break.
+        const unsigned long kAsked = g_user_trap.r0;
+        unsigned long&      kBreak = g_tasks[g_current].break_top;
+        if (kAsked >= kBrkBase && kAsked <= kBrkLimit) {
+            const unsigned long kTop = (kAsked + 4095UL) & ~4095UL;
+            cinux::mm::KernelTables tables;
+            const unsigned long     root = g_tasks[g_current].space->root();
+            while (kBreak < kTop) {
+                const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+                if (kFrame.raw == 0) {
+                    break;
+                }
+                auto* const table = cinux::mm::walk::EnsureLeafTable(
+                    tables, root, kBreak, cinux::arch::page::kUser);
+                if (table == nullptr) {
+                    cinux::mm::Pmm::self().free_page(kFrame);
+                    break;
+                }
+                table[cinux::arch::page::SlotIndex(kBreak, cinux::arch::page::kLeafLevel)] =
+                    cinux::arch::page::MakePageEntry(
+                        kFrame.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+                cinux::arch::space::InvalidatePage(kBreak);
+                kBreak += cinux::arch::page::kSize;
+            }
+        }
+        g_tasks[g_current].trap.r0 = kBreak;
+        cinux::print::Println("[armv7] brk -> %X", kBreak);
+        return &g_tasks[g_current].trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kSleep) {

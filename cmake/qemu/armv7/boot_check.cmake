@@ -54,6 +54,14 @@ if(EXPECTED_BLOCK2 AND NOT serial_out MATCHES "${EXPECTED_BLOCK2}")
     message(FATAL_ERROR
         "arm_boot: the second waiter never blocked.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_BRK AND NOT serial_out MATCHES "${EXPECTED_BRK}")
+    message(FATAL_ERROR
+        "arm_boot: brk never grew the heap.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_BRKOK AND NOT serial_out MATCHES "${EXPECTED_BRKOK}")
+    message(FATAL_ERROR
+        "arm_boot: the grown heap was not writable.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_UNKNOWN AND NOT serial_out MATCHES "${EXPECTED_UNKNOWN}")
     message(FATAL_ERROR
         "arm_boot: an unknown call was not refused.\nstdout:\n${serial_out}")
