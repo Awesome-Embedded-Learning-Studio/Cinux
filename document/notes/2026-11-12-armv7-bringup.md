@@ -48,6 +48,13 @@
 - 平台缝：`kernel/platform/<名字>.hpp` 只 include `cinux/platform/<名字>.hpp`，
   这个文件由根构建按 `CINUX_ARCHITECTURE` 生成，指向该端口的聚合头。七条
   中立头（bus、clock、firmware、interrupt、io、ps2）都走这条缝。
+- 缺页的修复门：用户态来的数据异常存整张帧，`faults.cpp` 读 DFAR 与 DFSR，
+  把故障交给一个修页钩子；钩子修好就把同一张帧装回去，出错的那条指令重跑。
+  钩子只认两段窗口：按需补页的 0x40009000，以及共享页的写时复制。
+- 写时复制：共享帧映射成用户只读（AP 0b10），写故障时复制一页、当前空间
+  改指副本并给可写、旧帧账减一；`cow_release.cpp` 的小表只记被共享的帧。
+  自检里两条任务共享 0x40008000，各自写、跑过若干次抢占再读回，都报
+  `task N keeps its page`。
 
 ## 两条陷阱帧路径
 
@@ -80,12 +87,16 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 上下文往返 | `context switch ok` |
 | 每核数据 | `per-cpu ok` |
 | 地址空间的拆分 | `space teardown ok` |
+| 共享帧的账本 | `cow ledger ok` |
+| 一帧挂进两个空间 | `shared frame ok` |
 | 两条内核任务轮转 | `two tasks ok` |
 | 两条用户任务与抢占 | `preempt to task`、`task 0 exited with status 7`、`task 1 faulted` |
 | 坏指针 | `svc write refused 80000000 + 8` |
 | 读 | `svc read 0 bytes` |
+| 按需补页 | `fault repaired at 40009000` |
+| 写时复制 | `cow copy at 40008000`、`task N keeps its page` |
 | 用户态往返 | `user mode round trip ok` |
-| 故意缺页 | `data abort at 51000000 status 805 code 2` |
+| 内核态缺页 | `kernel fault probe`、`data abort at 51000000 status 805 code 2` |
 
 ## 验收
 
@@ -134,6 +145,15 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
 15. 判据写反过两次。第一次要求"拆完空闲页数变多"，其实持平才对；第二次是
     根表那边还漏着四页，不管怎么判都不会平。先把漏的页还回去，判据才站
     得住。
+16. 判断异常来源用了 r3，而 r3 是用户寄存器。用户故障时它先被改成模式值，
+    重跑的指令就跑到那个数上去了（串口里是 fault caught at 10）。判断前先
+    把 r3 压栈，用户路径再取回。
+17. 修页钩子起初没有窗口，把自己安排的跨表故障也修了，那条验收当场失效。
+    钩子只该认它负责的那几页。
+18. 试过把 IRQ、svc、数据异常合成一个入口、一个宏保存整张帧再按种类分发。
+    那一版在这一轮里挂住过，标记也看不出进了哪一步，最后整段退回，只给数据
+    异常单独留了一条保存路径。这个方向未必错，但没能在这轮里验证，所以不
+    留在树上。
 
 ## 端口转发
 
@@ -155,8 +175,9 @@ firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC �
 
 - 系统调用只有 exit、read、write、sched_yield 四条，read 只认 fd 0、
   write 只认 1 与 2，还没有文件描述符表。
-- 帧的回收只支持独占：没有 COW 的账本，`cow::ReleaseFrame` 直接把页还给
-  PMM。要 fork 或共享映射就得先补这本账。
+- 写时复制只在自检里用：两个空间共享一帧、写故障复制，这条链通了；还没有
+  fork，也就没有真正的父子共享。内核侧那段等 tick 的空转也先换成了缺页
+  探针，内核态中断在用户阶段之后的开中断路径还没重新验。
 - 内核调度器没有接进来。现在的两条用户任务是自检里的小调度，帧、根表与
   时间片都能用，但任务结构、生命周期与阻塞还没长出来。
 - `abi`、`random`、`smp_control` 这些中立头还没有 armv7 版。
