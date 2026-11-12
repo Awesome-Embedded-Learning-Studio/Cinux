@@ -31,7 +31,13 @@ namespace cinux::mm::walk {
 using cinux::arch::page::Entry;
 
 /// The arch's table grammar, republished so walk callers name this header alone.
+using cinux::arch::page::DescriptorIsLeaf;
+using cinux::arch::page::DescriptorPresent;
 using cinux::arch::page::EntryTarget;
+using cinux::arch::page::MakePageEntry;
+using cinux::arch::page::MakeTablePointer;
+using cinux::arch::page::SmallLeafTarget;
+using cinux::arch::page::TableTarget;
 using cinux::arch::page::IndexRange;
 using cinux::arch::page::kEntriesPerTable;
 using cinux::arch::page::kLeafLevel;
@@ -97,10 +103,10 @@ SlotAt FindSlot(World& world, unsigned long root, unsigned long virtual_address)
     Entry* table = world.table(root);
     for (const WalkLevel kLevel : kUpperLevels) {
         Entry& slot = table[SlotIndex(virtual_address, kLevel)];
-        if (!slot.has(cinux::arch::page::kPresent)) {
+        if (!cinux::arch::page::DescriptorPresent(slot)) {
             return SlotAt{.entry = nullptr, .level = kLevel};
         }
-        if (slot.has(cinux::arch::page::kLarge)) {
+        if (cinux::arch::page::DescriptorIsLeaf(slot, kLevel)) {
             return SlotAt{.entry = &slot, .level = kLevel};
         }
         table = FollowTable(world, slot);
@@ -131,15 +137,15 @@ Entry* EnsureLeafTable(World& world, unsigned long root, unsigned long virtual_a
     Entry* table = world.table(root);
     for (const WalkLevel kLevel : kUpperLevels) {
         Entry& slot = table[SlotIndex(virtual_address, kLevel)];
-        if (!slot.has(cinux::arch::page::kPresent)) {
+        if (!cinux::arch::page::DescriptorPresent(slot)) {
             unsigned long const kFresh = world.take_page();
             if (kFresh == 0) {
                 return nullptr;
             }
-            slot  = cinux::arch::page::MakeTableEntry(kFresh,
-                                                      cinux::arch::page::kWritable | leaf_flags);
+            slot  = cinux::arch::page::MakeTablePointer(
+                    kFresh, cinux::arch::page::kWritable | leaf_flags);
             table = world.table(kFresh);
-        } else if (slot.has(cinux::arch::page::kLarge)) {
+        } else if (cinux::arch::page::DescriptorIsLeaf(slot, kLevel)) {
             return nullptr;
         } else {
             table = FollowTable(world, slot);
@@ -175,7 +181,7 @@ bool MapPage(World& world, unsigned long root, unsigned long virtual_address,
         return false;
     }
     kTable[SlotIndex(virtual_address, kLeafLevel)] =
-        cinux::arch::page::MakeTableEntry(physical, cinux::arch::page::kWritable);
+        cinux::arch::page::MakePageEntry(physical, cinux::arch::page::kWritable);
     return true;
 }
 
@@ -255,7 +261,7 @@ Entry UnmapPage(World& world, unsigned long root, unsigned long virtual_address)
 template <TableWorld World>
 unsigned long TranslatePage(World& world, unsigned long root, unsigned long virtual_address) {
     SlotAt const kSlot = FindSlot(world, root, virtual_address);
-    if (kSlot.entry == nullptr || !kSlot.entry->has(cinux::arch::page::kPresent)) {
+    if (kSlot.entry == nullptr || !cinux::arch::page::DescriptorPresent(*kSlot.entry)) {
         return 0;
     }
     if (!IsLeafLevel(kSlot.level)) {
@@ -267,10 +273,8 @@ unsigned long TranslatePage(World& world, unsigned long root, unsigned long virt
         physical.deposit(kField, kSlot.entry->extract(kField));
         return physical.raw | LowBits(virtual_address, IndexRange(kSlot.level).low);
     }
-    Entry physical{};
-    physical.deposit(cinux::arch::page::kTablePhys,
-                     kSlot.entry->extract(cinux::arch::page::kTablePhys));
-    return physical.raw | LowBits(virtual_address, IndexRange(kLeafLevel).low);
+    return cinux::arch::page::SmallLeafTarget(*kSlot.entry) |
+           LowBits(virtual_address, IndexRange(kLeafLevel).low);
 }
 
 }  // namespace cinux::mm::walk

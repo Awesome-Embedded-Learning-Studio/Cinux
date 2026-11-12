@@ -161,4 +161,84 @@ inline unsigned long EntryTarget(const Entry& slot) {
     return address.raw;
 }
 
+/**
+ * @brief         Reports whether a slot maps something.
+ * @param[in]     entry   The table slot.
+ * @return        true when the present bit is set.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool DescriptorPresent(const Entry& entry) {
+    return entry.has(kPresent);
+}
+
+/**
+ * @brief         Reports whether a slot is a leaf at the given level.
+ * @param[in]     entry   The table slot.
+ * @param[in]     level   The level holding the slot.
+ * @return        true when the large bit marks a leaf.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool DescriptorIsLeaf(const Entry& entry, WalkLevel /*level*/) {
+    return entry.has(kLarge);
+}
+
+/**
+ * @brief         Builds a pointer entry to the next-level table.
+ * @param[in]     physical   Physical address of the next table.
+ * @param[in]     flags      Extra terms.
+ * @return        The encoded entry.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr Entry MakeTablePointer(unsigned long physical, Entry flags) {
+    return MakeTableEntry(physical, flags);
+}
+
+/**
+ * @brief         Builds a 4 KiB leaf entry.
+ * @param[in]     physical   Physical address of the page.
+ * @param[in]     flags      Permission terms.
+ * @return        The encoded entry.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr Entry MakePageEntry(unsigned long physical, Entry flags) {
+    return MakeTableEntry(physical, flags);
+}
+
+/**
+ * @brief         Entries one table holds at a level.
+ * @param[in]     level   The level asked about.
+ * @return        512 at every level on x86-64.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr unsigned int EntriesAt(WalkLevel /*level*/) {
+    return kEntriesPerTable;
+}
+
+/**
+ * @brief         Reads the physical address a table pointer names.
+ * @param[in]     slot   A table-pointer entry.
+ * @return        The next table's physical address.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr unsigned long TableTarget(const Entry& slot) {
+    return EntryTarget(slot);
+}
+
+/**
+ * @brief         Reads the physical address a 4 KiB leaf names.
+ * @param[in]     slot   A small-page entry.
+ * @return        The page's physical address.
+ * @since         0.4.0
+ * @ingroup       kernel_arch
+ */
+constexpr unsigned long SmallLeafTarget(const Entry& slot) {
+    return EntryTarget(slot);
+}
+
 }  // namespace cinux::arch::page

@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
@@ -62,6 +63,11 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartWrite(" Hz, counter 0x");
     PrintHex(cinux::armv7::TimerCounter());
     cinux::armv7::UartWrite("\n");
+
+    static_assert(cinux::arch::page::kLeafLevel == cinux::arch::page::WalkLevel::kL2,
+                  "the bring-up image walks two levels");
+    static_assert(cinux::arch::page::EntriesAt(cinux::arch::page::WalkLevel::kL1) == 4096,
+                  "level 1 holds 4096 entries");
 
     extern int _vectors[];
     asm volatile("mcr p15, 0, %0, c12, c0, 0" : : "r"(_vectors));  // VBAR
