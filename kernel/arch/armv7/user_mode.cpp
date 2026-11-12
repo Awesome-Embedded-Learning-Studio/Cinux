@@ -188,6 +188,18 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
+        const long kYielded = user_syscall3(cinux::armv7::syscall_nr::kSchedYield, 0, 0, 0);
+        if (kYielded == 0) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('y'); NOTE('i'); NOTE('e'); NOTE('l'); NOTE('d'); NOTE(' ');
+            NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
+    }
+    if (task_id == 0) {
         const long kBadFlags = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, 0, 2);
         if (kBadFlags == static_cast<long>(cinux::armv7::errno::kInvalid)) {
             char          note[24];

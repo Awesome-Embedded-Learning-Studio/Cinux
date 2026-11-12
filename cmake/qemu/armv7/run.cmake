@@ -62,6 +62,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_ROOK=ro copy ok"
             "-DEXPECTED_BADFLAGS=mmap flags 2 refused"
             "-DEXPECTED_FLAGSOK=flags refused"
+            "-DEXPECTED_YIELD=yield ok"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"

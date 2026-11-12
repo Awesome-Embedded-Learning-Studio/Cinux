@@ -258,6 +258,27 @@ tick 里读进用户缓冲（这条没有）。试过两条路把一行送进接
 这轮留下的是一道防线：跑之前先删旧日志，跑完若日志不存在或为空直接失败。
 之前 runner 起不来时测试 0.01 秒就"通过"，断言读的是上一轮留下的日志。
 
+## 系统调用的覆盖表
+
+号与语义在上面，这张表记的是"哪条自检真的走到了它"：
+
+| 号 | 语义 | 覆盖它的自检 |
+| --- | --- | --- |
+| 1 | exit | `task 0 exited with status 7` |
+| 3 | read | `read timed out`（有数据那条未覆盖） |
+| 4 | write | `svc write 22 bytes`、两种拒绝 |
+| 6 | close | `close 2`、`ebadf ok` |
+| 20 | getpid | `getpid 3`、`pid N ok` |
+| 45 | brk | `brk -> 4000E000`、`brk ok` |
+| 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
+| 91 | munmap | `munmap 40020000 pages 1` |
+| 114 | wait | `blocks on`、`wait N -> DEAD`、`read timed out` 同族的超时 |
+| 158 | sched_yield | `yield ok` |
+| 162 | sleep | `sleeps 3 ticks`、`woke from sleep`、`slept` |
+| 未登记 | 未知号 | `svc FFFF unknown`、`unknown refused` |
+
+缺口只有一处：`read` 的"数据到了"分支。灌输入试过两种方式都不通，见上一节。
+
 ## 端口转发
 
 中立头 `kernel/arch/<名字>.hpp` 不含 ISA 路径，它引用
