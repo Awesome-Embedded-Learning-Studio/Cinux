@@ -45,6 +45,13 @@
 armv7 目前实现了 page、space_layout、space_control、irq_guard、halt、
 instructions 六个中立头；其余等着最小核心真正开始编译时再补。
 
+## 已经接上的中立件
+
+- `pmm`：来自 `kernel/mm/pmm.cpp`，BootInfo 由 DTB 的内存区间造出来，
+  256 MiB 报 65536 个空闲页。
+- `cinux/assert.hpp` 的断言钩子：armv7 版打一行串口再停机。
+- 表项判断与走法形状：`page_entry` 与 `page_walk_shape` 给的是两级短描述符。
+
 ## 还没接的
 
 - 用户态：第二级表已经会走，但还没有切到 PL0 的路径，也没有 USER 域

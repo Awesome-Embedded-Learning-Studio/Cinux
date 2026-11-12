@@ -11,6 +11,9 @@ add_executable(arm_image
     vectors.S
     mmu.cpp
     fdt.cpp
+    assert_hook.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
+    libc_support.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
 target_compile_options(arm_image PRIVATE

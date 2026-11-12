@@ -12,6 +12,8 @@
 
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
+#include "kernel/boot/boot_info.hpp"
+#include "kernel/mm/pmm.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
 #include "kernel/arch/armv7/mmu.hpp"
@@ -80,18 +82,32 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartWrite(cinux::armv7::TwoLevelDemo() ? "[armv7] two-level page ok\n"
                                                         : "[armv7] two-level page FAILED\n");
     {
-        constexpr unsigned long kDtbAddress = 0x80100000UL;
+        constexpr unsigned long kDtbAddress = 0x81000000UL;
         cinux::armv7::MemoryRange range{};
-        if (cinux::armv7::ReadMemoryRange(kDtbAddress, range)) {
+        if (!cinux::armv7::ReadMemoryRange(kDtbAddress, range)) {
+            cinux::armv7::UartWrite("[armv7] dtb missing or unreadable\n");
+        } else {
             cinux::armv7::UartWrite("[armv7] dtb memory 0x");
             PrintHex(range.base);
             cinux::armv7::UartWrite(" + 0x");
             PrintHex(range.size);
             cinux::armv7::UartWrite("\n");
-        } else {
-            cinux::armv7::UartWrite("[armv7] dtb missing or unreadable, first word 0x");
-            PrintHex(*reinterpret_cast<volatile unsigned long*>(kDtbAddress));
-            cinux::armv7::UartWrite("\n");
+
+            cinux::boot::BootInfo info{};
+            info.magic       = cinux::boot::kBootInfoMagic;
+            info.version     = cinux::boot::kBootInfoVersion;
+            info.struct_size = sizeof(cinux::boot::BootInfo);
+            info.e820_count  = 1;
+            info.e820[0]     = cinux::boot::E820Entry{.base = range.base,
+                                                      .length = range.size,
+                                                      .type   = cinux::boot::kE820Usable};
+            if (cinux::mm::Pmm::self().init(info)) {
+                cinux::armv7::UartWrite("[armv7] pmm free pages ");
+                PrintUnsigned(cinux::mm::Pmm::self().free_page_count());
+                cinux::armv7::UartWrite("\n");
+            } else {
+                cinux::armv7::UartWrite("[armv7] pmm refused init\n");
+            }
         }
     }
     asm volatile("cpsie if" ::: "memory");

@@ -7,7 +7,7 @@ endif()
 
 set(CINUX_ARM_RUN_SECONDS 5 CACHE STRING "How long the arm_boot check lets QEMU run")
 
-set(CINUX_ARM_DTB_ADDR 0x80100000)
+set(CINUX_ARM_DTB_ADDR 0x81000000)
 
 add_custom_target(run
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
@@ -27,5 +27,6 @@ add_test(NAME arm_boot
             -DEXPECTED=Cinux armv7: alive on i.MX6ULL
             -DEXPECTED_TICK=tick 1
             -DEXPECTED_MEMORY=dtb memory 0x80000000
+            -DEXPECTED_PMM=pmm free pages
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
