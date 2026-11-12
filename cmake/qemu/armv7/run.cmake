@@ -81,6 +81,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_SLOTREUSED=slot reused"
             "-DEXPECTED_GETPPID=getppid 0"
             "-DEXPECTED_PPIDOK=ppid ok"
+            "-DEXPECTED_FDINH=fd inherited ok"
+            "-DEXPECTED_BRKINH=brk inherited ok"
             "-DEXPECTED_NOSLOT=fork refused, no free slot"
             "-DEXPECTED_NOSLOTOK=no slot ok"
             "-DEXPECTED_TASK6=task 6 exited with status 3"

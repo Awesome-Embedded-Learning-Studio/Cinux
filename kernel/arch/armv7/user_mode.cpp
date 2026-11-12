@@ -441,6 +441,35 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         const long kFirst = user_syscall0(cinux::armv7::syscall_nr::kFork);
         if (kFirst == 0) {
             *kSharedPage = 0x2222UL;
+            // Two things are inherited rather than re-created: the open
+            // descriptors and the heap break.
+            char probe = 'x';
+            const long kClosedFd =
+                user_syscall3(cinux::armv7::syscall_nr::kWrite, 2,
+                              static_cast<unsigned long>(
+                                  reinterpret_cast<std::uintptr_t>(&probe)),
+                              1);
+            if (kClosedFd == static_cast<long>(cinux::armv7::errno::kBadFd)) {
+                char          note[32];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('f'); NOTE('d'); NOTE(' '); NOTE('i'); NOTE('n'); NOTE('h');
+                NOTE('e'); NOTE('r'); NOTE('i'); NOTE('t'); NOTE('e'); NOTE('d');
+                NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+            const long kBreak = user_syscall3(cinux::armv7::syscall_nr::kBrk, 0, 0, 0);
+            if (static_cast<unsigned long>(kBreak) == 0x4000E000UL) {
+                char          note[32];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('b'); NOTE('r'); NOTE('k'); NOTE(' '); NOTE('i'); NOTE('n');
+                NOTE('h'); NOTE('e'); NOTE('r'); NOTE('i'); NOTE('t'); NOTE('e');
+                NOTE('d'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
             const long kPpid = user_syscall3(cinux::armv7::syscall_nr::kGetPpid, 0, 0, 0);
             if (kPpid == 0) {
                 char          note[24];
