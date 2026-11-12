@@ -1,7 +1,7 @@
 #include "../framework/framework.hpp"
 #include "cinux/literal_types.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "test_assert.hpp"
 

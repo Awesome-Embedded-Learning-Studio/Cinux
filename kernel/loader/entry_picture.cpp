@@ -2,7 +2,7 @@
 #include <initializer_list>
 
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/loader/loader.hpp"
 
 namespace cinux::loader {

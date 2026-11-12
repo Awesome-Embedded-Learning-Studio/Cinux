@@ -5,7 +5,7 @@
 #include "cinux/math.hpp"
 #include "cinux/spin_mutex.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"  // NOLINT(misc-include-cleaner) IrqGuard is used below
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/heap.hpp"
 #include "kernel/mm/heap_config.hpp"

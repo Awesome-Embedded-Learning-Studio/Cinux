@@ -1,7 +1,7 @@
 #include "kernel/proc/signals.hpp"
 
 #include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"

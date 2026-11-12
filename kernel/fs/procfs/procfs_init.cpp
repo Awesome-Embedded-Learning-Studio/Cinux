@@ -8,7 +8,7 @@
 #include "cinux/result.hpp"
 #include "cinux/text.hpp"
 #include "kernel/arch/x86_64/cpuid.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/fs/file_world.hpp"

@@ -10,7 +10,7 @@
 #include "cinux/byte_order.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/net/e1000_config.hpp"
 #include "kernel/drivers/net/e1000_layout.hpp"

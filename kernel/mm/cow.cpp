@@ -7,8 +7,8 @@
 #include "cinux/spin_mutex.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"
 #include "kernel/arch/x86_64/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/hardware_frames.hpp"

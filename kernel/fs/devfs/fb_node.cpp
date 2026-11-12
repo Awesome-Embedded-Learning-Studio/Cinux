@@ -10,7 +10,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "cinux/text.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/console/screen.hpp"
 #include "kernel/drivers/device/device.hpp"

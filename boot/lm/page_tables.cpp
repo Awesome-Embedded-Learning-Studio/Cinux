@@ -2,7 +2,7 @@
 
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "layout.hpp"
 #include "lm.hpp"

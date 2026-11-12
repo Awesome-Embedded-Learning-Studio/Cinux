@@ -3,7 +3,7 @@
 
 #include "../framework/framework.hpp"
 #include "kernel/arch/x86_64/cpuid.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "test_assert.hpp"
 

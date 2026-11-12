@@ -8,10 +8,10 @@
 
 ## 页表项的语法：`page_entry.hpp`
 
-一切的起点是页表项本身。定义在 `kernel/arch/x86_64/page_entry.hpp` 里的类型叫 `Entry`，也就是 `BitMask<uint64_t>` 的一个别名。宽度定成了八个字节，而注释把话说得很直白，这宽度是我们按硬件事实认下来的，不管我们从哪个世界来编译都一样。我们数一下在用的几个位。第 0 位的 kPresent 说这项映射了东西，第 1 位的 kWritable 说可以写，第 2 位的 kUser 放行 ring 3，而且每一层都得带上它，中间的任何一层丢了，整条路对用户态而言就是死路。第 7 位的 kLarge 则说这项是个大页叶子，不再指向下一张表了，第 4 位的 kCacheDisable 关掉缓存，设备寄存器坚持要的正是它。第 9 位留给的是 kCow，软件自己用的，硬件是完全不过问的，写时复制就拿它标记共享的帧，写错误答的则是不再共享。第 63 位留给的是 kNoExec，它只有在 EFER.NXE（CPU 的模型专用寄存器开关，打开了硬件才认 No-Exec 位）生效了之后才有意义，NXE 没开的时候把它写进项里，招来的就是保留位缺页，所以每个映射调用都得显式把自己的标志传进来，而头文件不给任何默认值。
+一切的起点是页表项本身。定义在 `kernel/arch/page_entry.hpp` 里的类型叫 `Entry`，也就是 `BitMask<uint64_t>` 的一个别名。宽度定成了八个字节，而注释把话说得很直白，这宽度是我们按硬件事实认下来的，不管我们从哪个世界来编译都一样。我们数一下在用的几个位。第 0 位的 kPresent 说这项映射了东西，第 1 位的 kWritable 说可以写，第 2 位的 kUser 放行 ring 3，而且每一层都得带上它，中间的任何一层丢了，整条路对用户态而言就是死路。第 7 位的 kLarge 则说这项是个大页叶子，不再指向下一张表了，第 4 位的 kCacheDisable 关掉缓存，设备寄存器坚持要的正是它。第 9 位留给的是 kCow，软件自己用的，硬件是完全不过问的，写时复制就拿它标记共享的帧，写错误答的则是不再共享。第 63 位留给的是 kNoExec，它只有在 EFER.NXE（CPU 的模型专用寄存器开关，打开了硬件才认 No-Exec 位）生效了之后才有意义，NXE 没开的时候把它写进项里，招来的就是保留位缺页，所以每个映射调用都得显式把自己的标志传进来，而头文件不给任何默认值。
 
 ```cpp
-// kernel/arch/x86_64/page_entry.hpp
+// kernel/arch/page_entry.hpp
 constexpr Entry UserLeafTerms(bool writable, bool executable) {
     Entry terms = kUser;
     if (writable) {
@@ -66,7 +66,7 @@ FillPage 的本体在 `kernel/mm/demand.cpp`，我们只看它和页表的接触
 - `kernel/mm/page_walk.hpp` — TableWorld 接缝、FindSlot、EnsureLeafTable、MapPage、MapUserPage、UnmapPage、TranslatePage
 - `kernel/mm/vmm_config.hpp` — kSeedTablesSpan 与接管期表页供应的取舍说明
 - `kernel/mm/layout.hpp` — 对外公布的地址空间布局与各基址的 static_assert
-- `kernel/arch/x86_64/page_entry.hpp` — Entry 位语法、UserLeafTerms、三级叶子构造
+- `kernel/arch/page_entry.hpp` — Entry 位语法、UserLeafTerms、三级叶子构造
 - `kernel/arch/x86_64/registers.hpp` — ReloadCr3、InvalidatePage（invlpg）
 - `kernel/proc/fault_resolve.cpp`、`kernel/mm/demand.cpp` — 缺页 resolver 与按需填充
 - `kernel/init/init_sequence.cpp` — 接管在启动序列里的位置

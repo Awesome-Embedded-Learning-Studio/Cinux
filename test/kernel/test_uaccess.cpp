@@ -4,7 +4,7 @@
 #include "framework_kernel.hpp"
 #include "kernel/arch/x86_64/cpuid.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/arch/x86_64/protections.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/boot/print.hpp"

@@ -3,7 +3,7 @@
 #include "cinux/assert.hpp"
 #include "cinux/math.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/syscall.hpp"

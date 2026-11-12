@@ -5,7 +5,7 @@
 #include <limits>
 #include <span>
 
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 
 namespace cinux::mm {
 namespace {

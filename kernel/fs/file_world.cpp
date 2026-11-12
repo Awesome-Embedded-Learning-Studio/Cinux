@@ -19,7 +19,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/block/block_cache.hpp"
 #include "kernel/drivers/block/block_config.hpp"

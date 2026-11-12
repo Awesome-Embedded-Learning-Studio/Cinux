@@ -23,7 +23,7 @@
 
 #include "cinux/ref_count.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 
 namespace cinux::mm {
 

@@ -2,7 +2,7 @@
 #include "cinux/literal_types.hpp"
 #include "cinux/ptr.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"

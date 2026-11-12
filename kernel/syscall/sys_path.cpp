@@ -3,7 +3,7 @@
 
 #include "cinux/own.hpp"
 #include "cinux/path.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"

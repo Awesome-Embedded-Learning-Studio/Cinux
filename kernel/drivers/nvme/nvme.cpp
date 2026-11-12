@@ -10,7 +10,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/arch/x86_64/platform/hpet/hpet.hpp"

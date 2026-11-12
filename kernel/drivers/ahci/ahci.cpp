@@ -12,7 +12,7 @@
 #include "cinux/ptr.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/ahci/ahci_identify.hpp"
 #include "kernel/drivers/ahci/ahci_layout.hpp"

@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "test_assert.hpp"
 
 using cinux::arch::page::Entry;

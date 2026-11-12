@@ -5,7 +5,7 @@
 #include "../framework/framework.hpp"
 #include "cinux/addr.hpp"
 #include "cinux/literal_types.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/pmm_config.hpp"

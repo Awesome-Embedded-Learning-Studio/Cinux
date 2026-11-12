@@ -22,7 +22,7 @@
 
 #include <stdint.h>
 
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/boot/boot_info.hpp"
 
 namespace cinux::mm {

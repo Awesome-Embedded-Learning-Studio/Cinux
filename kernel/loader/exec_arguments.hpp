@@ -10,7 +10,7 @@
  */
 #pragma once
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 namespace cinux::loader {
 /** @brief Linux MAX_ARG_STRLEN, including the terminating NUL. */
 inline constexpr unsigned long kMaxArgumentStringBytes = 32 * arch::page::kSize;

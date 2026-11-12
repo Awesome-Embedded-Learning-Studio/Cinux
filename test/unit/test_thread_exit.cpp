@@ -1,7 +1,7 @@
 #include "../framework/framework.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/futex.hpp"
 #include "kernel/proc/sched_class.hpp"

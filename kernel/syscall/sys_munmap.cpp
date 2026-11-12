@@ -2,8 +2,8 @@
 
 #include "cinux/math.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/cow.hpp"
