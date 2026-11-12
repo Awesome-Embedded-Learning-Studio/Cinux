@@ -10,6 +10,7 @@
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/context.hpp"
+#include "kernel/arch/task_context.hpp"
 #include "kernel/arch/kernel_stack.hpp"
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/mm/vmm.hpp"
