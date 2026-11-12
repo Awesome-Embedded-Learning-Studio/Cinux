@@ -188,6 +188,19 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
+        const long kBadFlags = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, 0, 2);
+        if (kBadFlags == static_cast<long>(cinux::armv7::errno::kInvalid)) {
+            char          note[24];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('f'); NOTE('l'); NOTE('a'); NOTE('g'); NOTE('s'); NOTE(' ');
+            NOTE('r'); NOTE('e'); NOTE('f'); NOTE('u'); NOTE('s'); NOTE('e');
+            NOTE('d'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
+    }
+    if (task_id == 0) {
         constexpr unsigned long kRoHint = 0x40030000UL;
         const long kRo = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kRoHint, 1);
         if (kRo == static_cast<long>(kRoHint)) {
@@ -734,7 +747,13 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         // window, be page-aligned, and name unmapped pages.
         const unsigned long kBytes = g_user_trap.r0;
         const unsigned long kHint  = g_user_trap.r1;
+        const unsigned long kFlags = g_user_trap.r2;
         unsigned long&      kTop   = g_tasks[g_current].mmap_top;
+        if (kFlags > 1UL) {
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
+            cinux::print::Println("[armv7] mmap flags %X refused", kFlags);
+            return &g_tasks[g_current].trap;
+        }
         const unsigned long kWant  = (kBytes + 4095UL) & ~4095UL;
         unsigned long       kBase  = 0;
         if (kHint != 0) {
@@ -779,15 +798,14 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 return &g_tasks[g_current].trap;
             }
             const auto kLeafBits =
-                (g_user_trap.r2 & 1UL) != 0
+                kFlags != 0
                     ? cinux::arch::page::kUser | cinux::arch::page::kReadOnly
                     : cinux::arch::page::kUser | cinux::arch::page::kWritable;
             table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
                 cinux::arch::page::MakePageEntry(kFrame.raw, kLeafBits);
             cinux::arch::space::InvalidatePage(spot);
         }
-        cinux::print::Println("[armv7] mmap %X len %X flags %X", kBase, kWant,
-                              g_user_trap.r2);
+        cinux::print::Println("[armv7] mmap %X len %X flags %X", kBase, kWant, kFlags);
         g_tasks[g_current].trap.r0 = kBase;
         return &g_tasks[g_current].trap;
     }

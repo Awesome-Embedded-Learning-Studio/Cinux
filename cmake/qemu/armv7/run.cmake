@@ -60,6 +60,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_MUNMAP=munmap 40020000 pages 1"
             "-DEXPECTED_ROCOPY=ro copy at 40030000"
             "-DEXPECTED_ROOK=ro copy ok"
+            "-DEXPECTED_BADFLAGS=mmap flags 2 refused"
+            "-DEXPECTED_FLAGSOK=flags refused"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"

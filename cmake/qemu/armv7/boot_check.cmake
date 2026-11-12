@@ -68,6 +68,8 @@ expect_literal(EXPECTED_HINTOK "the hinted mapping did not work.")
 expect_literal(EXPECTED_MUNMAP "munmap did not release the page.")
 expect_literal(EXPECTED_ROCOPY "the read-only page was never copied.")
 expect_literal(EXPECTED_ROOK "the read-only page never became writable.")
+expect_literal(EXPECTED_BADFLAGS "an unknown mmap flag was accepted.")
+expect_literal(EXPECTED_FLAGSOK "the refused flag was not reported.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 

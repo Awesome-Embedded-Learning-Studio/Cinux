@@ -123,6 +123,8 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 扩堆 | `brk -> 4000E000`、用户侧 `brk ok` |
 | 匿名映射 | `mmap 40010000 len 2000`、用户侧 `mmap ok` |
 | 地址提示与回收 | `mmap hint 40020000 is taken`、`munmap 40020000 pages 1`、用户侧 `mmap hint ok` |
+| 只读映射 | `ro copy at 40030000`、用户侧 `ro copy ok` |
+| 参数检查 | `mmap flags 2 refused`、用户侧 `flags refused` |
 | 描述符 | `close 2`、`svc write refused -9 at`、用户侧 `ebadf ok` |
 | 等任意一条 | `task 3 blocks on 4`、返回先结束那条的下标 |
 | 等待超时 | `task 0 wait timed out`、用户侧 `self wait timed out` |
@@ -278,8 +280,11 @@ firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC �
   write 只认 1 与 2，还没有文件描述符表。
 - 克隆只在自检与四条任务里用：子树能克隆、写时复制能各写各的，任务结束也
   会把空间还回去。等待能阻塞、按位图等、按目标唤醒、能超时，sleep 也能用。
-  用户堆只有 brk 的只增窗口；mmap 只做匿名映射，能收地址提示、能用 munmap
-  还页，但没有文件映射与共享映射；描述符只有 0 到 2 三个，没有文件系统。没有进程、会话与信号，调度也还是端口里的迷你
+  用户堆只有 brk 的只增窗口；mmap 只做匿名映射：能收地址提示、能标只读
+  （flags 的 bit0，别的取值一律 EINVAL）、能用 munmap 还页，但没有文件映射
+  与共享映射；描述符只有 0 到 2 三个，没有文件系统。写时复制有两种：共享
+  帧被写时复制成各自私有（`cow copy`），只读私有页被写时复制成可写
+  （`ro copy`）。没有进程、会话与信号，调度也还是端口里的迷你
   实现，没有接上 `kernel/proc/scheduler.hpp` 的通用调度器（见上一节）。
 - 内核态中断在用户阶段之后重新开中断的那条路径已经验过：开中断之后跑两拍
   再触发缺页探针，串口里看得到内核态被服务的那一拍。
