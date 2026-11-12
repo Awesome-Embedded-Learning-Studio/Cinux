@@ -32,12 +32,22 @@
   `ContextSwitchIntoUser` 走异常返回，由 SPSR 决定落在哪个模式。
 - 每核数据：`per_cpu.hpp` 用 TPIDRPRW 找块，`kernel_stack.hpp` 的栈顶记在
   块里；armv7 没有 TSS，这是与 x86 差别最大的一处。
-- 用户态：`user_mode.cpp` 建每任务的根表与用户页，`user_trap.hpp` 记陷阱帧，
-  `svc.cpp` 是号表（exit 1、write 4、sched_yield 158），`user_entry.S` 做
-  进门与恢复。
-- 调度：两条用户任务，各自的根表、用户栈与帧；时间片一个 tick，从用户态
+- 用户态：`user_mode.cpp` 建每任务的空间与用户页，空间由
+  `mm::AddressSpace` 的 init 与 map_user 生成，`user_trap.hpp` 记陷阱帧，
+  `svc.cpp` 是号表（exit 1、read 3、write 4、sched_yield 158），
+  `user_entry.S` 做进门与恢复。
+- 用户指针：`user_access.hpp` 先验整段在用户顶以下、不溢出，再逐页看活动表
+  里是否对用户可读；`write` 与 `read` 都走它，坏指针返回 -1 而不是把内核
+  地址当用户缓冲。
+- 地址空间的生与死：`KernelTables::take_root` 与 `release_root` 由端口给
+  尺寸与对齐，`AddressSpace::teardown` 按 `IsUserSlot` 找用户槽并把帧、
+  表页、根表还回去；自检验的是拆完空闲页数回到原点。
+- 调度：两条用户任务，各自的空间、用户栈与帧；时间片一个 tick，从用户态
   来的中断里递减，到零就让出。另有 `task_switch.cpp` 的两条内核侧任务轮转，
   是最早那次预演，留着当上下文切换的独立自检。
+- 平台缝：`kernel/platform/<名字>.hpp` 只 include `cinux/platform/<名字>.hpp`，
+  这个文件由根构建按 `CINUX_ARCHITECTURE` 生成，指向该端口的聚合头。七条
+  中立头（bus、clock、firmware、interrupt、io、ps2）都走这条缝。
 
 ## 两条陷阱帧路径
 
@@ -51,7 +61,7 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 - 内核态进来（IRQ 且 SPSR 不是用户模式）：只 push r0 到 r3 与 lr，处理完
   原路返回，不换人。内核栈没有第二套，换人没有意义。
 
-这个分工是踩出来的，见下面第四处与第五处。
+这个分工是踩出来的，见下面第十一处。
 
 ## 自检清单
 
@@ -69,8 +79,11 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 走法映射一页 | `mapped page ok` |
 | 上下文往返 | `context switch ok` |
 | 每核数据 | `per-cpu ok` |
+| 地址空间的拆分 | `space teardown ok` |
 | 两条内核任务轮转 | `two tasks ok` |
-| 两条用户任务与抢占 | `preempt to task`、`task 0 done`、`task 1 faulted` |
+| 两条用户任务与抢占 | `preempt to task`、`task 0 exited with status 7`、`task 1 faulted` |
+| 坏指针 | `svc write refused 80000000 + 8` |
+| 读 | `svc read 0 bytes` |
 | 用户态往返 | `user mode round trip ok` |
 | 故意缺页 | `data abort at 51000000 status 805 code 2` |
 
@@ -113,6 +126,14 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
 12. 用户入口不能内联。第一版把切模式与跳转写成一个内联函数，恰好排在一次
     打印之后，`stmia` 存下的 lr 是那次打印调用的返回地址，用户一退出就跳
     回函数中间，来回死循环。独立成 `user_entry.S` 里的函数才对。
+13. 抄内核槽位的循环用了叶子表的槽数。x86 的顶层也是 512，看不出问题；
+    armv7 的一级表有 4096 槽、内核在 2048 号槽上，只抄 256 个就把内核丢了，
+    切过去直接停住。要用 `EntriesAt(kUpperLevels[0])`。
+14. 回收的递归按 x86 的层数写死。两级表上"层索引超出一级表集合"才是叶子
+    表，套 x86 的式子会把表页当帧释放。
+15. 判据写反过两次。第一次要求"拆完空闲页数变多"，其实持平才对；第二次是
+    根表那边还漏着四页，不管怎么判都不会平。先把漏的页还回去，判据才站
+    得住。
 
 ## 端口转发
 
@@ -125,12 +146,17 @@ armv7 目前给出了这些中立头的实现：context、halt、instructions、
 isr、kernel_stack、page、page_entry、page_walk_shape、per_cpu、
 per_cpu_config、space_control、space_layout、user_entry。其余等编译到再补。
 
+平台的七条走同一套生成方式：`kernel/platform/<名字>.hpp` 只 include
+`cinux/platform/<名字>.hpp`，后者指向 `kernel/arch/<isa>/platform/<名字>.hpp`。
+armv7 的 bus 与 ps2 是故意留空的聚合头，因为这块板子上没有这两种设施；
+firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC 与串口。
+
 ## 还没接的
 
-- 系统调用面只有 exit、write、sched_yield 三条，用户态传进来的指针没有
-  校验，直接当内核指针用。
-- `platform/clock`、`platform/interrupt`、`platform/io`、`platform/firmware`
-  还没接这一层，现在的实现是就地写的。
+- 系统调用只有 exit、read、write、sched_yield 四条，read 只认 fd 0、
+  write 只认 1 与 2，还没有文件描述符表。
+- 帧的回收只支持独占：没有 COW 的账本，`cow::ReleaseFrame` 直接把页还给
+  PMM。要 fork 或共享映射就得先补这本账。
 - 内核调度器没有接进来。现在的两条用户任务是自检里的小调度，帧、根表与
   时间片都能用，但任务结构、生命周期与阻塞还没长出来。
 - `abi`、`random`、`smp_control` 这些中立头还没有 armv7 版。
