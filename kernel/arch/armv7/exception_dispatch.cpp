@@ -21,6 +21,7 @@
 #include "kernel/boot/print.hpp"
 
 extern "C" cinux::arch::UserTrap* c_schedule_from_user(unsigned long number);
+void HandleIrq();
 extern "C" cinux::arch::UserTrap* c_irq_trap(cinux::arch::UserTrap* trap);
 
 void HandleDataAbort();
@@ -33,6 +34,10 @@ extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsi
 }
 
 extern "C" void c_exception_dispatch(unsigned long vector) {
+    if (vector == 6) {
+        HandleIrq();
+        return;
+    }
     if (vector == cinux::arch::isr::kPageFaultVector) {
         HandleDataAbort();
         return;

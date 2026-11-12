@@ -150,6 +150,11 @@ extern "C" [[noreturn]] void kmain() {
                                               : "[armv7] user mode round trip FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
+                    const unsigned long long kWait =
+                        static_cast<unsigned long long>(cinux::armv7::TimerFrequency()) / 4U;
+                    const unsigned long long kStart = cinux::armv7::TimerCounter();
+                    while (cinux::armv7::TimerCounter() - kStart < kWait) {
+                    }
                     // Deliberately unmapped: the abort reporter should name it.
                     *reinterpret_cast<volatile unsigned long*>(0x51000000UL) = 0xDEADUL;
                 } else {

@@ -47,9 +47,16 @@ _vec2: cmp  r7, #158
 
 @ IRQ: the return address needs the four-byte correction before saving.
 _vec6: sub  lr, lr, #4
+       mrs  r3, spsr
+       and  r3, r3, #0x1F
+       cmp  r3, #0x10              @ only a user interrupt may preempt
+       bne  _irq_plain
        mov  r1, #0                 @ interrupt
        mov  r2, #0xD2              @ back to IRQ mode, interrupts masked
        b    _trap_save
+_irq_plain:
+       mov  r0, #6
+       b    _dispatch
 
 @ Trapping svc: lr is already the user's return address.
 _svc_trap:
