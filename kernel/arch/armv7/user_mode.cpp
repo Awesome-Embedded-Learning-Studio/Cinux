@@ -77,12 +77,14 @@ struct UserTask {
     unsigned long            fd_mask;       // bit per open descriptor
     unsigned long            fault_handler; // user fault handler, 0 if none
     unsigned long            mmap_top;      // grow-only anonymous window
+    bool                     in_use;         // this slot owns a space
     bool                     read_pending;   // a read is parked, waiting for input
     unsigned long            read_buf;       // its destination
     unsigned long            read_count;     // how many bytes it asked for
 };
 
-constexpr unsigned long kTaskCount   = 4;
+constexpr unsigned long kTaskCount   = 8;
+constexpr unsigned long kInitialTasks = 4;
 constexpr unsigned long kBrkBase     = 0x4000C000UL;
 constexpr unsigned long kBrkLimit    = 0x40010000UL;
 constexpr unsigned long kMmapBase    = 0x40010000UL;
@@ -426,6 +428,39 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(line)), sizeof(line));
         static_cast<void>(kReceived);
     }
+    if (task_id == 0) {
+        const long kChild = user_syscall0(cinux::armv7::syscall_nr::kFork);
+        if (kChild == 0) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('c'); NOTE('h'); NOTE('i'); NOTE('l'); NOTE('d'); NOTE(' ');
+            NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+            static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 3, 0, 0));
+            for (;;) {
+            }
+        }
+        unsigned long child_status = 0;
+        for (unsigned long attempt = 0; attempt < 400000UL; ++attempt) {
+            const long kResult = user_syscall3(
+                cinux::armv7::syscall_nr::kWait, 1UL << static_cast<unsigned long>(kChild),
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&child_status)), 0);
+            if (kResult >= 0) {
+                if (child_status == 3UL) {
+                    char          note[16];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('f'); NOTE('o'); NOTE('r'); NOTE('k'); NOTE(' ');
+                    NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                break;
+            }
+        }
+    }
     if (task_id == 2) {
         const unsigned long kHandler =
             kTaskACode + (reinterpret_cast<std::uintptr_t>(&user_fault_handler_c) -
@@ -498,6 +533,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.break_top     = kBrkBase;
     task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
     task.fault_handler = 0;
+    task.in_use        = true;
     task.mmap_top      = kMmapBase;
     task.read_pending  = false;
     task.read_buf      = 0;
@@ -672,6 +708,12 @@ __attribute__((noinline)) bool RunUserModeSelfCheck() {
     if (!setup_task(3, kTaskACode, kTaskAStack, g_tasks[0].space)) {
         return false;
     }
+    for (unsigned long slot = kInitialTasks; slot < kTaskCount; ++slot) {
+        g_tasks[slot]           = UserTask{};
+        g_tasks[slot].state     = TaskState::kDone;
+        g_tasks[slot].in_use    = false;
+        g_tasks[slot].wait_target = kTaskCount;
+    }
     g_running = true;
     g_current = 0;
     cinux::arch::per_cpu::self().slice_ticks = 1;
@@ -790,6 +832,47 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
         g_tasks[g_current].trap.r0       = 0;
         cinux::print::Println("[armv7] read waits for input");
+    }
+
+    if (number == cinux::armv7::syscall_nr::kFork) {
+        unsigned long slot = kTaskCount;
+        for (unsigned long index = kInitialTasks; index < kTaskCount; ++index) {
+            if (!g_tasks[index].in_use) {
+                slot = index;
+                break;
+            }
+        }
+        if (slot == kTaskCount) {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
+            cinux::print::Println("[armv7] fork refused, no free slot");
+            return &g_tasks[g_current].trap;
+        }
+        UserTask& parent = g_tasks[g_current];
+        auto* const space = new cinux::mm::AddressSpace{};
+        if (space == nullptr || !space->init() ||
+            !cinux::armv7::CloneUserSpace(*parent.space, *space) ||
+            !privatize_stack(*space, *parent.space, kTaskAStack, slot)) {
+            delete space;
+            parent.trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
+            cinux::print::Println("[armv7] fork refused, clone failed");
+            return &parent.trap;
+        }
+        UserTask& child     = g_tasks[slot];
+        child               = UserTask{};
+        child.in_use        = true;
+        child.state         = TaskState::kRunnable;
+        child.space         = space;
+        child.break_top     = parent.break_top;
+        child.mmap_top      = parent.mmap_top;
+        child.fd_mask       = parent.fd_mask;
+        child.fault_handler = parent.fault_handler;
+        child.wait_target   = kTaskCount;
+        child.trap          = parent.trap;
+        child.trap.r0       = 0;  // the child's fork returns zero
+        cinux::print::Println("[armv7] fork %u -> %u", g_current, slot);
+        parent.trap.r0 = slot;
+        return &parent.trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kSignal) {

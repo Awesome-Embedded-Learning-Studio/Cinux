@@ -274,6 +274,7 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 | 号 | 语义 | 覆盖它的自检 |
 | --- | --- | --- |
 | 1 | exit | `task 0 exited with status 7` |
+| 2 | fork | `fork 0 -> 4`、`child ok`、`task 4 exited with status 3`、`fork ok` |
 | 3 | read | `read timed out`（有数据那条未覆盖） |
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
 | 6 | close | `close 2`、`ebadf ok` |
@@ -317,7 +318,8 @@ firmware 指向设备树，clock、interrupt、io 分别包住定时器、GIC �
   write 只认 1 与 2，还没有文件描述符表。
 - 克隆只在自检与四条任务里用：子树能克隆、写时复制能各写各的，任务结束也
   会把空间还回去。等待能阻塞、按位图等、按目标唤醒、能超时，sleep 也能用。
-  用户堆只有 brk 的只增窗口；mmap 只做匿名映射：能收地址提示、能标只读
+  任务槽一共八条，前四条开机就有，后四条留给 fork；`fork` 复用整棵子树克隆，
+  父任务拿子任务编号、子任务拿 0。用户堆只有 brk 的只增窗口；mmap 只做匿名映射：能收地址提示、能标只读
   （flags 的 bit0，别的取值一律 EINVAL）、能用 munmap 还页，但没有文件映射
   与共享映射；描述符只有 0 到 2 三个，没有文件系统。写时复制有两种：共享
   帧被写时复制成各自私有（`cow copy`），只读私有页被写时复制成可写

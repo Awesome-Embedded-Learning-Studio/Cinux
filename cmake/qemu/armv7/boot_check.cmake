@@ -77,6 +77,10 @@ expect_literal(EXPECTED_HANDLEROK "the fault handler never reported.")
 expect_literal(EXPECTED_HANDLEREXIT "the handler's exit status was lost.")
 expect_literal(EXPECTED_STATUS2 "wait did not report the exited task's status.")
 expect_literal(EXPECTED_STATUSOK "the statuses the user read back were wrong.")
+expect_literal(EXPECTED_FORK "fork never produced a child.")
+expect_literal(EXPECTED_CHILD "the child never reported.")
+expect_literal(EXPECTED_CHILDEXIT "the child's exit status was lost.")
+expect_literal(EXPECTED_FORKOK "the parent never reaped the child.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 
