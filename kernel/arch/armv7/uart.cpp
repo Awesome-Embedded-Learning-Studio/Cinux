@@ -60,8 +60,11 @@ void UartPutChar(char character) {
 }
 
 bool UartReceiveReady() {
+    // UTS1's RXEMPTY is the authoritative "is anything queued" bit. The
+    // USR2 RDR bit is cleared by reading URXD, so it under-reports when a
+    // caller peeks; UTS1 stays honest until the byte is taken.
     auto* const base = reinterpret_cast<volatile std::uint32_t*>(kUart1Base);
-    return (base[uart_reg::kUsr2 / 4U] & uart_reg::kUsr2Rdr) != 0;
+    return (base[uart_reg::kUts1 / 4U] & uart_reg::kUts1RxEmpty) == 0;
 }
 
 char UartReadChar() {

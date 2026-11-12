@@ -249,7 +249,12 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
 ## 还没能验的一条
 
 `read` 分两条路：没数据时挂起、到期回 0（这条有自检），以及数据到了就在
-tick 里读进用户缓冲（这条没有）。试过两条路把一行送进接收 FIFO，都没成：
+tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw/char/imx_serial.c](https://git.progress-linux.org/horok/qemu/raw/commit/a3199af6f93aefcd911216da31aa841a737f1190/hw/char/imx_serial.c)），
+三条与这里有关的语义：读 `URXD` 会清掉 `USR2` 的 RDR；`UTS1` 的 RXEMPTY
+才是"队列空不空"的权威位；写 `UCR2` 时不带 SRST 会触发一次整片复位。
+`UartReceiveReady` 因此从看 `USR2` 的 RDR 改成看 `UTS1` 的 RXEMPTY。
+
+即便如此，试过两条路把一行送进接收 FIFO 都没成：
 一是 ctest 的 `INPUT_FILE` 喂 stdio 串口，USR2 里 RDR 一直是 0，USR1 也
 看不到接收就绪位；二是改成 QEMU 的 unix socket 串口、等客户端连上再启动、
 半秒多之后写一行，接收 FIFO 里同样看不到数据。两条都撤掉，`read` 的数据

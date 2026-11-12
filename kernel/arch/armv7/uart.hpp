@@ -35,8 +35,11 @@ inline constexpr std::uint32_t kUcr3 = 0x88;
 inline constexpr std::uint32_t kUcr4 = 0x8C;
 inline constexpr std::uint32_t kUfcr = 0x90;
 inline constexpr std::uint32_t kUsr2 = 0x98;
+inline constexpr std::uint32_t kUts1 = 0xB4;
 /// USR2 bit 0: a byte is waiting in URXD.
 inline constexpr std::uint32_t kUsr2Rdr = 1U << 0U;
+/// UTS1 bit 5: the receive FIFO is empty.
+inline constexpr std::uint32_t kUts1RxEmpty = 1U << 5U;
 inline constexpr std::uint32_t kUbir = 0xA4;
 inline constexpr std::uint32_t kUbmr = 0xA8;
 }  // namespace uart_reg
