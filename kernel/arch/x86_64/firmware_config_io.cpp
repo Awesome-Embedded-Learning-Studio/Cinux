@@ -4,7 +4,7 @@
 
 #include "kernel/arch/x86_64/firmware_config.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/driver/base/io.hpp"
+#include "kernel/arch/x86_64/platform/io.hpp"
 
 namespace cinux::arch {
 namespace {

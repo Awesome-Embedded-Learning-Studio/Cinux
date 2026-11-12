@@ -2,9 +2,9 @@
 
 ## 功能概述
 
-这一页我们把磁盘驱动的两截故事连起来读。下面的一截是 PCI 总线，它干的活是把机器上插着的设备一个个清点出来，再把每个设备的配置空间读回来。上面的一截是 AHCI 驱动，它坐在总线的名册上找到 SATA 控制器，把寄存器的窗口映射进来，然后靠中断来完成每一次的读写。`kernel/driver/pci` 把总线做成了一张查得到的名册，消费者是按类码来问的，而从不按槽位来问，因为槽位本来就是固件留给机器的事实，内核里的任何驱动都不该指名道姓。`kernel/driver/ahci` 认死了这唯一的一个控制器，整条的命令链一次只发一条命令，也只占用零号的命令槽，完成靠中断把睡眠的人叫起来，而不是去轮询命令寄存器。
+这一页我们把磁盘驱动的两截故事连起来读。下面的一截是 PCI 总线，它干的活是把机器上插着的设备一个个清点出来，再把每个设备的配置空间读回来。上面的一截是 AHCI 驱动，它坐在总线的名册上找到 SATA 控制器，把寄存器的窗口映射进来，然后靠中断来完成每一次的读写。`kernel/drivers/pci` 把总线做成了一张查得到的名册，消费者是按类码来问的，而从不按槽位来问，因为槽位本来就是固件留给机器的事实，内核里的任何驱动都不该指名道姓。`kernel/drivers/ahci` 认死了这唯一的一个控制器，整条的命令链一次只发一条命令，也只占用零号的命令槽，完成靠中断把睡眠的人叫起来，而不是去轮询命令寄存器。
 
-块设备的一侧已经另有一层，AHCI 只是坐在后面的设备。同一份块设备接口的下面还站着 NVMe（`kernel/driver/nvme`，PCI 上的另一个大容量存储子类 0x08），它自己的页面还是空着的，我们在这里给它留一个位置。这一页讲的是 AHCI 的路是怎么走通的。
+块设备的一侧已经另有一层，AHCI 只是坐在后面的设备。同一份块设备接口的下面还站着 NVMe（`kernel/drivers/nvme`，PCI 上的另一个大容量存储子类 0x08），它自己的页面还是空着的，我们在这里给它留一个位置。这一页讲的是 AHCI 的路是怎么走通的。
 
 ## PCI 总线：配置空间怎么读
 
@@ -72,12 +72,12 @@ AHCI 这边的一切都长在 ahci_layout.hpp 的几个结构体上。`HbaMem` �
 
 ## 源码位置
 
-- `kernel/driver/pci/pci.hpp`、`kernel/driver/pci/pci.cpp` — PciBus 名册、枚举与选通、ReadSpotConfig 注入口
-- `kernel/driver/pci/pci_layout.hpp`、`kernel/driver/pci/pci_layout.cpp` — 选址字与 BAR 解码、能力链表查找、子类常量
-- `kernel/driver/ahci/ahci.hpp`、`kernel/driver/ahci/ahci.cpp` — Ahci 单例、初始化、issue 与等待、on_interrupt
-- `kernel/driver/ahci/ahci_layout.hpp`、`kernel/driver/ahci/ahci_layout.cpp` — 控制器（HBA）寄存器结构、命令链结构、FIS 与标志编码
-- `kernel/driver/ahci/ahci_identify.hpp`、`kernel/driver/ahci/ahci_identify.cpp` — 识别数据的解析与准入检查
-- `kernel/driver/block/block_device_concept.hpp` — BlockDevice 概念、BlockOps、BlockPort
-- `kernel/driver/block/block_queue.hpp`、`kernel/driver/block/block_queue.cpp` — 请求池、值班驱动、完成等待
+- `kernel/arch/x86_64/platform/pci/pci.hpp`、`kernel/arch/x86_64/platform/pci/pci.cpp` — PciBus 名册、枚举与选通、ReadSpotConfig 注入口
+- `kernel/arch/x86_64/platform/pci/pci_layout.hpp`、`kernel/arch/x86_64/platform/pci/pci_layout.cpp` — 选址字与 BAR 解码、能力链表查找、子类常量
+- `kernel/drivers/ahci/ahci.hpp`、`kernel/drivers/ahci/ahci.cpp` — Ahci 单例、初始化、issue 与等待、on_interrupt
+- `kernel/drivers/ahci/ahci_layout.hpp`、`kernel/drivers/ahci/ahci_layout.cpp` — 控制器（HBA）寄存器结构、命令链结构、FIS 与标志编码
+- `kernel/drivers/ahci/ahci_identify.hpp`、`kernel/drivers/ahci/ahci_identify.cpp` — 识别数据的解析与准入检查
+- `kernel/drivers/block/block_device_concept.hpp` — BlockDevice 概念、BlockOps、BlockPort
+- `kernel/drivers/block/block_queue.hpp`、`kernel/drivers/block/block_queue.cpp` — 请求池、值班驱动、完成等待
 - `kernel/init/init_sequence.cpp` — pci 与 ahci 两站在初始化阶梯上的位置
 - `kernel/fs/file_world.cpp` — BlockQueue 落座 AHCI 的那一行

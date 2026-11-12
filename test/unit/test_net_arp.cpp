@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/arp.hpp"
 #include "kernel/net/net_config.hpp"
 #include "kernel/net/net_layout.hpp"

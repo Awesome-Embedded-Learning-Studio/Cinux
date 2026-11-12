@@ -18,7 +18,7 @@
 
 ### 串口与打印
 
-`kernel/mini/driver/serial` 与 `kernel/mini/lib/kprintf` 是它开口说话的两件装备。我们把 `kprintf.h` 注释里的格式说明符读一遍：整数的 %d 与 %u，十六进制的 %x 与 %X，字符串与指针的 %s 与 %p，字符与百分号的 %c 与 %%，外加二进制的 %b。宽度写法则是 %Nd 与 %0Nd 这么两种，右对齐的空格与零都补得上。现在的去处分两半。引导世界的播报走 `boot/early/console.hpp` 与 `boot/early/print.hpp`，COM1 配的是 115200 8N1，这样安排的道理在 [引导链](../boot.md) 一页里写过，内核侧的串口则由 `kernel/driver/serial` 接管，`kernel/init/init_sequence.cpp` 的序列里，serial 站的是头一步。
+`kernel/mini/driver/serial` 与 `kernel/mini/lib/kprintf` 是它开口说话的两件装备。我们把 `kprintf.h` 注释里的格式说明符读一遍：整数的 %d 与 %u，十六进制的 %x 与 %X，字符串与指针的 %s 与 %p，字符与百分号的 %c 与 %%，外加二进制的 %b。宽度写法则是 %Nd 与 %0Nd 这么两种，右对齐的空格与零都补得上。现在的去处分两半。引导世界的播报走 `boot/early/console.hpp` 与 `boot/early/print.hpp`，COM1 配的是 115200 8N1，这样安排的道理在 [引导链](../boot.md) 一页里写过，内核侧的串口则由 `kernel/drivers/serial` 接管，`kernel/init/init_sequence.cpp` 的序列里，serial 站的是头一步。
 
 ### 物理内存
 

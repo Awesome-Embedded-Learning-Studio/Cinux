@@ -11,12 +11,12 @@
 #    include "cinux/assert.hpp"
 #    include "kernel/arch/x86_64/irq_stubs.hpp"
 #    include "kernel/arch/x86_64/pic.hpp"
-#    include "kernel/driver/pit/pit.hpp"
+#    include "kernel/arch/x86_64/platform/pit/pit.hpp"
 #    include "kernel/interrupt/irq.hpp"
 #    include "kernel/time/tick.hpp"
 #endif
 #ifdef KTEST_STAGE_KEYBOARD
-#    include "kernel/driver/keyboard/keyboard.hpp"
+#    include "kernel/drivers/keyboard/keyboard.hpp"
 #endif
 #if defined(KTEST_STAGE_MM) || defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK) ||          \
     defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD)
@@ -24,7 +24,7 @@
 #    include "kernel/arch/x86_64/ex_table.hpp"
 #    include "kernel/arch/x86_64/instructions.hpp"
 #    include "kernel/arch/x86_64/msr.hpp"
-#    include "kernel/driver/serial/serial.hpp"
+#    include "kernel/drivers/serial/serial.hpp"
 #    include "kernel/mm/heap_runtime.hpp"
 #    include "kernel/mm/pmm.hpp"
 #    include "kernel/syscall/uaccess.hpp"
@@ -35,8 +35,8 @@
 #    include "kernel/proc/task.hpp"
 #endif
 #ifdef KTEST_STAGE_BLOCK
-#    include "kernel/driver/ahci/ahci.hpp"
-#    include "kernel/driver/pci/pci.hpp"
+#    include "kernel/drivers/ahci/ahci.hpp"
+#    include "kernel/arch/x86_64/platform/pci/pci.hpp"
 #endif
 
 namespace kernel {

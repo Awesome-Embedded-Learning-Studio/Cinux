@@ -3,7 +3,7 @@
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
 #include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/proc/sync.hpp"

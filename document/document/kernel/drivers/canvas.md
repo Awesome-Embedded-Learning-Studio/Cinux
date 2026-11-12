@@ -86,7 +86,7 @@ const DeviceOps kFbOps{
 
 注释说帧里字节的进出归映射管，read 与 write 的字节流在这里都不支持，read 的回答永远是 0，我们拿到的就是文件尾。映射是唯一的笔。ioctl 认得的问句只有 0x4600 与 0x4602 两个，头文件的注释注明它们就是 Linux 的 FBIOGET_VSCREENINFO 与 FBIOGET_FSCREENINFO，答话的时候把引导报告里的几何与掩码抄进两张线格式记录（回答两张查询用的结构体），身份串写的是 CinuxFB，拷进记录的身份最多十五个字节，注释还补了这句，说给结尾的空字节留了位。问句表之外的字一律答 -ENOTTY。
 
-两张线格式记录的定义在 `kernel/driver/framebuffer/framebuffer_config.hpp`，注释的立场我们读一遍。问话的一方，是拿着 libc 的 linux/fb.h 编出来的用户程序，ABI 本身就是双方共同守着的声明。两张记录的每个字段都按 Linux 的 x86-64 形状摆，static_assert 把 160 与 80 字节的总大小、`smem_start` 与 `line_length` 的偏移一并看了起来，哪天形状漂了，断掉的就是构建，运行期不会有任何的意外。
+两张线格式记录的定义在 `kernel/drivers/framebuffer/framebuffer_config.hpp`，注释的立场我们读一遍。问话的一方，是拿着 libc 的 linux/fb.h 编出来的用户程序，ABI 本身就是双方共同守着的声明。两张记录的每个字段都按 Linux 的 x86-64 形状摆，static_assert 把 160 与 80 字节的总大小、`smem_start` 与 `line_length` 的偏移一并看了起来，哪天形状漂了，断掉的就是构建，运行期不会有任何的意外。
 
 映射的入口是 `fb_map_frame`，我们把它的次序走一遍：它查一遍帧缓冲是不是活着，再把偏移跟按页对齐的帧长比一比，越界的偏移答 `kInvalidArgument`，合法就返回物理基址按页向下对齐后加上偏移的地址，显存从这一页起交到进程的手里。
 
@@ -115,7 +115,7 @@ vesper 那一侧的 `FbdevDevice::open` 拿着节点走完全套，我们跟着�
 - `third_party/vesper/third_party/visor/include/visor/bindings/cinux/frame_expand.hpp` — 单色到 XRGB8888 的扩位
 - `third_party/vesper/src/host/fbdev_device.hpp/cpp` — 打开、问几何、mmap 与 blit/expand
 - `third_party/vesper/examples/fbdev_desktop.cpp` — 条带剖面、脏矩形主循环、fbdev_flush
-- `kernel/driver/framebuffer/framebuffer.hpp/cpp`、`kernel/driver/framebuffer/framebuffer_config.hpp` — 帧缓冲设备与 fbdev 线格式断言
+- `kernel/drivers/framebuffer/framebuffer.hpp/cpp`、`kernel/drivers/framebuffer/framebuffer_config.hpp` — 帧缓冲设备与 fbdev 线格式断言
 - `kernel/fs/devfs/fb_node.cpp` — /dev/fb0 座位
 - `kernel/console/screen.hpp/cpp` — 文本控制台的让位与收回
 - `kernel/fs/file_world.cpp` — 设备落座的调用处

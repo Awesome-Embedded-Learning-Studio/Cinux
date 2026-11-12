@@ -142,7 +142,7 @@ priority 的数值小的排前面，比较用的是严格小于，最早到的�
 
 ## 时钟与抢占
 
-节拍的来源一共有两条路，我们找出它们从哪来、再看它们都通向哪个函数。IRQ 线 0 上的 heartbeat 让 Tick::on_interrupt 计数，然后把节拍报给了 on_timer_tick。今天驱动这根线的设备是 PIT，它的代码在 kernel/driver/pit/pit.cpp，挂进 Tick 的活由 init_sequence.cpp 干，不过 Tick 服务特意做了类型擦除、连设备名都不认，换了芯片也不动消费者。本地 APIC 的时钟向量则是直接调 on_timer_tick。函数的本体只做记录、不做切换：
+节拍的来源一共有两条路，我们找出它们从哪来、再看它们都通向哪个函数。IRQ 线 0 上的 heartbeat 让 Tick::on_interrupt 计数，然后把节拍报给了 on_timer_tick。今天驱动这根线的设备是 PIT，它的代码在 kernel/arch/x86_64/platform/pit/pit.cpp，挂进 Tick 的活由 init_sequence.cpp 干，不过 Tick 服务特意做了类型擦除、连设备名都不认，换了芯片也不动消费者。本地 APIC 的时钟向量则是直接调 on_timer_tick。函数的本体只做记录、不做切换：
 
 ```cpp
 // kernel/proc/scheduler.cpp

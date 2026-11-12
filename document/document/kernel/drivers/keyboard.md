@@ -2,13 +2,13 @@
 
 ## 功能概述
 
-这一页我们把 `kernel/driver/keyboard` 里 PS/2 键盘的故事从头走一遍。键盘的每个键落下、抬起，8042 控制器就在 IRQ1 的线上举一次手，驱动从 0x60 的数据口把字节读走并翻成两种面貌。字符面貌进自己的环形队列，等的是控制台来取。键位面貌走的是 EventStream（事件流，一台输入设备自己的事件队列），被 devfs（内核里把设备摆成文件的那一层）摆成 event0 的输入节点，桌面 vesper 读的就是它。扫描码的翻译住在 `scancode.hpp` 与 `scancode.cpp`，设备本体的家在 `keyboard.hpp` 与 `keyboard.cpp`，事件流的记录格式与独占（grab）的问答在 `kernel/driver/input`，座位落在了 `kernel/fs/devfs/input_node.cpp`。
+这一页我们把 `kernel/drivers/keyboard` 里 PS/2 键盘的故事从头走一遍。键盘的每个键落下、抬起，8042 控制器就在 IRQ1 的线上举一次手，驱动从 0x60 的数据口把字节读走并翻成两种面貌。字符面貌进自己的环形队列，等的是控制台来取。键位面貌走的是 EventStream（事件流，一台输入设备自己的事件队列），被 devfs（内核里把设备摆成文件的那一层）摆成 event0 的输入节点，桌面 vesper 读的就是它。扫描码的翻译住在 `scancode.hpp` 与 `scancode.cpp`，设备本体的家在 `keyboard.hpp` 与 `keyboard.cpp`，事件流的记录格式与独占（grab）的问答在 `kernel/drivers/input`，座位落在了 `kernel/fs/devfs/input_node.cpp`。
 
 这一页的读法跟着一次按键走，我们看字节从数据口进来之后怎么翻、怎么进两条队列，再看桌面把它拿走的时候内核交出什么、谁有权让控制台闭嘴。指点设备里跟键盘共用 8042 的只有 PS/2 鼠标，USB 数位板走的是 XHCI（USB 的主控器）的另一条路，两台设备在事件面上各坐各的座位，分工的界线我们在最后一节画清。桌面的绘图与提交在 [Canvas 画布](canvas.md)那一页讲过了，这一页补的是输入的那一半。
 
 ## 8042 控制器与 IRQ1
 
-键盘与辅助指针共用的是同一个 8042 控制器，端口的地址、命令的字与应答的纪律因此都收在 `kernel/driver/ps2/controller.hpp` 一处，头文件的注释把这层用意写明了。控制器还有一条对外的接缝 `Ps2Ports`，内核把它接到真实的端口读写上，host 测试接的是照剧本应答的替身，两条接线我们都认了一遍。启动序列里每一步等待用的都是独立于中断的延时，注释说设备缺席的时候，启动也要在有限的时间里走完，bring-up 不会挂在一张沉默的芯片上。
+键盘与辅助指针共用的是同一个 8042 控制器，端口的地址、命令的字与应答的纪律因此都收在 `kernel/arch/x86_64/platform/ps2/controller.hpp` 一处，头文件的注释把这层用意写明了。控制器还有一条对外的接缝 `Ps2Ports`，内核把它接到真实的端口读写上，host 测试接的是照剧本应答的替身，两条接线我们都认了一遍。启动序列里每一步等待用的都是独立于中断的延时，注释说设备缺席的时候，启动也要在有限的时间里走完，bring-up 不会挂在一张沉默的芯片上。
 
 启动的头两步用 `0xAD` 与 `0xA7` 把两个端口都关掉，`Drain` 冲掉输出缓冲里积着的旧字节，我们用 `0x20` 读回配置字节，把第一端口的 IRQ 门（0x01）与翻译位（0x40）竖起来、把第二端口的 IRQ 门（0x02）按下去，写回配置走的是 `0x60`，`0xAA` 的自检命令发出去，答上来的字是 `0x55` 才算健康，末了 `0xAE` 把第一端口重新打开。翻译位竖起来有它的用处：键盘报键用的编号叫扫描码，编号的惯例分成好几套，控制器把设备交上的扫描码折成第 1 套再给软件，驱动从头到尾面对的就只有第 1 套。
 
@@ -17,7 +17,7 @@
 IRQ1 的 handler 短得只有一行，我们把它原样搬来：
 
 ```cpp
-// kernel/driver/keyboard/keyboard.cpp
+// kernel/drivers/keyboard/keyboard.cpp
 void irq1_thunk() {
     cinux::driver::Keyboard::self().on_byte(cinux::driver::InB(kDataPort));
 }
@@ -32,7 +32,7 @@ void irq1_thunk() {
 `on_byte` 是两副面孔分岔的地方，我们把它的全身读一遍：
 
 ```cpp
-// kernel/driver/keyboard/keyboard.cpp
+// kernel/drivers/keyboard/keyboard.cpp
 void Keyboard::on_byte(uint8_t raw_byte) {
     char const kGlyph = TranslateScancode(state_, raw_byte);
     if (kGlyph != 0 && glyphs_live_) {
@@ -101,18 +101,18 @@ RegisterInputDevices(
 
 ## 源码位置
 
-- `kernel/driver/keyboard/keyboard.hpp`、`keyboard.cpp`、`keyboard_config.hpp` — 设备本体、8042 启动、IRQ1 馈送、字形队列与信号量
-- `kernel/driver/keyboard/scancode.hpp`、`scancode.cpp` — 第 1 套扫描码的两张字形表、修饰键状态与两副翻译面孔
-- `kernel/driver/ps2/controller.hpp`、`controller.cpp`、`controller_host.cpp` — 8042 的事务词汇与端口接缝
-- `kernel/driver/input/event_stream.hpp`、`event_stream.cpp`、`input_config.hpp` — 事件流、24 字节记录、SYN_DROPPED 恢复、grab 与 ioctl 词汇
-- `kernel/driver/mouse/ps2_mouse.hpp`、`ps2_mouse.cpp`、`mouse_packet.hpp` — IRQ12 的指针、三字节包与再同步
-- `kernel/driver/usb/usb_tablet.hpp`、`usb_tablet.cpp` — 绝对轴数位板与抽干钩子
-- `kernel/driver/usb/usb_keyboard.hpp`、`usb_keyboard.cpp` — 只进控制台的 USB 键盘与 usbkbd 座位
+- `kernel/drivers/keyboard/keyboard.hpp`、`keyboard.cpp`、`keyboard_config.hpp` — 设备本体、8042 启动、IRQ1 馈送、字形队列与信号量
+- `kernel/drivers/keyboard/scancode.hpp`、`scancode.cpp` — 第 1 套扫描码的两张字形表、修饰键状态与两副翻译面孔
+- `kernel/arch/x86_64/platform/ps2/controller.hpp`、`controller.cpp`、`controller_host.cpp` — 8042 的事务词汇与端口接缝
+- `kernel/drivers/input/event_stream.hpp`、`event_stream.cpp`、`input_config.hpp` — 事件流、24 字节记录、SYN_DROPPED 恢复、grab 与 ioctl 词汇
+- `kernel/drivers/mouse/ps2_mouse.hpp`、`ps2_mouse.cpp`、`mouse_packet.hpp` — IRQ12 的指针、三字节包与再同步
+- `kernel/drivers/usb/usb_tablet.hpp`、`usb_tablet.cpp` — 绝对轴数位板与抽干钩子
+- `kernel/drivers/usb/usb_keyboard.hpp`、`usb_keyboard.cpp` — 只进控制台的 USB 键盘与 usbkbd 座位
 - `kernel/interrupt/irq.hpp`、`kernel/arch/x86_64/irq_stubs.cpp`、`kernel/arch/x86_64/vector_config.hpp` — 中断服务、0x20 起的向量与内部应答
 - `kernel/init/init_sequence.cpp` — keyboard 与 pointer 两个引导步骤及其失败态度
 - `kernel/fs/devfs/input_node.hpp`、`input_node.cpp` — event0 与 event1 的落座、每次打开的 InputOpen
 - `kernel/fs/file_world.cpp` — 两条流的接线与 event1 的归属
-- `kernel/driver/tty/console_tty.cpp` — 控制台的三路取键与回显
+- `kernel/drivers/tty/console_tty.cpp` — 控制台的三路取键与回显
 - `kernel/syscall/sys_read.cpp` — 设备读的让出循环与非阻塞短路
 - `third_party/vesper/src/host/evdev_input.hpp`、`evdev_input.cpp` — 打开、独占、翻译与 SYN_DROPPED 重建
 - `third_party/vesper/examples/fbdev_desktop.cpp` — 桌面的两路输入与键盘靠前

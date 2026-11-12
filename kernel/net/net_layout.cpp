@@ -6,8 +6,8 @@
 #include "cinux/bit_ops/bit_ops.hpp"
 #include "cinux/byte_order.hpp"
 #include "cinux/result.hpp"
-#include "kernel/driver/net/net_config.hpp"
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/net_config.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/net_config.hpp"
 
 namespace cinux::net {

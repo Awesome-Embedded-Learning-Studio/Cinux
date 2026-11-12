@@ -5,10 +5,10 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/result.hpp"
-#include "kernel/driver/input/event_stream.hpp"
-#include "kernel/driver/input/input_config.hpp"
-#include "kernel/driver/keyboard/scancode.hpp"
-#include "kernel/driver/mouse/mouse_packet.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
+#include "kernel/drivers/input/input_config.hpp"
+#include "kernel/drivers/keyboard/scancode.hpp"
+#include "kernel/drivers/mouse/mouse_packet.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "test_assert.hpp"
 

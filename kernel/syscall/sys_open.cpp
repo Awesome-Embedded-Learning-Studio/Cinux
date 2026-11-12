@@ -6,7 +6,7 @@
 #include "cinux/path.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"

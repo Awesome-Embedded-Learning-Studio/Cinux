@@ -4,7 +4,7 @@
 
 这一页我们把屏幕的来路完整走一遍。像素的旅程从引导世界开始，stage2 替我们切好了 VBE（VESA BIOS Extension，显卡 BIOS 的模式设置接口）的模式，把挑中的几何装进交接记录交给内核。内核接住它的有三样东西，帧缓冲器件把显存握在自己的手里，文本控制台把字符变作落上屏幕的字形，devfs（设备文件系统）里的 fb0 座位，把同一块显存交到用户进程的手里。整条链只认 32bpp 的帧。用户态画布怎么用这块显存，[Canvas 画布](canvas.md)那一页已经写过了，本页聚焦的是内核侧，口径跟它对齐而不重复内容。
 
-旧页写的 `kernel/drivers/video` 路径在当前的树里已经找不到，字体与控制台如今住进了 `kernel/console`，帧缓冲器件住进了 `kernel/driver/framebuffer`，本页按现在的源码重写。我们跟着像素的路线走，从引导世界的交接记录出发（探询怎么走的，[引导链](../../boot.md)那一页讲过了），看几何跨过世界开关（源码注释里的 world switch，stage2 把机器交给内核的那一下）的走法，再看内核给显存搭的两级映射窗口，然后是帧缓冲器件与文本控制台的本体，打印链的次序，末了回到 fb0 的座位与用户态的分工上。
+旧页写的 `kernel/drivers/video` 路径在当前的树里已经找不到，字体与控制台如今住进了 `kernel/console`，帧缓冲器件住进了 `kernel/drivers/framebuffer`，本页按现在的源码重写。我们跟着像素的路线走，从引导世界的交接记录出发（探询怎么走的，[引导链](../../boot.md)那一页讲过了），看几何跨过世界开关（源码注释里的 world switch，stage2 把机器交给内核的那一下）的走法，再看内核给显存搭的两级映射窗口，然后是帧缓冲器件与文本控制台的本体，打印链的次序，末了回到 fb0 的座位与用户态的分工上。
 
 ## 引导世界：一块 32 位的线性帧
 
@@ -42,10 +42,10 @@ framebuffer.hpp 里有一处对不上的地方，我们照实记下。它的文�
 
 ## 帧缓冲器件：墨与纸的像素字
 
-Framebuffer 的定义在 `kernel/driver/framebuffer/framebuffer.hpp`，它是 Meyers 式的单例。我们把它的体检读成四条，bpp 要的是 32，宽与高要的是非零，pitch 短于宽度乘四的不要，有一条不过的话就答假，器件从此就哑着了。过了体检就按 IoremapVirt 把帧的物理基址折成带 volatile 的 32 位字指针，随后把墨与纸（控制台的前景白与底黑两个颜色字）各自折算了一次存进成员：
+Framebuffer 的定义在 `kernel/drivers/framebuffer/framebuffer.hpp`，它是 Meyers 式的单例。我们把它的体检读成四条，bpp 要的是 32，宽与高要的是非零，pitch 短于宽度乘四的不要，有一条不过的话就答假，器件从此就哑着了。过了体检就按 IoremapVirt 把帧的物理基址折成带 volatile 的 32 位字指针，随后把墨与纸（控制台的前景白与底黑两个颜色字）各自折算了一次存进成员：
 
 ```cpp
-// kernel/driver/framebuffer/framebuffer.cpp
+// kernel/drivers/framebuffer/framebuffer.cpp
 constexpr uint32_t compose_pixel(const cinux::boot::FramebufferInfo& layout, Paint paint) {
     uint32_t const kRed   = static_cast<uint32_t>(paint.red) >> (8U - layout.red_size);
     uint32_t const kGreen = static_cast<uint32_t>(paint.green) >> (8U - layout.green_size);
@@ -90,8 +90,8 @@ fb0 的座位立在文件世界起来的时候。落座的次序、硬件页登�
 - `kernel/boot/boot_info.hpp` — FramebufferInfo 与 BootInfo 交接记录
 - `kernel/mm/layout.hpp` — kIoremapBase 与 IoremapVirt
 - `kernel/mm/vmm.cpp`、`kernel/mm/vmm.hpp` — MapFramebufferDoor 搭 ioremap 别名
-- `kernel/driver/framebuffer/framebuffer.hpp/cpp` — 帧缓冲器件本体
-- `kernel/driver/framebuffer/framebuffer_config.hpp` — fbdev 两张线格式记录
+- `kernel/drivers/framebuffer/framebuffer.hpp/cpp` — 帧缓冲器件本体
+- `kernel/drivers/framebuffer/framebuffer_config.hpp` — fbdev 两张线格式记录
 - `kernel/fs/devfs/fb_node.hpp/cpp` — fb0 座位
 - `kernel/console/screen.hpp/cpp` — TextConsole
 - `kernel/console/font.hpp/cpp` — PSF2 解析与嵌入字体

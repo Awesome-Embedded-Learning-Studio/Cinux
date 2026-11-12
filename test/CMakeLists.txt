@@ -35,19 +35,19 @@ add_cinux_test(net_stack ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
                             ${CMAKE_SOURCE_DIR}/kernel/net/net_layout.cpp
                             ${CMAKE_SOURCE_DIR}/kernel/net/ipv4.cpp
                             ${CMAKE_SOURCE_DIR}/kernel/net/icmp.cpp
-                            ${CMAKE_SOURCE_DIR}/kernel/driver/net/loopback.cpp)
+                            ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp)
 add_cinux_test(net_udp ${CMAKE_SOURCE_DIR}/kernel/net/udp.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/net_layout.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/ipv4.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/icmp.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
-                        ${CMAKE_SOURCE_DIR}/kernel/driver/net/loopback.cpp)
+                        ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp)
 add_cinux_test(net_tcp ${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/net_layout.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/ipv4.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/icmp.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
-                        ${CMAKE_SOURCE_DIR}/kernel/driver/net/loopback.cpp
+                        ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp
                         ${CMAKE_SOURCE_DIR}/kernel/time/timer_table.cpp)
 add_cinux_test(net_socket ${CMAKE_SOURCE_DIR}/kernel/net/raw.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/net/local_socket.cpp
@@ -61,11 +61,11 @@ add_cinux_test(net_socket ${CMAKE_SOURCE_DIR}/kernel/net/raw.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/net/arp.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/net/net_world.cpp
-                          ${CMAKE_SOURCE_DIR}/kernel/driver/net/loopback.cpp
+                          ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_socket.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_ioctl.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/net/ifaces.cpp
-                          ${CMAKE_SOURCE_DIR}/kernel/driver/tty/tty.cpp
+                          ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_common.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_path.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/time/timer_table.cpp
@@ -121,7 +121,7 @@ add_cinux_test(text)
 add_cinux_test(rtc)
 add_cinux_test(hpet)
 add_cinux_test(nvme)
-add_cinux_test(madt ${CMAKE_SOURCE_DIR}/kernel/driver/acpi/madt.cpp)
+add_cinux_test(madt ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/acpi/madt.cpp)
 add_cinux_test(font)
 add_cinux_test(console)
 add_cinux_test(syscall_face ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
@@ -173,18 +173,18 @@ add_cinux_test(syscall_face ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
                            framework/clock_host.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp)
 
-add_cinux_test(keyboard ${CMAKE_SOURCE_DIR}/kernel/driver/keyboard/scancode.cpp)
-add_cinux_test(input ${CMAKE_SOURCE_DIR}/kernel/driver/input/event_stream.cpp
-                      ${CMAKE_SOURCE_DIR}/kernel/driver/keyboard/scancode.cpp
-                      ${CMAKE_SOURCE_DIR}/kernel/driver/mouse/mouse_packet.cpp)
+add_cinux_test(keyboard ${CMAKE_SOURCE_DIR}/kernel/drivers/keyboard/scancode.cpp)
+add_cinux_test(input ${CMAKE_SOURCE_DIR}/kernel/drivers/input/event_stream.cpp
+                      ${CMAKE_SOURCE_DIR}/kernel/drivers/keyboard/scancode.cpp
+                      ${CMAKE_SOURCE_DIR}/kernel/drivers/mouse/mouse_packet.cpp)
 target_link_libraries(test_input PRIVATE Threads::Threads)
-add_cinux_test(input_node ${CMAKE_SOURCE_DIR}/kernel/driver/input/event_stream.cpp
-                          ${CMAKE_SOURCE_DIR}/kernel/driver/device/device.cpp
+add_cinux_test(input_node ${CMAKE_SOURCE_DIR}/kernel/drivers/input/event_stream.cpp
+                          ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/input_node.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
                           ${CMAKE_SOURCE_DIR}/kernel/fs/file_table.cpp)
-add_cinux_test(ps2_controller ${CMAKE_SOURCE_DIR}/kernel/driver/ps2/controller.cpp
+add_cinux_test(ps2_controller ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/ps2/controller.cpp
                              ${CMAKE_SOURCE_DIR}/test/framework/clock_host.cpp)
 add_cinux_test(pmm ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp)
 add_cinux_test(heap ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp)
@@ -249,17 +249,17 @@ add_cinux_test(sched_class ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
 add_cinux_test(vfs ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp)
 add_cinux_test(devfs ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
-                       ${CMAKE_SOURCE_DIR}/kernel/driver/device/device.cpp)
-add_cinux_test(device_model ${CMAKE_SOURCE_DIR}/kernel/driver/device/device.cpp
+                       ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp)
+add_cinux_test(device_model ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
                              ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
                              ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp)
-add_cinux_test(net_loopback ${CMAKE_SOURCE_DIR}/kernel/driver/net/loopback.cpp)
-add_cinux_test(tty ${CMAKE_SOURCE_DIR}/kernel/driver/tty/tty.cpp)
-add_cinux_test(pty ${CMAKE_SOURCE_DIR}/kernel/driver/tty/pty.cpp
-                      ${CMAKE_SOURCE_DIR}/kernel/driver/tty/tty.cpp)
-add_cinux_test(pty_node ${CMAKE_SOURCE_DIR}/kernel/driver/tty/pty.cpp
-                       ${CMAKE_SOURCE_DIR}/kernel/driver/tty/tty.cpp
-                       ${CMAKE_SOURCE_DIR}/kernel/driver/device/device.cpp
+add_cinux_test(net_loopback ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp)
+add_cinux_test(tty ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp)
+add_cinux_test(pty ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/pty.cpp
+                      ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp)
+add_cinux_test(pty_node ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/pty.cpp
+                       ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp
+                       ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/pty_node.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
@@ -297,8 +297,8 @@ add_cinux_test(ext2 ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_layout.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_write.cpp
                      ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_mutation.cpp
-                    ${CMAKE_SOURCE_DIR}/kernel/driver/block/block_cache.cpp
-                    ${CMAKE_SOURCE_DIR}/kernel/driver/block/block_queue.cpp
+                    ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_cache.cpp
+                    ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_queue.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/fs/file_table.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/proc/scheduler.cpp
@@ -308,17 +308,17 @@ add_cinux_test(ext2 ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_layout.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
                          ${CMAKE_SOURCE_DIR}/test/framework/clock_host.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/proc/lockdep.cpp ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp)
-add_cinux_test(pci ${CMAKE_SOURCE_DIR}/kernel/driver/pci/pci_layout.cpp)
-add_cinux_test(msi_layout ${CMAKE_SOURCE_DIR}/kernel/driver/pci/pci_layout.cpp
-                            ${CMAKE_SOURCE_DIR}/kernel/driver/msi/msi_layout.cpp
-                            ${CMAKE_SOURCE_DIR}/kernel/driver/msi/msix.cpp)
+add_cinux_test(pci ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/pci/pci_layout.cpp)
+add_cinux_test(msi_layout ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/pci/pci_layout.cpp
+                            ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/msi/msi_layout.cpp
+                            ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/msi/msix.cpp)
 add_cinux_test(irq ${CMAKE_SOURCE_DIR}/kernel/interrupt/irq.cpp)
-add_cinux_test(xhci_layout ${CMAKE_SOURCE_DIR}/kernel/driver/usb/xhci_layout.cpp
-                           ${CMAKE_SOURCE_DIR}/kernel/driver/usb/tablet_report.cpp)
+add_cinux_test(xhci_layout ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci_layout.cpp
+                           ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/tablet_report.cpp)
 add_cinux_test(async)
-add_cinux_test(ahci ${CMAKE_SOURCE_DIR}/kernel/driver/ahci/ahci_identify.cpp
-                    ${CMAKE_SOURCE_DIR}/kernel/driver/ahci/ahci_layout.cpp)
-add_cinux_test(block ${CMAKE_SOURCE_DIR}/kernel/driver/block/block_queue.cpp
+add_cinux_test(ahci ${CMAKE_SOURCE_DIR}/kernel/drivers/ahci/ahci_identify.cpp
+                    ${CMAKE_SOURCE_DIR}/kernel/drivers/ahci/ahci_layout.cpp)
+add_cinux_test(block ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_queue.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/fs/file_table.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/scheduler.cpp

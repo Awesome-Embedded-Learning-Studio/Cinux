@@ -3,9 +3,9 @@
 #include <array>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/msi/msi_layout.hpp"
-#include "kernel/driver/msi/msix.hpp"
-#include "kernel/driver/pci/pci_layout.hpp"
+#include "kernel/arch/x86_64/platform/msi/msi_layout.hpp"
+#include "kernel/arch/x86_64/platform/msi/msix.hpp"
+#include "kernel/arch/x86_64/platform/pci/pci_layout.hpp"
 #include "test_assert.hpp"
 
 namespace {

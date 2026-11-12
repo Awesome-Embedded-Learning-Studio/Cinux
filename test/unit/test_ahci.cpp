@@ -4,8 +4,8 @@
 #include <cstddef>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/ahci/ahci_identify.hpp"
-#include "kernel/driver/ahci/ahci_layout.hpp"
+#include "kernel/drivers/ahci/ahci_identify.hpp"
+#include "kernel/drivers/ahci/ahci_layout.hpp"
 #include "test_assert.hpp"
 
 TEST("ahci: a filled identify fis carries type, flag, opcode and one sector") {

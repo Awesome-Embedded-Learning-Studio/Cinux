@@ -2,7 +2,7 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/time.hpp"
-#include "kernel/driver/rtc/rtc.hpp"
+#include "kernel/drivers/rtc/rtc.hpp"
 #include "test_assert.hpp"
 
 using cinux::driver::ClockIsBinary;

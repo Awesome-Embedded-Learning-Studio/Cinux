@@ -2,9 +2,9 @@
 
 #include "cinux/memory.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/driver/ahci/ahci.hpp"
-#include "kernel/driver/block/block_cache.hpp"
-#include "kernel/driver/block/block_queue.hpp"
+#include "kernel/drivers/ahci/ahci.hpp"
+#include "kernel/drivers/block/block_cache.hpp"
+#include "kernel/drivers/block/block_queue.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"

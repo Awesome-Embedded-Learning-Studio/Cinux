@@ -1,7 +1,7 @@
 #include <array>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/hpet/hpet_layout.hpp"
+#include "kernel/arch/x86_64/platform/hpet/hpet_layout.hpp"
 #include "test_assert.hpp"
 
 namespace {

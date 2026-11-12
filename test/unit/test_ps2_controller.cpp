@@ -6,7 +6,7 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/time.hpp"
-#include "kernel/driver/ps2/controller.hpp"
+#include "kernel/arch/x86_64/platform/ps2/controller.hpp"
 #include "test_assert.hpp"
 
 using cinux::driver::ps2::Ps2Ports;

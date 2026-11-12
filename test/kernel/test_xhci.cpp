@@ -1,7 +1,7 @@
 #include "framework_kernel.hpp"
-#include "kernel/driver/usb/usb_config.hpp"
-#include "kernel/driver/usb/usb_keyboard.hpp"
-#include "kernel/driver/usb/xhci.hpp"
+#include "kernel/drivers/usb/usb_config.hpp"
+#include "kernel/drivers/usb/usb_keyboard.hpp"
+#include "kernel/drivers/usb/xhci.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"  // NOLINT(misc-include-cleaner)
 

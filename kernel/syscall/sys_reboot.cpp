@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_reboot.hpp"
 
 #include "kernel/console/console.hpp"
-#include "kernel/driver/acpi/acpi.hpp"
+#include "kernel/arch/x86_64/platform/acpi/acpi.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/syscall_internal.hpp"

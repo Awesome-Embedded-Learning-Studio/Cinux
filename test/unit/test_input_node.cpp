@@ -2,9 +2,9 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/result.hpp"
-#include "kernel/driver/device/device.hpp"
-#include "kernel/driver/input/event_stream.hpp"
-#include "kernel/driver/input/input_config.hpp"
+#include "kernel/drivers/device/device.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
+#include "kernel/drivers/input/input_config.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/devfs/input_node.hpp"
 #include "kernel/fs/file_table.hpp"

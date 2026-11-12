@@ -30,7 +30,7 @@
 #include "kernel/arch/x86_64/registers.hpp"
 #include "kernel/arch/x86_64/usermode.hpp"
 #include "kernel/boot/print.hpp"
-#include "kernel/driver/tty/console_tty.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/fs/devfs/console_node.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"

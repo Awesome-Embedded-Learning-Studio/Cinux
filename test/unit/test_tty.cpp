@@ -4,8 +4,8 @@
 #include <cstring>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/tty/tty.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/tty/tty.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "test_assert.hpp"
 
 // The wire's kernel termios is thirty-six bytes; the libc struct beside

@@ -1,5 +1,5 @@
 #include "../framework/framework.hpp"
-#include "kernel/driver/nvme/nvme_layout.hpp"
+#include "kernel/drivers/nvme/nvme_layout.hpp"
 #include "test_assert.hpp"
 
 TEST("nvme: completion identity, queue and phase all belong to the submitted command") {

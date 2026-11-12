@@ -10,7 +10,7 @@
 #include "kernel/arch/x86_64/cpuid.hpp"
 #include "kernel/arch/x86_64/page.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
-#include "kernel/driver/device/device.hpp"
+#include "kernel/drivers/device/device.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/procfs/procfs.hpp"

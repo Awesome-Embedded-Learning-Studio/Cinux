@@ -28,7 +28,7 @@
 #include <cstdint>
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/driver/block/block_config.hpp"
+#include "kernel/drivers/block/block_config.hpp"
 
 namespace cinux::fs::ext2 {
 

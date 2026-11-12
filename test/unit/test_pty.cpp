@@ -1,6 +1,6 @@
 #include "../framework/framework.hpp"
-#include "kernel/driver/tty/pty.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/tty/pty.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "test_assert.hpp"
 
 namespace {

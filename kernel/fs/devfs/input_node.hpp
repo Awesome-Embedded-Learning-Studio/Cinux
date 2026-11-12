@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "kernel/driver/input/event_stream.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
 
 namespace cinux::fs {
 

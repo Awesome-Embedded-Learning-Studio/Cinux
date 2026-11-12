@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-这一页我们把 `kernel/driver/serial` 里的串口驱动走一遍。它管的是 COM1 上那颗 16550 UART（PC 兼容机里最常见的一代串口芯片），全部的家当只有两个文件，露在外面的面孔只有五张：`SerialInit` 负责的是开工，`SerialPutChar` 与 `SerialDrain` 管的是发送和排空，`SerialTryGetChar` 与 `SerialHasKey` 管的则是接收。它是一颗纯轮询的驱动，中断从头到尾都是关着的，发一个字节的时候自己等线，收一个字节的时候自己到状态口去问。它的体量虽小，要紧的却是位置，内核打印链的末端落在它的身上，控制台 tty 取键盘字节时头一个问的也是它，断电前的排空等的还是它。我们顺着寄存器、初始化写表、收发路径、启动早期与控制台接线的次序往下走，沿途的取舍都跟着源码的注释走。
+这一页我们把 `kernel/drivers/serial` 里的串口驱动走一遍。它管的是 COM1 上那颗 16550 UART（PC 兼容机里最常见的一代串口芯片），全部的家当只有两个文件，露在外面的面孔只有五张：`SerialInit` 负责的是开工，`SerialPutChar` 与 `SerialDrain` 管的是发送和排空，`SerialTryGetChar` 与 `SerialHasKey` 管的则是接收。它是一颗纯轮询的驱动，中断从头到尾都是关着的，发一个字节的时候自己等线，收一个字节的时候自己到状态口去问。它的体量虽小，要紧的却是位置，内核打印链的末端落在它的身上，控制台 tty 取键盘字节时头一个问的也是它，断电前的排空等的还是它。我们顺着寄存器、初始化写表、收发路径、启动早期与控制台接线的次序往下走，沿途的取舍都跟着源码的注释走。
 
 ## 寄存器与轮询词表
 
@@ -10,7 +10,7 @@
 
 数据口与中断允许的两个偏移是一口两用的。按 16550 的惯例，线路控制寄存器的最高位是 DLAB（除数锁存访问位的开关，除数是决定线上波特率的分频值），它竖起来的时候，0 号与 1 号两个口改扮的是除数的低字节与高字节，它落回去的时候，两个口又回到数据与中断允许的本职。这个开关的用法，我们到初始化的一节看写表的原文。
 
-驱动说话用的词安在了 `kernel/driver/base/io.hpp`，我们把这几件词挨个认一遍。`PortWrite` 是端口与值配成的一对记录，`OutB` 的模板版本能把整张写表按次序一口气交出去，`InB` 读回的是一个字节，`WaitBitsSet` 的活是在状态口上打转，等掩码里的位全部亮起才放行，io.cpp 里的实现每转一圈垫一发 `pause`（x86 的暂停指令）。io.hpp 给 `WaitBitsSet` 的注释说它是所有轮询驱动的发送等待，PS/2 那边的 host 层接的也是同一批词，它的 `delay` 槽接的则是 PIT 的微秒等待，那段故事在 [PIT 定时器](pit.md)里讲过了。
+驱动说话用的词安在了 `kernel/arch/x86_64/platform/io.hpp`，我们把这几件词挨个认一遍。`PortWrite` 是端口与值配成的一对记录，`OutB` 的模板版本能把整张写表按次序一口气交出去，`InB` 读回的是一个字节，`WaitBitsSet` 的活是在状态口上打转，等掩码里的位全部亮起才放行，io.cpp 里的实现每转一圈垫一发 `pause`（x86 的暂停指令）。io.hpp 给 `WaitBitsSet` 的注释说它是所有轮询驱动的发送等待，PS/2 那边的 host 层接的也是同一批词，它的 `delay` 槽接的则是 PIT 的微秒等待，那段故事在 [PIT 定时器](pit.md)里讲过了。
 
 ## 初始化：一张七行的写表
 
@@ -46,13 +46,13 @@ console.cpp 是串口今天最大的客户。它的 `put_char` 把字符交给�
 
 ## 源码位置
 
-- `kernel/driver/serial/serial.hpp`、`serial.cpp` — 16550 驱动的本体、七行写表与轮询的收发
-- `kernel/driver/base/io.hpp`、`io.cpp` — PortWrite、OutB、InB、WaitBitsSet 的轮询词表
+- `kernel/drivers/serial/serial.hpp`、`serial.cpp` — 16550 驱动的本体、七行写表与轮询的收发
+- `kernel/arch/x86_64/platform/io.hpp`、`io.cpp` — PortWrite、OutB、InB、WaitBitsSet 的轮询词表
 - `kernel/init/init_sequence.cpp` — 排在第一行的 serial 步与失败的停机机关
 - `kernel/console/console.hpp`、`console.cpp` — 双份的扇出、闸锁、InitConsole 与 Flush
 - `kernel/console/screen.hpp`、`screen.cpp` — 文字屏幕的静默、让位与收回
 - `kernel/fs/devfs/fb_node.cpp` — 文字屏幕让位与收回的触发方
-- `kernel/driver/tty/console_tty.hpp`、`console_tty.cpp` — 三路的取键、回显与让出
+- `kernel/drivers/tty/console_tty.hpp`、`console_tty.cpp` — 三路的取键、回显与让出
 - `kernel/boot/print.hpp` — 打印链走到 PutString 的那一截
 - `kernel/syscall/sys_reboot.cpp` — 断电之前的 Flush
 - `boot/early/console.hpp` — boot 世界的同表拷贝

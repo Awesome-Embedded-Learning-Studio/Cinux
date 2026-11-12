@@ -21,8 +21,8 @@
 #include <vector>
 
 #include "cinux/memory.hpp"
-#include "kernel/driver/block/block_config.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_config.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 
 namespace cinux::test {
 

@@ -24,7 +24,7 @@
 
 #include "kernel/arch/x86_64/halt.hpp"
 #include "kernel/boot/print.hpp"
-#include "kernel/driver/base/io.hpp"
+#include "kernel/arch/x86_64/platform/io.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"
 

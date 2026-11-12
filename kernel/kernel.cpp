@@ -12,7 +12,7 @@
 #include "kernel/boot/print.hpp"
 #include "kernel/console/screen.hpp"
 #include "kernel/debug/kallsyms.hpp"
-#include "kernel/driver/rtc/rtc.hpp"
+#include "kernel/drivers/rtc/rtc.hpp"
 #include "kernel/init/init_sequence.hpp"
 #include "kernel/init/init_thread.hpp"
 #include "kernel/mm/layout.hpp"

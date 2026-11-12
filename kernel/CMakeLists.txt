@@ -41,20 +41,20 @@ set(CINUX_KERNEL_CORE_SOURCES
 
 set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/hpet/hpet.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/hpet/hpet.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/isr.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/exception.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/pic.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/irq_stubs.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/apic/local_apic.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/apic/io_apic.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/xhci.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/xhci_layout.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_device.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_keyboard.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_tablet.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/tablet_report.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/apic/local_apic.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/apic/io_apic.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci_layout.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_device.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_keyboard.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_tablet.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/tablet_report.cpp
     ${CMAKE_SOURCE_DIR}/kernel/interrupt/irq.cpp
     ${CMAKE_SOURCE_DIR}/kernel/debug/trace.cpp
     ${CMAKE_SOURCE_DIR}/kernel/debug/kallsyms.cpp

@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_clock.hpp"
 
-#include "kernel/driver/hpet/hpet.hpp"
-#include "kernel/driver/rtc/rtc.hpp"
+#include "kernel/arch/x86_64/platform/hpet/hpet.hpp"
+#include "kernel/drivers/rtc/rtc.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/uaccess.hpp"
 #include "kernel/time/tick.hpp"

@@ -3,8 +3,8 @@
 
 #include "cinux/byte_order.hpp"
 #include "framework.hpp"
-#include "kernel/driver/acpi/madt.hpp"
-#include "kernel/driver/acpi/madt_config.hpp"
+#include "kernel/arch/x86_64/platform/acpi/madt.hpp"
+#include "kernel/arch/x86_64/platform/acpi/madt_config.hpp"
 #include "test_assert.hpp"
 
 namespace {

@@ -3,7 +3,7 @@
 #include "cinux/ptr.hpp"
 #include "framework_kernel.hpp"
 #include "kernel/console/screen.hpp"
-#include "kernel/driver/framebuffer/framebuffer.hpp"
+#include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/mm/layout.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"  // NOLINT(misc-include-cleaner) consumed by the TEST() macro body

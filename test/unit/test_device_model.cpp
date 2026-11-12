@@ -2,7 +2,7 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/result.hpp"
-#include "kernel/driver/device/device.hpp"
+#include "kernel/drivers/device/device.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "test_assert.hpp"

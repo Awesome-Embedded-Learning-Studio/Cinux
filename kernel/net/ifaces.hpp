@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/net_config.hpp"
 
 namespace cinux::net {

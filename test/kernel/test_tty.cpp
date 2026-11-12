@@ -1,6 +1,6 @@
 #include "framework_kernel.hpp"
-#include "kernel/driver/tty/tty.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/tty/tty.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"  // NOLINT(misc-include-cleaner) consumed by the TEST() macro body
 

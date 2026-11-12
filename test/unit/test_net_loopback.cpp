@@ -1,7 +1,7 @@
 #include "../framework/framework.hpp"
-#include "kernel/driver/net/loopback.hpp"
-#include "kernel/driver/net/net_config.hpp"
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/loopback.hpp"
+#include "kernel/drivers/net/net_config.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "test_assert.hpp"
 
 namespace {

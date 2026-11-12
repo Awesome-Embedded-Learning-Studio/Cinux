@@ -3,7 +3,7 @@
 #include <array>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/pci/pci_layout.hpp"
+#include "kernel/arch/x86_64/platform/pci/pci_layout.hpp"
 #include "test_assert.hpp"
 
 TEST("pci: config address word packs location, register and enable bit") {

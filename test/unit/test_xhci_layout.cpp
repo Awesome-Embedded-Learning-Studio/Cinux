@@ -1,8 +1,8 @@
 #include <stdint.h>
 
 #include "../framework/framework.hpp"
-#include "kernel/driver/usb/usb_tablet.hpp"
-#include "kernel/driver/usb/xhci_layout.hpp"
+#include "kernel/drivers/usb/usb_tablet.hpp"
+#include "kernel/drivers/usb/xhci_layout.hpp"
 #include "test_assert.hpp"
 
 namespace {

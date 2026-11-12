@@ -1,11 +1,11 @@
 #include <array>
 
 #include "cinux/ptr.hpp"
-#include "kernel/driver/ahci/ahci.hpp"
-#include "kernel/driver/ahci/ahci_layout.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
-#include "kernel/driver/pci/pci.hpp"
-#include "kernel/driver/pci/pci_layout.hpp"
+#include "kernel/drivers/ahci/ahci.hpp"
+#include "kernel/drivers/ahci/ahci_layout.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/arch/x86_64/platform/pci/pci.hpp"
+#include "kernel/arch/x86_64/platform/pci/pci_layout.hpp"
 #include "kernel/mm/layout.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"

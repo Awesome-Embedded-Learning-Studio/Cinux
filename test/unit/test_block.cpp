@@ -4,8 +4,8 @@
 
 #include "../framework/framework.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
-#include "kernel/driver/block/block_queue.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_queue.hpp"
 #include "test/mock/mock_block_disk.hpp"
 #include "test_assert.hpp"
 

@@ -12,11 +12,11 @@
 
 ## 行编辑的纪律：Tty
 
-Tty 的定位写在 `kernel/driver/tty/tty.hpp` 的文件头里，说的是按键进、编好的行出，一个终端养一个自己的实例。这个类管的只是纪律，水管的进出一概不归它，字节的来路、回显的去处、等输入的读者怎么让路，都是装配的时候交进来的。TtyWiring 里坐着的是四个函数指针加一个上下文字，我们把座位挨个认过去，取键的 take_key、报信的 has_key、回显的 echo、让路的 wait，全是无捕获的函数指针，形状跟 FsOps 那对是一样的。注释把这么安排的用处讲清了，一套纪律类伺候的是许多终端，控制台接的是串口与键盘，伪终端的从端接的是主端的两只字节环，host 测试接的是假件。
+Tty 的定位写在 `kernel/drivers/tty/tty.hpp` 的文件头里，说的是按键进、编好的行出，一个终端养一个自己的实例。这个类管的只是纪律，水管的进出一概不归它，字节的来路、回显的去处、等输入的读者怎么让路，都是装配的时候交进来的。TtyWiring 里坐着的是四个函数指针加一个上下文字，我们把座位挨个认过去，取键的 take_key、报信的 has_key、回显的 echo、让路的 wait，全是无捕获的函数指针，形状跟 FsOps 那对是一样的。注释把这么安排的用处讲清了，一套纪律类伺候的是许多终端，控制台接的是串口与键盘，伪终端的从端接的是主端的两只字节环，host 测试接的是假件。
 
 纪律是在 read 里跑的，而不是在中断里跑的，我们跟着一次按键走完它的路。可打印的字符在 ECHO 竖着的时候当场回显。退格擦字的时候，回显的是退格、空格、退格的三连，屏幕上的字真的消失，`\b` 与 0x7F 的两个码，认的都是退格。等到了行尾，整行连着换行符一起停进了字节池，等的是读者来取。ICANON 落下去的时候，字节是原样直通的，也不做编辑了。一行的编辑预算是 128 字节，NUL 也算在了里面，字节池的容量是 1024 字节，短读剩下的半行留在池里给下一个读者。写的那一半不归这里管，注释的原话是终端只拥有输入编辑。
 
-termios 是终端的属性记录，纪律看的就是它，进与出走的是 copy_termios 与 apply_termios，整条记录原样地收发。线上是 36 字节的内核形状，termios2 的问句另有 44 字节的样子，glibc 的结构体比这大，tcgetattr 与 tcsetattr 干的是两种形状之间的换算，syscall 边界上从来不带超过这 36 字节的东西。我们把 `kernel/driver/tty/tty_config.hpp` 注释里的这段层次读了一遍，它讲完层次还记了一回误量，2026 年 10 月 19 日量出 60 字节的那一版量的是 libc 的结构体，量错了层，多写的 24 字节越过了记录的边界，落进了调用者放在旁边的字段。
+termios 是终端的属性记录，纪律看的就是它，进与出走的是 copy_termios 与 apply_termios，整条记录原样地收发。线上是 36 字节的内核形状，termios2 的问句另有 44 字节的样子，glibc 的结构体比这大，tcgetattr 与 tcsetattr 干的是两种形状之间的换算，syscall 边界上从来不带超过这 36 字节的东西。我们把 `kernel/drivers/tty/tty_config.hpp` 注释里的这段层次读了一遍，它讲完层次还记了一回误量，2026 年 10 月 19 日量出 60 字节的那一版量的是 libc 的结构体，量错了层，多写的 24 字节越过了记录的边界，落进了调用者放在旁边的字段。
 
 ISIG 竖着的时候，我们把纪律认得的三个控制字符数一遍，^C 折的是信号 2，^\ 折的是信号 3，^Z 折的是信号 20，认的这件事独立于 ICANON，raw 模式下的信号键照样活着。信号号是停在 take_pending_signal 里的，拉键的读者顺手把它取走，投给了进程组。窗口的形状（行数、列数加两个像素位）也归同一条记录管，ioctl 的问句答的就是它，set_window 换了形状，答出来的也跟着换了。
 
@@ -36,7 +36,7 @@ devfs 里的 console 节点是控制台的门牌，门牌的主从号是 `MakeDe
 
 ## 伪终端：给桌面 shell 备的座位
 
-PTY 的本体在 `kernel/driver/tty/pty.hpp` 里，我们把头文件的纲领读一遍，它说这是主从成对的一对，从端是一台真的终端，两只字节环只是它的水管，纪律长在从端的身上。两只环各有各的容量，raw 环 256 字节接主端写进来的键，主端环 4096 字节攒从端的输出与回显。从端的 Tty 在对子构造的时候就接好了线，取键的座位接的是 raw 环，回显的座位接的是主端环，让路的座位接的是构造时递进来的 hook，内核里是调度器的 yield，测试的世界里给的是空操作。穿过这一对的路有四条，主端写的字喂给纪律，从端的读者领走编好的行，从端自己写的输出推进主端环，主端的读者把从端产出的每一样都抽走，纪律的回显也在内。termios 是跟着从端走的，对从端应用的记录管的编辑，跟控制台的记录管 0 号描述符一模一样。
+PTY 的本体在 `kernel/drivers/tty/pty.hpp` 里，我们把头文件的纲领读一遍，它说这是主从成对的一对，从端是一台真的终端，两只字节环只是它的水管，纪律长在从端的身上。两只环各有各的容量，raw 环 256 字节接主端写进来的键，主端环 4096 字节攒从端的输出与回显。从端的 Tty 在对子构造的时候就接好了线，取键的座位接的是 raw 环，回显的座位接的是主端环，让路的座位接的是构造时递进来的 hook，内核里是调度器的 yield，测试的世界里给的是空操作。穿过这一对的路有四条，主端写的字喂给纪律，从端的读者领走编好的行，从端自己写的输出推进主端环，主端的读者把从端产出的每一样都抽走，纪律的回显也在内。termios 是跟着从端走的，对从端应用的记录管的编辑，跟控制台的记录管 0 号描述符一模一样。
 
 座位是开在 devfs 里的，管它的是 pty_node.cpp。打开 /dev/ptmx 的那一下，PtyTable 从座位表里领的是第一个空位，造一对新的 Pty，交出去的是主端的节点，从端的窗口尺寸从 ConsoleTty 接过一份，新对生下来就知道了屏幕的宽高。座位表一共备了 8 个位置，占满了之后，再来的每一对答的都是 ENOMEM，我们把注释里的立场读一遍，空座位与活座位是分不开的，怪的是对子的寿命册子还没立起来，猜错的代价是旧从端把字节写进新主端的环里，所以在那之前老老实实答内存不足。ptmx 这个座位自己是读不得也写不得的，问它要字节答的是 EIO，它会的只有开一对新的。
 
@@ -75,15 +75,15 @@ vesper 另有一个独立的终端程序 vesper_terminal，我们把它的差异
 
 它的生卒在提交记录与旧代码的注释里记得清楚，我们分三段认。头一段是 2026 年 5 月 25 日的 cde30d1，提交说明写的是 migrate from old Cinux，旧仓库的家当随它搬了进来，[小内核](../mini.md)记的也是这一次迁入。搬进来的头一段日子里，shell 的挂接走的是 pipe，旧页写的 fork 加 execve 就是那个世界。第二段的换线发生在 dd0e18f 之前，gui_init.cpp 里那段注释交代了缘故，pipe 给了 shell 一个非 tty 的标准流，回显是没有的，stdio 又是整块缓冲的，输出也就一直闷在了缓冲里，换成内核 PTY 的版本之后，从端是一台真终端了，ash 肯交互了，输出也活了，spawn 的法子也换了，fork 换成了 TaskBuilder 造任务。dd0e18f 这笔提交随后把老桌面层删掉了，terminal.cpp 的 415 行、terminal.hpp 的 330 行、terminal_ansi.cpp 的 120 行连同 window 与 window_manager 一起退场，内核 GUI 换到了 libs/gui 的新核心。第三段是 2026 年 10 月 31 日的 49ddfb0，提交说明还是我们见过的那句老话，写的是 feat: Migrate the refator version of Cinux，kernel/gui 的残余与 libs/gui 一并清走了，canvas 驱动与 CINUX_GUI 的开关也同批消失了，整座图形世界搬进了用户态的 vesper。[Canvas 画布](../drivers/canvas.md)与[小内核](../mini.md)记的正是这一批。
 
-职责的去向我们一摊一摊对。画布的活归了 visor 的 Canvas，窗口与边框归了 vesper 的 Desktop 与 WindowFrame，80x25 的固定缓冲换成了按字体折格、随缩放重裁的网格，ANSI 的三句扩成了上一节的清单。窗口握伪终端主端、shell 握从端的思路活着走下来了，只是两头当家的人都换了，主端从内核内的 pty_alloc 句柄换成了用户态 PtySession 手里的描述符，从端从内核直接拉的任务换成了 forkpty 下的子进程。行编辑的纪律跟着重构搬了家，旧树里的它住在 kernel/drivers/tty，今天的它在 kernel/driver/tty 里，喂它的座位从窗口的按键换成了串口、键盘与主端的字节环。
+职责的去向我们一摊一摊对。画布的活归了 visor 的 Canvas，窗口与边框归了 vesper 的 Desktop 与 WindowFrame，80x25 的固定缓冲换成了按字体折格、随缩放重裁的网格，ANSI 的三句扩成了上一节的清单。窗口握伪终端主端、shell 握从端的思路活着走下来了，只是两头当家的人都换了，主端从内核内的 pty_alloc 句柄换成了用户态 PtySession 手里的描述符，从端从内核直接拉的任务换成了 forkpty 下的子进程。行编辑的纪律跟着重构搬了家，旧树里的它住在 kernel/drivers/tty，今天的它在 kernel/drivers/tty 里，喂它的座位从窗口的按键换成了串口、键盘与主端的字节环。
 
 ## 源码位置
 
 - `kernel/console/console.hpp/cpp` — 控制台的中立面孔、扇出与排空
 - `kernel/console/screen.hpp/cpp` — TextConsole 与让位租约的屏幕半边，走读在[视频子系统](../drivers/video.md)
-- `kernel/driver/tty/tty.hpp/cpp`、`kernel/driver/tty/tty_config.hpp` — Tty 行编辑纪律、termios 问答与各档预算
-- `kernel/driver/tty/console_tty.hpp/cpp` — ConsoleTty 的装配与三个取键座位
-- `kernel/driver/tty/pty.hpp/cpp`、`kernel/driver/tty/pty_config.hpp` — 伪终端对子、两只字节环与座位表常量
+- `kernel/drivers/tty/tty.hpp/cpp`、`kernel/drivers/tty/tty_config.hpp` — Tty 行编辑纪律、termios 问答与各档预算
+- `kernel/drivers/tty/console_tty.hpp/cpp` — ConsoleTty 的装配与三个取键座位
+- `kernel/drivers/tty/pty.hpp/cpp`、`kernel/drivers/tty/pty_config.hpp` — 伪终端对子、两只字节环与座位表常量
 - `kernel/fs/devfs/console_node.cpp` — /dev/console、`tty_poll` 泵、前台进程组与 ioctl 面
 - `kernel/fs/devfs/pty_node.cpp` — ptmx、pts/N、/dev/tty 的座位、解析与 ioctl 面
 - `kernel/fs/file_world.cpp` — seat_console_streams 配的三条标准流

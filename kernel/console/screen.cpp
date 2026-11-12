@@ -6,7 +6,7 @@
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/console/console_grid.hpp"
 #include "kernel/console/font.hpp"
-#include "kernel/driver/framebuffer/framebuffer.hpp"
+#include "kernel/drivers/framebuffer/framebuffer.hpp"
 
 namespace cinux::console {
 
