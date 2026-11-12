@@ -36,6 +36,10 @@ namespace cinux::armv7 {
 /// Shares one frame, releases one owner, and checks it stays allocated.
 [[nodiscard]] bool RunCowSelfCheck();
 
+/// Shares one frame between two spaces; tearing one down must leave the
+/// other translating it, and tearing both must return every page.
+[[nodiscard]] bool RunSharedSpaceSelfCheck();
+
 /// Builds an address space, maps one frame, tears it down, and checks that
 /// the allocator got the frame and the tables back.
 [[nodiscard]] bool RunSpaceSelfCheck();

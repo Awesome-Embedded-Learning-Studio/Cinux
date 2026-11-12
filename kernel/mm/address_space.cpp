@@ -43,7 +43,7 @@ void release_table(Entry* table, unsigned long level_index) {
             continue;
         }
         if (cinux::arch::page::DescriptorIsLeaf(slot, kLevel)) {
-            cow::ReleaseFrame(walk::EntryTarget(slot));
+            cow::ReleaseFrame(cinux::arch::page::LeafFrame(slot, kLevel));
             continue;
         }
         const unsigned long kChild = walk::EntryTarget(slot);
@@ -52,7 +52,8 @@ void release_table(Entry* table, unsigned long level_index) {
             for (unsigned long leaf = 0; leaf < walk::kEntriesPerTable; ++leaf) {
                 Entry& leaf_slot = kChildTable[leaf];
                 if (cinux::arch::page::DescriptorPresent(leaf_slot)) {
-                    cow::ReleaseFrame(walk::EntryTarget(leaf_slot));
+                    cow::ReleaseFrame(
+                        cinux::arch::page::LeafFrame(leaf_slot, cinux::arch::page::kLeafLevel));
                 }
             }
         } else {

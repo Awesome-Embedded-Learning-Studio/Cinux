@@ -154,6 +154,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunSpaceSelfCheck()
                                               ? "[armv7] space teardown ok"
                                               : "[armv7] space teardown FAILED");
+                    cinux::print::Println(cinux::armv7::RunSharedSpaceSelfCheck()
+                                              ? "[armv7] shared frame ok"
+                                              : "[armv7] shared frame FAILED");
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");

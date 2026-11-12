@@ -6,6 +6,7 @@
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/context.hpp"
 #include "kernel/arch/kernel_stack.hpp"
@@ -152,6 +153,44 @@ bool RunCowSelfCheck() {
     cinux::mm::cow::ReleaseFrame(kFrame.raw);
     if (cinux::mm::Pmm::self().free_page_count() != kBefore - 1) {
         return false;  // the first release must not return the frame
+    }
+    cinux::mm::cow::ReleaseFrame(kFrame.raw);
+    return cinux::mm::Pmm::self().free_page_count() == kBefore;
+}
+
+bool RunSharedSpaceSelfCheck() {
+    const unsigned long kBefore = cinux::mm::Pmm::self().free_page_count();
+    auto* const         first   = new cinux::mm::AddressSpace{};
+    auto* const         second  = new cinux::mm::AddressSpace{};
+    if (first == nullptr || second == nullptr || !first->init() || !second->init()) {
+        return false;
+    }
+    const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    if (!MapSharedFrame(*first, 0x40001000UL, kFrame.raw) ||
+        !MapSharedFrame(*second, 0x40001000UL, kFrame.raw)) {
+        return false;
+    }
+    if (first->translate(0x40001000UL) != kFrame.raw ||
+        second->translate(0x40001000UL) != kFrame.raw) {
+        return false;
+    }
+    first->teardown();
+    if (cinux::mm::cow::FrameShares(kFrame.raw) != 2) {
+        return false;
+    }
+    if (second->translate(0x40001000UL) != kFrame.raw) {
+        return false;  // the surviving space still owns the frame
+    }
+    second->teardown();
+    // The test itself still owns the frame; the two spaces are gone.
+    if (cinux::mm::cow::FrameShares(kFrame.raw) != 1) {
+        return false;
+    }
+    if (cinux::mm::Pmm::self().free_page_count() != kBefore - 1) {
+        return false;
     }
     cinux::mm::cow::ReleaseFrame(kFrame.raw);
     return cinux::mm::Pmm::self().free_page_count() == kBefore;

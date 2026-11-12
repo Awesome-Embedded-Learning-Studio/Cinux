@@ -162,6 +162,18 @@ inline unsigned long EntryTarget(const Entry& slot) {
 }
 
 /**
+ * @brief         The frame a leaf entry names.
+ * @param[in]     slot    A leaf entry.
+ * @param[in]     level   The level that entry sits at.
+ * @return        Physical address of the frame.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline unsigned long LeafFrame(const Entry& slot, WalkLevel /*level*/) {
+    return EntryTarget(slot);
+}
+
+/**
  * @brief         Reports whether a slot maps something.
  * @param[in]     entry   The table slot.
  * @return        true when the present bit is set.

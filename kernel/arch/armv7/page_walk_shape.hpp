@@ -198,6 +198,18 @@ inline unsigned long EntryTarget(const Entry& slot) {
     return TableTarget(slot);
 }
 
+/**
+ * @brief         The frame a leaf entry names.
+ * @param[in]     slot    A leaf entry.
+ * @param[in]     level   The level that entry sits at.
+ * @return        Physical base of the small page or section it names.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline unsigned long LeafFrame(const Entry& slot, WalkLevel level) {
+    return level == kLeafLevel ? SmallLeafTarget(slot) : (slot.raw & 0xFFF00000UL);
+}
+
 /// Slots of level 1 below the 3 GiB user boundary.
 constexpr unsigned int kUserHalfSlots = 3072;
 
