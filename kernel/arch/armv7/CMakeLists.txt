@@ -10,6 +10,8 @@ add_executable(arm_image
     irq.cpp
     vectors.S
     context_switch.S
+    task_switch.cpp
+    selfcheck.cpp
     faults.cpp
     exception_dispatch.cpp
     fdt.cpp

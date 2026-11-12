@@ -16,6 +16,7 @@
 #include "kernel/mm/vmm.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
+#include "kernel/arch/armv7/task_switch.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -141,6 +142,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunPerCpuSelfCheck()
                                               ? "[armv7] per-cpu ok"
                                               : "[armv7] per-cpu FAILED");
+                    cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
+                                              ? "[armv7] two tasks ok"
+                                              : "[armv7] two tasks FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
                     // Let a few ticks land before the fault ends the run.

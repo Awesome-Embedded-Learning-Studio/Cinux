@@ -25,6 +25,7 @@ struct PerCpu {
     unsigned long kernel_stack_top;
     unsigned long user_stack_top;
     unsigned long pending_reap;
+    unsigned long current_slot;  // the running mini-task; ~0 means the caller
 };
 
 /// Points TPIDRPRW at a block; every processor calls this once.
