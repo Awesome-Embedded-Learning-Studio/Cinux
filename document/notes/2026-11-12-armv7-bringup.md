@@ -369,7 +369,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
 | 78 | getticks | `getticks 3`、睡三个 tick 之后变大（`ticks ok`） |
-| 5 | open | 内建只读文件按名字查表：`open hello as 3`、`file ok`，`open motd as`、`motd ok`；不存在的名字回 ENOENT（`enoent ok`）；可写文件：`open scratch as`、`file write 6`、`writefile ok`；只读文件不许写：`write 3 refused, read-only`、用户侧 `ro write ok`；末尾追加：`append ok` |
+| 5 | open | 内建只读文件按名字查表：`open hello as 3`、`file ok`，`open motd as`、`motd ok`；不存在的名字回 ENOENT（`enoent ok`）；可写文件：`open scratch as`、`file write 6`、`writefile ok`；只读文件不许写：`write 3 refused, read-only`、用户侧 `ro write ok`；末尾追加：`append ok`；跨任务共用：3 号任务轮询读到 0 号写下的同一段内容（`shared ok`） |
 | 45 | brk | `brk -> 4000E000`、`brk ok` |
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |

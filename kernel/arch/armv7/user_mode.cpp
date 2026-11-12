@@ -1050,6 +1050,45 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         auto* const kBad = reinterpret_cast<volatile unsigned long*>(0x51000000UL);
         *kBad            = 1;
     }
+    if (task_id == 3) {
+        // The file lives in the kernel: poll until the writer in task 0 has
+        // put its bytes there, then read the same ones back.
+        char path[10];
+        path[0] = '/'; path[1] = 's'; path[2] = 'c'; path[3] = 'r'; path[4] = 'a';
+        path[5] = 't'; path[6] = 'c'; path[7] = 'h'; path[8] = 0;   path[9] = 0;
+        for (unsigned long attempt = 0; attempt < 2000UL; ++attempt) {
+            const long kFd3 = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(path)), 0, 0);
+            if (kFd3 >= 3) {
+                char back[8];
+                for (unsigned long index = 0; index < 8; ++index) {
+                    back[index] = 0;
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                                static_cast<unsigned long>(kFd3), 0, 0));
+                const long kBytes = user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kFd3),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(back)), 8);
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kFd3), 0, 0));
+                if (kBytes == 8 && back[0] == 'a' && back[1] == 'b' && back[2] == 'c' &&
+                    back[3] == '1' && back[4] == '2' && back[5] == '3' &&
+                    back[6] == 'X' && back[7] == 'Y') {
+                    char          note[16];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('s'); NOTE('h'); NOTE('a'); NOTE('r'); NOTE('e'); NOTE('d');
+                    NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                    break;
+                }
+            }
+            static_cast<void>(
+                user_syscall3(cinux::armv7::syscall_nr::kSchedYield, 0, 0, 0));
+        }
+    }
     if (task_id != 0) {
         // Not mapped in the clone either: this must still end the task.
         static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x4000B000UL));
