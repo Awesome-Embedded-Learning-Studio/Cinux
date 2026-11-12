@@ -2,6 +2,19 @@
 cmake_minimum_required(VERSION 3.16)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/platform")
+
+# Architecture is a configure-time choice. Each architecture lives in one
+# file under cmake/arch/ providing cinux_arch_toolchain() (runs before
+# project(), picks the compilers) and cinux_arch_lane() (runs after,
+# attaches sources and run targets, and may own the rest of the configure).
+set(CINUX_ARCHITECTURE "x86_64" CACHE STRING
+    "Target architecture; one file per entry under cmake/arch/")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arch/${CINUX_ARCHITECTURE}.cmake")
+    message(FATAL_ERROR "No cmake/arch/${CINUX_ARCHITECTURE}.cmake; unknown CINUX_ARCHITECTURE")
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/arch/${CINUX_ARCHITECTURE}.cmake")
+cinux_arch_toolchain()
+
 project(Cinux VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -22,6 +35,14 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # compile commands could help us start our journey, happily
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# The lane attaches its sources and run targets here. A lane that owns the
+# rest of the configure (no hosted kernel, no Buildroot rootfs, no host
+# tests) sets CINUX_ARCH_LANE_TERMINAL and the root returns.
+cinux_arch_lane()
+if(CINUX_ARCH_LANE_TERMINAL)
+    return()
+endif()
 
 include(cmake/compilers/warning_standard.cmake)
 include(cmake/compilers/boot_modes.cmake)
