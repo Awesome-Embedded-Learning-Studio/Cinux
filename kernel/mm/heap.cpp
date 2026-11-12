@@ -4,7 +4,7 @@
 
 #include "cinux/math.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 
 namespace cinux::mm {
 

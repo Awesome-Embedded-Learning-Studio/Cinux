@@ -19,7 +19,7 @@
 #include "cinux/own.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
 

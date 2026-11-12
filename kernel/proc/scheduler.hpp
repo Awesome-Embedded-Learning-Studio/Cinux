@@ -34,7 +34,7 @@
 #include "cinux/scoped_guard.hpp"
 #include "cinux/singleton.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/proc/task_snapshot.hpp"

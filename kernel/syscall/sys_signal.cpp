@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_signal.hpp"
 
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signals.hpp"

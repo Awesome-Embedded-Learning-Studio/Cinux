@@ -5,7 +5,7 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/net/loopback.hpp"
 #include "kernel/drivers/net/net_config.hpp"

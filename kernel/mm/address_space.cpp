@@ -4,7 +4,7 @@
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/x86_64/registers.hpp"

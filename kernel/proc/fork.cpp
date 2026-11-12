@@ -8,7 +8,7 @@
 #include "cinux/own.hpp"
 #include "cinux/ptr.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/mm/address_space.hpp"

@@ -5,7 +5,7 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/x86_64/per_cpu.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/proc/futex.hpp"

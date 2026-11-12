@@ -5,7 +5,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/x86_64/isr.hpp"  // NOLINT(misc-include-cleaner) fault-code words shared with the reporter
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"

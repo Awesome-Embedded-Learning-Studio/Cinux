@@ -27,7 +27,7 @@
 #include "cinux/ref_count.hpp"
 #include "cinux/result.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/mm/layout.hpp"

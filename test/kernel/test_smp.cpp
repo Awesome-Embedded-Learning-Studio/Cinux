@@ -6,7 +6,7 @@
 #include "cinux/ptr.hpp"
 #include "kernel/arch/x86_64/gdt.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/x86_64/per_cpu.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/boot/print.hpp"

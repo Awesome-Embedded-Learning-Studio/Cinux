@@ -3,7 +3,7 @@
 #include "cinux/byte_order.hpp"
 #include "cinux/checksum.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/drivers/net/e1000.hpp"
 #include "kernel/drivers/net/loopback.hpp"
 #include "kernel/drivers/net/net_device.hpp"

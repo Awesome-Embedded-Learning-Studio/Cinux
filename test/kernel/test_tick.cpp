@@ -1,5 +1,5 @@
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/time/tick.hpp"
 #include "test_assert.hpp"
 #include "test_case.hpp"  // NOLINT(misc-include-cleaner) consumed by the TEST() macro body

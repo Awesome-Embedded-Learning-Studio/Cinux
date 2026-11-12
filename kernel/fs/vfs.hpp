@@ -34,7 +34,7 @@
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/mount_lease.hpp"
 

@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_readlink.hpp"
 
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/procfs/procfs.hpp"

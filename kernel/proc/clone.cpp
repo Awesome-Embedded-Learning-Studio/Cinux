@@ -3,7 +3,7 @@
 #include "cinux/assert.hpp"
 #include "cinux/ptr.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/proc/fork.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"

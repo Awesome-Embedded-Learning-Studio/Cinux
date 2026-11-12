@@ -30,7 +30,7 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "kernel/arch/x86_64/instructions.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/x86_64/platform/apic/local_apic.hpp"
 #include "kernel/arch/x86_64/platform/msi/msi_layout.hpp"

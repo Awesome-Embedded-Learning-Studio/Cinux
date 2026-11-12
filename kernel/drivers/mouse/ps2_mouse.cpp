@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/x86_64/platform/io.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
 #include "kernel/drivers/input/input_config.hpp"
