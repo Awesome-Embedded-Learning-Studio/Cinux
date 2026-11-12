@@ -34,6 +34,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -168,8 +169,8 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         static_cast<void>(kReceived);
     }
     if (task_id != 0) {
-        // A foreign task's code page: this task's table has nothing there.
-        static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x40001000UL));
+        // Not mapped in the clone either: this must still end the task.
+        static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x4000B000UL));
     }
     static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 7, 0, 0));
     for (;;) {
@@ -191,12 +192,54 @@ bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned l
     return true;
 }
 
-bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_va) {
+/// Gives a cloned task a private stack page and its own argument, so the
+/// clone shares code and data but not its stack.
+bool privatize_stack(cinux::mm::AddressSpace& space, const cinux::mm::AddressSpace& parent,
+                     unsigned long stack_va, unsigned long index) {
+    const unsigned long kParentFrame = parent.translate(stack_va);
+    if (kParentFrame == 0) {
+        return false;
+    }
+    const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    const auto* const source = reinterpret_cast<const unsigned char*>(kParentFrame);
+    auto* const       target = reinterpret_cast<unsigned char*>(kFrame.raw);
+    for (unsigned long offset = 0; offset < cinux::arch::page::kSize; ++offset) {
+        target[offset] = source[offset];
+    }
+    *reinterpret_cast<unsigned long*>(kFrame.raw + cinux::arch::page::kSize - 4) = index;
+    if (!space.map_user(stack_va, kFrame.raw)) {
+        return false;
+    }
+    cinux::mm::cow::ReleaseFrame(kParentFrame);  // the clone stops sharing the parent stack
+    // With the clone off it, the parent's stack is exclusive again, so
+    // put its writable permission back; a read-only exclusive page would
+    // fault with nobody to answer.
+    return const_cast<cinux::mm::AddressSpace&>(parent).map_user(stack_va, kParentFrame);
+}
+
+bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_va,
+                cinux::mm::AddressSpace* parent = nullptr) {
     UserTask& task = g_tasks[index];
     task           = UserTask{};
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
+    }
+    if (parent != nullptr) {
+        if (!cinux::armv7::CloneUserSpace(*parent, *task.space) ||
+            !privatize_stack(*task.space, *parent, stack_va, index)) {
+            return false;
+        }
+        task.trap      = cinux::arch::UserTrap{};
+        task.trap.lr   = code_va + static_cast<unsigned long>(
+                                       reinterpret_cast<std::uintptr_t>(&user_entry_stub) -
+                                       reinterpret_cast<std::uintptr_t>(__user_text_start));
+        task.trap.sp   = stack_va + cinux::arch::page::kSize;
+        task.trap.spsr = 0x10UL;
+        return true;
     }
     const auto kCodeFrame  = cinux::mm::Pmm::self().allocate_page();
     const auto kStackFrame = cinux::mm::Pmm::self().allocate_page();
@@ -311,7 +354,10 @@ bool RunUserModeSelfCheck() {
     }
     g_shared_frame = kShared.raw;
     g_kernel_root = cinux::arch::space::ActiveRoot();
-    if (!setup_task(0, kTaskACode, kTaskAStack) || !setup_task(1, kTaskBCode, kTaskBStack)) {
+    if (!setup_task(0, kTaskACode, kTaskAStack)) {
+        return false;
+    }
+    if (!setup_task(1, kTaskACode, kTaskAStack, g_tasks[0].space)) {
         return false;
     }
     g_running = true;

@@ -51,7 +51,7 @@ add_test(NAME arm_boot
             -DEXPECTED_FAULTED=task 1 faulted
             -DEXPECTED_PREEMPT=preempt to task
             -DEXPECTED_REFUSED=svc write refused 80000000
-            -DEXPECTED_USERFAULT=user fault caught at 40001000 code 4
+            -DEXPECTED_USERFAULT=user fault caught at 4000B000 code 4
             -DEXPECTED_FAULT=data abort at 51000000 status 805 code 2
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
