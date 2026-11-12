@@ -37,6 +37,9 @@ inline constexpr Entry kUser = base::bit::MaskBit<std::uint32_t>(29);
 /// Encoder flag: instruction fetches refuse. Consumed by the encoders.
 inline constexpr Entry kNoExec = base::bit::MaskBit<std::uint32_t>(28);
 
+/// Encoder flag: user mode may read but not write. Consumed by the encoders.
+inline constexpr Entry kReadOnly = base::bit::MaskBit<std::uint32_t>(27);
+
 /// The two short-descriptor levels.
 enum class WalkLevel : unsigned char {
     kL1 = 0,

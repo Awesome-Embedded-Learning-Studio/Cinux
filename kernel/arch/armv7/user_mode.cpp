@@ -25,18 +25,22 @@
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/space.hpp"
+#include "kernel/arch/isr.hpp"
+#include "kernel/arch/armv7/cow_ledger.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 
-using FaultRepair = bool (*)(unsigned long address);
+using FaultRepair = bool (*)(unsigned long address, unsigned long status);
 void InstallFaultRepair(FaultRepair hook);
 
 extern "C" unsigned char __user_text_start[];
@@ -61,6 +65,7 @@ cinux::arch::CpuContext g_scratch;
 unsigned long           g_kernel_root = 0;
 unsigned long           g_current     = 0;
 bool                    g_running     = false;
+unsigned long long      g_shared_frame = 0;
 
 long user_syscall0(unsigned long number) {
     register unsigned long r7 asm("r7") = number;
@@ -123,6 +128,12 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 
     }
     {
+        // Shared with the other task and mapped read-only: this write must
+        // take a copy-on-write fault and then succeed on its own frame.
+        auto* const kShared = reinterpret_cast<volatile unsigned long*>(0x40008000UL);
+        *kShared            = 0xC0FFEEUL;
+    }
+    {
         // Inside the user window but never mapped: the repair hook fills it
         // and the store is retried on the new page.
         auto* const kProbe = reinterpret_cast<volatile unsigned long*>(0x40009000UL);
@@ -181,6 +192,10 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         !task.space->map_user(stack_va, kStackFrame.raw)) {
         return false;
     }
+    if (g_shared_frame != 0 &&
+        !cinux::armv7::MapSharedFrame(*task.space, 0x40008000UL, static_cast<unsigned long>(g_shared_frame))) {
+        return false;
+    }
     // The task's argument waits at the top of its own stack; the copied
     // stub reads it before any C prologue can move sp.
     *reinterpret_cast<unsigned long*>(kStackFrame.raw + cinux::arch::page::kSize - 4) = index;
@@ -203,7 +218,41 @@ cinux::arch::UserTrap g_user_trap;
 
 namespace cinux::armv7 {
 
-bool RepairUserPage(unsigned long address) {
+bool RepairUserPage(unsigned long address, unsigned long status) {
+    // A write to a shared, read-only page gets a private copy: the frame
+    // the leaf names is duplicated, this space points at the copy, and
+    // this owner leaves the shared ledger.
+    const unsigned long kPage = address & ~(cinux::arch::page::kSize - 1UL);
+    {
+        cinux::mm::KernelTables tables;
+        const unsigned long     root = cinux::arch::space::ActiveRoot();
+        const unsigned long     frame = cinux::mm::walk::TranslatePage(tables, root, kPage);
+        if (frame != 0 && (status & cinux::arch::isr::kDfsrWrite) != 0 &&
+            cinux::mm::cow::FrameShares(frame) >= 2) {
+            const auto kCopy = cinux::mm::Pmm::self().allocate_page();
+            if (kCopy.raw == 0) {
+                return false;
+            }
+            const auto* const source = reinterpret_cast<const unsigned char*>(frame);
+            auto* const       target = reinterpret_cast<unsigned char*>(kCopy.raw);
+            for (unsigned long index = 0; index < cinux::arch::page::kSize; ++index) {
+                target[index] = source[index];
+            }
+            auto* const table = cinux::mm::walk::EnsureLeafTable(tables, root, kPage,
+                                                                 cinux::arch::page::kUser);
+            if (table == nullptr) {
+                return false;
+            }
+            table[cinux::arch::page::SlotIndex(kPage, cinux::arch::page::kLeafLevel)] =
+                cinux::arch::page::MakePageEntry(
+                    kCopy.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+            cinux::arch::space::InvalidatePage(kPage);
+            cinux::mm::cow::ReleaseFrame(frame);
+            cinux::print::Println("[armv7] cow copy at %X", kPage);
+            return true;
+        }
+    }
+
     // Only the demand-page window is fillable; every other fault (the
     // cross-table probe included) must fall through to the task ending.
     constexpr unsigned long kDemandBase = 0x40009000UL;
@@ -211,7 +260,6 @@ bool RepairUserPage(unsigned long address) {
     if (address < kDemandBase || address >= kDemandEnd) {
         return false;
     }
-    const unsigned long kPage = address & ~(cinux::arch::page::kSize - 1UL);
     cinux::mm::KernelTables tables;
     const unsigned long     root = cinux::arch::space::ActiveRoot();
     if (cinux::mm::walk::TranslatePage(tables, root, kPage) != 0) {
@@ -236,6 +284,11 @@ bool RepairUserPage(unsigned long address) {
 
 bool RunUserModeSelfCheck() {
     InstallFaultRepair(&RepairUserPage);
+    const auto kShared = cinux::mm::Pmm::self().allocate_page();
+    if (kShared.raw == 0) {
+        return false;
+    }
+    g_shared_frame = kShared.raw;
     g_kernel_root = cinux::arch::space::ActiveRoot();
     if (!setup_task(0, kTaskACode, kTaskAStack) || !setup_task(1, kTaskBCode, kTaskBStack)) {
         return false;

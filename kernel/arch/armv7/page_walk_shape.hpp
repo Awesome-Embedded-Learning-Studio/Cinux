@@ -102,7 +102,13 @@ constexpr Entry MakeTablePointer(unsigned long physical, Entry /*flags*/) {
 constexpr Entry MakePageEntry(unsigned long physical, Entry flags) {
     std::uint32_t terms = 0x2U;                      // small page
     terms |= (1U << 2U) | (1U << 3U) | (1U << 6U);   // B, C, TEX 001
-    terms |= (flags.has(kUser) ? (0x3U << 4U) : (0x1U << 4U));  // AP: both worlds or PL1
+    if (!flags.has(kUser)) {
+        terms |= (0x1U << 4U);                       // AP: PL1 only
+    } else if (flags.has(kReadOnly)) {
+        terms |= (0x2U << 4U);                       // AP: PL1 RW, user read-only
+    } else {
+        terms |= (0x3U << 4U);                       // AP: both worlds
+    }
     return Entry{static_cast<std::uint32_t>(physical & ~0xFFFUL) | terms};
 }
 

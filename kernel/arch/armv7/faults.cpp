@@ -22,7 +22,7 @@
 
 extern "C" [[noreturn]] void c_user_faulted();
 
-using RepairHook = bool (*)(unsigned long address);
+using RepairHook = bool (*)(unsigned long address, unsigned long status);
 
 namespace {
 
@@ -59,7 +59,7 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
                               fault_status, code);
         cinux::arch::Halt();
     }
-    if (g_repair != nullptr && g_repair(fault_address)) {
+    if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
         return trap;  // the same instruction runs again on the new mapping
     }
     cinux::print::Println("[armv7] user fault caught at %X code %X", fault_address, code);

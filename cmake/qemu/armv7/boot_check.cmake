@@ -50,6 +50,10 @@ if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
     message(FATAL_ERROR
         "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_COWCOPY AND NOT serial_out MATCHES "${EXPECTED_COWCOPY}")
+    message(FATAL_ERROR
+        "arm_boot: the shared page was never copied.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_REPAIR AND NOT serial_out MATCHES "${EXPECTED_REPAIR}")
     message(FATAL_ERROR
         "arm_boot: the demand page was never repaired.\nstdout:\n${serial_out}")
