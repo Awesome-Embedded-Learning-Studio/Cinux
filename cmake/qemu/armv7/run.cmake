@@ -118,6 +118,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_ENOENT=enoent ok"
             "-DEXPECTED_LSEEK=lseek 3 -> 0"
             "-DEXPECTED_LSEEKOK=lseek ok"
+            "-DEXPECTED_MOTD=open motd as"
+            "-DEXPECTED_MOTDOK=motd ok"
             "-DEXPECTED_SCRATCH=open scratch as"
             "-DEXPECTED_WRITEFILE=writefile ok"
             "-DEXPECTED_NOSLOTOPEN=open refused, no free slot"

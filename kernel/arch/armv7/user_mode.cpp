@@ -91,6 +91,21 @@ unsigned long g_scratch_len = 0;
 
 constexpr unsigned char kHelloFile[] = "hello\n";
 constexpr unsigned long kHelloSize   = sizeof(kHelloFile) - 1;
+constexpr unsigned char kMotdFile[]  = "hi there\n";
+constexpr unsigned long kMotdSize    = sizeof(kMotdFile) - 1;
+
+/// The read-only files this port knows by name.
+struct BuiltinFile {
+    const char*          name;
+    unsigned long        name_length;
+    const unsigned char* data;
+    unsigned long        size;
+};
+
+constexpr BuiltinFile kBuiltinFiles[] = {
+    {"/hello", 6, kHelloFile, kHelloSize},
+    {"/motd", 5, kMotdFile, kMotdSize},
+};
 
 struct UserTask {
     cinux::arch::UserTrap    trap;
@@ -413,6 +428,36 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             }
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
+        }
+        {
+            char motd[8];
+            motd[0] = '/'; motd[1] = 'm'; motd[2] = 'o'; motd[3] = 't';
+            motd[4] = 'd'; motd[5] = 0;   motd[6] = 0;   motd[7] = 0;
+            const long kMotdFd = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(motd)), 0, 0);
+            if (kMotdFd >= 3) {
+                char back[12];
+                for (unsigned long index = 0; index < 12; ++index) {
+                    back[index] = 0;
+                }
+                const long kRead = user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kMotdFd),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(back)), 9);
+                if (kRead == 9 && back[0] == 'h' && back[1] == 'i' && back[2] == ' ' &&
+                    back[3] == 't' && back[4] == 'h' && back[5] == 'e' &&
+                    back[6] == 'r' && back[7] == 'e' && back[8] == '\n') {
+                    char          note[16];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('m'); NOTE('o'); NOTE('t'); NOTE('d'); NOTE(' ');
+                    NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kMotdFd), 0, 0));
+            }
         }
         {
             // Writable file, with every step reported.
@@ -1389,13 +1434,27 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
             return &g_tasks[g_current].trap;
         }
-        const bool kHello = length == 6 && path[0] == '/' && path[1] == 'h' &&
-                            path[2] == 'e' && path[3] == 'l' && path[4] == 'l' &&
-                            path[5] == 'o';
+        const BuiltinFile* found = nullptr;
+        for (const auto& entry : kBuiltinFiles) {
+            if (length != entry.name_length) {
+                continue;
+            }
+            bool same = true;
+            for (unsigned long index = 0; index < length; ++index) {
+                if (path[index] != entry.name[index]) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
+                found = &entry;
+                break;
+            }
+        }
         const bool kScratch = length == 8 && path[0] == '/' && path[1] == 's' &&
                               path[2] == 'c' && path[3] == 'r' && path[4] == 'a' &&
                               path[5] == 't' && path[6] == 'c' && path[7] == 'h';
-        if (!kHello && !kScratch) {
+        if (found == nullptr && !kScratch) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoEnt);
             cinux::print::Println("[armv7] open refused");
@@ -1417,10 +1476,11 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].fds[slot].open     = true;
         g_tasks[g_current].fds[slot].kind     = FdKind::kFile;
         g_tasks[g_current].fds[slot].offset   = 0;
-        g_tasks[g_current].fds[slot].data     = kHello ? kHelloFile : g_scratch_file;
-        g_tasks[g_current].fds[slot].size     = kHello ? kHelloSize : g_scratch_len;
-        g_tasks[g_current].fds[slot].writable = !kHello;
-        cinux::print::Println("[armv7] open %s as %u", kHello ? "hello" : "scratch", slot);
+        g_tasks[g_current].fds[slot].data     = found != nullptr ? found->data : g_scratch_file;
+        g_tasks[g_current].fds[slot].size     = found != nullptr ? found->size : g_scratch_len;
+        g_tasks[g_current].fds[slot].writable = found == nullptr;
+        cinux::print::Println("[armv7] open %s as %u",
+                              found != nullptr ? found->name + 1 : "scratch", slot);
         g_tasks[g_current].trap.r0 = slot;
         return &g_tasks[g_current].trap;
     }
