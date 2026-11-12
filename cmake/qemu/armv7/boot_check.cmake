@@ -9,180 +9,110 @@ execute_process(
     RESULT_VARIABLE run_result)
 
 file(WRITE "${SERIAL_LOG}" "${serial_out}")
-if(NOT serial_out MATCHES "${EXPECTED}")
-    message(FATAL_ERROR
-        "arm_boot: serial banner missing (result ${run_result}).\n"
-        "stdout:\n${serial_out}\nstderr:\n${serial_err}")
-endif()
-if(EXPECTED_ROTATE AND NOT serial_out MATCHES "${EXPECTED_ROTATE}")
-    message(FATAL_ERROR
-        "arm_boot: the two user tasks never finished rotating.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_READ AND NOT serial_out MATCHES "${EXPECTED_READ}")
-    message(FATAL_ERROR "arm_boot: the read path never answered.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_TASK_DONE AND NOT serial_out MATCHES "${EXPECTED_TASK_DONE}")
-    message(FATAL_ERROR "arm_boot: task 0 never reported done.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_REFUSED AND NOT serial_out MATCHES "${EXPECTED_REFUSED}")
-    message(FATAL_ERROR
-        "arm_boot: a kernel pointer was accepted as a user buffer.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_PREEMPT AND NOT serial_out MATCHES "${EXPECTED_PREEMPT}")
-    message(FATAL_ERROR "arm_boot: no preemption was observed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_FAULTED AND NOT serial_out MATCHES "${EXPECTED_FAULTED}")
-    message(FATAL_ERROR "arm_boot: task 1 never reported faulted.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_USERFAULT AND NOT serial_out MATCHES "${EXPECTED_USERFAULT}")
-    message(FATAL_ERROR
-        "arm_boot: the cross-table fault was not caught.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_SVC AND NOT serial_out MATCHES "${EXPECTED_SVC}")
-    message(FATAL_ERROR
-        "arm_boot: the svc write path failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_USER AND NOT serial_out MATCHES "${EXPECTED_USER}")
-    message(FATAL_ERROR
-        "arm_boot: the user-mode round trip failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
-    message(FATAL_ERROR
-        "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_BLOCK2 AND NOT serial_out MATCHES "${EXPECTED_BLOCK2}")
-    message(FATAL_ERROR
-        "arm_boot: the second waiter never blocked.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_CLOSE AND NOT serial_out MATCHES "${EXPECTED_CLOSE}")
-    message(FATAL_ERROR "arm_boot: nothing was ever closed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_EBADF AND NOT serial_out MATCHES "${EXPECTED_EBADF}")
-    message(FATAL_ERROR
-        "arm_boot: a closed descriptor was still writable.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_MMAP AND NOT serial_out MATCHES "${EXPECTED_MMAP}")
-    message(FATAL_ERROR
-        "arm_boot: the anonymous mapping never appeared.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_MMAPOK AND NOT serial_out MATCHES "${EXPECTED_MMAPOK}")
-    message(FATAL_ERROR
-        "arm_boot: the mapped pages were not writable.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_BRK AND NOT serial_out MATCHES "${EXPECTED_BRK}")
-    message(FATAL_ERROR
-        "arm_boot: brk never grew the heap.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_BRKOK AND NOT serial_out MATCHES "${EXPECTED_BRKOK}")
-    message(FATAL_ERROR
-        "arm_boot: the grown heap was not writable.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_UNKNOWN AND NOT serial_out MATCHES "${EXPECTED_UNKNOWN}")
-    message(FATAL_ERROR
-        "arm_boot: an unknown call was not refused.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_PID AND NOT serial_out MATCHES "${EXPECTED_PID}")
-    message(FATAL_ERROR
-        "arm_boot: a task did not learn its own id.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_SLEEP AND NOT serial_out MATCHES "${EXPECTED_SLEEP}")
-    message(FATAL_ERROR
-        "arm_boot: no task ever went to sleep.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_WOKE AND NOT serial_out MATCHES "${EXPECTED_WOKE}")
-    message(FATAL_ERROR
-        "arm_boot: the sleeping task never woke.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_TIMEOUT AND NOT serial_out MATCHES "${EXPECTED_TIMEOUT}")
-    message(FATAL_ERROR
-        "arm_boot: no wait ever timed out.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_WAKE AND NOT serial_out MATCHES "${EXPECTED_WAKE}")
-    message(FATAL_ERROR
-        "arm_boot: the precise wake never happened.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_BLOCK AND NOT serial_out MATCHES "${EXPECTED_BLOCK}")
-    message(FATAL_ERROR
-        "arm_boot: the waiter never blocked.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_WAIT AND NOT serial_out MATCHES "${EXPECTED_WAIT}")
-    message(FATAL_ERROR
-        "arm_boot: the waiting task never reaped a sibling.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_THIRD AND NOT serial_out MATCHES "${EXPECTED_THIRD}")
-    message(FATAL_ERROR
-        "arm_boot: the third task never ran.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_KEEPS AND NOT serial_out MATCHES "${EXPECTED_KEEPS}")
-    message(FATAL_ERROR
-        "arm_boot: a task lost its private page.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_COWCOPY AND NOT serial_out MATCHES "${EXPECTED_COWCOPY}")
-    message(FATAL_ERROR
-        "arm_boot: the shared page was never copied.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_REPAIR AND NOT serial_out MATCHES "${EXPECTED_REPAIR}")
-    message(FATAL_ERROR
-        "arm_boot: the demand page was never repaired.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_FORK AND NOT serial_out MATCHES "${EXPECTED_FORK}")
-    message(FATAL_ERROR
-        "arm_boot: the user subtree clone failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_SHARED AND NOT serial_out MATCHES "${EXPECTED_SHARED}")
-    message(FATAL_ERROR
-        "arm_boot: the shared frame did not survive.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_COW AND NOT serial_out MATCHES "${EXPECTED_COW}")
-    message(FATAL_ERROR
-        "arm_boot: the share ledger never balanced.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_TEARDOWN AND NOT serial_out MATCHES "${EXPECTED_TEARDOWN}")
-    message(FATAL_ERROR
-        "arm_boot: the space teardown never balanced.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_PERCPU AND NOT serial_out MATCHES "${EXPECTED_PERCPU}")
-    message(FATAL_ERROR
-        "arm_boot: the per-CPU block check failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_CONTEXT AND NOT serial_out MATCHES "${EXPECTED_CONTEXT}")
-    message(FATAL_ERROR
-        "arm_boot: the context switch round trip failed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_MAP AND NOT serial_out MATCHES "${EXPECTED_MAP}")
-    message(FATAL_ERROR
-        "arm_boot: the mapped-page check never passed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_FAULT AND NOT serial_out MATCHES "${EXPECTED_FAULT}")
-    message(FATAL_ERROR
-        "arm_boot: the deliberate fault was not reported.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_PAGED AND NOT serial_out MATCHES "${EXPECTED_PAGED}")
-    message(FATAL_ERROR
-        "arm_boot: the paged heap never came up.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_HEAP AND NOT serial_out MATCHES "${EXPECTED_HEAP}")
-    message(FATAL_ERROR
-        "arm_boot: the heap self-check did not pass.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_CONSOLE AND NOT serial_out MATCHES "${EXPECTED_CONSOLE}")
-    message(FATAL_ERROR
-        "arm_boot: the console path never printed.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_SELFCHECK AND NOT serial_out MATCHES "${EXPECTED_SELFCHECK}")
-    message(FATAL_ERROR
-        "arm_boot: the in-image self-check did not pass.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_PMM AND NOT serial_out MATCHES "${EXPECTED_PMM}")
-    message(FATAL_ERROR
-        "arm_boot: the physical page manager never reported.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_MEMORY AND NOT serial_out MATCHES "${EXPECTED_MEMORY}")
-    message(FATAL_ERROR
-        "arm_boot: the device tree memory range never reached the log.\nstdout:\n${serial_out}")
-endif()
-if(EXPECTED_TICK AND NOT serial_out MATCHES "${EXPECTED_TICK}")
-    message(FATAL_ERROR
-        "arm_boot: no timer tick reached the serial log.\nstdout:\n${serial_out}")
-endif()
+
+# Expectations are literal text, not regular expressions: a checked line
+# may contain '+', '(', or any other metacharacter without changing what
+# the check means.
+function(expect_literal variable message_text)
+    if(NOT ${variable})
+        return()
+    endif()
+    string(FIND "${serial_out}" "${${variable}}" found_at)
+    if(found_at EQUAL -1)
+        message(FATAL_ERROR
+            "arm_boot: ${message_text} (expected \"${${variable}}\")\n"
+            "stdout:\n${serial_out}\nstderr:\n${serial_err}")
+    endif()
+endfunction()
+
+expect_literal(EXPECTED "serial banner missing")
+
+expect_literal(EXPECTED_ROTATE "the two user tasks never finished rotating.")
+
+expect_literal(EXPECTED_READ "the read path never answered.")
+
+expect_literal(EXPECTED_TASK_DONE "task 0 never reported done.")
+
+expect_literal(EXPECTED_REFUSED "a kernel pointer was accepted as a user buffer.")
+
+expect_literal(EXPECTED_PREEMPT "no preemption was observed.")
+
+expect_literal(EXPECTED_FAULTED "task 1 never reported faulted.")
+
+expect_literal(EXPECTED_USERFAULT "the cross-table fault was not caught.")
+
+expect_literal(EXPECTED_SVC "the svc write path failed.")
+
+expect_literal(EXPECTED_USER "the user-mode round trip failed.")
+
+expect_literal(EXPECTED_TASKS "the two-task round robin failed.")
+
+expect_literal(EXPECTED_BLOCK2 "the second waiter never blocked.")
+
+expect_literal(EXPECTED_CLOSE "nothing was ever closed.")
+
+expect_literal(EXPECTED_EBADF "a closed descriptor was still writable.")
+
+expect_literal(EXPECTED_MMAP "the anonymous mapping never appeared.")
+
+expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
+
+expect_literal(EXPECTED_BRK "brk never grew the heap.")
+
+expect_literal(EXPECTED_BRKOK "the grown heap was not writable.")
+
+expect_literal(EXPECTED_UNKNOWN "an unknown call was not refused.")
+
+expect_literal(EXPECTED_PID "a task did not learn its own id.")
+
+expect_literal(EXPECTED_SLEEP "no task ever went to sleep.")
+
+expect_literal(EXPECTED_WOKE "the sleeping task never woke.")
+
+expect_literal(EXPECTED_TIMEOUT "no wait ever timed out.")
+
+expect_literal(EXPECTED_WAKE "the precise wake never happened.")
+
+expect_literal(EXPECTED_BLOCK "the waiter never blocked.")
+
+expect_literal(EXPECTED_WAIT "the waiting task never reaped a sibling.")
+
+expect_literal(EXPECTED_THIRD "the third task never ran.")
+
+expect_literal(EXPECTED_KEEPS "a task lost its private page.")
+
+expect_literal(EXPECTED_COWCOPY "the shared page was never copied.")
+
+expect_literal(EXPECTED_REPAIR "the demand page was never repaired.")
+
+expect_literal(EXPECTED_FORK "the user subtree clone failed.")
+
+expect_literal(EXPECTED_SHARED "the shared frame did not survive.")
+
+expect_literal(EXPECTED_COW "the share ledger never balanced.")
+
+expect_literal(EXPECTED_TEARDOWN "the space teardown never balanced.")
+
+expect_literal(EXPECTED_PERCPU "the per-CPU block check failed.")
+
+expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
+
+expect_literal(EXPECTED_MAP "the mapped-page check never passed.")
+
+expect_literal(EXPECTED_FAULT "the deliberate fault was not reported.")
+
+expect_literal(EXPECTED_PAGED "the paged heap never came up.")
+
+expect_literal(EXPECTED_HEAP "the heap self-check did not pass.")
+
+expect_literal(EXPECTED_CONSOLE "the console path never printed.")
+
+expect_literal(EXPECTED_SELFCHECK "the in-image self-check did not pass.")
+
+expect_literal(EXPECTED_PMM "the physical page manager never reported.")
+
+expect_literal(EXPECTED_MEMORY "the device tree memory range never reached the log.")
+
+expect_literal(EXPECTED_TICK "no timer tick reached the serial log.")
+
 message(STATUS "arm_boot: banner seen")
