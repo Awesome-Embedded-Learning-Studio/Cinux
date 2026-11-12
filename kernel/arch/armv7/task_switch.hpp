@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/kernel_stack.hpp"
 
 namespace cinux::arch {
@@ -32,5 +33,14 @@ inline void StoreTaskAddressRegs(unsigned long /*fs_base*/, unsigned long /*gs_b
 
 /// The matching no-op.
 inline void LoadTaskAddressRegs(unsigned long /*fs_base*/, unsigned long /*gs_base*/) {}
+
+/// Single core: the outgoing task is off-CPU before the switch, so a
+/// reclaim never waits for a core that will not come.
+inline void SwitchTaskContext(CpuContext& from, const CpuContext& to, int* on_cpu) {
+    if (on_cpu != nullptr) {
+        *on_cpu = -1;
+    }
+    ContextSwitch(&from, &to);
+}
 
 }  // namespace cinux::arch

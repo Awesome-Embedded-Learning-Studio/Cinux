@@ -54,7 +54,7 @@ public:
         swap_address_regs(&outgoing, &incoming);
         __atomic_store_n(&incoming.on_cpu, static_cast<int>(arch::per_cpu::PerCpu::self().cpu_id),
                          __ATOMIC_RELEASE);
-        ContextSwitch(&outgoing.ctx, &incoming.ctx, &outgoing.on_cpu);
+        cinux::arch::SwitchTaskContext(outgoing.ctx, incoming.ctx, &outgoing.on_cpu);
     }
 
     void enter_from_main(Task& incoming) {
@@ -62,7 +62,8 @@ public:
         swap_address_regs(nullptr, &incoming);
         __atomic_store_n(&incoming.on_cpu, static_cast<int>(arch::per_cpu::PerCpu::self().cpu_id),
                          __ATOMIC_RELEASE);
-        ContextSwitch(&main_ctx_[arch::per_cpu::PerCpu::self().cpu_id], &incoming.ctx);
+        cinux::arch::SwitchTaskContext(main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
+                                       incoming.ctx, nullptr);
     }
 
     void return_to_main(Task& outgoing) {
@@ -70,8 +71,9 @@ public:
             cinux::arch::space::SwitchRoot(cinux::mm::KernelPageRoot());
         }
         swap_address_regs(&outgoing, nullptr);
-        ContextSwitch(&outgoing.ctx, &main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
-                      &outgoing.on_cpu);
+        cinux::arch::SwitchTaskContext(outgoing.ctx,
+                                       main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
+                                       &outgoing.on_cpu);
     }
 
     void reclaim(Task& dead) {

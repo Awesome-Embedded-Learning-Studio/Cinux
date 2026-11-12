@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "kernel/arch/x86_64/context.hpp"
 #include "kernel/arch/x86_64/kernel_stack.hpp"
 #include "kernel/arch/x86_64/per_cpu.hpp"
 
@@ -31,6 +32,11 @@ inline void StoreTaskAddressRegs(unsigned long long& fs_base, unsigned long long
 /// Loads the incoming task's address-register bases from its context.
 inline void LoadTaskAddressRegs(unsigned long long fs_base, unsigned long long gs_base) {
     per_cpu::LoadTaskAddressRegs(fs_base, gs_base);
+}
+
+/// Saves `from`, loads `to`, and records that `from` left the CPU.
+inline void SwitchTaskContext(CpuContext& from, const CpuContext& to, int* on_cpu) {
+    ContextSwitch(&from, &to, on_cpu);
 }
 
 }  // namespace cinux::arch

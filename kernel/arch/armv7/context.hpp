@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 namespace cinux::arch {
 
 /// The register image context_switch.S moves with plain offsets.
@@ -34,10 +36,16 @@ struct CpuContext {
     unsigned long sp;
     unsigned long lr;
     unsigned long spsr;
+
+    /// No segment bases exist on this port; the fields keep the shared
+    /// switch code compilable and stay zero.
+    unsigned long long fs_base = 0;
+    unsigned long long gs_base = 0;
 };
 
-static_assert(sizeof(CpuContext) == 11 * sizeof(unsigned long),
+static_assert(offsetof(CpuContext, spsr) == 10 * sizeof(unsigned long),
               "the switch moves eleven words");
+static_assert(sizeof(CpuContext) == 64, "two address-register words close the context");
 
 /// Saves the running world into `from` and resumes `to` in the same mode.
 extern "C" void ContextSwitch(CpuContext* from, const CpuContext* to);
