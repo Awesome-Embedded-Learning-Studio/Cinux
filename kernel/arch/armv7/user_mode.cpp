@@ -170,6 +170,17 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
+        const long kSlept = user_syscall3(cinux::armv7::syscall_nr::kSleep, 3, 0, 0);
+        if (kSlept == 0) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('s'); NOTE('l'); NOTE('e'); NOTE('p'); NOTE('t'); NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
+    }
+    if (task_id == 0) {
         // Waiting on itself can never be satisfied: it must time out.
         unsigned long status = 0;
         const long    kSelf  = user_syscall3(
@@ -492,6 +503,19 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         wake_waiters_of(g_current);
     }
 
+    if (number == cinux::armv7::syscall_nr::kSleep) {
+        const unsigned long kTicks = g_user_trap.r0;
+        if (kTicks == 0) {
+            return &g_tasks[g_current].trap;
+        }
+        g_tasks[g_current].state         = TaskState::kBlocked;
+        g_tasks[g_current].wait_mask     = 0;
+        g_tasks[g_current].wait_target   = kTaskCount;
+        g_tasks[g_current].wait_deadline = g_tick_now + kTicks;
+        g_tasks[g_current].trap.r0       = 0;
+        cinux::print::Println("[armv7] task %u sleeps %u ticks", g_current, kTicks);
+    }
+
     if (number == cinux::armv7::syscall_nr::kWait) {
         const unsigned long kMask = g_user_trap.r0;
         unsigned long       kDone = kTaskCount;
@@ -546,9 +570,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     for (auto& task : g_tasks) {
         if (task.state == TaskState::kBlocked) {
             task.state         = TaskState::kRunnable;
+            task.trap.r0       = task.wait_mask == 0 ? 0 : static_cast<unsigned long>(-2);
             task.wait_mask     = 0;
             task.wait_deadline = 0;
-            task.trap.r0       = static_cast<unsigned long>(-2);
             woke               = true;
         }
     }
@@ -583,8 +607,15 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
         if (task.state == TaskState::kBlocked && task.wait_deadline <= ticks) {
             task.state         = TaskState::kRunnable;
             task.wait_target   = kTaskCount;
-            task.trap.r0       = static_cast<unsigned long>(-2);
-            cinux::print::Println("[armv7] task %u wait timed out", &task - &g_tasks[0]);
+            const unsigned long kIndex = &task - &g_tasks[0];
+            if (task.wait_mask == 0) {
+                task.trap.r0 = 0;
+                cinux::print::Println("[armv7] task %u woke from sleep", kIndex);
+            } else {
+                task.trap.r0 = static_cast<unsigned long>(-2);
+                cinux::print::Println("[armv7] task %u wait timed out", kIndex);
+            }
+            task.wait_mask = 0;
         }
     }
 }

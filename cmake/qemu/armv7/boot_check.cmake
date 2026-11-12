@@ -54,6 +54,14 @@ if(EXPECTED_BLOCK2 AND NOT serial_out MATCHES "${EXPECTED_BLOCK2}")
     message(FATAL_ERROR
         "arm_boot: the second waiter never blocked.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_SLEEP AND NOT serial_out MATCHES "${EXPECTED_SLEEP}")
+    message(FATAL_ERROR
+        "arm_boot: no task ever went to sleep.\nstdout:\n${serial_out}")
+endif()
+if(EXPECTED_WOKE AND NOT serial_out MATCHES "${EXPECTED_WOKE}")
+    message(FATAL_ERROR
+        "arm_boot: the sleeping task never woke.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_TIMEOUT AND NOT serial_out MATCHES "${EXPECTED_TIMEOUT}")
     message(FATAL_ERROR
         "arm_boot: no wait ever timed out.\nstdout:\n${serial_out}")

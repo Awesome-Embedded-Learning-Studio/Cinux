@@ -115,6 +115,7 @@ const Answer* find_answer(unsigned long number) {
 bool traps_to_scheduler(unsigned long number) {
     return number == cinux::armv7::syscall_nr::kExit ||
            number == cinux::armv7::syscall_nr::kWait ||
+           number == cinux::armv7::syscall_nr::kSleep ||
            number == cinux::armv7::syscall_nr::kSchedYield;
 }
 
