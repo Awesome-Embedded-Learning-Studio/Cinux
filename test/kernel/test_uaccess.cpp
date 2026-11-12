@@ -2,7 +2,7 @@
 #include "cinux/ptr.hpp"
 #include "cinux/shared.hpp"
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/cpuid.hpp"
+#include "kernel/arch/cpuid.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/x86_64/protections.hpp"

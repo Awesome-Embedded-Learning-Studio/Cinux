@@ -5,7 +5,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "kernel/arch/x86_64/gdt.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
+#include "kernel/arch/instructions.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/arch/x86_64/smp.hpp"

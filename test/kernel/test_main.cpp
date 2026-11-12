@@ -1,5 +1,5 @@
 #include "framework_kernel.hpp"
-#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/arch/halt.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/console/console.hpp"
@@ -20,10 +20,10 @@
 #endif
 #if defined(KTEST_STAGE_MM) || defined(KTEST_STAGE_PROC) || defined(KTEST_STAGE_BLOCK) ||          \
     defined(KTEST_STAGE_IRQ) || defined(KTEST_STAGE_KEYBOARD)
-#    include "kernel/arch/x86_64/cpuid.hpp"
+#    include "kernel/arch/cpuid.hpp"
 #    include "kernel/arch/x86_64/ex_table.hpp"
-#    include "kernel/arch/x86_64/instructions.hpp"
-#    include "kernel/arch/x86_64/msr.hpp"
+#    include "kernel/arch/instructions.hpp"
+#    include "kernel/arch/msr.hpp"
 #    include "kernel/drivers/serial/serial.hpp"
 #    include "kernel/mm/heap_runtime.hpp"
 #    include "kernel/mm/pmm.hpp"

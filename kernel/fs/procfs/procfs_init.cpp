@@ -7,7 +7,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "cinux/text.hpp"
-#include "kernel/arch/x86_64/cpuid.hpp"
+#include "kernel/arch/cpuid.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/x86_64/smp.hpp"
 #include "kernel/drivers/device/device.hpp"

@@ -10,7 +10,7 @@
 #include "cinux/bit_ops/bitmask.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
+#include "kernel/arch/instructions.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/boot/print.hpp"

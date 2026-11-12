@@ -1,6 +1,6 @@
 #include "kernel/debug/panic.hpp"
 
-#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/arch/halt.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/debug/trace.hpp"
 #include "kernel/mm/heap.hpp"

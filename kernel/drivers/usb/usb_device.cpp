@@ -25,7 +25,7 @@
 #include "cinux/byte_order.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
+#include "kernel/arch/instructions.hpp"
 #include "kernel/drivers/usb/usb_config.hpp"
 #include "kernel/drivers/usb/xhci.hpp"
 #include "kernel/drivers/usb/xhci_layout.hpp"

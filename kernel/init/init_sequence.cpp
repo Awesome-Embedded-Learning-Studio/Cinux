@@ -2,10 +2,10 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/cpuid.hpp"
+#include "kernel/arch/cpuid.hpp"
 #include "kernel/arch/x86_64/entropy.hpp"
 #include "kernel/arch/x86_64/ex_table.hpp"
-#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/arch/halt.hpp"
 #include "kernel/arch/x86_64/irq_stubs.hpp"
 #include "kernel/arch/x86_64/pic.hpp"
 #include "kernel/arch/x86_64/protections.hpp"

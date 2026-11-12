@@ -4,7 +4,7 @@
 #include <type_traits>
 
 #include "cinux/assert.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
+#include "kernel/arch/instructions.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/lockdep.hpp"
