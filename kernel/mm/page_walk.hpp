@@ -80,7 +80,7 @@ struct SlotAt {
  * @brief         Walks to the slot an address resolves to, read-only.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   The address whose slot is wanted.
  * @return        The slot and its level; entry is null when the walk
  *                fell off before reaching one.
@@ -103,8 +103,8 @@ SlotAt FindSlot(World& world, unsigned long root, unsigned long virtual_address)
         table = FollowTable(world, slot);
     }
     return SlotAt{
-        .entry = &table[SlotIndex(virtual_address, WalkLevel::kPageTable)],
-        .level = WalkLevel::kPageTable,
+        .entry = &table[SlotIndex(virtual_address, kLeafLevel)],
+        .level = kLeafLevel,
     };
 }
 
@@ -113,7 +113,7 @@ SlotAt FindSlot(World& world, unsigned long root, unsigned long virtual_address)
  *                creating missing intermediate tables on the way.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   The address whose page table is wanted.
  * @param[in]     leaf_flags        Flags each freshly created table
  *                                  carries in its pointer entry.
@@ -150,7 +150,7 @@ Entry* EnsureLeafTable(World& world, unsigned long root, unsigned long virtual_a
  *                tables from the world's supply.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   Target address; the low bits of the
  *                                  physical side are dropped by the entry.
  * @param[in]     physical          Physical page to map.
@@ -171,7 +171,7 @@ bool MapPage(World& world, unsigned long root, unsigned long virtual_address,
     if (kTable == nullptr) {
         return false;
     }
-    kTable[SlotIndex(virtual_address, WalkLevel::kPageTable)] =
+    kTable[SlotIndex(virtual_address, kLeafLevel)] =
         cinux::arch::page::MakeTableEntry(physical, cinux::arch::page::kWritable);
     return true;
 }
@@ -180,7 +180,7 @@ bool MapPage(World& world, unsigned long root, unsigned long virtual_address,
  * @brief         Maps one 4 KiB page ring 3 may reach.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   Target address; the address side of
  *                                  the leaf decides the slot.
  * @param[in]     leaf             The finished leaf entry: the caller
@@ -204,7 +204,7 @@ bool MapUserPage(World& world, unsigned long root, unsigned long virtual_address
     if (kTable == nullptr) {
         return false;
     }
-    kTable[SlotIndex(virtual_address, WalkLevel::kPageTable)] = leaf;
+    kTable[SlotIndex(virtual_address, kLeafLevel)] = leaf;
     return true;
 }
 
@@ -212,7 +212,7 @@ bool MapUserPage(World& world, unsigned long root, unsigned long virtual_address
  * @brief         Clears one 4 KiB mapping and reports what was there.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   The page to unmap.
  * @return        The entry that occupied the slot, or a zero entry when
  *                the walk fell off before reaching one.
@@ -226,7 +226,7 @@ bool MapUserPage(World& world, unsigned long root, unsigned long virtual_address
 template <TableWorld World>
 Entry UnmapPage(World& world, unsigned long root, unsigned long virtual_address) {
     SlotAt const kSlot = FindSlot(world, root, virtual_address);
-    if (kSlot.entry == nullptr || kSlot.level != WalkLevel::kPageTable) {
+    if (kSlot.entry == nullptr || kSlot.level != kLeafLevel) {
         return Entry{};
     }
     Entry const kOld = *kSlot.entry;
@@ -238,7 +238,7 @@ Entry UnmapPage(World& world, unsigned long root, unsigned long virtual_address)
  * @brief         Translates a virtual address to its physical byte.
  *
  * @param[in,out] world            The table world the walk runs on.
- * @param[in]     root             Physical address of the PML4 to walk.
+ * @param[in]     root             Physical address of the top-level table to walk.
  * @param[in]     virtual_address   The byte to resolve.
  * @return        Physical address of the same byte, or 0 when unmapped.
  * @note          Reads through 1 GiB, 2 MiB, and 4 KiB leaves alike:
@@ -255,7 +255,7 @@ unsigned long TranslatePage(World& world, unsigned long root, unsigned long virt
     if (kSlot.entry == nullptr || !kSlot.entry->has(cinux::arch::page::kPresent)) {
         return 0;
     }
-    if (kSlot.level != WalkLevel::kPageTable) {
+    if (kSlot.level != kLeafLevel) {
         if (kSlot.level == WalkLevel::kPml4) {
             return 0;
         }
@@ -268,7 +268,7 @@ unsigned long TranslatePage(World& world, unsigned long root, unsigned long virt
     Entry physical{};
     physical.deposit(cinux::arch::page::kTablePhys,
                      kSlot.entry->extract(cinux::arch::page::kTablePhys));
-    return physical.raw | LowBits(virtual_address, IndexRange(WalkLevel::kPageTable).low);
+    return physical.raw | LowBits(virtual_address, IndexRange(kLeafLevel).low);
 }
 
 }  // namespace cinux::mm::walk

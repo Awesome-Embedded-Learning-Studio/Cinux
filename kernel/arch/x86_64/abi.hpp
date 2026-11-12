@@ -26,9 +26,6 @@ namespace cinux::arch::abi {
 /// ELF class this ABI runs: 2 is ELFCLASS64.
 inline constexpr std::uint8_t kElfClass = 2;
 
-/// ELF data encoding this ABI reads: 1 is ELFDATA2LSB, little-endian.
-inline constexpr std::uint8_t kElfData = 1;
-
 /// ELF machine number this ABI runs: 0x3E is EM_X86_64.
 inline constexpr std::uint16_t kElfMachine = 0x3E;
 
