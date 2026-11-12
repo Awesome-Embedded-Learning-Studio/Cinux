@@ -339,6 +339,25 @@ write 按偏移写进去、再读回来。加进去之后那次 open 在串口�
 
 这个毛病在只有控制台描述符的时候看不出来，因为那三个槽本来就常开。
 
+## x86 描述符表审计：armv7 犯过的毛病那边都没有
+
+方向调整：不再继续给 armv7 的替身加能力，改为先审计 x86 同类逻辑，再造中
+立层。审计对象 `kernel/fs/file_table.cpp` 与 `kernel/syscall/sys_close.cpp`。
+
+close 入口 `HandleClose` 直接转发 `FileTable::free`，任意描述符都能释放，
+没有"只认 0 到 2 号"的限制。`free` 锁内查槽、detach 挪出、锁外靠持有量析
+构释放；`detach_locked` 把 `next_fd_` 回退，所以释放后的编号会被重新发出，
+与 armv7 验过的"关掉再开拿回同一编号"同构。
+
+测试盖得全（`test/unit/fs/test_file_table.cpp`，17 个用例）：释放后最低优
+先复用、双重 close 被拒、adopt 共享游标（即 dup 的偏移共享语义）、cloexec
+位、并发 close 与重用、dup2 校验源、fork 快照、动态增长与降限额。armv7 犯
+过的三类毛病（close 只认 0 到 2、槽位泄漏、别名判断错位）在 x86 都不成立，
+且各有测试守着。
+
+浅缺口一处：`HandleClose` 本身没有直接用例（`close_range` 有），但它只有
+五行转发，`free` 已被充分覆盖。x86 宿主测试 86/86 通过。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
