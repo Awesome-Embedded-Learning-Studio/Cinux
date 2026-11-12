@@ -22,6 +22,8 @@
 #include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/page_walk.hpp"
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
@@ -33,6 +35,9 @@
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
+
+using FaultRepair = bool (*)(unsigned long address);
+void InstallFaultRepair(FaultRepair hook);
 
 extern "C" unsigned char __user_text_start[];
 extern "C" unsigned char __user_text_end[];
@@ -118,6 +123,12 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 
     }
     {
+        // Inside the user window but never mapped: the repair hook fills it
+        // and the store is retried on the new page.
+        auto* const kProbe = reinterpret_cast<volatile unsigned long*>(0x40009000UL);
+        *kProbe            = 0xC0FFEEUL;
+    }
+    {
         char       line[16];
         const long kReceived = user_syscall3(
             cinux::armv7::syscall_nr::kRead, 0,
@@ -192,7 +203,39 @@ cinux::arch::UserTrap g_user_trap;
 
 namespace cinux::armv7 {
 
+bool RepairUserPage(unsigned long address) {
+    // Only the demand-page window is fillable; every other fault (the
+    // cross-table probe included) must fall through to the task ending.
+    constexpr unsigned long kDemandBase = 0x40009000UL;
+    constexpr unsigned long kDemandEnd  = 0x4000A000UL;
+    if (address < kDemandBase || address >= kDemandEnd) {
+        return false;
+    }
+    const unsigned long kPage = address & ~(cinux::arch::page::kSize - 1UL);
+    cinux::mm::KernelTables tables;
+    const unsigned long     root = cinux::arch::space::ActiveRoot();
+    if (cinux::mm::walk::TranslatePage(tables, root, kPage) != 0) {
+        return false;
+    }
+    const auto kFrame = cinux::mm::Pmm::self().allocate_page();
+    if (kFrame.raw == 0) {
+        return false;
+    }
+    auto* const table = cinux::mm::walk::EnsureLeafTable(tables, root, kPage,
+                                                         cinux::arch::page::kUser);
+    if (table == nullptr) {
+        return false;
+    }
+    table[cinux::arch::page::SlotIndex(kPage, cinux::arch::page::kLeafLevel)] =
+        cinux::arch::page::MakePageEntry(kFrame.raw,
+                                         cinux::arch::page::kUser | cinux::arch::page::kWritable);
+    cinux::arch::space::InvalidatePage(kPage);
+    cinux::print::Println("[armv7] fault repaired at %X", kPage);
+    return true;
+}
+
 bool RunUserModeSelfCheck() {
+    InstallFaultRepair(&RepairUserPage);
     g_kernel_root = cinux::arch::space::ActiveRoot();
     if (!setup_task(0, kTaskACode, kTaskAStack) || !setup_task(1, kTaskBCode, kTaskBStack)) {
         return false;

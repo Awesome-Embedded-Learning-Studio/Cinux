@@ -23,9 +23,18 @@ _vec1: mov r0, #1
        b   _dispatch
 _vec3: mov r0, #3
        b   _dispatch
-_vec4: sub lr, lr, #8
-       mov r0, #4
-       b   _dispatch
+_vec4: sub  lr, lr, #8
+       stmdb sp!, {r3}            @ park r3 while the mode is checked
+       mrs  r3, spsr
+       and  r3, r3, #0x1F
+       cmp  r3, #0x10              @ only a user fault may be repaired
+       bne  _abort_plain
+       ldmia sp!, {r3}
+       b    _abort_trap_save
+_abort_plain:
+       add  sp, sp, #4
+       mov  r0, #4
+       b    _dispatch
 _vec5: mov r0, #5
        b   _dispatch
 _vec7: sub lr, lr, #4
@@ -80,6 +89,34 @@ _trap_save:
        msr   cpsr_c, r2            @ back to the mode we came from
        str   r3, [r12, #52]
        mov   r0, r12
+       bl    c_trap_entry
+       mov   r3, r0
+       ldr   r1, [r3, #52]         @ user sp
+       ldr   r2, [r3, #60]         @ SPSR
+       ldr   r12, [r3, #56]        @ user pc
+       cps   #0x1F
+       mov   sp, r1
+       cps   #0x13
+       msr   spsr_cxsf, r2
+       mov   lr, r12
+       ldmia r3, {r0-r12}
+       movs  pc, lr
+
+_abort_trap_save:
+       stmdb sp!, {r12}
+       ldr   r12, =g_user_trap
+       stmia r12, {r0-r11}
+       ldr   r3, [sp], #4
+       str   r3, [r12, #48]
+       str   lr, [r12, #56]        @ the trapping mode's lr
+       mrs   r3, spsr
+       str   r3, [r12, #60]        @ the trapping mode's SPSR
+       cps   #0x1F                 @ System mode reads the user bank's sp
+       mov   r3, sp
+       msr   cpsr_c, r2            @ back to the mode we came from
+       str   r3, [r12, #52]
+       mov   r0, r12
+       mov   r1, #2
        bl    c_trap_entry
        mov   r3, r0
        ldr   r1, [r3, #52]         @ user sp
