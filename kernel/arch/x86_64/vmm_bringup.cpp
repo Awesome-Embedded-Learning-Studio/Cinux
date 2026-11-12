@@ -162,6 +162,10 @@ unsigned long KernelTables::take_page() {
     return kFresh.raw;
 }
 
+unsigned long KernelTables::take_root() {
+    return take_page();
+}
+
 void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
     unsigned long const kFrameBytes = static_cast<unsigned long>(info.framebuffer.pitch) *
                                       static_cast<unsigned long>(info.framebuffer.height);

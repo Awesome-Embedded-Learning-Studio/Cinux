@@ -51,17 +51,18 @@ void release_user_tables(Entry* table, int levels_below) {
 
 bool AddressSpace::init() {
     const arch::IrqGuard kIrq;
-    const auto           kGate  = gate_.guard();
-    base::PhysAddr const kFrame = Pmm::self().allocate_page();
-    if (kFrame == base::PhysAddr{}) {
+    const auto           kGate = gate_.guard();
+    KernelTables         tables;
+    const unsigned long  kRoot = tables.take_root();
+    if (kRoot == 0) {
         return false;
     }
-    auto* const kFresh = cinux::base::PtrAt<Entry>(DirectMapVirt(kFrame.raw));
-    cinux::base::SetBytes(kFresh, 0, cinux::arch::page::kSize);
+    auto* const        kFresh  = cinux::base::PtrAt<Entry>(DirectMapVirt(kRoot));
     const Entry* const kKernel = cinux::base::PtrAt<Entry>(DirectMapVirt(KernelPageRoot()));
-    cinux::base::CopyBytes(kFresh + kKernelHalfSlots, kKernel + kKernelHalfSlots,
-                           kKernelHalfSlots * kSlotBytes);
-    root_ = kFrame.raw;
+    for (unsigned long index = 0; index < walk::kEntriesPerTable; ++index) {
+        kFresh[index] = cinux::arch::space::IsUserSlot(index) ? Entry{} : kKernel[index];
+    }
+    root_ = kRoot;
     return true;
 }
 

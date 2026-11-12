@@ -33,6 +33,17 @@ using cinux::base::operator""_MiB;
 /** @brief Bytes one PML4 entry spans; every reserved region is sized in whole entries. */
 inline constexpr unsigned long kPageTableSpan = 512_GiB;
 
+/**
+ * @brief         Reports whether a top-level slot belongs to the user world.
+ * @param[in]     index   PML4 slot.
+ * @return        true for the lower 256 slots, which a fresh space starts empty.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool IsUserSlot(unsigned long index) {
+    return index < 256;
+}
+
 /** @brief PML4 slot of the direct map of physical RAM. */
 inline constexpr unsigned long kDirectMapSlot = 256;
 /** @brief PML4 slot of the kernel heap window. */

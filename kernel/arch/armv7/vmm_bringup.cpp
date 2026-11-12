@@ -76,6 +76,26 @@ unsigned long KernelTables::take_page() {
     return kFresh.raw;
 }
 
+unsigned long KernelTables::take_root() {
+    // The first-level table is sixteen contiguous KiB on a 16 KiB
+    // boundary. Take eight contiguous pages and use the aligned window;
+    // the pages outside it are leaked on purpose.
+    const auto kBlock = Pmm::self().allocate_pages(3);
+    if (kBlock.raw == 0) {
+        return 0;
+    }
+    const unsigned long kSkip = ((0x4000UL - (kBlock.raw & 0x3FFFUL)) & 0x3FFFUL) / 4096UL;
+    if (kSkip > 4) {
+        return 0;
+    }
+    const unsigned long kRoot = kBlock.raw + (kSkip * 4096UL);
+    auto* const         table = cinux::base::PtrAt<unsigned char>(kRoot);
+    for (unsigned long offset = 0; offset < 0x4000UL; ++offset) {
+        table[offset] = 0;
+    }
+    return kRoot;
+}
+
 void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
     static_cast<void>(info);  // No framebuffer door on this board yet.
 }

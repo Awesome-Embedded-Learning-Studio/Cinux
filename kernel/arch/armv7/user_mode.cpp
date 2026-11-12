@@ -22,6 +22,7 @@
 #include "kernel/arch/armv7/context.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/space.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
@@ -125,20 +126,6 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     }
 }
 
-/// A first-level table is sixteen contiguous KiB, sixteen-KiB aligned.
-/// Take eight contiguous pages and use the aligned window inside them.
-unsigned long allocate_l1_block() {
-    const auto block = cinux::mm::Pmm::self().allocate_pages(3);
-    if (block.raw == 0) {
-        return 0;
-    }
-    const unsigned long skip = ((0x4000UL - (block.raw & 0x3FFFUL)) & 0x3FFFUL) / 4096UL;
-    if (skip > 4) {
-        return 0;
-    }
-    return block.raw + (skip * 4096UL);
-}
-
 bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned long physical) {
     cinux::mm::KernelTables tables;
     cinux::arch::page::Entry* table =
@@ -154,7 +141,8 @@ bool map_user_page(unsigned long root, unsigned long virtual_address, unsigned l
 }
 
 unsigned long build_task_root() {
-    const unsigned long block = allocate_l1_block();
+    cinux::mm::KernelTables tables;
+    const unsigned long     block = tables.take_root();
     if (block == 0) {
         return 0;
     }
@@ -162,10 +150,10 @@ unsigned long build_task_root() {
     const auto* const kernel_root =
         reinterpret_cast<const cinux::arch::page::Entry*>(cinux::mm::KernelPageRoot());
     for (unsigned long index = 0; index < 4096; ++index) {
-        root[index] = kernel_root[index];
+        root[index] = cinux::arch::space::IsUserSlot(index)
+                          ? cinux::arch::page::Entry{}
+                          : kernel_root[index];
     }
-    constexpr unsigned long kUserWindow = 0x40000000UL;
-    root[kUserWindow >> 20U] = cinux::arch::page::Entry{0};
     return block;
 }
 

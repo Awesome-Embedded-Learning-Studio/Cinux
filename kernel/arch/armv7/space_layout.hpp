@@ -24,6 +24,13 @@ namespace cinux::arch::space {
 using cinux::base::operator""_KiB;
 using cinux::base::operator""_MiB;
 
+/// The one first-level slot reserved for a task's own pages. The board's
+/// kernel and device mappings live below it, so it is the only window a
+/// new world must start empty.
+constexpr bool IsUserSlot(unsigned long index) {
+    return index == (0x40000000UL >> 20U);
+}
+
 /// The kernel heap window's virtual base: just past the managed RAM, so
 /// the heap's virtual pages never collide with the identity map.
 inline constexpr unsigned long kHeapBase = 0x90000000UL;
