@@ -11,9 +11,12 @@ add_executable(arm_image
     vectors.S
     context_switch.S
     task_switch.cpp
+    user_entry.S
     selfcheck.cpp
     faults.cpp
     exception_dispatch.cpp
+    svc.cpp
+    user_mode.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp

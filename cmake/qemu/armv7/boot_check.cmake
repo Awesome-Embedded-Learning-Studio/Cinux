@@ -14,6 +14,10 @@ if(NOT serial_out MATCHES "${EXPECTED}")
         "arm_boot: serial banner missing (result ${run_result}).\n"
         "stdout:\n${serial_out}\nstderr:\n${serial_err}")
 endif()
+if(EXPECTED_USER AND NOT serial_out MATCHES "${EXPECTED_USER}")
+    message(FATAL_ERROR
+        "arm_boot: the user-mode round trip failed.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
     message(FATAL_ERROR
         "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")

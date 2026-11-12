@@ -21,8 +21,12 @@ _vec0: mov r0, #0
        b   _dispatch
 _vec1: mov r0, #1
        b   _dispatch
-_vec2: mov r0, #2
-       b   _dispatch
+_vec2: push {r0-r3, lr}
+       mov  r0, r7
+       bl   c_svc_handler
+       str  r0, [sp]
+       pop  {r0-r3, lr}
+       movs pc, lr
 _vec3: mov r0, #3
        b   _dispatch
 _vec4: sub lr, lr, #8

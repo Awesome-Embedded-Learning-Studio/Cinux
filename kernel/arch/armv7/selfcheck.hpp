@@ -36,4 +36,7 @@ namespace cinux::armv7 {
 /// Runs two tasks that yield to each other and checks the step counts.
 [[nodiscard]] bool RunTaskSelfCheck();
 
+/// Drops to user mode, makes one svc, and comes back through a second.
+[[nodiscard]] bool RunUserModeSelfCheck();
+
 }  // namespace cinux::armv7
