@@ -1257,15 +1257,25 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kOpen) {
-        char path[16] = {};
-        if (!cinux::arch::CopyFromUser(path, g_user_trap.r0, sizeof(path) - 1)) {
+        // One byte at a time: a stack string may end just before the page
+        // boundary, and a single wide copy would be refused wholesale.
+        char          path[16] = {};
+        unsigned long length   = 0;
+        bool          copied   = true;
+        while (length + 1 < sizeof(path)) {
+            if (!cinux::arch::CopyFromUser(&path[length], g_user_trap.r0 + length, 1)) {
+                copied = false;
+                break;
+            }
+            if (path[length] == '\0') {
+                break;
+            }
+            ++length;
+        }
+        if (!copied) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
             return &g_tasks[g_current].trap;
-        }
-        unsigned long length = 0;
-        while (length < sizeof(path) && path[length] != '\0') {
-            ++length;
         }
         const bool kKnown = length == 6 && path[0] == '/' && path[1] == 'h' &&
                             path[2] == 'e' && path[3] == 'l' && path[4] == 'l' &&
