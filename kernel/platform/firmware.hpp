@@ -16,4 +16,5 @@
  */
 
 #pragma once
-#include "kernel/arch/x86_64/platform/acpi/acpi.hpp"
+
+#include "cinux/platform/firmware.hpp"

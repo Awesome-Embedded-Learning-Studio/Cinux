@@ -16,4 +16,5 @@
  */
 
 #pragma once
-#include "kernel/arch/x86_64/platform/ps2/controller.hpp"
+
+#include "cinux/platform/ps2.hpp"

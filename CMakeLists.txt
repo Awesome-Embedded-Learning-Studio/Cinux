@@ -54,7 +54,7 @@ endforeach()
 
 # Same shim story for the platform face: a neutral platform header names no
 # port, the generated file points at the selected port's aggregate.
-set(CINUX_PLATFORM_HEADERS clock interrupt io)
+set(CINUX_PLATFORM_HEADERS bus clock firmware interrupt io ps2)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated/cinux/platform)
 foreach(platform_header IN LISTS CINUX_PLATFORM_HEADERS)
     file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/generated/cinux/platform/${platform_header}.hpp

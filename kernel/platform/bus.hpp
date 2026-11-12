@@ -16,5 +16,4 @@
 
 #pragma once
 
-#include "kernel/arch/x86_64/platform/pci/pci.hpp"
-#include "kernel/arch/x86_64/platform/pci/pci_layout.hpp"
+#include "cinux/platform/bus.hpp"
