@@ -396,6 +396,21 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                 user_write(note, note_length);
             }
+            char oneByte[2];
+            oneByte[0] = 'z';
+            oneByte[1] = 0;
+            const long kRoWrite = user_syscall3(
+                cinux::armv7::syscall_nr::kWrite, static_cast<unsigned long>(kFd),
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(oneByte)), 1);
+            if (kRoWrite == static_cast<long>(cinux::armv7::errno::kBadFd)) {
+                char          note[24];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('r'); NOTE('o'); NOTE(' '); NOTE('w'); NOTE('r'); NOTE('i');
+                NOTE('t'); NOTE('e'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
         }
@@ -1815,6 +1830,7 @@ extern "C" bool CurrentFdIsFile(unsigned long fd) {
 
 extern "C" long FileWrite(unsigned long fd, unsigned long buffer, unsigned long count) {
     if (!CurrentFdIsFile(fd) || !g_tasks[g_current].fds[fd].writable) {
+        cinux::print::Println("[armv7] write %u refused, read-only", fd);
         return cinux::armv7::errno::kBadFd;
     }
     FdEntry&            file = g_tasks[g_current].fds[fd];
