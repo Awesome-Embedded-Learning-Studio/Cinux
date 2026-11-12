@@ -118,6 +118,7 @@ armv7 的栈是按模式 bank 的，用户态与 SVC 各有一套，所以"从�
 | 等待与挂起 | `task 0 blocks on 1`、`wait 2 -> DEAD` |
 | 自身标识 | `getpid 3`、用户侧 `pid 3 ok` |
 | 扩堆 | `brk -> 4000E000`、用户侧 `brk ok` |
+| 匿名映射 | `mmap 40010000 len 2000`、用户侧 `mmap ok` |
 | 描述符 | `close 2`、`svc write refused -9 at`、用户侧 `ebadf ok` |
 | 等任意一条 | `task 3 blocks on 4`、返回先结束那条的下标 |
 | 等待超时 | `task 0 wait timed out`、用户侧 `self wait timed out` |
@@ -193,6 +194,10 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
     引号；顺便逐条核对：三十四条期望在输出里都能按整句找到，也都有对应的
     检查分支，其中一条早就不存在的 `svc write matched` 换成现在的
     `svc write`。
+22. 断言用 `MATCHES` 比对，期望串因此被当成正则。`mmap` 那行写成
+    `mmap 40010000 + 2000`，加号成了量词，本地看着对、测试却红。现在换成
+    `string(FIND)` 的字面量查找，串里有什么就比什么，失败时把期望串与整段
+    输出一起打出来。
 
 ## 调度器的上提之路
 
