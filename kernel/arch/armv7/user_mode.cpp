@@ -54,13 +54,18 @@ constexpr unsigned long kTaskAStack = 0x40002000UL;
 constexpr unsigned long kTaskBCode  = 0x40003000UL;
 constexpr unsigned long kTaskBStack = 0x40004000UL;
 
+enum class TaskState : unsigned char { kRunnable, kDone };
+
 struct UserTask {
-    cinux::arch::UserTrap      trap;
-    cinux::mm::AddressSpace*   space;
-    bool                       done;
+    cinux::arch::UserTrap    trap;
+    cinux::mm::AddressSpace* space;
+    TaskState                state;
+    unsigned long            exit_status;
 };
 
-UserTask                g_tasks[2];
+constexpr unsigned long kTaskCount = 2;
+
+UserTask                g_tasks[kTaskCount];
 cinux::arch::CpuContext g_main;
 cinux::arch::CpuContext g_scratch;
 unsigned long           g_kernel_root = 0;
@@ -223,7 +228,9 @@ bool privatize_stack(cinux::mm::AddressSpace& space, const cinux::mm::AddressSpa
 bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_va,
                 cinux::mm::AddressSpace* parent = nullptr) {
     UserTask& task = g_tasks[index];
-    task           = UserTask{};
+    task            = UserTask{};
+    task.state      = TaskState::kRunnable;
+    task.exit_status = 0;
     task.space     = new cinux::mm::AddressSpace{};
     if (task.space == nullptr || !task.space->init()) {
         return false;
@@ -367,7 +374,11 @@ bool RunUserModeSelfCheck() {
     cinux::arch::space::SwitchRoot(g_tasks[0].space->root());
     cinux::arch::EnterUserModeWithReturn(g_tasks[0].trap.lr, g_tasks[0].trap.sp, &g_main);
     cinux::arch::space::SwitchRoot(g_kernel_root);
-    return g_tasks[0].done && g_tasks[1].done;
+    bool all_done = true;
+    for (const auto& task : g_tasks) {
+        all_done = all_done && task.state == TaskState::kDone;
+    }
+    return all_done;
 }
 
 }  // namespace cinux::armv7
@@ -376,28 +387,40 @@ namespace {
 
 /// Picks the next runnable task and hands its frame back to the stub.
 /// Never returns when nothing is runnable: it resumes the kernel instead.
+/// The next runnable task after `from`, or kTaskCount when there is none.
+unsigned long next_runnable(unsigned long from) {
+    for (unsigned long step = 1; step < kTaskCount; ++step) {
+        const unsigned long candidate = (from + step) % kTaskCount;
+        if (g_tasks[candidate].state == TaskState::kRunnable) {
+            return candidate;
+        }
+    }
+    return kTaskCount;
+}
+
 cinux::arch::UserTrap* schedule_next(unsigned long number) {
     cinux::arch::UserTrap& running = g_tasks[g_current].trap;
     for (unsigned long word = 0; word < 16; ++word) {
         (&running.r0)[word] = (&g_user_trap.r0)[word];
     }
     if (number == cinux::armv7::syscall_nr::kExit) {
-        g_tasks[g_current].done = true;
+        g_tasks[g_current].state       = TaskState::kDone;
+        g_tasks[g_current].exit_status = g_user_trap.r0;
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
                               g_user_trap.r0);
     }
 
-    const unsigned long other = g_current == 0 ? 1 : 0;
-    if (!g_tasks[other].done) {
-        g_current = other;
-        cinux::print::Println("[armv7] switch to task %u", other);
-        cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
+    const unsigned long kNext = next_runnable(g_current);
+    if (kNext != kTaskCount) {
+        g_current = kNext;
+        cinux::print::Println("[armv7] switch to task %u", kNext);
+        cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
         cinux::arch::per_cpu::self().slice_ticks = 1;
-        return &g_tasks[other].trap;
+        return &g_tasks[kNext].trap;
     }
 
-    if (!g_tasks[g_current].done) {
-        // The other one finished; this task keeps running.
+    if (g_tasks[g_current].state == TaskState::kRunnable) {
+        // The others finished; this task keeps running.
         return &g_tasks[g_current].trap;
     }
 
@@ -426,30 +449,30 @@ extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap
     for (unsigned long word = 0; word < 16; ++word) {
         (&running.r0)[word] = (&trap->r0)[word];
     }
-    const unsigned long other = g_current == 0 ? 1 : 0;
-    if (g_tasks[other].done) {
+    const unsigned long kNext = next_runnable(g_current);
+    if (kNext == kTaskCount) {
         return trap;
     }
-    g_current = other;
-    cinux::print::Println("[armv7] preempt to task %u", other);
-    cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
+    g_current = kNext;
+    cinux::print::Println("[armv7] preempt to task %u", kNext);
+    cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
     cinux::arch::per_cpu::self().slice_ticks = 1;
-    return &g_tasks[other].trap;
+    return &g_tasks[kNext].trap;
 }
 
 extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
 
 /// A user task died on an abort: mark it, run the other one, or go home.
 extern "C" [[noreturn]] void c_user_faulted() {
-    g_tasks[g_current].done = true;
+    g_tasks[g_current].state = TaskState::kDone;
     cinux::print::Println("[armv7] task %u faulted", g_current);
-    const unsigned long other = g_current == 0 ? 1 : 0;
-    if (!g_tasks[other].done) {
-        g_current = other;
-        cinux::print::Println("[armv7] switch to task %u", other);
-        cinux::arch::space::SwitchRoot(g_tasks[other].space->root());
+    const unsigned long kNext = next_runnable(g_current);
+    if (kNext != kTaskCount) {
+        g_current = kNext;
+        cinux::print::Println("[armv7] switch to task %u", kNext);
+        cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
         asm volatile("cps #0x13" ::: "memory");
-        ResumeTrap(&g_tasks[other].trap);
+        ResumeTrap(&g_tasks[kNext].trap);
     }
     g_running = false;
     cinux::print::Println("[armv7] all user tasks done");
