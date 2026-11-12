@@ -12,6 +12,7 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/proc/proc_config.hpp"
+#include "kernel/arch/task_switch.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 
@@ -28,9 +29,8 @@ static_assert((1U << static_cast<unsigned>(kStackOrder)) == kStackPages,
 }
 
 void arm_task_entry(const Task& task) {
-    unsigned long long const kStackTop              = task.stack_base + kStackBytes;
-    cinux::arch::SetKernelStackTop(kStackTop);
-    cinux::arch::per_cpu::PerCpu::self().kernel_rsp = kStackTop;
+    unsigned long long const kStackTop = task.stack_base + kStackBytes;
+    cinux::arch::ArmTaskStack(kStackTop);
     unsigned long long const kRoot =
         (task.user_root != 0) ? task.user_root : cinux::mm::KernelPageRoot();
     if (cinux::arch::space::ActiveRoot() != kRoot) {
@@ -40,10 +40,10 @@ void arm_task_entry(const Task& task) {
 
 void swap_address_regs(Task* outgoing, const Task* incoming) {
     if (outgoing != nullptr) {
-        cinux::arch::per_cpu::StoreTaskAddressRegs(outgoing->ctx.fs_base, outgoing->ctx.gs_base);
+        cinux::arch::StoreTaskAddressRegs(outgoing->ctx.fs_base, outgoing->ctx.gs_base);
     }
     if (incoming != nullptr) {
-        cinux::arch::per_cpu::LoadTaskAddressRegs(incoming->ctx.fs_base, incoming->ctx.gs_base);
+        cinux::arch::LoadTaskAddressRegs(incoming->ctx.fs_base, incoming->ctx.gs_base);
     }
 }
 

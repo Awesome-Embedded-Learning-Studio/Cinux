@@ -45,7 +45,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CINUX_PORT_HEADERS
     abi context cpuid debug_frame firmware halt init instructions irq_guard isr
     kernel_stack msr page page_entry page_walk_shape per_cpu per_cpu_config random
-    smp_control space_control space_layout syscall_abi task_context user_access user_entry)
+    smp_control space_control space_layout syscall_abi task_context task_switch user_access user_entry)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated/cinux/port)
 foreach(port_header IN LISTS CINUX_PORT_HEADERS)
     file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/generated/cinux/port/${port_header}.hpp

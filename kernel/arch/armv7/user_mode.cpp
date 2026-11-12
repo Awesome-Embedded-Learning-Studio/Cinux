@@ -29,6 +29,7 @@
 #include "kernel/arch/armv7/cow_ledger.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
+#include "kernel/arch/task_switch.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/page_walk.hpp"

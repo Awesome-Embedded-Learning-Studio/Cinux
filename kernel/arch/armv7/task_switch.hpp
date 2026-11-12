@@ -1,12 +1,12 @@
 /**
  * @file    task_switch.hpp
- * @brief   A minimal two-task round robin over the context switch.
+ * @brief   armv7's part of entering a task: a stack top, and nothing else
+ *          yet.
  *
- * This is not the scheduler; it is the smallest thing that proves the
- * pieces talk to each other: two stacks, two register images, and the
- * per-CPU block naming which one runs. The yield entry keeps the shape
- * of the scheduler's own seam, so replacing it later leaves the switch
- * and the per-CPU data untouched.
+ * There is no TSS and no segment base here: the supervisor stack is just
+ * the SVC bank's pointer, and per-task address registers would be the
+ * thread-id registers, which this lane does not use. The named calls
+ * exist so the shared switch code can stay the same shape.
  *
  * @author  Charliechen114514
  * @date    2026-11-12
@@ -18,9 +18,19 @@
 
 #pragma once
 
-namespace cinux::armv7 {
+#include "kernel/arch/armv7/kernel_stack.hpp"
 
-/// Runs two hand-built tasks that yield to each other, then checks the counts.
-[[nodiscard]] bool RunTaskSelfCheck();
+namespace cinux::arch {
 
-}  // namespace cinux::armv7
+/// Records the task's kernel stack top in the per-CPU block.
+inline void ArmTaskStack(unsigned long long top) {
+    SetKernelStackTop(static_cast<unsigned long>(top));
+}
+
+/// This port has no per-task address registers yet.
+inline void StoreTaskAddressRegs(unsigned long /*fs_base*/, unsigned long /*gs_base*/) {}
+
+/// The matching no-op.
+inline void LoadTaskAddressRegs(unsigned long /*fs_base*/, unsigned long /*gs_base*/) {}
+
+}  // namespace cinux::arch
