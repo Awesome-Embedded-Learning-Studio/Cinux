@@ -353,7 +353,7 @@ bool RepairUserPage(unsigned long address, unsigned long status) {
     return true;
 }
 
-bool RunUserModeSelfCheck() {
+__attribute__((noinline)) bool RunUserModeSelfCheck() {
     InstallFaultRepair(&RepairUserPage);
     const auto kShared = cinux::mm::Pmm::self().allocate_page();
     if (kShared.raw == 0) {
@@ -390,6 +390,17 @@ namespace {
 
 /// Picks the next runnable task and hands its frame back to the stub.
 /// Never returns when nothing is runnable: it resumes the kernel instead.
+/// Returns one task's space to the allocator. Called only after the
+/// scheduler has switched away from it, so its tables are not active.
+void teardown_space(unsigned long index) {
+    if (g_tasks[index].space == nullptr) {
+        return;
+    }
+    g_tasks[index].space->teardown();
+    delete g_tasks[index].space;
+    g_tasks[index].space = nullptr;
+}
+
 /// The next runnable task after `from`, or kTaskCount when there is none.
 unsigned long next_runnable(unsigned long from) {
     for (unsigned long step = 1; step < kTaskCount; ++step) {
@@ -413,11 +424,15 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                               g_user_trap.r0);
     }
 
+    const unsigned long kOld  = g_current;
     const unsigned long kNext = next_runnable(g_current);
     if (kNext != kTaskCount) {
         g_current = kNext;
         cinux::print::Println("[armv7] switch to task %u", kNext);
         cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
+        if (g_tasks[kOld].state == TaskState::kDone) {
+            teardown_space(kOld);
+        }
         cinux::arch::per_cpu::self().slice_ticks = 1;
         return &g_tasks[kNext].trap;
     }
@@ -430,6 +445,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     g_running = false;
     cinux::print::Println("[armv7] all user tasks done");
     cinux::arch::space::SwitchRoot(g_kernel_root);
+    teardown_space(kOld);
     cinux::arch::ContextSwitch(&g_scratch, &g_main);
     __builtin_unreachable();
 }
@@ -469,17 +485,20 @@ extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
 extern "C" [[noreturn]] void c_user_faulted() {
     g_tasks[g_current].state = TaskState::kDone;
     cinux::print::Println("[armv7] task %u faulted", g_current);
+    const unsigned long kOld  = g_current;
     const unsigned long kNext = next_runnable(g_current);
     if (kNext != kTaskCount) {
         g_current = kNext;
         cinux::print::Println("[armv7] switch to task %u", kNext);
         cinux::arch::space::SwitchRoot(g_tasks[kNext].space->root());
-        asm volatile("cps #0x13" ::: "memory");
+        teardown_space(kOld);
+        asm volatile("cps#0x13" ::: "memory");
         ResumeTrap(&g_tasks[kNext].trap);
     }
     g_running = false;
     cinux::print::Println("[armv7] all user tasks done");
     cinux::arch::space::SwitchRoot(g_kernel_root);
+    teardown_space(kOld);
     asm volatile("cps #0x13" ::: "memory");
     cinux::arch::ContextSwitch(&g_scratch, &g_main);
     __builtin_unreachable();
