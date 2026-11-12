@@ -121,8 +121,15 @@ bool traps_to_scheduler(unsigned long number) {
 
 }  // namespace
 
+extern "C" unsigned long CurrentTaskIndex();
+
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
+    if (kNumber == cinux::armv7::syscall_nr::kGetPid) {
+        trap->r0 = CurrentTaskIndex();
+        cinux::print::Println("[armv7] getpid %u", trap->r0);
+        return trap;
+    }
     if (traps_to_scheduler(kNumber)) {
         return c_schedule_from_user(kNumber);
     }

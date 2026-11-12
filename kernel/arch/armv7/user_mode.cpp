@@ -169,6 +169,19 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
         user_write(note, note_length);
     }
+    {
+        const long kPid = user_syscall3(cinux::armv7::syscall_nr::kGetPid, 0, 0, 0);
+        if (static_cast<unsigned long>(kPid) == task_id) {
+            char          note[16];
+            unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+            NOTE('p'); NOTE('i'); NOTE('d'); NOTE(' ');
+            NOTE(static_cast<char>('0' + task_id)); NOTE(' '); NOTE('o'); NOTE('k');
+            NOTE('\n');
+#undef NOTE
+            user_write(note, note_length);
+        }
+    }
     if (task_id == 0) {
         const long kSlept = user_syscall3(cinux::armv7::syscall_nr::kSleep, 3, 0, 0);
         if (kSlept == 0) {
@@ -618,6 +631,10 @@ extern "C" void SchedulerOnTick(unsigned long ticks) {
             task.wait_mask = 0;
         }
     }
+}
+
+extern "C" unsigned long CurrentTaskIndex() {
+    return g_current;
 }
 
 extern "C" bool SchedulerRunning() {
