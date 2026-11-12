@@ -68,7 +68,7 @@ struct UserTask {
 };
 
 constexpr unsigned long kTaskCount   = 4;
-constexpr unsigned long kWaitTicks  = 5;  // half a second before a wait gives up
+constexpr unsigned long kWaitTicks  = 20;  // default deadline when the caller passes 0
 
 UserTask                g_tasks[kTaskCount];
 cinux::arch::CpuContext g_main;
@@ -173,7 +173,7 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         unsigned long status = 0;
         const long    kSelf  = user_syscall3(
             cinux::armv7::syscall_nr::kWait, 0,
-            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 0);
+            static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&status)), 5);
         if (kSelf == -2) {
             char          note[32];
             unsigned long note_length = 0;
@@ -503,9 +503,11 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         }
         // Not finished: park this task; when someone ends, wake_blocked
         // makes it runnable again and it re-asks with -1 in hand.
+        const unsigned long kTimeout =
+            g_user_trap.r2 == 0 ? kWaitTicks : g_user_trap.r2;
         g_tasks[g_current].state         = TaskState::kBlocked;
         g_tasks[g_current].wait_target   = kTarget;
-        g_tasks[g_current].wait_deadline = g_tick_now + kWaitTicks;
+        g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
         g_tasks[g_current].trap.r0       = ~0UL;
         cinux::print::Println("[armv7] task %u blocks on %u", g_current, kTarget);
     }
