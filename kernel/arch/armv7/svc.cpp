@@ -84,6 +84,7 @@ bool traps_to_scheduler(unsigned long number) {
            number == cinux::armv7::syscall_nr::kBrk ||
            number == cinux::armv7::syscall_nr::kClose ||
            number == cinux::armv7::syscall_nr::kRead ||
+           number == cinux::armv7::syscall_nr::kSignal ||
            number == cinux::armv7::syscall_nr::kMmap ||
            number == cinux::armv7::syscall_nr::kMunmap ||
            number == cinux::armv7::syscall_nr::kWait ||

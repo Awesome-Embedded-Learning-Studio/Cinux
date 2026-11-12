@@ -72,6 +72,9 @@ expect_literal(EXPECTED_ROOK "the read-only page never became writable.")
 expect_literal(EXPECTED_BADFLAGS "an unknown mmap flag was accepted.")
 expect_literal(EXPECTED_FLAGSOK "the refused flag was not reported.")
 expect_literal(EXPECTED_YIELD "sched_yield never answered.")
+expect_literal(EXPECTED_HANDLED "the registered fault handler never ran.")
+expect_literal(EXPECTED_HANDLEROK "the fault handler never reported.")
+expect_literal(EXPECTED_HANDLEREXIT "the handler's exit status was lost.")
 
 expect_literal(EXPECTED_MMAPOK "the mapped pages were not writable.")
 

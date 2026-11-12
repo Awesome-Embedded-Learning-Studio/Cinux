@@ -75,6 +75,7 @@ struct UserTask {
     unsigned long            wait_deadline; // ticks; valid while blocked
     unsigned long            break_top;     // grow-only user heap break
     unsigned long            fd_mask;       // bit per open descriptor
+    unsigned long            fault_handler; // user fault handler, 0 if none
     unsigned long            mmap_top;      // grow-only anonymous window
     bool                     read_pending;   // a read is parked, waiting for input
     unsigned long            read_buf;       // its destination
@@ -136,6 +137,24 @@ void user_write(const char* text, unsigned long length) {
 extern "C" void user_entry_stub();
 
 /// Runs on a user page; reaches the kernel only through svc.
+/// Runs in user mode after a fault when the task registered a handler.
+extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_fault_handler_c(
+    unsigned long /*address*/, unsigned long /*code*/);
+
+extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_fault_handler_c(
+    unsigned long /*address*/, unsigned long /*code*/) {
+    char          note[16];
+    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+    NOTE('h'); NOTE('a'); NOTE('n'); NOTE('d'); NOTE('l'); NOTE('e'); NOTE('r');
+    NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+    user_write(note, note_length);
+    static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kExit, 9, 0, 0));
+    for (;;) {
+    }
+}
+
 extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program_c(
     unsigned long task_id) {
     char          buffer[64];
@@ -396,6 +415,14 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(line)), sizeof(line));
         static_cast<void>(kReceived);
     }
+    if (task_id == 2) {
+        const unsigned long kHandler =
+            kTaskACode + (reinterpret_cast<std::uintptr_t>(&user_fault_handler_c) -
+                             reinterpret_cast<std::uintptr_t>(__user_text_start));
+        static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kSignal, 11, kHandler, 0));
+        auto* const kBad = reinterpret_cast<volatile unsigned long*>(0x51000000UL);
+        *kBad            = 1;
+    }
     if (task_id != 0) {
         // Not mapped in the clone either: this must still end the task.
         static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x4000B000UL));
@@ -459,6 +486,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
     task.wait_deadline = 0;
     task.break_top     = kBrkBase;
     task.fd_mask       = 0b111UL;  // stdin, stdout, stderr
+    task.fault_handler = 0;
     task.mmap_top      = kMmapBase;
     task.read_pending  = false;
     task.read_buf      = 0;
@@ -751,6 +779,21 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
         g_tasks[g_current].trap.r0       = 0;
         cinux::print::Println("[armv7] read waits for input");
+    }
+
+    if (number == cinux::armv7::syscall_nr::kSignal) {
+        // Signal is spelled narrow here: only SIGSEGV, only a handler.
+        const unsigned long kSigno   = g_user_trap.r0;
+        const unsigned long kHandler = g_user_trap.r1;
+        if (kSigno == 11) {
+            g_tasks[g_current].fault_handler = kHandler;
+            cinux::print::Println("[armv7] fault handler %X for task %u", kHandler, g_current);
+            g_tasks[g_current].trap.r0 = 0;
+        } else {
+            g_tasks[g_current].trap.r0 =
+                static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
+        }
+        return &g_tasks[g_current].trap;
     }
 
     if (number == cinux::armv7::syscall_nr::kMmap) {
@@ -1083,6 +1126,23 @@ extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap
 }
 
 extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
+
+/// A fault with a registered handler resumes in user mode with the handler
+/// in place of the faulting instruction; without one it ends the task.
+extern "C" cinux::arch::UserTrap* c_user_fault_handler(cinux::arch::UserTrap* trap,
+                                                       unsigned long address,
+                                                       unsigned long code) {
+    if (g_tasks[g_current].fault_handler == 0) {
+        return nullptr;
+    }
+    cinux::print::Println("[armv7] fault handled at %X by %X", address,
+                          g_tasks[g_current].fault_handler);
+    trap->r0   = address;
+    trap->r1   = code;
+    trap->lr   = g_tasks[g_current].fault_handler;
+    trap->spsr = 0x10UL;  // user mode, interrupts on
+    return trap;
+}
 
 /// A user task died on an abort: mark it, run the other one, or go home.
 extern "C" [[noreturn]] void c_user_faulted() {

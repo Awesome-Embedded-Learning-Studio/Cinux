@@ -27,6 +27,7 @@ inline constexpr unsigned long kSleep       = 162;
 inline constexpr unsigned long kGetPid      = 20;
 inline constexpr unsigned long kBrk         = 45;
 inline constexpr unsigned long kClose       = 6;
+inline constexpr unsigned long kSignal      = 67;
 inline constexpr unsigned long kMmap        = 90;
 inline constexpr unsigned long kMunmap      = 91;
 

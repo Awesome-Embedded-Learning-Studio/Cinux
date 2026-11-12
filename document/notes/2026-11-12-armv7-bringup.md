@@ -282,9 +282,16 @@ tick 里读进用户缓冲（这条没有）。查过 QEMU 的模型源码（[hw
 | 90 | mmap | 单调分配、地址提示、只读、`flags 2 refused` |
 | 91 | munmap | `munmap 40020000 pages 1` |
 | 114 | wait | `blocks on`、`wait N -> DEAD`、`read timed out` 同族的超时 |
+| 67 | signal | `fault handler 40001008 for task 2` |
 | 158 | sched_yield | `yield ok` |
 | 162 | sleep | `sleeps 3 ticks`、`woke from sleep`、`slept` |
 | 未登记 | 未知号 | `svc FFFF unknown`、`unknown refused` |
+
+故障处理函数：任务可以给 SIGSEGV 登记一个用户态地址（`signal` 只认 11 与
+非零处理函数）。用户态故障时，若登记过就把陷入帧改成"从处理函数继续"，
+参数是故障地址与状态；没登记就照旧被收掉。自检里 2 号任务登记、踩
+`0x51000000`、处理函数报 `handler ok` 并以 9 退出；1 号任务没登记，
+`user fault caught` 与 `task 1 faulted` 照旧。
 
 缺口只有一处：`read` 的"数据到了"分支。灌输入试过两种方式都不通，见上一节。
 
