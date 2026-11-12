@@ -57,6 +57,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_MMAPOK=mmap ok"
             "-DEXPECTED_HINTTOOK=mmap hint 40020000 is taken"
             "-DEXPECTED_HINTOK=mmap hint ok"
+            "-DEXPECTED_MUNMAP=munmap 40020000 pages 1"
             "-DEXPECTED_EBADF=ebadf ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"

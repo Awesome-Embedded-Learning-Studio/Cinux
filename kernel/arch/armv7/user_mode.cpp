@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/task_switch.hpp"
@@ -36,6 +37,7 @@
 #include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
@@ -178,22 +180,31 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
-        const long kHinted = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
-                                           0x40020000UL, 0);
-        if (kHinted == static_cast<long>(0x40020000UL)) {
-            auto* const kSpot = reinterpret_cast<volatile unsigned long*>(0x40020000UL);
+        constexpr unsigned long kHint = 0x40020000UL;
+        const long kHinted =
+            user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kHint, 0);
+        if (kHinted == static_cast<long>(kHint)) {
+            auto* const kSpot = reinterpret_cast<volatile unsigned long*>(kHint);
             *kSpot            = 0xF00DUL;
-            const long kAgain = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
-                                              0x40020000UL, 0);
-            if (*kSpot == 0xF00DUL && kAgain == -12) {
-                char          note[24];
-                unsigned long note_length = 0;
+            const bool kFirstWrite = (*kSpot == 0xF00DUL);
+            static_cast<void>(
+                user_syscall3(cinux::armv7::syscall_nr::kMunmap, kHint, 4096, 0));
+            const long kAgain =
+                user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kHint, 0);
+            const long kTaken = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096,
+                                              kHint, 0);
+            if (kFirstWrite && kAgain == static_cast<long>(kHint) && kTaken == -12) {
+                *kSpot = 0xCAFEUL;
+                if (*kSpot == 0xCAFEUL) {
+                    char          note[24];
+                    unsigned long note_length = 0;
 #define NOTE(c) note[note_length++] = (c)
-                NOTE('m'); NOTE('m'); NOTE('a'); NOTE('p'); NOTE(' '); NOTE('h');
-                NOTE('i'); NOTE('n'); NOTE('t'); NOTE(' '); NOTE('o'); NOTE('k');
-                NOTE('\n');
+                    NOTE('m'); NOTE('m'); NOTE('a'); NOTE('p'); NOTE(' '); NOTE('h');
+                    NOTE('i'); NOTE('n'); NOTE('t'); NOTE(' '); NOTE('o'); NOTE('k');
+                    NOTE('\n');
 #undef NOTE
-                user_write(note, note_length);
+                    user_write(note, note_length);
+                }
             }
         }
     }
@@ -668,6 +679,43 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         }
         cinux::print::Println("[armv7] mmap %X len %X", kBase, kWant);
         g_tasks[g_current].trap.r0 = kBase;
+        return &g_tasks[g_current].trap;
+    }
+
+    if (number == cinux::armv7::syscall_nr::kMunmap) {
+        // Only the anonymous window: the stack and the code are not
+        // this call's to release.
+        const unsigned long kAddr  = g_user_trap.r0;
+        const unsigned long kBytes = g_user_trap.r1;
+        if (kAddr < kMmapBase || (kAddr & 4095UL) != 0 || kBytes == 0) {
+            g_tasks[g_current].trap.r0 = static_cast<unsigned long>(-22);
+            return &g_tasks[g_current].trap;
+        }
+        const unsigned long kEnd = (kAddr + kBytes + 4095UL) & ~4095UL;
+        cinux::mm::KernelTables tables;
+        const unsigned long     root = g_tasks[g_current].space->root();
+        auto* const             l1   = reinterpret_cast<cinux::arch::page::Entry*>(root);
+        unsigned long           freed = 0;
+        for (unsigned long spot = kAddr; spot < kEnd; spot += cinux::arch::page::kSize) {
+            const auto kL1 = l1[(spot >> 20U) & 0xFFFUL];
+            if (!cinux::arch::page::DescriptorPresent(kL1) ||
+                cinux::arch::page::DescriptorIsLeaf(kL1, cinux::arch::page::WalkLevel::kL1)) {
+                continue;
+            }
+            auto* const l2 = reinterpret_cast<cinux::arch::page::Entry*>(
+                cinux::arch::page::TableTarget(kL1));
+            auto& slot = l2[(spot >> 12U) & 0xFFUL];
+            if (!cinux::arch::page::DescriptorPresent(slot)) {
+                continue;
+            }
+            cinux::mm::cow::ReleaseFrame(cinux::arch::page::LeafFrame(
+                slot, cinux::arch::page::kLeafLevel));
+            slot = cinux::arch::page::Entry{0};
+            cinux::arch::space::InvalidatePage(spot);
+            ++freed;
+        }
+        cinux::print::Println("[armv7] munmap %X pages %u", kAddr, freed);
+        g_tasks[g_current].trap.r0 = 0;
         return &g_tasks[g_current].trap;
     }
 

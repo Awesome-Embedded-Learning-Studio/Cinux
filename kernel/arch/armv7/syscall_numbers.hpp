@@ -28,5 +28,6 @@ inline constexpr unsigned long kGetPid      = 20;
 inline constexpr unsigned long kBrk         = 45;
 inline constexpr unsigned long kClose       = 6;
 inline constexpr unsigned long kMmap        = 90;
+inline constexpr unsigned long kMunmap      = 91;
 
 }  // namespace cinux::armv7::syscall_nr
