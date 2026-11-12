@@ -334,7 +334,7 @@ N 次；失败时脚本会指出现成的留档日志。默认一次。
 | 3 | read | `read timed out`（有数据那条未覆盖） |
 | 4 | write | `svc write 22 bytes`、两种拒绝 |
 | 6 | close | `close 2`、`ebadf ok` |
-| 19 | lseek | `lseek 3 -> 0`、用户侧 `lseek ok`（读三字节、回零、再读六字节） |
+| 19 | lseek | `lseek 3 -> 0`、用户侧 `lseek ok`（读三字节、回零、再读六字节）；同一文件开两次各读各的（`multi open ok`）；开满 3 到 7 之后再开回 ENOMEM（`full ok`） |
 | 20 | getpid | `getpid 3`、`pid N ok` |
 | 64 | getppid | `getppid 0`、`ppid ok` |
 | 78 | getticks | `getticks 3`、睡三个 tick 之后变大（`ticks ok`） |

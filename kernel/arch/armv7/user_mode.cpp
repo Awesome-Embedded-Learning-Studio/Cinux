@@ -395,6 +395,75 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
             static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                             static_cast<unsigned long>(kFd), 0, 0));
         }
+        {
+            char second[8];
+            second[0] = '/'; second[1] = 'h'; second[2] = 'e'; second[3] = 'l';
+            second[4] = 'l'; second[5] = 'o'; second[6] = 0;   second[7] = 0;
+            const long kA = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(second)), 0, 0);
+            const long kB = user_syscall3(
+                cinux::armv7::syscall_nr::kOpen,
+                static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(second)), 0, 0);
+            if (kA >= 3 && kB >= 3 && kA != kB) {
+                char pa[4] = {0, 0, 0, 0};
+                char pb[4] = {0, 0, 0, 0};
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                                static_cast<unsigned long>(kA), 0, 0));
+                static_cast<void>(user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kA),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(pa)), 2));
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kLseek,
+                                                static_cast<unsigned long>(kB), 3, 0));
+                static_cast<void>(user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kB),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(pb)), 3));
+                static_cast<void>(user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, static_cast<unsigned long>(kA),
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(&pa[2])), 1));
+                if (pa[0] == 'h' && pa[1] == 'e' && pa[2] == 'l' && pb[0] == 'l' &&
+                    pb[1] == 'o' && pb[2] == '\n') {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('m'); NOTE('u'); NOTE('l'); NOTE('t'); NOTE('i'); NOTE(' ');
+                    NOTE('o'); NOTE('p'); NOTE('e'); NOTE('n'); NOTE(' '); NOTE('o');
+                    NOTE('k'); NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kA), 0, 0));
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kB), 0, 0));
+            }
+            long          last  = 0;
+            unsigned long held  = 0;
+            long          kept[6] = {0, 0, 0, 0, 0, 0};
+            for (unsigned long round = 0; round < 6; ++round) {
+                last = user_syscall3(
+                    cinux::armv7::syscall_nr::kOpen,
+                    static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(second)), 0, 0);
+                if (last < 0) {
+                    break;
+                }
+                kept[held] = last;
+                ++held;
+            }
+            for (unsigned long index = 0; index < held; ++index) {
+                static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
+                                                static_cast<unsigned long>(kept[index]), 0, 0));
+            }
+            if (last == static_cast<long>(cinux::armv7::errno::kNoMem)) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('f'); NOTE('u'); NOTE('l'); NOTE('l'); NOTE(' '); NOTE('o');
+                NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
         char missing[4];
         missing[0] = '/'; missing[1] = 'n'; missing[2] = 0; missing[3] = 0;
         const long kMissing   = user_syscall3(

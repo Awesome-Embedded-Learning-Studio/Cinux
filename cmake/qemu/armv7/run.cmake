@@ -118,6 +118,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_ENOENT=enoent ok"
             "-DEXPECTED_LSEEK=lseek 3 -> 0"
             "-DEXPECTED_LSEEKOK=lseek ok"
+            "-DEXPECTED_MULTIOPEN=multi open ok"
+            "-DEXPECTED_FULL=full ok"
             "-DEXPECTED_CLOSE=close 2"
             "-DEXPECTED_WOKE=task 0 woke from sleep"
             "-DEXPECTED_TASKS=two tasks ok"

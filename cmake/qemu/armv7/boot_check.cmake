@@ -73,6 +73,8 @@ expect_literal(EXPECTED_FILEOK "the file contents were wrong.")
 expect_literal(EXPECTED_ENOENT "a missing name was accepted.")
 expect_literal(EXPECTED_LSEEK "lseek never moved the offset.")
 expect_literal(EXPECTED_LSEEKOK "the offset did not survive a rewind.")
+expect_literal(EXPECTED_MULTIOPEN "two opens shared one offset.")
+expect_literal(EXPECTED_FULL "the descriptor table never filled up.")
 
 expect_literal(EXPECTED_MMAP "the anonymous mapping never appeared.")
 expect_literal(EXPECTED_HINTTOOK "a taken hint was accepted.")
