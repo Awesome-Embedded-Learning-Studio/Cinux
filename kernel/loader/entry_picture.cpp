@@ -2,6 +2,7 @@
 #include <initializer_list>
 
 #include "cinux/memory.hpp"
+#include "kernel/arch/abi.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/loader/loader.hpp"
 
@@ -11,13 +12,12 @@ namespace {
 
 using arch::page::kSize;
 
-/// One word of the exec initial-stack ABI. The x86_64 System V startup
-/// stack speaks 8-byte words whatever the kernel build's own word width
-/// is; the arch split will move this alias next to the ABI it serves.
-using AbiWord = unsigned long long;
+/// The initial-stack word comes from the ABI the target supplies, so the
+/// frame's width cannot drift from the world the program will run in.
+using cinux::arch::abi::AbiWord;
 
 /// Bytes one initial-stack word occupies on the wire.
-constexpr unsigned long kAbiWordBytes = sizeof(AbiWord);
+using cinux::arch::abi::kAbiWordBytes;
 
 struct PicturePlane {
     unsigned char* page;

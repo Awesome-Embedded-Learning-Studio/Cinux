@@ -60,9 +60,6 @@ inline constexpr std::uint16_t kTypeExecutable = 2;
 /// position-independent so any base serves it.
 inline constexpr std::uint16_t kTypeShared = 3;
 
-/// The one machine served: x86-64.
-inline constexpr std::uint16_t kMachineX8664 = 0x3E;
-
 /// Which seat an image is parsed for. The interpreter seat takes one
 /// shape, the shared object; the program seat takes two — the
 /// fixed-base executable, whose link addresses already place it, and
@@ -90,10 +87,13 @@ struct ElfImage {
     const std::uint8_t* segments;         ///< Pointer to the program-header table inside the file.
     std::uint16_t       segment_count;    ///< Loadable candidates in the table.
     std::uint16_t       segment_size;     ///< Bytes per program-header entry.
+    std::uint8_t        elf_class;        ///< ELF class the image declared: 1 is 32-bit, 2 is 64-bit.
+    std::uint16_t       machine;          ///< Machine number from the header; the arch decides if it
+                                          ///< may run here.
 };
 
 /**
- * @brief         Judges one buffer as an ELF64 image for one seat.
+ * @brief         Judges one buffer as an ELF image for one seat.
  *
  * @param[in]     data    The image bytes.
  * @param[in]     bytes   How many are readable at data.
@@ -102,18 +102,36 @@ struct ElfImage {
  * @return        The image reduced to entry, header-table address, and
  *                segment table, or kInvalidArgument for anything this
  *                loader refuses.
- * @note          Checks the magic, class, endianness, machine, the
- *                type the role asks for, and that the whole header and
- *                program-header table sit inside the buffer — every
- *                refusal names a reason in one line on the serial path
- *                in the caller.
+ * @note          Checks the magic, class, endianness, the type the role
+ *                asks for, and that the whole header and program-header
+ *                table sit inside the buffer. Both ELF classes read,
+ *                each with its own header offsets; whether the machine
+ *                and class may actually run here is the loader's
+ *                judgement against kernel/arch/abi.hpp, not the parser's.
  * @warning       None
  * @throws        None
  * @since         0.1.0
  * @ingroup       kernel_loader
  */
-[[nodiscard]] base::Result<ElfImage> ParseElf64(const std::uint8_t* data, std::size_t bytes,
-                                                ImageRole role);
+[[nodiscard]] base::Result<ElfImage> ParseElf(const std::uint8_t* data, std::size_t bytes,
+                                              ImageRole role);
+
+/**
+ * @brief         Reports whether an image's class and machine may run on
+ *                this target.
+ *
+ * @param[in]     image   A parse that succeeded.
+ * @return        true when the image's ELF class and machine number match
+ *                what kernel/arch/abi.hpp declares for this target.
+ * @note          The parser reads any well-formed class; this gate is the
+ *                architecture's judgement, kept out of the byte reader so
+ *                a port changes one constant rather than the parser.
+ * @warning       None
+ * @throws        None
+ * @since         0.3.0
+ * @ingroup       kernel_loader
+ */
+[[nodiscard]] bool ImageRunsHere(const ElfImage& image);
 
 /**
  * @brief         Reads one segment out of a parsed table.

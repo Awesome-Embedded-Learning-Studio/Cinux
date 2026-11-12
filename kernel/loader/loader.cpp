@@ -1,3 +1,4 @@
+#include "kernel/arch/abi.hpp"
 #include "kernel/loader/loader.hpp"
 
 #include <cstddef>
@@ -94,11 +95,14 @@ bool map_segment(const LoadWorld& world, const ElfSegment& segment,
 
 bool LoadElfIntoSpace(const std::uint8_t* data, std::size_t bytes, const LoadWorld& world,
                       EntryFacts& facts) {
-    const base::Result<ElfImage> kParsed = ParseElf64(data, bytes, world.role);
+    const base::Result<ElfImage> kParsed = ParseElf(data, bytes, world.role);
     if (!kParsed.ok()) {
         return false;
     }
-    const ElfImage             kImage = kParsed.value();
+    const ElfImage kImage = kParsed.value();
+    if (!ImageRunsHere(kImage)) {
+        return false;
+    }
     base::Shared<fs::OpenFile> backing;
     if (world.file_ops != nullptr) {
         backing = base::Shared<fs::OpenFile>(

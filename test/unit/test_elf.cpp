@@ -190,13 +190,13 @@ void check_good_segment(const cinux::loader::ElfImage& image) {
 }
 
 TEST("elf: segment flags travel with the loadable facts") {
-    const auto kParsed = cinux::loader::ParseElf64(kGoodImage.bytes, kImageBytes,
+    const auto kParsed = cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
                                                    cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kParsed.ok());
     TestImage writable = kGoodImage;
     put_dword(writable, kEhdrBytes + 4, 6);
     const auto kRewritten =
-        cinux::loader::ParseElf64(writable.bytes, kImageBytes, cinux::loader::ImageRole::kProgram);
+        cinux::loader::ParseElf(writable.bytes, kImageBytes, cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kRewritten.ok());
     cinux::loader::ElfSegment segment{};
     ASSERT_TRUE(cinux::loader::ReadSegment(kRewritten.value(), 0, segment));
@@ -205,7 +205,7 @@ TEST("elf: segment flags travel with the loadable facts") {
 }
 
 TEST("elf: a well-formed static image parses to entry and segments") {
-    const auto kParsed = cinux::loader::ParseElf64(kGoodImage.bytes, kImageBytes,
+    const auto kParsed = cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
                                                    cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kParsed.ok());
     ASSERT_TRUE(kParsed.value().entry == 0x401000);
@@ -217,25 +217,37 @@ TEST("elf: a well-formed static image parses to entry and segments") {
 void refuse_mangled_word(TestImage broken, std::size_t where, std::uint8_t value) {
     broken.bytes[where] = value;
     ASSERT_TRUE(
-        !cinux::loader::ParseElf64(broken.bytes, kImageBytes, cinux::loader::ImageRole::kProgram)
+        !cinux::loader::ParseElf(broken.bytes, kImageBytes, cinux::loader::ImageRole::kProgram)
              .ok());
 }
 
 TEST("elf: refusals name their family") {
-    ASSERT_TRUE(!cinux::loader::ParseElf64(nullptr, 64, cinux::loader::ImageRole::kProgram).ok());
+    ASSERT_TRUE(!cinux::loader::ParseElf(nullptr, 64, cinux::loader::ImageRole::kProgram).ok());
     ASSERT_TRUE(
-        !cinux::loader::ParseElf64(kGoodImage.bytes, 32, cinux::loader::ImageRole::kProgram).ok());
+        !cinux::loader::ParseElf(kGoodImage.bytes, 32, cinux::loader::ImageRole::kProgram).ok());
     refuse_mangled_word(kGoodImage, 0, 'M');
     refuse_mangled_word(kGoodImage, 4, 1);
-    refuse_mangled_word(kGoodImage, 18, 0x28);
     refuse_mangled_word(kGoodImage, 56, 0);
     refuse_mangled_word(kGoodImage, 54, 32);
+}
+
+TEST("elf: a sound image for another machine passes the parse and fails the arch gate") {
+    TestImage foreign = kGoodImage;
+    foreign.bytes[18] = 0x28;
+    const auto kParsed = cinux::loader::ParseElf(foreign.bytes, kImageBytes,
+                                                  cinux::loader::ImageRole::kProgram);
+    ASSERT_TRUE(kParsed.ok());
+    ASSERT_TRUE(!cinux::loader::ImageRunsHere(kParsed.value()));
+    const auto kNative = cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
+                                                  cinux::loader::ImageRole::kProgram);
+    ASSERT_TRUE(kNative.ok());
+    ASSERT_TRUE(cinux::loader::ImageRunsHere(kNative.value()));
 }
 
 TEST("elf: the program seat takes the relocatable shape and names its bias need") {
     TestImage relocatable = kGoodImage;
     relocatable.bytes[16] = cinux::loader::kTypeShared;
-    const auto kParsed    = cinux::loader::ParseElf64(relocatable.bytes, kImageBytes,
+    const auto kParsed    = cinux::loader::ParseElf(relocatable.bytes, kImageBytes,
                                                       cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kParsed.ok());
     ASSERT_TRUE(cinux::loader::ProgramNeedsLoadBias(relocatable.bytes, kImageBytes));
@@ -243,7 +255,7 @@ TEST("elf: the program seat takes the relocatable shape and names its bias need"
 }
 
 TEST("elf: reads past the table refuse politely") {
-    const auto kParsed = cinux::loader::ParseElf64(kGoodImage.bytes, kImageBytes,
+    const auto kParsed = cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
                                                    cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kParsed.ok());
     cinux::loader::ElfSegment segment{};
@@ -252,7 +264,7 @@ TEST("elf: reads past the table refuse politely") {
 }
 
 TEST("elf: the interpreter seat parses a shared image and reports its header table") {
-    const auto kParsed = cinux::loader::ParseElf64(kSharedImage.bytes, kImageBytes,
+    const auto kParsed = cinux::loader::ParseElf(kSharedImage.bytes, kImageBytes,
                                                    cinux::loader::ImageRole::kInterpreter);
     ASSERT_TRUE(kParsed.ok());
     ASSERT_TRUE(kParsed.value().entry == 0x2000);
@@ -265,13 +277,13 @@ TEST("elf: the interpreter seat parses a shared image and reports its header tab
 }
 
 TEST("elf: the interpreter seat refuses the fixed-base shape") {
-    ASSERT_TRUE(!cinux::loader::ParseElf64(kGoodImage.bytes, kImageBytes,
+    ASSERT_TRUE(!cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
                                            cinux::loader::ImageRole::kInterpreter)
                      .ok());
 }
 
 TEST("elf: a table no loadable segment covers reports zero") {
-    const auto kParsed = cinux::loader::ParseElf64(kGoodImage.bytes, kImageBytes,
+    const auto kParsed = cinux::loader::ParseElf(kGoodImage.bytes, kImageBytes,
                                                    cinux::loader::ImageRole::kProgram);
     ASSERT_TRUE(kParsed.ok());
     ASSERT_TRUE(kParsed.value().headers_address == 0);
