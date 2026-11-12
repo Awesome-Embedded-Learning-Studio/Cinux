@@ -19,7 +19,7 @@
 #include "kernel/arch/isr.hpp"
 #include "kernel/boot/print.hpp"
 
-extern "C" void c_data_abort_handler() {
+void HandleDataAbort() {
     unsigned long fault_address = 0;
     unsigned long fault_status  = 0;
     asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(fault_address));  // DFAR

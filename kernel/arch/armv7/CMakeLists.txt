@@ -10,6 +10,7 @@ add_executable(arm_image
     irq.cpp
     vectors.S
     faults.cpp
+    exception_dispatch.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp

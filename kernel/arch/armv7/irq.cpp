@@ -22,8 +22,8 @@ void PrintUnsigned(unsigned long long value) {
 
 }  // namespace
 
-/// C side of the IRQ vector: acknowledge, serve, end.
-extern "C" void c_irq_handler() {
+/// IRQ side: acknowledge, serve, end.
+void HandleIrq() {
     const unsigned long id = cinux::armv7::GicAcknowledge();
     if (id == cinux::armv7::kTimerInterruptIdSecure ||
         id == cinux::armv7::kTimerInterruptIdNonSecure) {
