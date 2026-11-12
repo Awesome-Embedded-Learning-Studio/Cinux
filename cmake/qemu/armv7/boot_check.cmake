@@ -50,6 +50,10 @@ if(EXPECTED_TASKS AND NOT serial_out MATCHES "${EXPECTED_TASKS}")
     message(FATAL_ERROR
         "arm_boot: the two-task round robin failed.\nstdout:\n${serial_out}")
 endif()
+if(EXPECTED_THIRD AND NOT serial_out MATCHES "${EXPECTED_THIRD}")
+    message(FATAL_ERROR
+        "arm_boot: the third task never ran.\nstdout:\n${serial_out}")
+endif()
 if(EXPECTED_KEEPS AND NOT serial_out MATCHES "${EXPECTED_KEEPS}")
     message(FATAL_ERROR
         "arm_boot: a task lost its private page.\nstdout:\n${serial_out}")

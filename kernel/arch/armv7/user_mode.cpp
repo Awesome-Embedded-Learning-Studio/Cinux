@@ -63,7 +63,7 @@ struct UserTask {
     unsigned long            exit_status;
 };
 
-constexpr unsigned long kTaskCount = 2;
+constexpr unsigned long kTaskCount = 3;
 
 UserTask                g_tasks[kTaskCount];
 cinux::arch::CpuContext g_main;
@@ -365,6 +365,9 @@ bool RunUserModeSelfCheck() {
         return false;
     }
     if (!setup_task(1, kTaskACode, kTaskAStack, g_tasks[0].space)) {
+        return false;
+    }
+    if (!setup_task(2, kTaskACode, kTaskAStack, g_tasks[0].space)) {
         return false;
     }
     g_running = true;

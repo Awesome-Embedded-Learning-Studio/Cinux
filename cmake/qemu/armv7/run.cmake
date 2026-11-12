@@ -42,6 +42,7 @@ add_test(NAME arm_boot
             -DEXPECTED_REPAIR=fault repaired at 40009000
             -DEXPECTED_COWCOPY=cow copy at 40008000
             -DEXPECTED_KEEPS=task 1 keeps its page
+            -DEXPECTED_THIRD=task 2 keeps its page
             -DEXPECTED_TASKS=two tasks ok
             -DEXPECTED_USER=user mode round trip ok
             -DEXPECTED_SVC=svc write matched
