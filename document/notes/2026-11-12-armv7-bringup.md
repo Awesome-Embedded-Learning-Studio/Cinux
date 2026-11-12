@@ -214,6 +214,19 @@ x86 那条线不受影响：`cmake --build build --target test_host` 是 86 个�
 所以接入的路径不是"写个 sink 就完"，而是先把 `task_runtime` 里那两段
 （建上下文、切换）抽成端口实现，再写 sink，最后才谈把用户任务搬过去。
 
+已经做完的：建上下文（`kernel/arch/task_context.hpp`）、切任务前的栈顶与
+地址寄存器（`task_switch.hpp`）、三参数切换的端口化，以及 armv7 上下文末尾
+补的两个地址寄存器字段。做完之后再拿 `task.cpp`、`task_runtime.cpp`、
+`scheduler.cpp` 试编，还差这几样端口侧的东西，也都补上了：
+`smp_control`（单核空实现）、`FpuImage` 占位、`PerCpu` 补齐共享代码用到的
+字段、`TaskTrampoline`（r4 放入口、r5 放退出钩子）、以及终端的车道里也要
+生成 `checks_config.hpp`。
+
+补完之后编译是过的，链接过不去：`Task` 这个控制块带着一整套依赖，
+`fs::FileTable` 的构造与析构、`proc::SendSignal`、`futex::ClearTidWord`
+都要一起进来。这三样各自又牵出文件系统、信号与 futex。也就是说把通用调度器
+接上，等于把这几块一起搬进臂上镜像。这一版没有搬，先把依赖记在这里。
+
 在没做这一步之前，迷你调度器就是这一版的真调度器，笔记与自检都按它写。
 
 ## 端口转发

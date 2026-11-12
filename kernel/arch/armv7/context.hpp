@@ -23,6 +23,12 @@
 
 namespace cinux::arch {
 
+/// This lane does not save floating point with a task; the type exists
+/// so the shared task block compiles.
+struct FpuImage {
+    unsigned long long words[64];
+};
+
 /// The register image context_switch.S moves with plain offsets.
 struct CpuContext {
     unsigned long r4;
@@ -55,3 +61,11 @@ extern "C" void ContextSwitch(CpuContext* from, const CpuContext* to);
 extern "C" void ContextSwitchIntoUser(CpuContext* from, const CpuContext* to);
 
 }  // namespace cinux::arch
+
+extern "C" {
+
+/// The first instruction of a freshly built task: r4 holds the body and
+/// r5 the exit hook, so a body that returns still lands in the exit path.
+void TaskTrampoline();
+
+}  // extern "C"

@@ -14,6 +14,11 @@
 
 namespace cinux::arch {
 
+/// Lets the core breathe while another waits for it.
+inline void CpuRelax() {
+    asm volatile("yield");
+}
+
 /// Full memory barrier.
 inline void MemoryBarrier() {
     asm volatile("dsb" ::: "memory");

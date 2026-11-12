@@ -29,3 +29,11 @@ ContextSwitchIntoUser:
     msr     spsr_cxsf, r2
     ldmia   r1, {r4-r11, sp, lr}
     movs    pc, lr
+
+@ A fresh task starts here through lr, with its body in r4 and its exit
+@ hook in r5. A returning body still lands in the unified exit path.
+
+.global TaskTrampoline
+TaskTrampoline:
+    blx r4
+    bx  r5

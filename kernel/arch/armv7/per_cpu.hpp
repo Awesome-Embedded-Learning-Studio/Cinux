@@ -17,16 +17,34 @@
 
 #pragma once
 
+#include <atomic>
+
+namespace cinux::proc {
+struct Task;
+}
+
 namespace cinux::arch::per_cpu {
 
 /// The scratch block one processor owns.
 struct PerCpu {
-    unsigned long cpu_id;
-    unsigned long kernel_stack_top;
-    unsigned long user_stack_top;
-    unsigned long pending_reap;
-    unsigned long current_slot;  // the running mini-task; ~0 means the caller
-    unsigned long slice_ticks;   // ticks left before a preemption
+    unsigned long       kernel_stack_top;  ///< Supervisor stack the next entry uses.
+    unsigned long       user_stack_top;    ///< Where the last user drop put sp.
+    cinux::proc::Task*  current = nullptr; ///< The task running on this core.
+    unsigned long       cpu_id;            ///< The number this core reports.
+    unsigned long       apic_id;           ///< Kept for the shared fields' shape.
+    cinux::proc::Task*  pending_reap = nullptr;  ///< A dead task awaiting reclaim.
+    unsigned long       slice_ticks;       ///< Ticks left before a preemption.
+    unsigned long       preempt_depth;     ///< Nested preemption suppressions.
+    unsigned long       no_reschedule_depth;  ///< Nested "do not switch" scopes.
+    unsigned long       queue_depth;       ///< Ready tasks at the last rotate.
+    bool                rotate_due;        ///< A rotate was asked for.
+    bool                notify_pending;    ///< A wakeup is already in flight.
+    std::atomic<unsigned int> local_timer_interrupts{0};
+    std::atomic<unsigned int> reschedule_interrupts{0};
+    unsigned long       current_slot;      ///< The mini-task; ~0 means the caller.
+
+    /// The block installed on the executing processor.
+    static PerCpu& self();
 };
 
 /// Points TPIDRPRW at a block; every processor calls this once.
@@ -36,6 +54,12 @@ inline void Install(PerCpu* block) {
 
 /// Follows TPIDRPRW to the executing processor's block.
 inline PerCpu& self() {
+    unsigned long base = 0;
+    asm volatile("mrc p15, 0, %0, c13, c0, 4" : "=r"(base));
+    return *reinterpret_cast<PerCpu*>(base);
+}
+
+inline PerCpu& PerCpu::self() {
     unsigned long base = 0;
     asm volatile("mrc p15, 0, %0, c13, c0, 4" : "=r"(base));
     return *reinterpret_cast<PerCpu*>(base);
