@@ -67,7 +67,7 @@ public:
     /// Where the shell's first instruction sits.
     std::uint64_t entry = 0;
 
-    /// The shell world's PML4.
+    /// The shell world's top-level table.
     unsigned long root = 0;
 
     /// Where the shell's stack picture landed.

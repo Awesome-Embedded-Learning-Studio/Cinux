@@ -115,9 +115,9 @@ const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& ha
 /**
  * @brief         The kernel's own page-table root, fixed at takeover.
  *
- * @return        Physical address of the kernel PML4.
+ * @return        Physical address of the kernel's top-level table.
  * @note          Capture of the moment switching began: once other
- *                address spaces activate, CR3 names the live one, while
+ *                address spaces activate, the active root names the live one, while
  *                this stays the road home.
  * @warning       None
  * @throws        None
