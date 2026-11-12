@@ -201,9 +201,9 @@ AddressSpace* CloneSharedSpace(const AddressSpace& parent, const VmaStore* range
         cinux::base::safety::Check(!leaf.has(cinux::arch::page::kLarge),
                                    "user half holds a large page");
         const unsigned long long kTarget = walk::EntryTarget(leaf);
-        const unsigned long      kBase   = slot << walk::IndexRange(walk::WalkLevel::kPml4).low;
+        const unsigned long      kBase   = slot << walk::IndexRange(walk::kUpperLevels[0]).low;
         descend(cinux::base::PtrAt<Entry>(cinux::mm::DirectMapVirt(kTarget)),
-                walk::WalkLevel::kPdpt, kBase, kContext);
+                walk::kUpperLevels[1], kBase, kContext);
     }
     if (arch::space::ActiveRoot() == kParentRoot) {
         arch::space::SwitchRoot(kParentRoot);

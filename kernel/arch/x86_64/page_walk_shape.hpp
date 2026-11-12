@@ -75,6 +75,44 @@ constexpr BitRange IndexRange(WalkLevel level) {
     return {.low = 0, .width = 0};
 }
 
+/// The level a 4 KiB leaf occupies; every walk ends here or at a large leaf above it.
+// (kLeafLevel already declared above.)
+
+/**
+ * @brief         Reports whether a level holds 4 KiB leaves.
+ * @param[in]     level   The level asked about.
+ * @return        true for the last level of the descent.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool IsLeafLevel(WalkLevel level) {
+    return level == kLeafLevel;
+}
+
+/**
+ * @brief         Reports whether a level may hold a large leaf.
+ * @param[in]     level   The level asked about.
+ * @return        true where this machine allows a large page.
+ * @note          x86-64 allows them at the PDPT (1 GiB) and the page
+ *                directory (2 MiB), never at the top level.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool HasLargeLeaf(WalkLevel level) {
+    return level == WalkLevel::kPdpt || level == WalkLevel::kPageDirectory;
+}
+
+/**
+ * @brief         Names the physical-address field of a level's large leaf.
+ * @param[in]     level   The level whose field is wanted.
+ * @return        Bit range of that level's physical address.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr BitRange LargeLeafPhys(WalkLevel level) {
+    return level == WalkLevel::kPdpt ? kHugePagePhys : kLargePagePhys;
+}
+
 /// The levels the walk descends through before the leaf table.
 constexpr WalkLevel kUpperLevels[3] = {
     WalkLevel::kPml4,

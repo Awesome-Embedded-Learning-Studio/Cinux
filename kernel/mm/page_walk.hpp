@@ -36,7 +36,10 @@ using cinux::arch::page::IndexRange;
 using cinux::arch::page::kEntriesPerTable;
 using cinux::arch::page::kLeafLevel;
 using cinux::arch::page::kUpperLevels;
+using cinux::arch::page::HasLargeLeaf;
+using cinux::arch::page::IsLeafLevel;
 using cinux::arch::page::kUserHalfSlots;
+using cinux::arch::page::LargeLeafPhys;
 using cinux::arch::page::LowBits;
 using cinux::arch::page::SlotIndex;
 using cinux::arch::page::WalkLevel;
@@ -255,12 +258,11 @@ unsigned long TranslatePage(World& world, unsigned long root, unsigned long virt
     if (kSlot.entry == nullptr || !kSlot.entry->has(cinux::arch::page::kPresent)) {
         return 0;
     }
-    if (kSlot.level != kLeafLevel) {
-        if (kSlot.level == WalkLevel::kPml4) {
+    if (!IsLeafLevel(kSlot.level)) {
+        if (!HasLargeLeaf(kSlot.level)) {
             return 0;
         }
-        auto const kField = kSlot.level == WalkLevel::kPdpt ? cinux::arch::page::kHugePagePhys
-                                                            : cinux::arch::page::kLargePagePhys;
+        auto const kField = LargeLeafPhys(kSlot.level);
         Entry      physical{};
         physical.deposit(kField, kSlot.entry->extract(kField));
         return physical.raw | LowBits(virtual_address, IndexRange(kSlot.level).low);
