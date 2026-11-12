@@ -188,6 +188,23 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         user_write(note, note_length);
     }
     if (task_id == 0) {
+        constexpr unsigned long kRoHint = 0x40030000UL;
+        const long kRo = user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kRoHint, 1);
+        if (kRo == static_cast<long>(kRoHint)) {
+            auto* const kSpot = reinterpret_cast<volatile unsigned long*>(kRoHint);
+            *kSpot            = 0x5EEDUL;
+            if (*kSpot == 0x5EEDUL) {
+                char          note[16];
+                unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                NOTE('r'); NOTE('o'); NOTE(' '); NOTE('c'); NOTE('o'); NOTE('p');
+                NOTE('y'); NOTE(' '); NOTE('o'); NOTE('k'); NOTE('\n');
+#undef NOTE
+                user_write(note, note_length);
+            }
+        }
+    }
+    if (task_id == 0) {
         constexpr unsigned long kHint = 0x40020000UL;
         const long kHinted =
             user_syscall3(cinux::armv7::syscall_nr::kMmap, 4096, kHint, 0);
@@ -514,6 +531,36 @@ bool RepairUserPage(unsigned long address, unsigned long status) {
         }
     }
 
+    cinux::mm::KernelTables tables;
+    const unsigned long     root = cinux::arch::space::ActiveRoot();
+    const unsigned long     mapped = cinux::mm::walk::TranslatePage(tables, root, kPage);
+    if (mapped != 0 && (status & cinux::arch::isr::kDfsrWrite) != 0 &&
+        !cinux::arch::UserPageIsWritable(kPage)) {
+        // A private page mapped read-only: copy it and hand back a
+        // writable frame. Nobody else shares it, so the old one goes.
+        const auto kCopy = cinux::mm::Pmm::self().allocate_page();
+        if (kCopy.raw == 0) {
+            return false;
+        }
+        const auto* const source = reinterpret_cast<const unsigned char*>(mapped);
+        auto* const       target = reinterpret_cast<unsigned char*>(kCopy.raw);
+        for (unsigned long index = 0; index < cinux::arch::page::kSize; ++index) {
+            target[index] = source[index];
+        }
+        auto* const table = cinux::mm::walk::EnsureLeafTable(tables, root, kPage,
+                                                             cinux::arch::page::kUser);
+        if (table == nullptr) {
+            return false;
+        }
+        table[cinux::arch::page::SlotIndex(kPage, cinux::arch::page::kLeafLevel)] =
+            cinux::arch::page::MakePageEntry(
+                kCopy.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+        cinux::arch::space::InvalidatePage(kPage);
+        cinux::mm::cow::ReleaseFrame(mapped);
+        cinux::print::Println("[armv7] ro copy at %X", kPage);
+        return true;
+    }
+
     // Only the demand-page window is fillable; every other fault (the
     // cross-table probe included) must fall through to the task ending.
     constexpr unsigned long kDemandBase = 0x40009000UL;
@@ -521,9 +568,7 @@ bool RepairUserPage(unsigned long address, unsigned long status) {
     if (address < kDemandBase || address >= kDemandEnd) {
         return false;
     }
-    cinux::mm::KernelTables tables;
-    const unsigned long     root = cinux::arch::space::ActiveRoot();
-    if (cinux::mm::walk::TranslatePage(tables, root, kPage) != 0) {
+    if (mapped != 0) {
         return false;
     }
     const auto kFrame = cinux::mm::Pmm::self().allocate_page();
@@ -733,12 +778,16 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
                 g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
                 return &g_tasks[g_current].trap;
             }
+            const auto kLeafBits =
+                (g_user_trap.r2 & 1UL) != 0
+                    ? cinux::arch::page::kUser | cinux::arch::page::kReadOnly
+                    : cinux::arch::page::kUser | cinux::arch::page::kWritable;
             table[cinux::arch::page::SlotIndex(spot, cinux::arch::page::kLeafLevel)] =
-                cinux::arch::page::MakePageEntry(
-                    kFrame.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
+                cinux::arch::page::MakePageEntry(kFrame.raw, kLeafBits);
             cinux::arch::space::InvalidatePage(spot);
         }
-        cinux::print::Println("[armv7] mmap %X len %X", kBase, kWant);
+        cinux::print::Println("[armv7] mmap %X len %X flags %X", kBase, kWant,
+                              g_user_trap.r2);
         g_tasks[g_current].trap.r0 = kBase;
         return &g_tasks[g_current].trap;
     }

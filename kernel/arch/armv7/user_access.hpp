@@ -65,6 +65,31 @@ inline bool UserPageIsMapped(unsigned long address) {
 }
 
 /**
+ * @brief         Reports whether one page is mapped user-writable.
+ * @param[in]     address   Page-aligned user address.
+ * @return        true when the leaf grants write access to user mode.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline bool UserPageIsWritable(unsigned long address) {
+    const auto* const l1 = reinterpret_cast<const page::Entry*>(space::ActiveRoot());
+    const page::Entry kL1 = l1[(address >> 20U) & 0xFFFUL];
+    if (!page::DescriptorPresent(kL1)) {
+        return false;
+    }
+    if (page::DescriptorIsLeaf(kL1, page::WalkLevel::kL1)) {
+        const unsigned long ap = (kL1.raw >> 10U) & 0x3UL;
+        return ap == 0x3UL;
+    }
+    const auto* const l2 = reinterpret_cast<const page::Entry*>(page::TableTarget(kL1));
+    const page::Entry kL2 = l2[(address >> 12U) & 0xFFUL];
+    if (!page::DescriptorPresent(kL2)) {
+        return false;
+    }
+    return ((kL2.raw >> 4U) & 0x3UL) == 0x3UL;
+}
+
+/**
  * @brief         Checks a whole user range: below the top, no overflow,
  *                every page mapped for user mode.
  * @param[in]     address   First byte.
