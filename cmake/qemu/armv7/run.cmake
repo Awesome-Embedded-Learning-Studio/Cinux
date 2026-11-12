@@ -19,6 +19,21 @@ add_custom_target(run
 
 # Every -D value that contains a space must be quoted: an unquoted one is
 # split into several arguments and the check only ever sees its first word.
+# A repeated -D name silently keeps only the last value, which quietly
+# drops an assertion. Refuse that at configure time.
+file(READ ${CMAKE_CURRENT_LIST_FILE} _arm_self)
+string(REGEX MATCHALL "-D([A-Za-z0-9_]+)=" _arm_defs "${_arm_self}")
+set(_arm_names "")
+foreach(_arm_def IN LISTS _arm_defs)
+    string(REGEX REPLACE "^-D([A-Za-z0-9_]+)=.*$" "\\1" _arm_name "${_arm_def}")
+    list(FIND _arm_names "${_arm_name}" _arm_seen)
+    if(_arm_seen GREATER -1)
+        message(FATAL_ERROR
+            "arm_boot: -D${_arm_name} appears twice; only the last would survive")
+    endif()
+    list(APPEND _arm_names "${_arm_name}")
+endforeach()
+
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
             "-DQEMU_PROGRAM=${CINUX_ARM_QEMU}"
