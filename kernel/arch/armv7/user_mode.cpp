@@ -462,6 +462,31 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 #undef NOTE
                     user_write(note, note_length);
                 }
+                const long kBadSeek = user_syscall3(
+                    cinux::armv7::syscall_nr::kLseek, static_cast<unsigned long>(kScrFd),
+                    static_cast<unsigned long>(-1), 0);
+                if (kBadSeek == static_cast<long>(cinux::armv7::errno::kInvalid)) {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('l'); NOTE('s'); NOTE('e'); NOTE('e'); NOTE('k'); NOTE(' ');
+                    NOTE('b'); NOTE('a'); NOTE('d'); NOTE(' '); NOTE('o'); NOTE('k');
+                    NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
+                const long kBadRead = user_syscall3(
+                    cinux::armv7::syscall_nr::kRead, 0, 0x80000000UL, 4);
+                if (kBadRead == static_cast<long>(cinux::armv7::errno::kFault)) {
+                    char          note[24];
+                    unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+                    NOTE('r'); NOTE('e'); NOTE('a'); NOTE('d'); NOTE(' ');
+                    NOTE('b'); NOTE('a'); NOTE('d'); NOTE(' '); NOTE('o'); NOTE('k');
+                    NOTE('\n');
+#undef NOTE
+                    user_write(note, note_length);
+                }
                 static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kClose,
                                                 static_cast<unsigned long>(kScrFd), 0, 0));
             }
@@ -1319,6 +1344,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         if (next < 0 || kWhence > 2) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
+            cinux::print::Println("[armv7] lseek %u refused, whence %u", kFd, kWhence);
             return &g_tasks[g_current].trap;
         }
         file.offset = static_cast<unsigned long>(next);
@@ -1370,6 +1396,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         if (slot == kMaxFds) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
+            cinux::print::Println("[armv7] open refused, no free slot");
             return &g_tasks[g_current].trap;
         }
         g_tasks[g_current].fds[slot].open     = true;
@@ -1414,6 +1441,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         if (kCount == 0 || !cinux::arch::UserRangeIsMapped(kBuf, kCount)) {
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kFault);
+            cinux::print::Println("[armv7] read refused %X + %u", kBuf, kCount);
             return &g_tasks[g_current].trap;
         }
         if (cinux::armv7::UartReceiveReady()) {
