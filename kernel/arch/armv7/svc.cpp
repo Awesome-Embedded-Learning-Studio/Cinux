@@ -22,10 +22,6 @@
 
 namespace {
 
-cinux::arch::CpuContext  g_scratch;
-cinux::arch::CpuContext* g_kernel_return = nullptr;
-volatile bool            g_user_exited   = false;
-
 unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long count) {
     if (fd != 1 && fd != 2) {
         return static_cast<unsigned long>(-1);
@@ -39,35 +35,8 @@ unsigned long do_write(unsigned long fd, unsigned long buffer, unsigned long cou
 
 }  // namespace
 
-void InstallUserReturnContext(cinux::arch::CpuContext* context) {
-    g_kernel_return = context;
-    g_user_exited   = false;
-}
-
-extern "C" bool UserExited() {
-    return g_user_exited;
-}
-
-extern "C" void ReturnToKernelFromFault() {
-    if (g_kernel_return == nullptr) {
-        return;
-    }
-    g_user_exited = true;
-    cinux::arch::ContextSwitch(&g_scratch, g_kernel_return);
-}
-
-extern "C" void NoteUserExit() {
-    g_user_exited = true;
-}
-
 extern "C" unsigned long c_svc_handler(unsigned long number, unsigned long* frame) {
     switch (number) {
-    case cinux::armv7::syscall_nr::kExit:
-        if (g_kernel_return != nullptr) {
-            NoteUserExit();
-            cinux::arch::ContextSwitch(&g_scratch, g_kernel_return);
-        }
-        return ~0UL;
     case cinux::armv7::syscall_nr::kWrite: {
         const unsigned long result = do_write(frame[0], frame[1], frame[2]);
         cinux::print::Println("[armv7] svc write %u bytes", result);

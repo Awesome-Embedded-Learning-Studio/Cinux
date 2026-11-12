@@ -63,7 +63,7 @@ long user_syscall0(unsigned long number) {
     asm volatile("svc #0"
                  : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
                  : "r"(r7)
-                 : "cc", "memory");
+                 : "cc", "memory", "ip", "lr");
     return static_cast<long>(r0);
 }
 
@@ -77,7 +77,7 @@ long user_syscall3(unsigned long number, unsigned long arg0, unsigned long arg1,
     asm volatile("svc #0"
                  : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
                  : "r"(r7)
-                 : "cc", "memory");
+                 : "cc", "memory", "ip", "lr");
     return static_cast<long>(r0);
 }
 
@@ -88,11 +88,15 @@ void user_write(const char* text, unsigned long length) {
                                     length));
 }
 
+extern "C" void user_entry_stub();
+
 /// Runs on a user page; reaches the kernel only through svc.
-extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program() {
+extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program_c(
+    unsigned long task_id) {
     char          buffer[64];
     unsigned long length = 0;
 #define PUSH_CHAR(c) buffer[length++] = (c)
+    PUSH_CHAR('0' + static_cast<char>(task_id));
     PUSH_CHAR('['); PUSH_CHAR('a'); PUSH_CHAR('r'); PUSH_CHAR('m'); PUSH_CHAR('v');
     PUSH_CHAR('7'); PUSH_CHAR(']'); PUSH_CHAR(' '); PUSH_CHAR('u'); PUSH_CHAR('s');
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
@@ -103,6 +107,10 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
         if (round != 2) {
             static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kSchedYield));
         }
+    }
+    if (task_id != 0) {
+        // A foreign task's code page: this task's table has nothing there.
+        static_cast<void>(*reinterpret_cast<volatile unsigned long*>(0x40001000UL));
     }
     static_cast<void>(user_syscall0(cinux::armv7::syscall_nr::kExit));
     for (;;) {
@@ -176,9 +184,12 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         !map_user_page(task.root, stack_va, kStackFrame.raw)) {
         return false;
     }
+    // The task's argument waits at the top of its own stack; the copied
+    // stub reads it before any C prologue can move sp.
+    *reinterpret_cast<unsigned long*>(kStackFrame.raw + cinux::arch::page::kSize - 4) = index;
     const unsigned long kEntry =
         code_va + static_cast<unsigned long>(
-                      reinterpret_cast<std::uintptr_t>(&user_program) -
+                      reinterpret_cast<std::uintptr_t>(&user_entry_stub) -
                       reinterpret_cast<std::uintptr_t>(__user_text_start));
     task.context      = cinux::arch::CpuContext{};
     task.context.lr   = kEntry;
@@ -249,4 +260,26 @@ cinux::arch::CpuContext* schedule_next(unsigned long number) {
 
 extern "C" cinux::arch::CpuContext* c_schedule_from_user(unsigned long number) {
     return schedule_next(number);
+}
+
+extern "C" void ResumeUserFrame(cinux::arch::CpuContext* frame);
+
+/// A user task died on an abort: mark it, run the other one, or go home.
+extern "C" [[noreturn]] void c_user_faulted() {
+    g_tasks[g_current].done = true;
+    cinux::print::Println("[armv7] task %u faulted", g_current);
+    const unsigned long other = g_current == 0 ? 1 : 0;
+    if (!g_tasks[other].done) {
+        g_current = other;
+        cinux::print::Println("[armv7] switch to task %u", other);
+        cinux::arch::space::SwitchRoot(g_tasks[other].root);
+        asm volatile("cps #0x13" ::: "memory");
+        ResumeUserFrame(&g_tasks[other].context);
+    }
+    g_running = false;
+    cinux::print::Println("[armv7] all user tasks done");
+    cinux::arch::space::SwitchRoot(g_kernel_root);
+    asm volatile("cps #0x13" ::: "memory");
+    cinux::arch::ContextSwitch(&g_scratch, &g_main);
+    __builtin_unreachable();
 }

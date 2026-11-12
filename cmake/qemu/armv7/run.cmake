@@ -39,7 +39,9 @@ add_test(NAME arm_boot
             -DEXPECTED_USER=user mode round trip ok
             -DEXPECTED_SVC=svc write matched
             -DEXPECTED_ROTATE=all user tasks done
-            -DEXPECTED_TASK_DONE=task 1 done
+            -DEXPECTED_TASK_DONE=task 0 done
+            -DEXPECTED_FAULTED=task 1 faulted
+            -DEXPECTED_USERFAULT=user fault caught at 40001000 code 4
             -DEXPECTED_FAULT=data abort at 51000000 status 805 code 2
             -DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
