@@ -118,6 +118,14 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
     PUSH_CHAR('e'); PUSH_CHAR('r'); PUSH_CHAR(' '); PUSH_CHAR('w'); PUSH_CHAR('r');
     PUSH_CHAR('i'); PUSH_CHAR('t'); PUSH_CHAR('e'); PUSH_CHAR('\n');
 #undef PUSH_CHAR
+    // Write this task's own value into the shared page; the first write
+    // takes a copy-on-write fault. It is read back only after the loop,
+    // by which time preemption has let the other task write its own value
+    // into the same address.
+    constexpr unsigned long kSharedVa = 0x40008000UL;
+    const unsigned long     kValue    = 0x1000UL + task_id;
+    *reinterpret_cast<volatile unsigned long*>(kSharedVa) = kValue;
+
     // A pointer into the kernel's own memory must be refused, not read.
     static_cast<void>(user_syscall3(cinux::armv7::syscall_nr::kWrite, 1, 0x80000000UL, 8));
     for (unsigned long round = 0; round < 20; ++round) {
@@ -128,10 +136,23 @@ extern "C" [[noreturn]] __attribute__((section(".user_text"))) void user_program
 
     }
     {
-        // Shared with the other task and mapped read-only: this write must
-        // take a copy-on-write fault and then succeed on its own frame.
-        auto* const kShared = reinterpret_cast<volatile unsigned long*>(0x40008000UL);
-        *kShared            = 0xC0FFEEUL;
+        char          note[32];
+        unsigned long note_length = 0;
+#define NOTE(c) note[note_length++] = (c)
+        NOTE('t'); NOTE('a'); NOTE('s'); NOTE('k'); NOTE(' ');
+        NOTE(static_cast<char>('0' + task_id));
+        NOTE(' ');
+        if (*reinterpret_cast<volatile unsigned long*>(kSharedVa) == kValue) {
+            NOTE('k'); NOTE('e'); NOTE('e'); NOTE('p'); NOTE('s'); NOTE(' ');
+            NOTE('i'); NOTE('t'); NOTE('s'); NOTE(' '); NOTE('p'); NOTE('a');
+            NOTE('g'); NOTE('e'); NOTE('\n');
+        } else {
+            NOTE('l'); NOTE('o'); NOTE('s'); NOTE('t'); NOTE(' '); NOTE('i');
+            NOTE('t'); NOTE('s'); NOTE(' '); NOTE('p'); NOTE('a'); NOTE('g');
+            NOTE('e'); NOTE('\n');
+        }
+#undef NOTE
+        user_write(note, note_length);
     }
     {
         // Inside the user window but never mapped: the repair hook fills it
