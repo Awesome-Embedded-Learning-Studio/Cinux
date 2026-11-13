@@ -157,6 +157,36 @@ void guest_main(void) {
             sys3(4UL, 1UL, (unsigned long)kNbA, slen(kNbA));
         }
     }
+    // fstat: the motd's shape, regular file with its byte count.
+    {
+        static const char kStA[] = "[guest] fstat refused\n";
+        static const char kStB[] = "[guest] fstat ok, motd is a regular 9-byte file\n";
+        struct GuestStat {
+            unsigned long long dev;
+            unsigned long long ino;
+            unsigned long long links;
+            unsigned int       mode;
+            unsigned int       uid;
+            unsigned int       gid;
+            unsigned int       padding;
+            unsigned long long rdev;
+            long long          size;
+            long long          blksize;
+            long long          blocks;
+            unsigned long long atime;
+            unsigned long long mtime;
+            unsigned long long ctime;
+            unsigned int       unused[4];
+        } stat;
+        const long kMotd = sys3(5UL, (unsigned long)"/motd", 0UL, 0UL);
+        const long kSt   = sys3(108UL, (unsigned long)kMotd, (unsigned long)&stat, 0UL);
+        if (kSt == 0 && stat.mode == 0x81A4U && stat.size == 9) {
+            sys3(4UL, 1UL, (unsigned long)kStB, slen(kStB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kStA, slen(kStA));
+        }
+        sys3(6UL, (unsigned long)kMotd, 0UL, 0UL);
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }

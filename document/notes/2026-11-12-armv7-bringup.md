@@ -778,6 +778,23 @@ arm_boot 3/3，host 单测全绿。
 - `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green（新增 EXPECTED_FCNTL）。
 - 全部 host 测试 0 failed，`ninja -C build` 零错误。
 
+## fstat 上中立表：guest 读出 motd 的形状
+
+### 做了什么
+
+- `kFstat = 108` 进 armv7 svc 中立表。审计确认 `HandleFstat` 全中立（LiveSlot + FsOps.stat + uaccess），零改动，`sys_fstat.cpp` 链入 arm 镜像。
+- guest 新增探针：fstat /motd 验证 mode 0100644（ramfs 的 kFsFileMode）与 size 9（"hi there\n"），guest 侧声明与 SyscallStat 同构的记录。
+
+### 踩坑
+
+- run.cmake 有期望名查重（同名 -D 只留最后一个会静默丢期望），guest 的 fstat 期望撞上旧自检世界的 EXPECTED_FSTAT，改名 EXPECTED_GUESTSTAT。
+- CMakeLists 里替换路径时前缀截断产生 kernel/sys_fcntl.cpp 这类坏路径，cmake 直接拒绝配置，修回 kernel/syscall/ 全路径。
+
+### 怎么验证的
+
+- `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green（新增 EXPECTED_GUESTSTAT）。
+- 全部 host 测试 0 failed，`ninja -C build` 零错误。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
