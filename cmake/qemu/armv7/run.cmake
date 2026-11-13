@@ -5,7 +5,7 @@ if(NOT CINUX_ARM_QEMU)
     message(FATAL_ERROR "armv7 lane: qemu-system-arm not found in PATH")
 endif()
 
-set(CINUX_ARM_RUN_SECONDS 20 CACHE STRING "How long the arm_boot check lets QEMU run")
+set(CINUX_ARM_RUN_SECONDS 30 CACHE STRING "How long the arm_boot check lets QEMU run")
 
 set(CINUX_ARM_DTB_ADDR 0x81000000)
 
@@ -75,6 +75,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUESTBRK=[guest] brk ok, heap page reads back"
             "-DEXPECTED_GUESTMMAP=[guest] mmap ok, anon page reads back"
             "-DEXPECTED_GUESTFORK=[guest] fork ok, child reaped with own page"
+            "-DEXPECTED_GUESTLITTER=[guest] litter ok, three young and a grandchild"
             "-DEXPECTED_SEATWRITE=[seat] scheduler task writes from user m"
             "-DEXPECTED_SEATOK=sched user seat ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"

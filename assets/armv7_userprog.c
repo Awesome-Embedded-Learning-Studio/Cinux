@@ -26,15 +26,12 @@ static long sys6(unsigned long number, unsigned long a, unsigned long b, unsigne
     return r0;
 }
 
-static unsigned long slen(const char* s) {
-    unsigned long n = 0;
-    while (s[n] != 0) {
-        ++n;
-    }
-    return n;
-}
+
+static unsigned long slen(const char* s);
+__attribute__((used)) static const char kTextPad[0x400] = {1, 2, 3};
 
 void guest_main(void) {
+    (void)kTextPad;
     static const char kTag[] = "[guest] hello from the loaded image\n";
     sys3(4UL, 1UL, (unsigned long)kTag, slen(kTag));
 
@@ -277,7 +274,89 @@ void guest_main(void) {
             }
         }
     }
+    // Litter: three young at once plus a grandchild through the first
+    // young. Every young writes its own duel page first, proving each
+    // fork got its own copy of the shared frame; the exit codes carry
+    // the verdicts home to whoever reaps them.
+    {
+        static const char kLitA[] = "[guest] litter refused\n";
+        static const char kLitB[] = "[guest] litter ok, three young and a grandchild\n";
+        volatile unsigned long* duel =
+            (volatile unsigned long*)(unsigned long)sys6(
+                90UL, 0UL, 0x1000UL, 0x3UL, 0x22UL, ~0UL, 0UL);
+        *duel = 0xAAUL;
+        unsigned long reaped = 0;
+        unsigned long good = 1;
+        for (unsigned long i = 0; i < 3; ++i) {
+            const long kYoung = sys3(2UL, 0UL, 0UL, 0UL);  // fork
+            if (kYoung < 0) {
+                good = 0;
+                break;
+            }
+            if (kYoung == 0) {
+                // Young: the duel page arrives as the parent left it;
+                // this side's mark proves the copy, and the exit word
+                // carries it back. The first young also raises a
+                // grandchild and reaps it before leaving.
+                if (*duel != 0xAAUL) {
+                    sys3(1UL, 0x80UL + i, 0UL, 0UL);
+                    for (;;) {
+                    }
+                }
+                *duel = 0xB0UL + i;
+                if (i == 0) {
+                    const long kGrand = sys3(2UL, 0UL, 0UL, 0UL);
+                    if (kGrand == 0) {
+                        sys3(1UL, 33UL, 0UL, 0UL);  // the grandchild's word
+                        for (;;) {
+                        }
+                    }
+                    unsigned int gstatus = 0;
+                    gstatus = 0;
+                    const long kGRes = sys3(114UL, (unsigned long)kGrand,
+                                            (unsigned long)&gstatus, 0UL);
+                    if (kGRes != kGrand || gstatus != 33UL) {
+                        sys3(1UL, 0x90UL, 0UL, 0UL);
+                        for (;;) {
+                        }
+                    }
+                    sys3(1UL, 12UL, 0UL, 0UL);
+                    for (;;) {
+                    }
+                }
+                sys3(1UL, 12UL + i, 0UL, 0UL);
+                for (;;) {
+                }
+            }
+            unsigned int status = 0;
+            const long kW = sys3(114UL, (unsigned long)kYoung,
+                                 (unsigned long)&status, 0UL);
+            if (kW != kYoung || status != 12UL + i) {
+                good = 0;
+                break;
+            }
+            ++reaped;
+        }
+        // The parent's own duel page must have survived three forks
+        // and three private marks untouched.
+        if (good && reaped == 3 && *duel == 0xAAUL) {
+            sys3(4UL, 1UL, (unsigned long)kLitB, slen(kLitB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kLitA, slen(kLitA));
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }
+}
+static unsigned long slen(const char* s);
+// Padding that keeps the text segment past one page: the entry page
+// then arrives through the kernel's lazy fetch-repair path, so every
+// run exercises it instead of only the eager tail mapping.
+static unsigned long slen(const char* s) {
+    unsigned long n = 0;
+    while (s[n] != 0) {
+        ++n;
+    }
+    return n;
 }

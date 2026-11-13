@@ -178,7 +178,8 @@ _prefetch_trap_save:
        stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
        cps   #0x1F                 @ System mode shares the user sp bank
        mov   r1, sp
-       cps   #0x1B                 @ back to prefetch-abort mode
+       cps   #0x17                 @ back to abort mode: prefetch and
+                                    @ data aborts share the one bank
        mov   r2, lr                @ the faulting instruction
        mrs   r3, spsr
        str   r1, [sp, #52]         @ user sp
