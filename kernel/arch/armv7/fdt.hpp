@@ -1,17 +1,10 @@
 /**
  * @file    fdt.hpp
- * @brief   A small flattened-device-tree reader, enough for the memory node.
- *
- * The blob's header points at a structure block (tokens and nodes) and a
- * strings block (property names). This reader walks the structure once,
- * picks the node whose device_type says "memory", and decodes its reg
- * property as a 32-bit base and size, which is the shape the QEMU board
- * hands out. A full parser (phandles, cells, interrupts) comes with the
- * real port.
+ * @brief   The flattened device tree reader this port boots with.
  *
  * @author  Charliechen114514
- * @date    2026-11-12
- * @version 0.1
+ * @date    2026-11-14
+ * @version 0.2.0
  * @since   0.1.0
  * @ingroup kernel_arch
  * @copyright Copyright (c) 2026
@@ -29,14 +22,17 @@ struct MemoryRange {
     std::uint32_t size = 0;
 };
 
-/**
- * @brief         Reads the first /memory reg from a device tree blob.
- * @param[in]     blob   Physical address of the blob.
- * @param[out]    range  Receives base and size.
- * @return        true when the blob is well formed and has a memory node.
- * @since         0.1.0
- * @ingroup       kernel_arch
- */
+/// A borrowed view of one property's bytes inside the blob.
+struct PropertyBytes {
+    const std::uint8_t* bytes = nullptr;
+    std::uint32_t      len    = 0;
+};
+
 [[nodiscard]] bool ReadMemoryRange(std::uint32_t blob, MemoryRange& range);
+
+/// Finds one property by absolute node path, e.g. node_path
+/// "/opt/cinux" with property "init-env". The view dies with the blob.
+[[nodiscard]] bool ReadProperty(std::uint32_t blob, const char* node_path,
+                                const char* property, PropertyBytes& out);
 
 }  // namespace cinux::armv7

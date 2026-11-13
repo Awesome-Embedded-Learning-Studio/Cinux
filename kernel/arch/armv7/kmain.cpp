@@ -22,6 +22,7 @@
 #include "kernel/platform/ps2.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
+#include "kernel/arch/armv7/firmware.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/arch/armv7/task_switch.hpp"
@@ -97,6 +98,7 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::TimerEnable();
     {
         constexpr unsigned long kDtbAddress = 0x81000000UL;
+        cinux::armv7::firmware::SetDtb(kDtbAddress);
         cinux::armv7::MemoryRange range{};
         if (!cinux::armv7::ReadMemoryRange(kDtbAddress, range)) {
             cinux::armv7::UartWrite("[armv7] dtb missing or unreadable\n");
@@ -106,6 +108,17 @@ extern "C" [[noreturn]] void kmain() {
             cinux::armv7::UartWrite(" + 0x");
             PrintHex(range.size);
             cinux::armv7::UartWrite("\n");
+
+            // The firmware face: the same name the x86 lane reads from
+            // fw_cfg answers from the tree this port booted with.
+            char environment[64];
+            if (cinux::armv7::firmware::ReadString("opt/cinux/init-env", environment)) {
+                cinux::armv7::UartWrite("[armv7] firmware init-env ");
+                cinux::armv7::UartWrite(environment);
+                cinux::armv7::UartWrite("\n");
+            } else {
+                cinux::armv7::UartWrite("[armv7] firmware init-env missing\n");
+            }
 
             cinux::boot::BootInfo info{};
             info.magic       = cinux::boot::kBootInfoMagic;

@@ -44,6 +44,7 @@ add_test(NAME arm_boot
             "-DEXPECTED=Cinux armv7: alive on i.MX6ULL"
             "-DEXPECTED_TICK=tick 1"
             "-DEXPECTED_MEMORY=dtb memory 0x80000000"
+            "-DEXPECTED_FIRMWARE=firmware init-env console=ttymxc0 seat=dtb"
             "-DEXPECTED_PMM=pmm free pages"
             "-DEXPECTED_SELFCHECK=selfcheck pmm ok"
             "-DEXPECTED_CONSOLE=console up"

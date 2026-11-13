@@ -94,6 +94,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/pty_node.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/input/event_stream.cpp
     fdt.cpp
+    firmware.cpp
     vmm_bringup.cpp
     assert_hook.cpp
     selfcheck.cpp

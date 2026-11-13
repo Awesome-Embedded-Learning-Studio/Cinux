@@ -5,6 +5,12 @@
     #size-cells = <1>;
     model = "QEMU i.MX6UL EVK bring-up";
 
+    opt {
+        cinux {
+            init-env = "console=ttymxc0 seat=dtb";
+        };
+    };
+
     memory@80000000 {
         device_type = "memory";
         reg = <0x80000000 0x10000000>;

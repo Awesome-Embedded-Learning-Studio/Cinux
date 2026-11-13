@@ -137,6 +137,7 @@ expect_literal(EXPECTED_SELFCHECK "the in-image self-check did not pass.")
 expect_literal(EXPECTED_PMM "the physical page manager never reported.")
 
 expect_literal(EXPECTED_MEMORY "the device tree memory range never reached the log.")
+expect_literal(EXPECTED_FIRMWARE "the dtb firmware face did not answer.")
 
 expect_literal(EXPECTED_TICK "no timer tick reached the serial log.")
 
