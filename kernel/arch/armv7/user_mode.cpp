@@ -1695,9 +1695,8 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             g_tasks[g_current].files->alloc(kOps, kBackend, node.value(), options);
         kOps->release(kBackend, node.value());
         if (!kFd.ok()) {
-            // The held reference belongs to the seat the table refused;
-            // give it back before answering.
-            kOps->release(kBackend, node.value());
+            // alloc refuses inside its own lock before any retain, so
+            // the one release above already settled the held count.
             g_tasks[g_current].trap.r0 =
                 static_cast<unsigned long>(cinux::armv7::errno::kNoMem);
             cinux::print::Println("[armv7] open refused, no free slot");

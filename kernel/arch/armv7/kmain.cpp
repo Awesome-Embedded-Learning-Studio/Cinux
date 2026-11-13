@@ -186,13 +186,18 @@ extern "C" [[noreturn]] void kmain() {
                     const unsigned long kPagesBefore =
                         cinux::mm::Pmm::self().free_page_count();
                     const bool kTasksOk = cinux::armv7::RunUserModeSelfCheck();
-                    const bool kSeatOk  = cinux::armv7::RunSchedulerUserSelfCheck();
+                    // The first pass's heap growth stays resident, so the
+                    // leak question is whether a second pass costs more
+                    // pages, not whether the first one did.
+                    const unsigned long kPagesMid = cinux::mm::Pmm::self().free_page_count();
+                    const bool kTasksAgain = kTasksOk && cinux::armv7::RunUserModeSelfCheck();
                     const unsigned long kPagesAfter = cinux::mm::Pmm::self().free_page_count();
-                    cinux::print::Println("[armv7] tasks pages %u -> %u", kPagesBefore,
-                                          kPagesAfter);
+                    const bool kSeatOk  = cinux::armv7::RunSchedulerUserSelfCheck();
+                    cinux::print::Println("[armv7] tasks pages %u -> %u -> %u", kPagesBefore,
+                                          kPagesMid, kPagesAfter);
                     cinux::print::Println(kSeatOk ? "[armv7] sched user seat ok"
                                                   : "[armv7] sched user seat FAILED");
-                    cinux::print::Println((kTasksOk && kSeatOk && kPagesAfter == kPagesBefore)
+                    cinux::print::Println((kTasksAgain && kSeatOk && kPagesAfter == kPagesMid)
                                               ? "[armv7] user mode round trip ok"
                                               : "[armv7] user mode round trip FAILED");
                     asm volatile("cpsie if" ::: "memory");

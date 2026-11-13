@@ -32,6 +32,7 @@
 #include "kernel/syscall/sys_mmap.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
+#include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_ioctl.hpp"
 #include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
@@ -149,6 +150,7 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kIoctl, &cinux::syscall::HandleIoctl},
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},
     {cinux::armv7::syscall_nr::kFstat, &cinux::syscall::HandleFstat},
+    {cinux::armv7::syscall_nr::kGetdents, &cinux::syscall::HandleGetdents},
 };
 
 const NeutralService* find_neutral_service(unsigned long number) {

@@ -61,6 +61,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_PTY=pty ok, master and slave echo"
             "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
             "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"
+            "-DEXPECTED_GETDENTS=getdents ok, root holds five entries with hello"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
             "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
             "-DEXPECTED_GUESTEXIT=guest exited with status 0"

@@ -795,6 +795,30 @@ arm_boot 3/3，host 单测全绿。
 - `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green（新增 EXPECTED_GUESTSTAT）。
 - 全部 host 测试 0 failed，`ninja -C build` 零错误。
 
+## getdents 中立化与旧世界双释放修复
+
+### getdents 切片
+- 审计 x86 路径后确认 `kernel/syscall/sys_getdents.cpp` 本就纯中立（LiveSlot 取活口、ops->read_dir 遍历、uaccess 写 dirent64 记录：ino@0、off@8、len@16(u16)、type@18、name@19，记录 8 字节对齐），无需新造任何机制，直接复用。
+- armv7 侧接线：`syscall_numbers.hpp` 增 `kGetdents = 217`，svc 中立表加行分发 `HandleGetdents`，CMake 显式源列表加 `kernel/syscall/sys_getdents.cpp`。
+- guest 探针最终形态：open("/") 后 syscall 217 拉 512 字节缓冲，按 len 遍历记录，断言 5 条且含 hello，输出 `[guest] getdents ok, root holds five entries with hello`，run.cmake 增 `EXPECTED_GETDENTS`。
+
+### 旧世界 open 双释放（本切片发现的真 bug）
+- 现象：ramfs 根最早 seed 的 hello 节点在 g_tasks 自检期间名字被踩成 `20 e2 00 64`，getdents 第 5 条乱码、lookup("/hello") 找不到。
+- 二分链：seed 时完好 → staging 后完好 → task 世界启动前完好 → task 0 fork 掩码阻塞时已坏 → 精确到 task 3 的 open("/scratch") 的 `FileTable::alloc` 调用窗口。
+- 根因：`user_mode.cpp` 旧 open 处理器失败路径双释放。1696 行 alloc 返回后无条件 release（消 lookup_held 的 +1，正确），1700 行 !kFd.ok() 时再 release 一次。但 `FileTable::alloc` 在表满时于锁内 vacant_locked 判定即返回，先于 new OpenFile 与 ops->retain，失败时不持有任何引用。多放的一次让 hello 的计数（树边 1 + lookup_held 1）归零，RamNode::release_ref 执行 delete，父目录 child 链悬垂。之后 alloc 的 52 字节 OpenFile 复用该内存，构造函数字段写入覆盖 name[0..3]。
+- 触发场景：fd 上限探针（8 槽表满打出 "open refused, no free slot"）时 open 的正是 /hello。
+- 修复：删掉失败分支里的第二次 release，注释说明 alloc 拒绝发生在自身锁内且先于任何 retain。中立层（file_table/open_file/Shared/ramfs）对照审计无 bug，x86 的 sys_open 配对正确，不动。
+- gdb watchpoint 未命中的解释：写入者是复用者（OpenFile 构造），而非直接针对旧地址的踩踏，且 %X 对指针有符号扩展显示问题（用 %u 才准）。
+
+### 页数断言语义修正
+- 修复后 hello 活着，单轮自检页数 64573 -> 64571（堆增长驻留，分配器不还页），旧的 before==after 断言误报泄漏。
+- kmain 改为两轮运行：第一轮的堆驻留不视为泄漏，断言第二轮前后页数相等。实测 64573 -> 64566 -> 64566，round trip ok。
+
+### 验证
+- `./scripts/check-armv7.sh --repeat 3` both lanes green。
+- 全部 84 个 host 测试 0 failed。
+- `ninja -C build` 干净。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

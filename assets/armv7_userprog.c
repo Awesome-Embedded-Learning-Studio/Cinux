@@ -187,6 +187,37 @@ void guest_main(void) {
         }
         sys3(6UL, (unsigned long)kMotd, 0UL, 0UL);
     }
+    // Directory walk: the root's records list the seeded files back,
+    // hello included now that the old world releases what it holds.
+    {
+        static const char kDlA[] = "[guest] getdents refused\n";
+        static const char kDlB[] = "[guest] getdents ok, root holds five entries with hello\n";
+        const long kRoot = sys3(5UL, (unsigned long)"/", 0UL, 0UL);
+        unsigned char records[512];
+        unsigned long names = 0;
+        unsigned long saw_hello = 0;
+        long got = 0;
+        if (kRoot >= 0) {
+            got = sys3(217UL, (unsigned long)kRoot, (unsigned long)records, sizeof(records));
+            unsigned long walk = 0;
+            while (got > 0 && walk + 19 < (unsigned long)got) {
+                const unsigned short kLen =
+                    *(const unsigned short*)(records + walk + 16);
+                const char* kName = (const char*)(records + walk + 19);
+                ++names;
+                if (kName[0]=='h'&&kName[1]=='e'&&kName[2]=='l'&&kName[3]=='l'&&kName[4]=='o'&&kName[5]=='\0') {
+                    saw_hello = 1;
+                }
+                walk += kLen;
+            }
+        }
+        if (got > 0 && names == 5 && saw_hello) {
+            sys3(4UL, 1UL, (unsigned long)kDlB, slen(kDlB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kDlA, slen(kDlA));
+        }
+        sys3(6UL, (unsigned long)kRoot, 0UL, 0UL);
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }

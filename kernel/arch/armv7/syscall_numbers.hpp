@@ -38,5 +38,6 @@ inline constexpr unsigned long kMunmap      = 91;
 inline constexpr unsigned long kIoctl       = 54;
 inline constexpr unsigned long kFstat       = 108;
 inline constexpr unsigned long kFcntl       = 55;
+inline constexpr unsigned long kGetdents    = 217;
 
 }  // namespace cinux::armv7::syscall_nr
