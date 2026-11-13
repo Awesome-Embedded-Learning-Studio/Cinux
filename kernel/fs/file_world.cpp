@@ -140,29 +140,7 @@ Vfs& kernel_vfs() {
 }
 
 base::Result<void> FileWorld::seat_console_streams(FileTable& table) {
-    const base::Result<FsView> kView = vfs_.resolve("/dev/console");
-    if (!kView.ok()) {
-        return kView.error();
-    }
-    const FsView&              flat  = kView.value();
-    const base::Result<FsNode> kNode = flat.ops->lookup(flat.self, "console");
-    if (!kNode.ok()) {
-        return kNode.error();
-    }
-    flat.ops->retain(flat.self, kNode.value());
-    const base::Shared<OpenFile> kStream{new OpenFile(flat.ops, flat.self, kNode.value())};
-    if (!kStream.holds()) {
-        flat.ops->release(flat.self, kNode.value());
-        return base::KernelError::kOutOfMemory;
-    }
-    kStream->status_flags = kFsReadWriteStatus;
-    for (unsigned long seat = 0; seat < 3; ++seat) {
-        const base::Result<unsigned long> kSeated = table.adopt_at(kStream, seat);
-        if (!kSeated.ok()) {
-            return kSeated.error();
-        }
-    }
-    return {};
+    return SeatConsoleStreams(vfs_, table);
 }
 
 unsigned long FileWorld::mounts_text(char* out, unsigned long capacity) const {

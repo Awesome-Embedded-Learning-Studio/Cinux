@@ -738,6 +738,30 @@ arm_boot 3/3，host 单测全绿。
 - 拖 test_syscall_face 依赖链（net_world -> task_runtime -> arch 汇编）是死路，中立测试不能碰 arch 符号，正确解法是 ifaces 的注入面。
 - 32 位 size_t 与 uint32_t 常量同传 std::min 会推导失败，arm 报错而 x86 因 64 位 size_t 恰好通过。
 
+## seated write 中立化：stdio 走真 /dev/console
+
+### 做了什么
+
+- `kWrite` 加入 armv7 svc 中立表（`HandleWrite`），seated guest 的 write 不再走旧 answer 的 `UartPutChar` 直写路径。
+- `FileWorld::seat_console_streams` 的逻辑提取为中立自由函数 `fs::SeatConsoleStreams(Vfs&, FileTable&)`，放在 `kernel/fs/device_tree.cpp`（device_tree 已是两 lane 共链的中立装配点）。FileWorld 方法转调它，armv7 的 `SeatProcessBody` 也转调它：seated 进程的 0/1/2 现在绑到 SeatDeviceTree 装好的 /dev/console tty 节点，与 x86 init 的 stdio 同一条机制。
+- `kernel/syscall/sys_write.cpp` 链入 armv7 镜像。
+- run.cmake 的 EXPECTED_SEATWRITE 从旧调试行 `svc write 40 bytes` 改为字面 `[seat] scheduler task writes from user m`（seat 探针 40 字节真输出）。
+
+### 效果
+
+- guest 五行探针（hello/motd/brk/mmap/pty）现在全部由真 console 设备吐出，字面内容与旧行一致，机制却从 UART 直写换成了 tty 线路。seated 世界的第二条输出路径删除。
+- 旧 g_tasks 自检世界的 console face（erased UART face）保留，它随 g_tasks 整体退役，不再单独扩面。
+
+### 踩坑
+
+- file_world.cpp 不能整个链进 armv7（拖 Ahci 等 x86 驱动装配），中立函数应落在 device_tree 这个两 lane 共链的装配点。
+- armv7 期望值是字面匹配，行为换路径后调试打印行会消失，期望要跟着改字面。
+
+### 怎么验证的
+
+- `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green。
+- 全部 host 测试 0 failed，`ninja -C build` 零错误。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

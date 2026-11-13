@@ -163,4 +163,15 @@ private:
     ext2::Ext2*         volume_ = nullptr;
 };
 
+/**
+ * @brief         Seats the console's stream at descriptors 0 through 2.
+ * @param[in,out] vfs    The mounted tree holding /dev/console.
+ * @param[in,out] table  The process's table receiving the stream.
+ * @note          One shared open serves all three seats, the shape
+ *                every lane's seated process inherits.
+ * @since         0.8.0
+ * @ingroup       kernel_fs
+ */
+[[nodiscard]] base::Result<void> SeatConsoleStreams(Vfs& vfs, FileTable& table);
+
 }  // namespace cinux::fs

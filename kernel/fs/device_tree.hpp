@@ -32,4 +32,6 @@ namespace cinux::fs {
 void SeatDeviceTree(DevFs& devfs, driver::EventStream& primary_input,
                     driver::EventStream& pointer_input);
 
+
+
 }  // namespace cinux::fs

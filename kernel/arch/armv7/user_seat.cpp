@@ -31,6 +31,7 @@
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/user_entry.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
+#include "kernel/fs/file_world.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/fs/file_table.hpp"
@@ -83,18 +84,10 @@ void SeatProcessBody() {
     g_seat_body          = &body;
     mm::AddressSpace* const kSpace = g_seat_world.space;
 
-    // Seat this task's own files: the console faces answer through them.
+    // Seat this task's own files: the console stream answers through
+    // the same /dev/console every lane's seated process reads.
     g_seat_files = proc::Scheduler::self().current()->files;
-    const fs::FsOps* const kFace = userfs::console_ops();
-    const fs::FsNode        kNode{nullptr, fs::InodeType::kCharDevice, 0, 0};
-    const auto kIn = cinux::base::MakeShared<fs::OpenFile>(kFace, nullptr, kNode);
-    static_cast<void>(g_seat_files->adopt_at(kIn, 0));
-    const auto kOutOne = cinux::base::MakeShared<fs::OpenFile>(kFace, nullptr, kNode);
-    kOutOne->status_flags = 2;  // writable
-    static_cast<void>(g_seat_files->adopt_at(kOutOne, 1));
-    const auto kOutTwo = cinux::base::MakeShared<fs::OpenFile>(kFace, nullptr, kNode);
-    kOutTwo->status_flags = 2;
-    static_cast<void>(g_seat_files->adopt_at(kOutTwo, 2));
+    static_cast<void>(fs::SeatConsoleStreams(userfs::vfs(), *g_seat_files));
 
     const unsigned long kKernelRoot = mm::KernelPageRoot();
     cinux::arch::per_cpu::self().slice_ticks = 1000;  // the seat window owns the slice

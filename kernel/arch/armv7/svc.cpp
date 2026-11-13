@@ -136,6 +136,7 @@ struct NeutralService {
 
 const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kRead,   &cinux::syscall::HandleRead},
+    {cinux::armv7::syscall_nr::kWrite,  &cinux::syscall::HandleWrite},
     {cinux::armv7::syscall_nr::kOpen,   &cinux::syscall::HandleOpen},
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
     {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},

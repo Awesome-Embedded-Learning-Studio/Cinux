@@ -22,6 +22,7 @@
 #include "cinux/assert.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/fs/devfs/console_node.hpp"
+#include "kernel/fs/file_table.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
 #include "kernel/fs/devfs/input_node.hpp"
@@ -38,5 +39,32 @@ void SeatDeviceTree(DevFs& devfs, driver::EventStream& primary_input,
     RegisterPtyDevices();
     RegisterInputDevices(primary_input, pointer_input);
 }
+
+base::Result<void> SeatConsoleStreams(Vfs& vfs, FileTable& table) {
+    const base::Result<FsView> kView = vfs.resolve("/dev/console");
+    if (!kView.ok()) {
+        return kView.error();
+    }
+    const FsView&              flat  = kView.value();
+    const base::Result<FsNode> kNode = flat.ops->lookup(flat.self, "console");
+    if (!kNode.ok()) {
+        return kNode.error();
+    }
+    flat.ops->retain(flat.self, kNode.value());
+    const base::Shared<OpenFile> kStream{new OpenFile(flat.ops, flat.self, kNode.value())};
+    if (!kStream.holds()) {
+        flat.ops->release(flat.self, kNode.value());
+        return base::KernelError::kOutOfMemory;
+    }
+    kStream->status_flags = kFsReadWriteStatus;
+    for (unsigned long seat = 0; seat < 3; ++seat) {
+        const base::Result<unsigned long> kSeated = table.adopt_at(kStream, seat);
+        if (!kSeated.ok()) {
+            return kSeated.error();
+        }
+    }
+    return {};
+}
+
 
 }  // namespace cinux::fs
