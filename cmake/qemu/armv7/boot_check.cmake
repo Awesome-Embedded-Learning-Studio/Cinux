@@ -180,6 +180,7 @@ expect_literal(EXPECTED_PERCPU "the per-CPU block check failed.")
 expect_literal(EXPECTED_CPUID "the MIDR identity probe did not answer.")
 expect_literal(EXPECTED_PROCCPU "the /proc/cpuinfo read-back probe did not answer.")
 expect_literal(EXPECTED_SCHED "the shared-scheduler round trip did not answer.")
+expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
 
 expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
 

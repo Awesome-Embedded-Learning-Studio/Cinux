@@ -17,6 +17,7 @@ add_executable(arm_image
     exception_dispatch.cpp
     svc.cpp
     user_mode.cpp
+    lcdif.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp

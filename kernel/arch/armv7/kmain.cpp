@@ -22,6 +22,7 @@
 #include "kernel/platform/ps2.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/arch/armv7/fdt.hpp"
+#include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/arch/armv7/task_switch.hpp"
 #include "kernel/boot/boot_info.hpp"
@@ -171,6 +172,11 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunSchedulerSelfCheck()
                                               ? "[armv7] sched roundtrip ok"
                                               : "[armv7] sched roundtrip FAILED");
+                    {
+                        const unsigned long kFrame = cinux::armv7::lcdif::InitFramebuffer();
+                        cinux::print::Println("[armv7] lcdif 320x240 fb %X",
+                                              kFrame != 0 ? kFrame : 0);
+                    }
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

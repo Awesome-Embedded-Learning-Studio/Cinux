@@ -502,6 +502,21 @@ sched roundtrip ok 挂进 arm_boot 期望。preemption 保持关闭，探针自�
 c_schedule_from_user）换到这些真件上，用户任务的 trap frame 与通用 Task 的
 CpuContext 对接。
 
+## LCDIF 点亮：第一块屏幕
+
+QEMU 11 的 mcimx6ul-evk 真的模拟了 i.MX6UL LCDIF（hw/display/
+imx6ul_lcdif.c），但生成的 dtb 里没有它的节点，bring-up 先硬编码
+0x021C8000。存在性靠写读回分辨：unimplemented 桩读零，真模型保持写入。
+
+模型只答一张小脸：TRANSFER_COUNT(0x30) 定宽高，CTRL(0x00) 的 RUN 位与
+WORD_LENGTH=3（读作 XRGB8888），NEXT_BUF(0x50) 的写入就是整帧触发。驱动
+lcdif.cpp 恰好只编这张脸——320x240 一帧 order-9 页块，首图红条绿场，
+顺序几何→RUN→触发。screendump 出 320x240 PPM 首像素 00 00 ff，像素真
+落了屏。lcdif 320x240 fb 挂进 arm_boot 期望。
+
+到 GUI 的路还差：devfs 的 /dev/fb0 座位（把这块帧缓冲交给用户态 vesper
+桌面）、event 键鼠、vesper 本体在 armv7 的交叉编译。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
