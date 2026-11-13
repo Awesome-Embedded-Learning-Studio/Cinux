@@ -138,6 +138,12 @@ struct Task : cinux::base::container::SelfNode<Task> {
     const char*        name{};             ///< Label for dumps, caller-owned storage.
     unsigned long long stack_base{};       ///< Direct-map base of the owned stack.
     unsigned long long user_root{};        ///< PML4 of the user world, 0 while kernel-only.
+    /// Arch-private seat state for a task that runs a user world
+    /// through its port's episode machinery. Null while kernel-only.
+    /// The pointee's type and lifetime belong to the port; the neutral
+    /// core only carries the pointer so a port can find its per-task
+    /// state from the current task without a side registry.
+    void* arch_seat{};
     /// The world this task retires with, held against a whole thread
     /// group: a CLONE_VM clone adds one owner instead of copying, and
     /// the last owner out tears the user half down. Empty while

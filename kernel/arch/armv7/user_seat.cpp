@@ -56,61 +56,78 @@ namespace cinux::armv7 {
 
 namespace {
 
-/// The seated process's open files; the console faces read it before
-/// the bring-up round-robin's table. Null while no seated process runs.
-cinux::base::Shared<cinux::fs::FileTable> g_seat_files{};
-
-/// Where the waiting kernel body's saved machine state lives; the
-/// return and exit services switch back to it.
-cinux::arch::CpuContext* g_seat_body = nullptr;
-
-/// The world the running body entered: the probe builds and owns its
-/// pages, the guest hands over the loader's already-built world.
-struct SeatWorld {
-    mm::AddressSpace* space       = nullptr;
-    unsigned long     entry       = 0;
-    unsigned long     stack_top   = 0;
-    unsigned long     exit_status = 0;
-    bool              exited      = false;
-    bool              spoke       = false;
-    mm::VmaStore*     ranges      = nullptr;
+/// The launch in flight: the one world being seated right now. The
+/// body copies it into the task's own seat state and the launcher
+/// reads the run's verdict back from that state.
+/// The per-task state a running user world lives in. The words sit on
+/// the launcher's stack and outlive the body; the task's arch_seat
+/// points here so every episode side finds the current process's own
+/// world without a side registry.
+struct SeatRun {
+    mm::AddressSpace*        space = nullptr;
+    mm::VmaStore*            ranges = nullptr;
+    cinux::arch::CpuContext* body = nullptr;  // where the parked kernel half waits
+    unsigned long            exit_status = 0;
+    bool                     exited      = false;
+    bool                     spoke       = false;
 };
 
-SeatWorld g_seat_world{};
+struct SeatLaunch {
+    mm::AddressSpace* space     = nullptr;
+    mm::VmaStore*     ranges    = nullptr;
+    SeatRun*          run       = nullptr;
+    unsigned long     entry     = 0;
+    unsigned long     stack_top = 0;
+};
+
+SeatLaunch g_seat_launch{};
+
+/// The current process's seat state, or null while none runs.
+SeatRun* current_seat() {
+    proc::Task* const kTask = proc::Scheduler::self().current();
+    return kTask == nullptr ? nullptr : static_cast<SeatRun*>(kTask->arch_seat);
+}
 
 /// One shared body for every seated process: enter the user world,
 /// come back when it asks, then retire with its exit word.
 void SeatProcessBody() {
+    SeatRun* const kRun = g_seat_launch.run;
     cinux::arch::CpuContext body{};
-    g_seat_body          = &body;
-    mm::AddressSpace* const kSpace = g_seat_world.space;
+    kRun->body            = &body;
+    mm::AddressSpace* const kSpace = kRun->space;
 
     // Seat this task's own files: the console stream answers through
     // the same /dev/console every lane's seated process reads.
-    g_seat_files = proc::Scheduler::self().current()->files;
-    static_cast<void>(fs::SeatConsoleStreams(userfs::vfs(), *g_seat_files));
+    const cinux::base::Shared<cinux::fs::FileTable> kFiles =
+        proc::Scheduler::self().current()->files;
+    static_cast<void>(fs::SeatConsoleStreams(userfs::vfs(), *kFiles));
 
     const unsigned long kKernelRoot = mm::KernelPageRoot();
     cinux::arch::per_cpu::self().slice_ticks = 1000;  // the seat window owns the slice
     cinux::arch::space::SwitchRoot(kSpace->root());
-    arch::EnterUserModeWithReturn(g_seat_world.entry, g_seat_world.stack_top, &body);
+    arch::EnterUserModeWithReturn(g_seat_launch.entry, g_seat_launch.stack_top, &body);
     // A service call landed here with the user world parked.
     cinux::arch::space::SwitchRoot(kKernelRoot);
-    g_seat_files.reset();
-    g_seat_world.spoke = true;
+    kRun->spoke = true;
 
-    proc::Scheduler::self().exit_current(static_cast<long long>(g_seat_world.exit_status));
+    // The run's words die with this frame: retire the seat marker
+    // before the scheduler can hand the task back, or a stale current
+    // task makes the old-world episodes look seated.
+    proc::Scheduler::self().current()->arch_seat = nullptr;
+    proc::Scheduler::self().exit_current(static_cast<long long>(kRun->exit_status));
 }
 
 /// Runs one seated world through a fresh scheduler task.
 bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned long stack_top,
                       bool /*owns_space*/, bool expect_exit, unsigned long expect_status,
                       const char* name) {
-    mm::VmaStore* const kCarried = g_seat_world.ranges;  // a caller's store rides along
-    g_seat_world = SeatWorld{.space     = space,
-                             .entry     = entry,
-                             .stack_top = stack_top,
-                             .ranges    = kCarried};
+    mm::VmaStore* const kCarried = g_seat_launch.ranges;  // a caller's store rides along
+    SeatRun run{.ranges = kCarried};
+    g_seat_launch = SeatLaunch{.space     = space,
+                               .ranges    = kCarried,
+                               .run       = &run,
+                               .entry     = entry,
+                               .stack_top = stack_top};
     proc::Task* const kTask =
         proc::TaskBuilder().set_entry(SeatProcessBody).set_name(name).build();
     if (kTask == nullptr) {
@@ -119,25 +136,29 @@ bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned lon
     // The register of promises the neutral demand pager fills against;
     // the loader already wrote the guest's segments into its own store,
     // the probe starts a fresh one.
-    if (g_seat_world.ranges == nullptr) {
+    if (run.ranges == nullptr) {
         kTask->vmas = base::MakeShared<mm::VmaStore>();
-        g_seat_world.ranges = kTask->vmas.get();
+        run.ranges  = kTask->vmas.get();
+        g_seat_launch.ranges = run.ranges;
     } else {
-        kTask->vmas = base::Shared<mm::VmaStore>(g_seat_world.ranges);
+        kTask->vmas = base::Shared<mm::VmaStore>(run.ranges);
     }
     // The task owns the space: the neutral syscall faces read it, and
     // its Shared release runs the teardown once the task retires.
     kTask->space    = base::Shared<mm::AddressSpace>(space);
     kTask->user_root = space->root();
+    // The running state rides the task: every episode side reaches it
+    // through arch_seat, and the launcher reads the verdict here.
+    run.space = space;
+    kTask->arch_seat = &run;
     if (!proc::Scheduler::self().seat(*kTask)) {
         return false;
     }
     proc::Scheduler::self().run_until_done();
-    if (!g_seat_world.spoke) {
+    if (!run.spoke) {
         return false;
     }
-    return !expect_exit ||
-           (g_seat_world.exited && g_seat_world.exit_status == expect_status);
+    return !expect_exit || (run.exited && run.exit_status == expect_status);
 }
 
 /// Runs one seated world that carries its own promise register: the
@@ -146,10 +167,10 @@ bool run_seated_world_with_ranges(mm::AddressSpace* space, unsigned long entry,
                                   unsigned long stack_top, bool owns_space, bool expect_exit,
                                   unsigned long expect_status, const char* name,
                                   mm::VmaStore* ranges) {
-    g_seat_world.ranges = ranges;
+    g_seat_launch.ranges = ranges;
     const bool kOk = run_seated_world(space, entry, stack_top, owns_space, expect_exit,
                                       expect_status, name);
-    g_seat_world.ranges = nullptr;
+    g_seat_launch.ranges = nullptr;
     return kOk;
 }
 
@@ -190,29 +211,33 @@ bool run_probe_world() {
 /// RepairWriteFault the legacy task world serves. One fill or one
 /// private copy, and the instruction that faulted runs again.
 bool SeatRepairPage(unsigned long address, unsigned long status) {
-    if (!SeatWorldActive() || g_seat_world.ranges == nullptr) {
+    SeatRun* const kSeat = current_seat();
+    if (kSeat == nullptr || kSeat->ranges == nullptr) {
         return false;
     }
     if ((status & arch::isr::kDfsrWrite) != 0 &&
-        mm::cow::RepairWriteFault(g_seat_world.space->root(), address)) {
+        mm::cow::RepairWriteFault(kSeat->space->root(), address)) {
         return true;
     }
     unsigned long spsr = 0;
     asm volatile("mrs %0, spsr" : "=r"(spsr));
     const unsigned long long kCode = arch::isr::FaultCodeFromStatus(status, spsr);
     const mm::demand::FillOutcome kFilled =
-        mm::demand::FillPage(*g_seat_world.space, *g_seat_world.ranges, address, kCode);
+        mm::demand::FillPage(*kSeat->space, *kSeat->ranges, address, kCode);
     return kFilled != mm::demand::FillOutcome::kUnhandled;
 }
 
 }  // namespace
 
 cinux::base::Shared<cinux::fs::FileTable> seated_files() {
-    return g_seat_files;
+    proc::Task* const kTask = proc::Scheduler::self().current();
+    return kTask == nullptr || kTask->arch_seat == nullptr
+               ? cinux::base::Shared<cinux::fs::FileTable>{}
+               : kTask->files;
 }
 
 bool SeatWorldActive() {
-    return g_seat_files.holds();
+    return current_seat() != nullptr;
 }
 
 void SeatReturnToKernel() {
@@ -222,18 +247,18 @@ void SeatReturnToKernel() {
     // into the body right after its EnterUserModeWithReturn. The body
     // resumes with its pre-user sp, so the frame's 64 bytes die with
     // the episode.
-    g_seat_files.reset();
+    SeatRun* const kSeat = current_seat();
     arch::CpuContext* const kUserWords =
         reinterpret_cast<arch::CpuContext*>(&g_current_trap->r4);
-    arch::ContextSwitch(kUserWords, g_seat_body);
+    arch::ContextSwitch(kUserWords, kSeat->body);
     __builtin_unreachable();
 }
 
 void SeatExit(unsigned long status) {
     // The exit service: same switch as the return, but the body reads
     // the exit word and retires through the scheduler's exit path.
-    g_seat_world.exited      = true;
-    g_seat_world.exit_status = status;
+    current_seat()->exited      = true;
+    current_seat()->exit_status = status;
     SeatReturnToKernel();
 }
 
