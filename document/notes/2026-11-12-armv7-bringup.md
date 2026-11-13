@@ -567,6 +567,22 @@ armv7 用户区的真边界：IsUserSlot 只认 0x40000000 那一个 L1 槽，br
 用户窗口就这一段，内核 identity 从 0x8000 起占着低区，guest 老老实实链进
 窗口。将来用户区扩张时这个槽位约定要重新谈。
 
+## guest 从 ELF 跑进用户态：第一趟真 exec
+
+装载好的 guest 不再只是躺在 AddressSpace 里。guest 程序升级成真 syscall 客
+户：write(1, 问候, 35) 再 exit(0)，svc 号走 r7，arm-none-eabi-gcc freestanding
+编出 ELF32 链在用户窗口。user_fs 探针把装载产物移交堆（space、vma、entry、
+一页栈在 mmap 基上），user_mode 的自检轮把 guest 坐进 task 4：同一张
+g_tasks 表、同一套 seat_console 文件座位、同一个调度与 svc 分发面——它和内
+置自检任务唯一区别是页面来自 ELF 而非内嵌镜像。guest 在用户态写出
+[guest] hello from the loaded image，exit 后页账 64638 -> 64638 分毫不差。
+
+这是 exec 链在 armv7 的第一趟端到端：交叉编译的 ELF、中立 loader、中立
+vfs、中立 devfs/console、本端口 svc 面，全部串起来跑。x86 的 exec 与 armv7
+的 exec 从此共享 loader 与 fs，剩下的差异只在切入和 syscall 分发的架构层。
+小账：g_guest_ranges 全局未随任务回收（VmaStore 不持页，页账不受影响），
+等调度器最后一跳换真 Scheduler 时一并处理。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

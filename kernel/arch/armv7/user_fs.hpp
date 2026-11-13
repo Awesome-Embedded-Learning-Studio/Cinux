@@ -23,6 +23,10 @@ class RamFs;
 class Vfs;
 }  // namespace cinux::fs
 
+namespace cinux::mm {
+class AddressSpace;
+}  // namespace cinux::mm
+
 namespace cinux::armv7::userfs {
 
 /// Seeds the volume and mounts it: /hello, /motd, /readme, /scratch.
@@ -41,5 +45,15 @@ const cinux::fs::FsOps* console_ops();
 /// The scratch file's byte ceiling; writes past it answer ENOSPC,
 /// matching the stand-in's fixed window.
 inline constexpr unsigned long kScratchRoom = 64;
+
+/// The loaded guest's world, or null when no image seated: the neutral
+/// loader's output, waiting for the user-mode lane to run it.
+cinux::mm::AddressSpace* take_guest();
+
+/// Where the loaded guest's first instruction lives.
+unsigned long guest_entry();
+
+/// Marks the guest as owned by its task; the loader's copy retires.
+void guest_seated();
 
 }  // namespace cinux::armv7::userfs

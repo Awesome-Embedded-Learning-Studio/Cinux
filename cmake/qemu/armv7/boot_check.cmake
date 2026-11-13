@@ -184,6 +184,8 @@ expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
 expect_literal(EXPECTED_FB0 "the /dev/fb0 seat did not answer.")
 expect_literal(EXPECTED_EVENT0 "the /dev/event0 seat did not answer.")
 expect_literal(EXPECTED_GUESTLOAD "the neutral loader did not seat the guest image.")
+expect_literal(EXPECTED_GUESTRUN "the guest task did not join the round.")
+expect_literal(EXPECTED_GUESTHELLO "the loaded guest did not speak from user mode.")
 
 expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
 

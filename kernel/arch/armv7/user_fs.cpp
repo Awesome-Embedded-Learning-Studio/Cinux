@@ -59,6 +59,9 @@ namespace {
 fs::RamFs* g_ram  = nullptr;
 fs::Vfs*   g_vfs  = nullptr;
 fs::ProcFs* g_proc = nullptr;
+mm::AddressSpace* g_guest_space = nullptr;
+mm::VmaStore*     g_guest_ranges = nullptr;
+unsigned long     g_guest_entry  = 0;
 
 /// One seeded regular file: create it, then lay its bytes in. The plain
 /// make_file hands back a borrowed handle, so nothing is released here.
@@ -273,12 +276,13 @@ void init() {
             base::safety::Check(kChunk2.ok() && kChunk2.value() != 0, "guest elf read failed");
             taken += static_cast<unsigned long>(kChunk2.value());
         }
-        mm::AddressSpace fresh;
-        base::safety::Check(fresh.init(), "guest elf address space refused to init");
-        mm::VmaStore ranges;
+        g_guest_space = new mm::AddressSpace{};
+        base::safety::Check(g_guest_space != nullptr && g_guest_space->init(),
+                            "guest elf address space refused to init");
+        g_guest_ranges = new mm::VmaStore{};
         const loader::LoadWorld kLoadWorld{
-            .space         = fresh,
-            .vmas          = ranges,
+            .space         = *g_guest_space,
+            .vmas          = *g_guest_ranges,
             .file          = kGuestNode.value(),
             .file_bytes    = kImageBytes,
             .file_ops      = kGuestView.value().ops,
@@ -288,12 +292,30 @@ void init() {
         loader::EntryFacts facts{};
         base::safety::Check(loader::LoadElfIntoSpace(image, taken, kLoadWorld, facts),
                             "guest elf refused the neutral loader");
-        base::safety::Check(facts.program_entry == 0x40000000U,
+        base::safety::Check(facts.program_entry >= 0x40000000U &&
+                                facts.program_entry < 0x40100000UL,
                             "guest elf entry did not land where it was linked");
-        cinux::print::Println("[armv7] load guest entry %X phnum %u",
-                              static_cast<unsigned long>(facts.program_entry),
+        // One stack page above the mmap base, inside the user window.
+        const auto kStackFrame = mm::Pmm::self().allocate_page();
+        base::safety::Check(kStackFrame.raw != 0 &&
+                                g_guest_space->map_user(0x40010000UL, kStackFrame.raw),
+                            "guest stack refused its mapping");
+        g_guest_entry = static_cast<unsigned long>(facts.program_entry);
+        cinux::print::Println("[armv7] load guest entry %X phnum %u", g_guest_entry,
                               facts.header_count);
     }
+}
+
+mm::AddressSpace* take_guest() {
+    return g_guest_space;
+}
+
+unsigned long guest_entry() {
+    return g_guest_entry;
+}
+
+void guest_seated() {
+    g_guest_space = nullptr;
 }
 
 fs::Vfs& vfs() {
