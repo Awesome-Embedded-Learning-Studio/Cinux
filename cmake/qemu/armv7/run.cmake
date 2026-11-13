@@ -61,6 +61,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUESTLOAD=load guest entry 40000054 phnum 1"
             "-DEXPECTED_GUESTRUN=guest seated as task 4 entry 40000054"
             "-DEXPECTED_GUESTHELLO=[guest] hello from the loaded image"
+            "-DEXPECTED_SEATWRITE=svc write 40 bytes"
+            "-DEXPECTED_SEATOK=sched user seat ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"
             "-DEXPECTED_COW=cow ledger ok"
             "-DEXPECTED_SHARED=shared frame ok"

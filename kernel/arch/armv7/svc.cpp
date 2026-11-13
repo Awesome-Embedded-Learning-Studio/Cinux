@@ -108,8 +108,17 @@ extern "C" unsigned long CurrentTaskIndex();
 extern "C" unsigned long CurrentTaskParent();
 extern "C" unsigned long CurrentTick();
 
+namespace cinux::armv7 {
+void SeatReturnToKernel() __attribute__((noreturn));
+}
+
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
+    if (kNumber == 0x1000UL) {
+        // The seated process asks the kernel to take it back; the
+        // switch into its waiting body does not come through here.
+        cinux::armv7::SeatReturnToKernel();
+    }
     if (kNumber == cinux::armv7::syscall_nr::kGetPid) {
         trap->r0 = CurrentTaskIndex();
         cinux::print::Println("[armv7] getpid %u", trap->r0);

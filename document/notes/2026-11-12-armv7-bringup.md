@@ -598,6 +598,24 @@ armv7 交叉编译下的成色。结论：除 sys_arch_prctl（fs_base）、sys_
 假装。sys_exec 顺手修了一处 ABI 敏感：gnu_stack_flags 从 unsigned int 改
 std::uint32_t（uint32_t 在 arm 是 unsigned long，中立层必须定宽）。
 
+## 用户进程坐上真调度器：x86 模型的 armv7 落点
+
+审计 x86：Scheduler 的 Task 就是进程载体，切入用户态只是任务上下文的一次
+跳转（init_thread 在任务体里 EnterUserMode），syscall 回到同一任务自己的内
+核栈。armv7 的 ContextSwitch 早已为这个模型备好——SPSR 决定恢复进内核还是
+用户世界，ldmia 恢复的 sp 就是任务自己的栈。缺的只是一次真跑。
+
+新自检 RunSchedulerUserSelfCheck 补上这一跑：真 proc::Task，任务体在自己
+的栈上 EnterUserModeWithReturn 进用户态（seat_prog.S 小程序：svc write 一句
+问候、svc 0x1000 请求回内核）。写走的是中立 FileTable——current_open 先问
+席位（任务自己的 files），再回落 g_tasks，一个入口两种坐骑。回内核用
+ContextSwitch 的例外返回把 svc 处理态直接切回等待中的任务体，UserTrap 的
+r4..spsr 十一个字恰好是一张 CpuContext 图像，不需要新汇编。
+
+至此三个用户世界在同一 svc 面下共存：g_tasks 自检轮、loader 装的 guest、
+真调度器上的有座用户进程。下一片把 g_tasks 的散件（wait/fork/mmap/brk）
+逐一搬到中立 proc 件上，搬完拆旧轨。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

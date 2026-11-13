@@ -57,4 +57,8 @@ namespace cinux::armv7 {
 /// scheduler: one round trip from main into a real Task and back.
 [[nodiscard]] bool RunSchedulerSelfCheck();
 
+/// A user process on a real scheduler Task: drops to user mode on its
+/// own stack, writes through the seated file table, returns, retires.
+[[nodiscard]] bool RunSchedulerUserSelfCheck();
+
 }  // namespace cinux::armv7

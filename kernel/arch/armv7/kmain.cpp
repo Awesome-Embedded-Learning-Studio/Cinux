@@ -192,6 +192,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println((kTasksOk && kPagesAfter == kPagesBefore)
                                               ? "[armv7] user mode round trip ok"
                                               : "[armv7] user mode round trip FAILED");
+                    cinux::print::Println(cinux::armv7::RunSchedulerUserSelfCheck()
+                                              ? "[armv7] sched user seat ok"
+                                              : "[armv7] sched user seat FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
                     const unsigned long long kWait =

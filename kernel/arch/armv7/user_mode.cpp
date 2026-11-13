@@ -29,6 +29,7 @@
 #include "kernel/arch/armv7/cow_ledger.hpp"
 #include "kernel/arch/armv7/entropy.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
+#include "kernel/arch/armv7/user_seat.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
@@ -1533,6 +1534,14 @@ void seat_console(const cinux::base::Shared<cinux::fs::FileTable>& table) {
 
 /// The current task's open at one descriptor, or an empty hold.
 cinux::base::Shared<cinux::fs::OpenFile> current_open(unsigned long fd) {
+    const cinux::base::Shared<cinux::fs::FileTable> kSeated =
+        cinux::armv7::seated_files();
+    if (kSeated.holds()) {
+        const cinux::base::Result<cinux::base::Shared<cinux::fs::OpenFile>> kFound =
+            kSeated->get(fd);
+        return kFound.ok() ? kFound.value()
+                           : cinux::base::Shared<cinux::fs::OpenFile>{};
+    }
     const auto& kTable = g_tasks[g_current].files;
     if (!kTable.holds()) {
         return cinux::base::Shared<cinux::fs::OpenFile>{};

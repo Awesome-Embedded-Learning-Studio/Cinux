@@ -47,6 +47,7 @@ add_executable(arm_image
     user_mode.cpp
     lcdif.cpp
     entropy.cpp
+    seat_prog.S
     uart_input.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/elf_layout.cpp
@@ -71,6 +72,7 @@ add_executable(arm_image
     assert_hook.cpp
     selfcheck.cpp
     user_fs.cpp
+    user_seat.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap_runtime.cpp

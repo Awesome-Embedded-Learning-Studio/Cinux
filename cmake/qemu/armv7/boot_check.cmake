@@ -186,6 +186,8 @@ expect_literal(EXPECTED_EVENT0 "the /dev/event0 seat did not answer.")
 expect_literal(EXPECTED_GUESTLOAD "the neutral loader did not seat the guest image.")
 expect_literal(EXPECTED_GUESTRUN "the guest task did not join the round.")
 expect_literal(EXPECTED_GUESTHELLO "the loaded guest did not speak from user mode.")
+expect_literal(EXPECTED_SEATWRITE "the seated task's console write did not answer.")
+expect_literal(EXPECTED_SEATOK "the scheduler-seat user round trip did not finish.")
 
 expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
 
