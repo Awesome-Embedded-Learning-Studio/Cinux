@@ -140,7 +140,13 @@ _irq_trap_save:
        ldmia r3, {r0-r12}
        movs  pc, lr
 
-@ Same stack frame shape as the svc path, on the abort bank's stack.
+@ Same stack frame shape as the svc path, built on the abort bank's
+@ stack only long enough to move it: the abort bank is one per CPU,
+@ so a handler that parks or dies mid-frame would abandon it there
+@ and the bank stack would drift until it hits bottom. The frame
+@ therefore moves onto the interrupted task's supervisor stack - the
+@ same home the svc path parks its frames on - and the bank stack
+@ comes back to its top before any C runs.
 _abort_trap_save:
        sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
        stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
@@ -152,21 +158,8 @@ _abort_trap_save:
        str   r1, [sp, #52]         @ user sp
        str   r2, [sp, #56]         @ user pc
        str   r3, [sp, #60]         @ user SPSR
-       mov   r0, sp
-       mov   r1, #2
-       bl    c_trap_entry
-       mov   r3, r0
-       add   sp, sp, #64           @ free the frame on this bank's stack
-       ldr   r1, [r3, #52]         @ user sp
-       ldr   r2, [r3, #60]         @ SPSR
-       ldr   r12, [r3, #56]        @ user pc
-       cps   #0x1F
-       mov   sp, r1
-       cps   #0x13
-       msr   spsr_cxsf, r2
-       mov   lr, r12
-       ldmia r3, {r0-r12}
-       movs  pc, lr
+       mov   r1, #2                @ data abort
+       b     _banked_trap_run
 
 @ A kernel-mode prefetch abort: dump the kernel world and stop. The
 @ frame shape matches the abort save path so C can read it the same way.
@@ -185,11 +178,29 @@ _prefetch_trap_save:
        str   r1, [sp, #52]         @ user sp
        str   r2, [sp, #56]         @ user pc
        str   r3, [sp, #60]         @ user SPSR
-       mov   r0, sp
-       mov   r1, #3
-       bl    c_trap_entry
+       mov   r1, #3                @ fetch abort
+       b     _banked_trap_run
+
+@ Shared by the data- and fetch-abort stubs. On arrival the frame is
+@ complete on the abort bank's stack and r1 carries the trap kind.
+@ r0-r12 hold user values here, but the resume path reloads every one
+@ of them from the frame copy, so the copy may clobber them freely.
+_banked_trap_run:
+       mov   r0, sp                @ r0 = the bank-frame to move
+       cps   #0x13                 @ supervisor: sp = the task's kernel sp
+       sub   sp, sp, #64
+       mov   r4, sp                @ r4 = the frame's new home
+       add   r5, sp, #64           @ r5 = one past the frame's end
+1:     ldmia r0!, {r2, r3}
+       stmia r4!, {r2, r3}
+       cmp   r4, r5
+       blo   1b                    @ sixteen words shuttled, 64 bytes done
+       mov   r0, sp                @ r0 = the frame on the task stack
+       cps   #0x17
+       add   sp, sp, #64           @ the bank stack is whole again
+       cps   #0x13
+       bl    c_trap_entry          @ C runs on the task's own stack
        mov   r3, r0
-       add   sp, sp, #64
        ldr   r1, [r3, #52]         @ user sp
        ldr   r2, [r3, #60]         @ SPSR
        ldr   r12, [r3, #56]        @ user pc
@@ -199,6 +210,7 @@ _prefetch_trap_save:
        msr   spsr_cxsf, r2
        mov   lr, r12
        ldmia r3, {r0-r12}
+       add   sp, sp, #64           @ the frame comes off the task stack
        movs  pc, lr
 
 _prefetch_dump:
