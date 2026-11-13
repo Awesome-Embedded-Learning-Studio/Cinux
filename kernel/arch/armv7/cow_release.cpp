@@ -15,7 +15,7 @@
  * @copyright Copyright (c) 2026
  */
 
-#include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/mm/cow.hpp"
 
 #include "cinux/assert.hpp"
 #include "kernel/arch/page.hpp"

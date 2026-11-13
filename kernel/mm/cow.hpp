@@ -152,6 +152,24 @@ void ReleaseFrame(unsigned long long frame);
                              const VmaStore* ranges = nullptr);
 
 /**
+ * @brief         Records one more owner for a frame.
+ *
+ * @note          The second owner makes a frame shared. Ports that
+ *          count marks retain on both clone hooks; ports that count
+ *          address spaces retain when a leaf's permissions drop.
+ * @since         0.3.0
+ * @ingroup       kernel_mm
+ */
+void RetainFrame(unsigned long long frame);
+
+/**
+ * @brief         Reports the recorded owners, 0 when the frame is exclusive.
+ * @since         0.3.0
+ * @ingroup       kernel_mm
+ */
+[[nodiscard]] unsigned long FrameShares(unsigned long long frame);
+
+/**
  * @brief         Build a child address space sharing the parent's pages.
  *
  * @param[in]     ranges   Address ranges to clone; all when null.

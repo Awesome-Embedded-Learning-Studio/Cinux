@@ -60,6 +60,10 @@ void Pmm::free_pages(PhysAddr phys, int order) {
     if (phys == PhysAddr{}) {
         return;
     }
+    const unsigned long kIndex =
+        cinux::base::math::Floor(phys.raw, cinux::arch::page::kSize);
+    cinux::base::safety::Check(kIndex + (1UL << order) <= kPmmTotalPages && bitmap_.test(kIndex),
+                               "pmm double free");
     bitmap_.clear_range(cinux::base::math::Floor(phys.raw, cinux::arch::page::kSize),
                         1UL << static_cast<unsigned long>(order));
 }

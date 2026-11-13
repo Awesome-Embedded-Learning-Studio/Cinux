@@ -26,6 +26,8 @@ _start:
     ldr     sp, =__fiq_stack_top
     cps     #0x17               @ abort mode
     ldr     sp, =__abt_stack_top
+    cps     #0x1B               @ undefined mode: nothing may ride a
+    ldr     sp, =__und_stack_top @ garbage sp into a frame ever again
     cps     #0x13               @ back to supervisor
 
     ldr     sp, =__stack_top

@@ -46,6 +46,11 @@ SECTIONS
         . += 4K;
         __abt_stack_top = .;
     }
+
+    .und_stack (NOLOAD) : ALIGN(8) {
+        . += 4K;
+        __und_stack_top = .;
+    }
 }
 
 /* Three pages are reserved for user code between code_va and the stack;
