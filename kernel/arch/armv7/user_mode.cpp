@@ -1329,7 +1329,10 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
 }  // namespace
 
 extern "C" {
-cinux::arch::UserTrap g_user_trap;
+/// The frame of the exception episode now in flight. It points into
+/// the interrupted task's own kernel stack, so a handler that parks
+/// (or a second task's episode) cannot clobber it.
+cinux::arch::UserTrap* g_current_trap = nullptr;
 }
 
 namespace cinux::armv7 {
@@ -1528,18 +1531,18 @@ unsigned long next_runnable(unsigned long from) {
 cinux::arch::UserTrap* schedule_next(unsigned long number) {
     cinux::arch::UserTrap& running = g_tasks[g_current].trap;
     for (unsigned long word = 0; word < 16; ++word) {
-        (&running.r0)[word] = (&g_user_trap.r0)[word];
+        (&running.r0)[word] = (&g_current_trap->r0)[word];
     }
     if (number == cinux::armv7::syscall_nr::kExit) {
         g_tasks[g_current].state       = TaskState::kDone;
-        g_tasks[g_current].exit_status = g_user_trap.r0;
+        g_tasks[g_current].exit_status = g_current_trap->r0;
         cinux::print::Println("[armv7] task %u exited with status %u", g_current,
-                              g_user_trap.r0);
+                              g_current_trap->r0);
         wake_waiters_of(g_current);
     }
 
     if (number == cinux::armv7::syscall_nr::kFstat) {
-        const unsigned long kFd = g_user_trap.r0;
+        const unsigned long kFd = g_current_trap->r0;
         const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
         if (!kOpen.holds()) {
             g_tasks[g_current].trap.r0 =
@@ -1551,7 +1554,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         if (kOpen->ops->stat(kOpen->backend, kOpen->node, probed).ok()) {
             const unsigned long info[2] = {probed.size,
                                            (kOpen->status_flags & kFdWritable) != 0 ? 1UL : 0UL};
-            if (!cinux::arch::CopyToUser(g_user_trap.r1, info, sizeof(info))) {
+            if (!cinux::arch::CopyToUser(g_current_trap->r1, info, sizeof(info))) {
                 g_tasks[g_current].trap.r0 =
                     static_cast<unsigned long>(cinux::armv7::errno::kFault);
                 return &g_tasks[g_current].trap;
@@ -1568,9 +1571,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kLseek) {
-        const unsigned long kFd     = g_user_trap.r0;
-        const long          kOffset = static_cast<long>(g_user_trap.r1);
-        const unsigned long kWhence = g_user_trap.r2;
+        const unsigned long kFd     = g_current_trap->r0;
+        const long          kOffset = static_cast<long>(g_current_trap->r1);
+        const unsigned long kWhence = g_current_trap->r2;
         const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
         if (!kOpen.holds() || kOpen->ops->stat == nullptr ||
             kOpen->node.type != cinux::fs::InodeType::kFile) {
@@ -1603,7 +1606,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         unsigned long length   = 0;
         bool          copied   = true;
         while (length + 1 < sizeof(path)) {
-            if (!cinux::arch::CopyFromUser(&path[length], g_user_trap.r0 + length, 1)) {
+            if (!cinux::arch::CopyFromUser(&path[length], g_current_trap->r0 + length, 1)) {
                 copied = false;
                 break;
             }
@@ -1618,7 +1621,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             return &g_tasks[g_current].trap;
         }
         const std::string_view kPath{path, length};
-        const bool             kScratch = kPath == "/scratch";
+        const bool kScratch = kPath == "/scratch";
         const cinux::base::Result<cinux::fs::FsView> kView =
             cinux::armv7::userfs::vfs().resolve(kPath);
         cinux::base::Result<cinux::fs::FsNode> node{
@@ -1657,9 +1660,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kRead) {
-        const unsigned long kFd    = g_user_trap.r0;
-        const unsigned long kBuf   = g_user_trap.r1;
-        const unsigned long kCount = g_user_trap.r2;
+        const unsigned long kFd    = g_current_trap->r0;
+        const unsigned long kBuf   = g_current_trap->r1;
+        const unsigned long kCount = g_current_trap->r2;
         const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
         if (!kOpen.holds()) {
             g_tasks[g_current].trap.r0 =
@@ -1716,7 +1719,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
             return &g_tasks[g_current].trap;
         }
         // Nothing yet: park until input arrives or the deadline passes.
-        const unsigned long kTimeout = g_user_trap.r3 == 0 ? kReadTicks : g_user_trap.r3;
+        const unsigned long kTimeout = g_current_trap->r3 == 0 ? kReadTicks : g_current_trap->r3;
         g_tasks[g_current].read_pending  = true;
         g_tasks[g_current].read_buf      = kBuf;
         g_tasks[g_current].read_count    = kCount;
@@ -1724,7 +1727,6 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         g_tasks[g_current].wait_mask     = 0;
         g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
         g_tasks[g_current].trap.r0       = 0;
-        cinux::print::Println("[armv7] read waits for input");
     }
 
     if (number == cinux::armv7::syscall_nr::kFork) {
@@ -1771,8 +1773,8 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
 
     if (number == cinux::armv7::syscall_nr::kSignal) {
         // Signal is spelled narrow here: only SIGSEGV, only a handler.
-        const unsigned long kSigno   = g_user_trap.r0;
-        const unsigned long kHandler = g_user_trap.r1;
+        const unsigned long kSigno   = g_current_trap->r0;
+        const unsigned long kHandler = g_current_trap->r1;
         if (kSigno == 11) {
             g_tasks[g_current].fault_handler = kHandler;
             cinux::print::Println("[armv7] fault handler %X for task %u", kHandler, g_current);
@@ -1788,9 +1790,9 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         // Anonymous mapping. r0 is the byte length, r1 an optional address
         // hint (0 lets the bump window choose). A hint must sit inside the
         // window, be page-aligned, and name unmapped pages.
-        const unsigned long kBytes = g_user_trap.r0;
-        const unsigned long kHint  = g_user_trap.r1;
-        const unsigned long kFlags = g_user_trap.r2;
+        const unsigned long kBytes = g_current_trap->r0;
+        const unsigned long kHint  = g_current_trap->r1;
+        const unsigned long kFlags = g_current_trap->r2;
         unsigned long&      kTop   = g_tasks[g_current].mmap_top;
         if (kFlags > 1UL) {
             g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
@@ -1856,8 +1858,8 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     if (number == cinux::armv7::syscall_nr::kMunmap) {
         // Only the anonymous window: the stack and the code are not
         // this call's to release.
-        const unsigned long kAddr  = g_user_trap.r0;
-        const unsigned long kBytes = g_user_trap.r1;
+        const unsigned long kAddr  = g_current_trap->r0;
+        const unsigned long kBytes = g_current_trap->r1;
         if (kAddr < kMmapBase || (kAddr & 4095UL) != 0 || kBytes == 0) {
             g_tasks[g_current].trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kInvalid);
             return &g_tasks[g_current].trap;
@@ -1891,7 +1893,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kClose) {
-        const unsigned long     kFd   = g_user_trap.r0;
+        const unsigned long     kFd   = g_current_trap->r0;
         const cinux::base::Shared<cinux::fs::OpenFile> kOpen = current_open(kFd);
         if (kOpen.holds() && g_tasks[g_current].files->free(kFd).ok()) {
             cinux::print::Println("[armv7] close %u", kFd);
@@ -1907,7 +1909,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     if (number == cinux::armv7::syscall_nr::kBrk) {
         // Grow-only: round up to a page, map what is new, refuse past the
         // window or below the base by reporting the current break.
-        const unsigned long kAsked = g_user_trap.r0;
+        const unsigned long kAsked = g_current_trap->r0;
         unsigned long&      kBreak = g_tasks[g_current].break_top;
         if (kAsked >= kBrkBase && kAsked <= kBrkLimit) {
             const unsigned long kTop = (kAsked + 4095UL) & ~4095UL;
@@ -1937,7 +1939,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kSleep) {
-        const unsigned long kTicks = g_user_trap.r0;
+        const unsigned long kTicks = g_current_trap->r0;
         if (kTicks == 0) {
             return &g_tasks[g_current].trap;
         }
@@ -1950,7 +1952,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
     }
 
     if (number == cinux::armv7::syscall_nr::kWait) {
-        const unsigned long kMask = g_user_trap.r0;
+        const unsigned long kMask = g_current_trap->r0;
         unsigned long       kDone = kTaskCount;
         for (unsigned long index = 0; index < kTaskCount; ++index) {
             if (((kMask >> index) & 1UL) != 0 && g_tasks[index].state == TaskState::kDone) {
@@ -1960,7 +1962,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         }
         if (kDone != kTaskCount) {
             const unsigned long kStatus = g_tasks[kDone].exit_status;
-            if (cinux::arch::CopyToUser(g_user_trap.r1, &kStatus, sizeof(kStatus))) {
+            if (cinux::arch::CopyToUser(g_current_trap->r1, &kStatus, sizeof(kStatus))) {
                 cinux::print::Println("[armv7] wait %u -> %X", kDone, kStatus);
                 g_tasks[g_current].trap.r0 = kDone;
             } else {
@@ -1971,7 +1973,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         // Not finished: park this task; when someone ends, wake_blocked
         // makes it runnable again and it re-asks with -1 in hand.
         const unsigned long kTimeout =
-            g_user_trap.r2 == 0 ? kWaitTicks : g_user_trap.r2;
+            g_current_trap->r2 == 0 ? kWaitTicks : g_current_trap->r2;
         g_tasks[g_current].state         = TaskState::kBlocked;
         g_tasks[g_current].wait_mask     = kMask;
         g_tasks[g_current].wait_deadline = g_tick_now + kTimeout;
@@ -1990,6 +1992,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         }
         cinux::arch::per_cpu::self().slice_ticks = 1;
         return &g_tasks[kNext].trap;
+        // DBGRESUME
     }
 
     if (g_tasks[g_current].state == TaskState::kRunnable) {
@@ -2020,7 +2023,10 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         const unsigned long kRetry = next_runnable(g_current);
         if (kRetry != kTaskCount) {
             g_current = kRetry;
-            cinux::print::Println("[armv7] switch to task %u", kRetry);
+            cinux::print::Println("[armv7] switch to task %u pc %X sp %X spsr %X state %u", kRetry,
+                                  g_tasks[kRetry].trap.lr, g_tasks[kRetry].trap.sp,
+                                  g_tasks[kRetry].trap.spsr,
+                                  static_cast<unsigned>(g_tasks[kRetry].state));
             cinux::arch::space::SwitchRoot(g_tasks[kRetry].space->root());
             cinux::arch::per_cpu::self().slice_ticks = 1;
             return &g_tasks[kRetry].trap;

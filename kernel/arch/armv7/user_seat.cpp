@@ -44,7 +44,7 @@
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 
-extern "C" cinux::arch::UserTrap g_user_trap;
+extern "C" cinux::arch::UserTrap* g_current_trap;
 
 using FaultRepair = bool (*)(unsigned long address, unsigned long status);
 void InstallFaultRepair(FaultRepair hook);
@@ -217,11 +217,14 @@ bool SeatWorldActive() {
 
 void SeatReturnToKernel() {
     // Runs in the service-call context on the seated task's own stack.
-    // The user's saved frame lives in g_user_trap; its r4..spsr words
-    // are a CpuContext image, and the switch returns into the body
-    // right after its EnterUserModeWithReturn.
+    // The user's saved frame is this episode's own stack frame; its
+    // r4..spsr words are a CpuContext image, and the switch returns
+    // into the body right after its EnterUserModeWithReturn. The body
+    // resumes with its pre-user sp, so the frame's 64 bytes die with
+    // the episode.
     g_seat_files.reset();
-    arch::CpuContext* const kUserWords = reinterpret_cast<arch::CpuContext*>(&g_user_trap.r4);
+    arch::CpuContext* const kUserWords =
+        reinterpret_cast<arch::CpuContext*>(&g_current_trap->r4);
     arch::ContextSwitch(kUserWords, g_seat_body);
     __builtin_unreachable();
 }

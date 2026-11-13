@@ -115,9 +115,12 @@ extern "C" [[noreturn]] void kmain() {
             info.e820[0]     = cinux::boot::E820Entry{.base = range.base,
                                                       .length = range.size,
                                                       .type   = cinux::boot::kE820Usable};
-            extern unsigned char __fiq_stack_top[];
+            // The kernel image ends at the last bank stack: the abort-mode
+            // stack sits after the fiq stack, and everything above must stay
+            // reserved or the PMM hands those frames to the kernel heap.
+            extern unsigned char __abt_stack_top[];
             info.kernel_paddr    = 0x80000000UL;
-            info.kernel_mem_size = reinterpret_cast<unsigned long>(__fiq_stack_top) - 0x80000000UL;
+            info.kernel_mem_size = reinterpret_cast<unsigned long>(__abt_stack_top) - 0x80000000UL;
             info.kernel_file_size = info.kernel_mem_size;
             info.kernel_entry     = 0x80000000UL;
             if (cinux::mm::Pmm::self().init(info)) {

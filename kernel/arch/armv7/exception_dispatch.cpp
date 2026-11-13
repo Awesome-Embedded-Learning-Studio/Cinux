@@ -27,7 +27,13 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap);
 
 void HandleDataAbort();
 
+extern "C" {
+/// Set by the vector stub each episode; declared in user_mode.cpp.
+extern cinux::arch::UserTrap* g_current_trap;
+}
+
 extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsigned long is_svc) {
+    g_current_trap = trap;
     if (is_svc == 2) {
         return c_abort_trap(trap);
     }
@@ -35,6 +41,23 @@ extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsi
         return c_svc_dispatch(trap);
     }
     return c_irq_trap(trap);
+}
+
+extern "C" void c_kernel_prefetch_dump(cinux::arch::UserTrap* trap) {
+    unsigned long ifar = 0;
+    asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(ifar));
+    cinux::print::Println("[armv7] kernel prefetch abort at %X spsr %X", ifar, trap->spsr);
+    cinux::print::Println("  r0 %X r1 %X r2 %X r3 %X r4 %X", trap->r0, trap->r1, trap->r2,
+                          trap->r3, trap->r4);
+    cinux::print::Println("  r5 %X r6 %X r7 %X r8 %X r9 %X", trap->r5, trap->r6, trap->r7,
+                          trap->r8, trap->r9);
+    cinux::print::Println("  r10 %X r11 %X r12 %X sp %X", trap->r10, trap->r11, trap->r12,
+                          trap->sp);
+    const unsigned long* const kWords = reinterpret_cast<unsigned long*>(trap->sp & ~3UL);
+    for (unsigned i = 0; i < 48; ++i) {
+        cinux::print::Println("  stack[%u] %X", i, kWords[i]);
+    }
+    cinux::arch::Halt();
 }
 
 extern "C" void c_exception_dispatch(unsigned long vector) {
@@ -45,11 +68,6 @@ extern "C" void c_exception_dispatch(unsigned long vector) {
     if (vector == cinux::arch::isr::kPageFaultVector) {
         HandleDataAbort();
         return;
-    }
-    if (vector == 3) {
-        unsigned long ifar = 0;
-        asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(ifar));  // IFAR
-        cinux::print::Println("[armv7] prefetch abort at %X", ifar);
     }
     cinux::print::Println("[armv7] exception %u unhandled, stopping", vector);
     cinux::arch::Halt();
