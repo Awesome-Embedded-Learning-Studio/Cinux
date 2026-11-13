@@ -143,6 +143,22 @@ void guest_main(void) {
             sys3(6UL, (unsigned long)kMaster, 0UL, 0UL);
         }
     }
+    // Blocking stdin: the line the runner drips into the UART arrives
+    // through the console tty's line discipline, canonical and echoed.
+    {
+        static const char kLiA[] = "[guest] stdin refused\n";
+        static const char kLiB[] = "[guest] stdin ok, line read back\n";
+        char line[16];
+        for (unsigned long i = 0; i < sizeof(line); ++i) {
+            line[i] = 0;
+        }
+        const long kGot = sys3(3UL, 0UL, (unsigned long)line, sizeof(line) - 1UL);
+        if (kGot == 6 && line[0]=='c'&&line[1]=='i'&&line[2]=='n'&&line[3]=='u'&&line[4]=='x'&&line[5]=='\n') {
+            sys3(4UL, 1UL, (unsigned long)kLiB, slen(kLiB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kLiA, slen(kLiA));
+        }
+    }
     // Nonblocking stdin: F_SETFL arms O_NONBLOCK, and the empty
     // line answers EAGAIN instead of parking the caller.
     {

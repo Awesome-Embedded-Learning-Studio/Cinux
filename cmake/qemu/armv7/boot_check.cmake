@@ -1,12 +1,25 @@
 # Runs the bring-up image for a fixed window and checks the serial banner.
-execute_process(
-    COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
-            -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
-            -nographic -monitor none
-    TIMEOUT ${RUN_SECONDS}
-    OUTPUT_VARIABLE serial_out
-    ERROR_VARIABLE serial_err
-    RESULT_VARIABLE run_result)
+# With STDIN_FILE set, the file's bytes drip into the guest's UART after
+# a delay: bytes that arrive before the kernel's UART bring-up are
+# dropped by the model, and the legacy task world's pending reads would
+# swallow them right after, so the wait skips both windows.
+if(STDIN_FILE)
+    execute_process(
+        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -nographic -monitor none"
+        TIMEOUT ${RUN_SECONDS}
+        OUTPUT_VARIABLE serial_out
+        ERROR_VARIABLE serial_err
+        RESULT_VARIABLE run_result)
+else()
+    execute_process(
+        COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
+                -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
+                -nographic -monitor none
+        TIMEOUT ${RUN_SECONDS}
+        OUTPUT_VARIABLE serial_out
+        ERROR_VARIABLE serial_err
+        RESULT_VARIABLE run_result)
+endif()
 file(WRITE "${SERIAL_LOG}" "${serial_out}")
 
 if(NOT EXISTS ${SERIAL_LOG})

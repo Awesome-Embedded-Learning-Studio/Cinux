@@ -5,7 +5,7 @@ if(NOT CINUX_ARM_QEMU)
     message(FATAL_ERROR "armv7 lane: qemu-system-arm not found in PATH")
 endif()
 
-set(CINUX_ARM_RUN_SECONDS 5 CACHE STRING "How long the arm_boot check lets QEMU run")
+set(CINUX_ARM_RUN_SECONDS 20 CACHE STRING "How long the arm_boot check lets QEMU run")
 
 set(CINUX_ARM_DTB_ADDR 0x81000000)
 
@@ -62,6 +62,9 @@ add_test(NAME arm_boot
             "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
             "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"
             "-DEXPECTED_GETDENTS=getdents ok, root holds five entries with hello"
+            "-DEXPECTED_STDIN=stdin ok, line read back"
+            "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
+            "-DSTDIN_DELAY=6"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
             "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
             "-DEXPECTED_GUESTEXIT=guest exited with status 0"

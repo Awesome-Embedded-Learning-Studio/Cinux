@@ -819,6 +819,26 @@ arm_boot 3/3，host 单测全绿。
 - 全部 84 个 host 测试 0 failed。
 - `ninja -C build` 干净。
 
+## stdin 行读取打通
+
+### 审计结论
+- 座位 guest 的 stdin 已是 /dev/console 的真 tty：SeatConsoleStreams 装的是 DevFs 的 FsOps,read 桥到 DeviceOps::read(console_node.cpp),行规 Tty::read_line 直接经 wiring take_key 拉 platform::SerialTryGetChar(armv7 的 platform/serial.hpp 转发 UartReceiveReady/UartReadChar)。
+- 阻塞语义链完整:HandleRead 对阻塞 fd 在 kWouldBlock 上 yield 重试,每轮 read_line 自己尝试 take_key,无需输入泵。非阻塞路径(F_SETFL O_NONBLOCK)因 ops->try_read 为空走 read,kWouldBlock 映射 EAGAIN,先前 fcntl 探针已验证。
+- 结论:不需要写任何新实现,只缺一个端到端探针把字节送进 UART。
+
+### 注入时序(三条窗口规则)
+- 0 秒注入的字节在内核 UartInit 之前到达,QEMU 的 imx-serial 模型直接丢弃。
+- 注入落在旧 g_tasks 世界 read pending 窗口内会被其 tick 唤醒的 DrainConsole 吃掉。
+- 注入晚于 read 段即可:guest 的阻塞读无限等,FIFO 里的字节照常读出(tty echo 会在串口回显该行)。
+- boot_check.cmake 增加 STDIN_FILE/STDIN_DELAY 分支:(sleep N && cat 文件) | qemu。assets/armv7_stdin.txt 内容 cinux\n,延迟 6 秒,窗口 CINUX_ARM_RUN_SECONDS 5 -> 20。
+
+### guest 探针
+- 阻塞 read(0) 读一行,断言 6 字节 "cinux\n",输出 `[guest] stdin ok, line read back`,EXPECT_STDIN 入 run.cmake。放在 fcntl 之前:先消费注入行,后面的空读 EAGAIN 依然成立。
+
+### 验证
+- `./scripts/check-armv7.sh --repeat 3` both lanes green。
+- 84 个 host 测试 0 failed,`ninja -C build` 干净。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
