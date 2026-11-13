@@ -168,6 +168,9 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunSharedSpaceSelfCheck()
                                               ? "[armv7] shared frame ok"
                                               : "[armv7] shared frame FAILED");
+                    cinux::print::Println(cinux::armv7::RunSchedulerSelfCheck()
+                                              ? "[armv7] sched roundtrip ok"
+                                              : "[armv7] sched roundtrip FAILED");
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

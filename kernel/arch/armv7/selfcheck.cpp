@@ -4,6 +4,9 @@
 #include "kernel/mm/heap.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/address_space.hpp"
+#include "kernel/proc/sched_class.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/task.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
 #include "kernel/arch/armv7/clone_space.hpp"
@@ -256,6 +259,36 @@ bool RunSpaceSelfCheck() {
     space->teardown();
     const unsigned long kAfter = cinux::mm::Pmm::self().free_page_count();
     return kAfter == kBefore;
+}
+
+namespace {
+
+bool g_scheduler_probe_ran = false;
+
+/// The probe task's body: records its visit and retires through the
+/// shared exit path, which hands control back to main.
+void SchedulerProbeBody() {
+    g_scheduler_probe_ran = true;
+    cinux::proc::Scheduler::self().exit_current(0);
+}
+
+}  // namespace
+
+bool RunSchedulerSelfCheck() {
+    cinux::proc::Scheduler::self().install_class(cinux::proc::DefaultFifoClass());
+    cinux::proc::InstallKernelSwitchSink();
+    cinux::proc::Task* const kProbe =
+        cinux::proc::TaskBuilder().set_entry(SchedulerProbeBody).set_name("schedprobe").build();
+    if (kProbe == nullptr) {
+        return false;
+    }
+    if (!cinux::proc::Scheduler::self().seat(*kProbe)) {
+        return false;
+    }
+    // Preemption stays off: the probe retires itself before this call
+    // answers, and the timer never needs to move it.
+    cinux::proc::Scheduler::self().run_until_done();
+    return g_scheduler_probe_ran;
 }
 
 }  // namespace cinux::armv7

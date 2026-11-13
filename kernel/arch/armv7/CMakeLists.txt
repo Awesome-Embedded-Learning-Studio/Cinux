@@ -37,6 +37,8 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/futex.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/task_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/sched_class.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp

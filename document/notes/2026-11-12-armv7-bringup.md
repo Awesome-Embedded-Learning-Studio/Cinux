@@ -484,6 +484,24 @@ null 任务断言，让 task-less 调用响亮拒绝而不是把空指针穿进�
 道补 -fno-threadsafe-statics（与其余车道同款）。arm_boot 3/3 过，host 单
 测全绿。
 
+## 共享调度器第一趟真切换：main 进任务再回 main
+
+task_runtime.cpp（KernelSwitchSink 与 TaskBuilder 的家）在 armv7 下语法直
+接全过——它依赖的每个 arch 座早已就位：ArmTaskContext 写 r4/r5/sp/lr，
+context_switch.S 的 TaskTrampoline 按同一约定起跳，SwitchTaskContext 单核
+同核置 on_cpu=-1，ArmTaskStack/space::SwitchRoot 都在。sched_class.cpp 一
+并链入。
+
+自检 RunSchedulerSelfCheck 走完整真件路径：TaskBuilder 建内核任务
+schedprobe，install_class(DefaultFifoClass) 加 InstallKernelSwitchSink，
+seat 入队，run_until_done 从 main 经 enter_from_main 切进任务，任务体
+exit_current 退休，reclaim 归还栈页与 Task 块，控制回到 main。打印
+sched roundtrip ok 挂进 arm_boot 期望。preemption 保持关闭，探针自退休。
+
+至此调度器上提只剩最后一跳：user_mode.cpp 的迷你调度（g_tasks 四槽与
+c_schedule_from_user）换到这些真件上，用户任务的 trap frame 与通用 Task 的
+CpuContext 对接。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

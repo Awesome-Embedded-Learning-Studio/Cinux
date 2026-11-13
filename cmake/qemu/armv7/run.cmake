@@ -54,6 +54,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_PERCPU=per-cpu ok"
             "-DEXPECTED_CPUID=cpu id ARM C07"
             "-DEXPECTED_PROCCPU=proc cpuinfo"
+            "-DEXPECTED_SCHED=sched roundtrip ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"
             "-DEXPECTED_COW=cow ledger ok"
             "-DEXPECTED_SHARED=shared frame ok"
