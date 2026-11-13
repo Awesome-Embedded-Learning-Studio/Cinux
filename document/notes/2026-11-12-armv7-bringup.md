@@ -536,6 +536,21 @@ arm_boot 期望全数照旧。字体 blob 用 arm 格式 objcopy 复刻 x86 规�
 至此 GUI 内核侧只差输入：event0/event1 的键鼠后端与 pty/console 节点还
 坐在 x86 的键盘鼠标驱动上，那是下一块中立审计。
 
+## event0 落座：UART 键盘喂中立事件流
+
+审计 x86 输入链：EventStream 与 input_node 本就中立（语法直过），键盘只是
+流的发布者。armv7 缺的是发布源。QEMU 的 imx6ul 有 chipidea USB 模型，但
+USB HID 整链（host 控制器加设备枚举）是下一块整活，本轮先做诚实的近路：
+uart_input.cpp 把串口 RX 折成 Linux 键码（字母表按标准 KEY_A 30/KEY_B 48
+那张图，不是字母序），每次按键发布按下加抬起再关一条 SYN_REPORT。
+PollUartKeyboard 挂在轮询路径，event1 的座位真实但安静——这块板没有指点
+设备，宁可空流不造数据。
+
+探针先把 device model 的 fb0 语义补了一课：devfs lookup 只给设备记录，
+读之前必须 adopt_open（设备的 open 钩子把节点换成 per-open 的
+InputOpen）。探针发布一条 KEY_A 报告，adopt 后单次读回 72 字节，逐字段校
+验 wire 布局，打印 dev event0 72 bytes 挂进 arm_boot 期望。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

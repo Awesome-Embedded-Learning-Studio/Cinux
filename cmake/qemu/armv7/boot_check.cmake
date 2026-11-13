@@ -182,6 +182,7 @@ expect_literal(EXPECTED_PROCCPU "the /proc/cpuinfo read-back probe did not answe
 expect_literal(EXPECTED_SCHED "the shared-scheduler round trip did not answer.")
 expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
 expect_literal(EXPECTED_FB0 "the /dev/fb0 seat did not answer.")
+expect_literal(EXPECTED_EVENT0 "the /dev/event0 seat did not answer.")
 
 expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
 

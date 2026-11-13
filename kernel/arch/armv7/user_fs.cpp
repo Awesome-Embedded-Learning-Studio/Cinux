@@ -31,9 +31,13 @@
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
+#include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
+#include "kernel/fs/devfs/input_node.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
+#include "kernel/drivers/input/input_config.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -202,7 +206,7 @@ void init() {
         };
         base::safety::Check(driver::Framebuffer::self().init(kInfo),
                             "framebuffer refused the LCDIF geometry");
-        auto* const kDev = new fs::DevFs();
+        fs::DevFs* const kDev = new fs::DevFs();
         driver::DeviceModel::self().bind(*kDev);
         fs::RegisterFramebufferDevice();
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
@@ -212,6 +216,27 @@ void init() {
         cinux::print::Println("[armv7] dev fb0 %ux%u",
                               driver::Framebuffer::self().width(),
                               driver::Framebuffer::self().height());
+
+        // event0 speaks the UART's keys, event1 sits quiet: the
+        // pointer has no source on this board. The probe plants one
+        // key report and reads it back through the very vfs.
+        fs::RegisterInputDevices(armv7::UartKeyboardEvents(), armv7::BoardPointerEvents());
+        armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 1);
+        armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 0);
+        armv7::UartKeyboardEvents().publish_report();
+        const auto kEventNode = kDev->lookup("event0");
+        base::safety::Check(kEventNode.ok(), "dev event0 lookup failed");
+        const auto kOpened = kDev->adopt_open(kEventNode.value(), "event0");
+        base::safety::Check(kOpened.ok(), "dev event0 open failed");
+        driver::InputEventWire wire[3]{};
+        const auto kChunk = kDev->read(kOpened.value(), 0, wire, sizeof(wire));
+        base::safety::Check(kChunk.ok() && kChunk.value() == sizeof(wire),
+                            "dev event0 read failed");
+        base::safety::Check(wire[0].type == driver::kEvKey && wire[0].code == 30 &&
+                                wire[0].value == 1 && wire[2].type == 0 && wire[2].code == 0,
+                            "dev event0 wire lacked the key report");
+        cinux::print::Println("[armv7] dev event0 %u bytes",
+                              static_cast<unsigned long>(kChunk.value()));
     }
 }
 

@@ -32,6 +32,7 @@ add_executable(arm_image
     svc.cpp
     user_mode.cpp
     lcdif.cpp
+    uart_input.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
     ${CMAKE_SOURCE_DIR}/kernel/drivers/framebuffer/framebuffer.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
@@ -42,6 +43,8 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/console/screen.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/fb_node.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/input_node.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/input/event_stream.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp
