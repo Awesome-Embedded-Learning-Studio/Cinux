@@ -32,6 +32,7 @@
 #include "kernel/syscall/sys_getpid.hpp"
 #include "kernel/syscall/sys_lseek.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
+#include "kernel/syscall/sys_yield.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
@@ -161,6 +162,9 @@ const NeutralService kNeutralServices[] = {
     // while the bring-up round-robin keeps its own mask dialect for
     // the episodes that run before any seat exists.
     {cinux::armv7::syscall_nr::kWait, &cinux::syscall::HandleWait4},
+    // A seated yield must reach the real scheduler, not fall through
+    // to the bring-up round-robin whose task slots are stale by then.
+    {cinux::armv7::syscall_nr::kSchedYield, &cinux::syscall::HandleYield},
 };
 
 const NeutralService* find_neutral_service(unsigned long number) {

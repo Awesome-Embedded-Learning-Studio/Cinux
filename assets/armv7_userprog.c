@@ -35,6 +35,62 @@ void guest_main(void) {
     static const char kTag[] = "[guest] hello from the loaded image\n";
     sys3(4UL, 1UL, (unsigned long)kTag, slen(kTag));
 
+        // Edges: the refusal paths the old bring-up world used to own — a
+    // kernel pointer read must be refused, a bad prot must be refused,
+    // a read-only page earns its private copy on first write, a munmap
+    // really frees the hint for the next taker and no further, yield
+    // answers zero, lseek rewinds, and a read-only fd refuses writes.
+    {
+        static const char kEdA[] = "[guest] edges refused\n";
+        static const char kEdB[] = "[guest] edges ok, refusals refused and hints honored\n";
+        unsigned long good = 1;
+if (sys3(4UL, 1UL, 0x80000000UL, 8UL) >= 0) {  // kernel pointer
+            good = 0;
+        }
+if (sys6(90UL, 0UL, 0x1000UL, 0x8UL, 0x22UL, ~0UL, 0UL) >= 0) {  // bad prot
+            good = 0;
+        }
+const long kPage = sys6(90UL, 0UL, 0x1000UL, 0x3UL, 0x22UL, ~0UL, 0UL);
+        if (kPage > 0) {
+            volatile unsigned long* spot = (volatile unsigned long*)(unsigned long)kPage;
+            *spot                        = 0xF00DUL;
+sys3(91UL, (unsigned long)kPage, 0x1000UL, 0UL);  // munmap
+            const long kAgain = sys6(90UL, 0UL, 0x1000UL, 0x3UL, 0x22UL, ~0UL, 0UL);
+            if (kAgain <= 0) {
+                good = 0;  // the freed span must serve the next mapping
+            } else {
+                *(volatile unsigned long*)(unsigned long)kAgain = 0xCAFEUL;
+            }
+const long kFixed1 = sys6(90UL, 0x40020000UL, 0x1000UL, 0x3UL, 0x32UL, ~0UL, 0UL);
+            const long kFixed2 = sys6(90UL, 0x40020000UL, 0x1000UL, 0x3UL, 0x32UL, ~0UL, 0UL);
+            volatile unsigned long* fixed_spot = (volatile unsigned long*)0x40020000UL;
+            *fixed_spot                        = 0xD00DUL;
+            if (kFixed1 != 0x40020000L || kFixed2 != 0x40020000L || *fixed_spot != 0xD00DUL) {
+                good = 0;  // a fixed mapping must reclaim and stand twice
+            }
+        } else {
+            good = 0;
+        }
+if (sys3(158UL, 0UL, 0UL, 0UL) != 0L) {  // sched_yield
+            good = 0;
+        }
+const long kFd = sys3(5UL, (unsigned long)"/motd", 0UL, 0UL);
+        if (kFd >= 0) {
+            static char nibble[4];
+const long kFirst = sys3(3UL, (unsigned long)kFd, (unsigned long)nibble, 4UL);
+const long kBack  = sys3(19UL, (unsigned long)kFd, 0UL, 0UL);  // lseek to 0
+            const long kRedo  = sys3(3UL, (unsigned long)kFd, (unsigned long)nibble, 4UL);
+const long kRoWr  = sys3(4UL, (unsigned long)kFd, (unsigned long)nibble, 1UL);
+            if (kFirst != 4L || kBack != 0L || kRedo != 4L || kRoWr != -9L) {
+                good = 0;  // a regular file answers no writes
+            }
+            sys3(6UL, (unsigned long)kFd, 0UL, 0UL);
+        } else {
+            good = 0;
+        }
+sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
+    }
+
     static char page[4096] __attribute__((aligned(16)));
     const long kFd = sys3(5UL, (unsigned long)"/motd", 0UL, 0UL);  // open
     if (kFd >= 0) {

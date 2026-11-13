@@ -34,6 +34,11 @@ long long HandleRead(const SyscallFrame& frame) {
         return -kEbadf;
     }
     auto* const   kFile = kSlot.value().get();
+    // The access mode is part of the open, not the file: a descriptor
+    // born O_WRONLY answers reads with EBADF whatever it points at.
+    if ((kFile->status_flags & kOpenAccMode) == kOpenWriteOnly) {
+        return -kEbadf;
+    }
     unsigned char stage[kReadStageBytes];
     const auto    kWant =
         static_cast<unsigned long>(frame.rdx < kReadStageBytes ? frame.rdx : kReadStageBytes);

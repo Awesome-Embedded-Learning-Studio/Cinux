@@ -72,6 +72,11 @@ long long WriteRun(unsigned long long descriptor, unsigned long long source,
     }
     // NOLINTNEXTLINE(misc-const-correctness) the settle loop advances this open's cursor
     auto* const   kFile = kSlot.value().get();
+    // The access mode is part of the open, not the file: a descriptor
+    // born O_RDONLY answers writes with EBADF whatever it points at.
+    if ((kFile->status_flags & kOpenAccMode) == 0) {
+        return -kEbadf;
+    }
     unsigned char stage[kWriteStageBytes];
     const auto    kChunk =
         static_cast<unsigned long>(count < kWriteStageBytes ? count : kWriteStageBytes);

@@ -58,6 +58,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/fork_resume.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fork.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_wait.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_yield.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/user_access.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
