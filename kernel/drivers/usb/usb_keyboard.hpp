@@ -24,6 +24,7 @@
 #include "cinux/container/ring_queue.hpp"
 #include "cinux/singleton.hpp"
 #include "kernel/drivers/usb/usb_config.hpp"
+#include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_device.hpp"
 
 namespace cinux::driver {
@@ -74,7 +75,7 @@ public:
      * @since         0.6.0
      * @ingroup       kernel_driver
      */
-    [[nodiscard]] uint8_t seated_slot() const;
+    [[nodiscard]] bool seated() const;
 
     /**
      * @brief         Drains finished reports, then answers the queue.

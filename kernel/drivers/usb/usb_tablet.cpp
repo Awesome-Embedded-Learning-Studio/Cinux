@@ -5,7 +5,7 @@
 #include "cinux/bit_ops/bitmask.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/input/input_config.hpp"
-#include "kernel/drivers/usb/xhci.hpp"
+#include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/xhci_layout.hpp"
 
 namespace cinux::driver {
@@ -17,7 +17,9 @@ constexpr uint16_t kBtnRight  = 0x111;
 constexpr uint16_t kBtnMiddle = 0x112;
 
 void poll_tablet() {
-    XhciHost::self().drain_events();
+    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
+        kHost->pump();
+    }
 }
 }
 
@@ -25,28 +27,30 @@ bool UsbTablet::init() {
     if (ready_) {
         return true;
     }
-    XhciHost&       host = XhciHost::self();
+    usb::HostDriver* host = usb::PrimaryHost();
+    if (host == nullptr) {
+        return false;
+    }
     usb::KeyboardEp endpoint{};
-    if (!device_.enumerate(host, usb::kHidProtocolNone, endpoint)) {
+    if (!device_.enumerate(*host, usb::kHidProtocolNone, endpoint)) {
         return false;
     }
     if (endpoint.address != 0x81 || endpoint.max_packet < 5 ||
-        !device_.set_configuration(host, endpoint.config_value) ||
-        !device_.configure_interrupt_in(host, endpoint.max_packet, endpoint.interval)) {
-        static_cast<void>(device_.detach(host));
+        !device_.set_configuration(*host, endpoint.config_value) ||
+        !device_.configure_interrupt_in(*host, endpoint.max_packet, endpoint.interval)) {
+        static_cast<void>(device_.detach(*host));
         return false;
     }
     stream_.configure_absolute(32767);
     stream_.set_poll_hook(poll_tablet);
-    device_.interrupt_read(host, &UsbTablet::report_arrived, this);
+    device_.interrupt_read(*host, &UsbTablet::report_arrived, this);
     ready_ = true;
     print::Println("[kern] usb tablet seated, absolute axes 0..32767");
     return true;
 }
 
 void UsbTablet::report_arrived(UsbTablet& self, unsigned long status, unsigned long length) {
-    if ((status == usb::kCompletionSuccess || status == usb::kCompletionShortPacket) &&
-        length >= 5) {
+    if (status == 0 && length >= 5) {
         const TabletReport kReport = DecodeTablet(self.device_.report());
         self.stream_.publish(kEvAbs, kAbsX, kReport.x);
         self.stream_.publish(kEvAbs, kAbsY, kReport.y);
@@ -62,7 +66,9 @@ void UsbTablet::report_arrived(UsbTablet& self, unsigned long status, unsigned l
         self.buttons_ = kReport.buttons;
         self.stream_.publish_report();
     }
-    self.device_.interrupt_read(XhciHost::self(), &UsbTablet::report_arrived, &self);
+    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
+        self.device_.interrupt_read(*kHost, &UsbTablet::report_arrived, &self);
+    }
 }
 
 EventStream& UsbTablet::events() {

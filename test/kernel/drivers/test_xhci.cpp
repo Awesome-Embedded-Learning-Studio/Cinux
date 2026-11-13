@@ -1,5 +1,4 @@
 #include "framework_kernel.hpp"
-#include "kernel/drivers/usb/usb_config.hpp"
 #include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/drivers/usb/xhci.hpp"
 #include "test_assert.hpp"
@@ -15,8 +14,7 @@ TEST("xhci: the controller brings up and a keyboard answers") {
 
     auto& keyboard = cinux::driver::UsbKeyboard::self();
     ASSERT_TRUE(keyboard.init());
-    ASSERT_GT(keyboard.seated_slot(), 0U);
-    ASSERT_LE(keyboard.seated_slot(), cinux::driver::usb::kXhciSlotsEnabled);
+    ASSERT_TRUE(keyboard.seated());
 }
 
 }  // namespace

@@ -24,6 +24,7 @@
 
 #include "cinux/singleton.hpp"
 #include "cinux/spin_mutex.hpp"
+#include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_config.hpp"
 #include "kernel/drivers/usb/xhci_layout.hpp"
 
@@ -32,11 +33,51 @@ namespace cinux::driver::usb {
 template <typename Owner>
 class UsbDevice;
 
-/// @brief One seated device as the event drain sees it, erased at the seam.
-struct DeviceRoute {
-    uint8_t port;    ///< The root-hub port the device answered on, zero when free.
-    void*   device;  ///< The seated device, opaque here.
-    void (*deliver)(void* device, const Trb&);  ///< Hands one transfer event over.
+/**
+ * @brief   One seated device's xHCI state, all of it silicon vocabulary.
+ * @note    Slots, context pages, endpoint rings and doorbell targets
+ *          live here and never leave this driver; the neutral face
+ *          above only ever sees the seat pointer.
+ * @since   0.9.0
+ * @ingroup kernel_driver
+ */
+struct XhciSeat {
+    /// The device's slot number, zero when the seat is free.
+    uint8_t slot = 0;
+    /// The attached device's speed code.
+    uint8_t speed = 0;
+    /// The root-hub port the device answered on, zero when free.
+    uint8_t port = 0;
+    /// The slot's input context page, bus address.
+    uint64_t input_page = 0;
+    /// The slot's output context page, bus address.
+    uint64_t output_page = 0;
+    /// The control endpoint's ring page, bus address.
+    uint64_t ep0_page = 0;
+    /// The interrupt endpoint's ring page, bus address.
+    uint64_t ep1_page = 0;
+    /// The control endpoint's ring cursor.
+    RingState ep0_{};
+    /// The interrupt endpoint's ring cursor.
+    RingState ep1_{};
+    /// The transfer event the control spin waits for.
+    uint64_t control_trb = 0;
+    /// Whether the waited control transfer finished.
+    bool control_done = false;
+    /// The waited control transfer's completion code.
+    uint8_t control_code = 0;
+    /// The armed interrupt transfer's ring word.
+    uint64_t report_trb = 0;
+    /// Whether an interrupt transfer is in flight.
+    bool report_live = false;
+    /// Bytes the armed interrupt page takes.
+    unsigned long report_bytes = 0;
+    /// Where the neutral layer wants the finished report, bus address.
+    uint64_t report_target = 0;
+    /// The armed interrupt's completion, neutral cargo only.
+    void (*done)(void* owner, const TransferDone&) = nullptr;
+    /// The done's first word.
+    void* owner = nullptr;
 };
 
 }  // namespace cinux::driver::usb
@@ -54,7 +95,7 @@ struct PciDevice;
  * @since   0.6.0
  * @ingroup kernel_driver
  */
-class XhciHost : public base::Singleton<XhciHost> {
+class XhciHost : public usb::HostDriver, public base::Singleton<XhciHost> {
     friend class base::Singleton<XhciHost>;
     template <typename Owner>
     friend class usb::UsbDevice;
@@ -81,7 +122,7 @@ public:
      * @since         0.6.0
      * @ingroup       kernel_driver
      */
-    [[nodiscard]] bool present() const;
+    [[nodiscard]] bool present() override;
 
     /**
      * @brief         Root-hub ports the controller offers.
@@ -92,7 +133,7 @@ public:
      * @since         0.6.0
      * @ingroup       kernel_driver
      */
-    [[nodiscard]] unsigned int max_ports() const;
+    [[nodiscard]] unsigned int max_ports() override;
 
     /**
      * @brief         Drains every finished event on the ring.
@@ -117,7 +158,22 @@ public:
      * @since         0.6.0
      * @ingroup       kernel_driver
      */
-    [[nodiscard]] bool unhealthy() const;
+    [[nodiscard]] bool unhealthy() override;
+
+    /// The neutral faces below the protocol layer, all override.
+    [[nodiscard]] bool port_connected(unsigned int port) override;
+    [[nodiscard]] bool port_taken(unsigned int port) override;
+    [[nodiscard]] void* address(unsigned int port) override;
+    [[nodiscard]] bool control_read(void* seat, uint16_t value, void* data,
+                                    uint16_t length) override;
+    [[nodiscard]] bool set_configuration(void* seat, uint8_t config_value) override;
+    [[nodiscard]] bool configure_interrupt_in(void* seat, uint16_t max_packet,
+                                              uint8_t interval) override;
+    void arm_interrupt_in(void* seat, uint64_t buffer_physical, unsigned long length,
+                          void (*done)(void* owner, const usb::TransferDone&),
+                          void* owner) override;
+    void detach(void* seat) override;
+    void pump() override;
 
 private:
     XhciHost() = default;
@@ -134,8 +190,9 @@ private:
     void                   write_doorbell(unsigned int slot, unsigned int target);
     [[nodiscard]] uint32_t port_status(unsigned int port) const;
     [[nodiscard]] bool     reset_port(unsigned int port, uint8_t& speed);
-    void                   seat_device(uint8_t slot, void* device,
-                                       void (*deliver)(void* device, const usb::Trb& event));
+    void                   seat_transfer(usb::XhciSeat& seat, const usb::Trb& event);
+    [[nodiscard]] bool     spin_for_control(usb::XhciSeat& seat);
+    void                   ring_report(usb::XhciSeat& seat);
     void                   consume_event();
     [[nodiscard]] bool     await_command(uint64_t trb_address, uint8_t& slot, uint8_t& code);
     void                   arm_delivery(const PciDevice* host);
@@ -149,7 +206,7 @@ private:
     uint64_t                command_page_                   = 0;
     uint64_t                event_page_                     = 0;
     uint64_t                device_page_                    = 0;
-    usb::DeviceRoute        routes_[usb::kXhciSlotsEnabled] = {};
+    usb::XhciSeat           seats_[usb::kXhciSlotsEnabled]  = {};
     base::SpinMutex         event_gate_{};
     uint64_t                awaited_trb_   = 0;
     bool                    command_ready_ = false;

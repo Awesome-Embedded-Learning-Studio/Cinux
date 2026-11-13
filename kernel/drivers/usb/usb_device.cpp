@@ -1,16 +1,15 @@
 /**
  * @file    usb_device.cpp
- * @brief   The device layer's transfers, one class driver's type at a time.
+ * @brief   The device layer's walk, one class driver's type at a time.
  *
- * The endpoint-zero control dance, the interrupt ring's read, and the
- * completion dispatch live here; every register word goes through the
- * host controller's faces, every context and ring word through the
- * layout vocabulary. Explicit instantiation happens at the class
+ * The enumeration walk, the descriptor reads, and the report page's
+ * arming live here; every register word stays behind the neutral
+ * HostDriver face. Explicit instantiation happens at the class
  * drivers that own devices.
  *
  * @author  Charliechen114514
- * @date    2026-10-22
- * @version 0.2
+ * @date    2026-11-14
+ * @version 0.3
  * @since   0.6.0
  * @ingroup kernel_driver
  * @copyright Copyright (c) 2026
@@ -20,14 +19,10 @@
 
 #include <stdint.h>
 
-#include "cinux/addr.hpp"
-#include "cinux/bit_ops/bitmask.hpp"
-#include "cinux/byte_order.hpp"
 #include "cinux/memory.hpp"
+#include "cinux/byte_order.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/instructions.hpp"
 #include "kernel/drivers/usb/usb_config.hpp"
-#include "kernel/drivers/usb/xhci.hpp"
 #include "kernel/drivers/usb/xhci_layout.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -36,162 +31,47 @@ namespace cinux::driver::usb {
 
 namespace {
 
-/// @brief Where the control data buffer sits inside the endpoint page.
-constexpr unsigned long kControlBufferOffset = 0x800;
-
-/// @brief Where the report buffer sits inside the interrupt page.
-constexpr unsigned long kReportOffset = 0x800;
-
-/// @brief How many bytes one keyboard report carries.
-constexpr unsigned long kReportBytes = 8;
-
 /// @brief One page of zeros, the honest size of a DMA page.
 constexpr unsigned long kPageBytes = 4096;
 
-/// @brief Bounded spins for a hypervisor that answers in microseconds.
-constexpr unsigned long kSpinLimit = 2000000;
-
-/// @brief The interrupt endpoint's doorbell target: endpoint zero is one.
-constexpr unsigned long kInterruptEndpointId = 3;
-
-/// @brief The control endpoint's doorbell target.
-constexpr unsigned long kControlEndpointId = 1;
-
-/// @brief Port speed code for a high-speed device.
-constexpr uint8_t kSpeedHigh = 3;
-
-/// @brief Endpoint zero's packet ceiling at high speed.
-constexpr uint16_t kPacketHigh = 64;
-
-/// @brief Endpoint zero's packet ceiling otherwise.
-constexpr uint16_t kPacketElse = 8;
-
-/// @brief The transfer-length field of an event's status word.
-constexpr cinux::base::bit::BitRange kEventLength{.low = 0, .width = 24};
-
-/// @brief Lays one control transfer's stages on a ring, status last.
-// NOLINTNEXTLINE(readability-function-size) three stages named one by one
-void control_stages(Trb* ring, RingState& state, uint64_t ring_physical, uint64_t setup,
-                    uint32_t setup_extra, uint64_t buffer, uint32_t buffer_length, bool has_data,
-                    uint32_t slot_bits, uint64_t& status_trb) {
-    EnqueueCommand(
-        ring, kTransferRingTrbs, state, ring_physical, setup, kSetupPacketBytes,
-        TrbControl(kTrbSetupStage, setup_extra | kTrbImmediateData | kTrbChain | slot_bits));
-    if (has_data) {
-        EnqueueCommand(ring, kTransferRingTrbs, state, ring_physical, buffer, buffer_length,
-                       TrbControl(kTrbDataStage, kTrbDirIn | kTrbChain | slot_bits));
-    }
-    status_trb = ring_physical + (state.index * sizeof(Trb));
-    EnqueueCommand(ring, kTransferRingTrbs, state, ring_physical, 0, 0,
-                   TrbControl(kTrbStatusStage, kTrbDirIn | kTrbInterruptOnCompletion | slot_bits));
-}
+/// @brief Where the report sits inside its page.
+constexpr unsigned long kReportOffset = 0x800;
 
 }  // namespace
 
 template <typename Owner>
-bool UsbDevice<Owner>::address(XhciHost& host, uint8_t port) {
-    uint8_t slot = 0;
-    if (!host.run_command(0, TrbControl(kTrbEnableSlot, 0), slot) || slot == 0) {
-        return false;
-    }
-    slot_ = slot;
-
-    const base::PhysAddr kInput  = mm::Pmm::self().allocate_page();
-    const base::PhysAddr kOutput = mm::Pmm::self().allocate_page();
-    const base::PhysAddr kEp0    = mm::Pmm::self().allocate_page();
-    const base::PhysAddr kEp1    = mm::Pmm::self().allocate_page();
-    if (kInput == base::PhysAddr{} || kOutput == base::PhysAddr{} ||
-        kEp0 == base::PhysAddr{} || kEp1 == base::PhysAddr{}) {
-        if (kInput != base::PhysAddr{}) {
-            mm::Pmm::self().free_page(kInput);
-        }
-        if (kOutput != base::PhysAddr{}) {
-            mm::Pmm::self().free_page(kOutput);
-        }
-        if (kEp0 != base::PhysAddr{}) {
-            mm::Pmm::self().free_page(kEp0);
-        }
-        if (kEp1 != base::PhysAddr{}) {
-            mm::Pmm::self().free_page(kEp1);
-        }
-        return false;
-    }
-
-    host.seat_device(slot, this, &UsbDevice::deliver);
-    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kInput.raw)), 0, kPageBytes);
-    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kOutput.raw)), 0, kPageBytes);
-    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEp0.raw)), 0, kPageBytes);
-    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEp1.raw)), 0, kPageBytes);
-    input_page_                                                       = kInput.raw;
-    output_page_                                                      = kOutput.raw;
-    ep0_page_                                                         = kEp0.raw;
-    ep1_page_                                                         = kEp1.raw;
-    base::PtrAt<uint64_t>(mm::DirectMapVirt(host.device_page_))[slot] = output_page_;
-
-    port_                        = port;
-    host.routes_[slot_ - 1].port = port;
-    if (!host.reset_port(port_, speed_)) {
-        return false;
-    }
-
-    auto* const kContext = base::PtrAt<uint32_t>(mm::DirectMapVirt(input_page_));
-    InitRing(base::PtrAt<Trb>(mm::DirectMapVirt(ep0_page_)), kTransferRingTrbs, ep0_page_);
-    ep0_ = RingState{.index = 0, .cycle = true};
-    SetAddFlags(kContext, 0x3U);
-    BuildSlotContext(kContext + 8, 0, port_, speed_, 1);
-    BuildControlEpContext(kContext + 16, ep0_page_,
-                          speed_ == kSpeedHigh ? kPacketHigh : kPacketElse);
-    const uint32_t kSlotBits = static_cast<uint32_t>(slot_) << 24U;
-    uint8_t        answered  = 0;
-    return host.run_command(input_page_, TrbControl(kTrbAddressDevice, kSlotBits), answered);
-}
-
-template <typename Owner>
-bool UsbDevice<Owner>::detach(XhciHost& host) {
-    if (slot_ == 0) {
+bool UsbDevice<Owner>::detach(HostDriver& host) {
+    if (seat_ == nullptr) {
         return true;
     }
-    uint8_t answered = 0;
-    if (!host.run_command(0, TrbControl(kTrbDisableSlot, static_cast<uint32_t>(slot_) << 24U),
-                          answered)) {
-        return false;
+    host.detach(seat_);
+    if (report_page_ != 0) {
+        mm::Pmm::self().free_page(base::PhysAddr{report_page_});
+        report_page_ = 0;
     }
-    host.routes_[slot_ - 1]                                            = {};
-    base::PtrAt<uint64_t>(mm::DirectMapVirt(host.device_page_))[slot_] = 0;
-    const uint64_t kPages[] = {input_page_, output_page_, ep0_page_, ep1_page_};
-    for (const uint64_t kPage : kPages) {
-        if (kPage != 0) {
-            mm::Pmm::self().free_page(base::PhysAddr{kPage});
-        }
-    }
-    slot_ = 0;
-    port_ = 0;
+    seat_ = nullptr;
     return true;
 }
 
 template <typename Owner>
-bool UsbDevice<Owner>::enumerate(XhciHost& host, uint8_t protocol, KeyboardEp& endpoint) {
+bool UsbDevice<Owner>::enumerate(HostDriver& host, uint8_t protocol, KeyboardEp& endpoint) {
     if (!host.present()) {
         return false;
     }
     for (unsigned int port = 1; port <= host.max_ports() && port <= 255; ++port) {
-        bool occupied = false;
-        for (const auto& route : host.routes_) {
-            occupied = occupied || route.port == port;
-        }
-        if (occupied || (host.port_status(port) & 1U) == 0) {
+        if (host.port_taken(port) || !host.port_connected(port)) {
             continue;
         }
-        if (!address(host, static_cast<uint8_t>(port))) {
-            static_cast<void>(detach(host));
+        seat_ = host.address(port);
+        if (seat_ == nullptr) {
             return false;
         }
         unsigned char descriptor[256] = {};
-        if (control_read(host, 0x0100, descriptor, 18) &&
-            control_read(host, 0x0200, descriptor, 9)) {
+        if (host.control_read(seat_, 0x0100, descriptor, 18) &&
+            host.control_read(seat_, 0x0200, descriptor, 9)) {
             const auto kLength = base::ReadWord16(descriptor, 2);
             if (kLength >= 9 && kLength <= sizeof(descriptor) &&
-                control_read(host, 0x0200, descriptor, kLength) &&
+                host.control_read(seat_, 0x0200, descriptor, kLength) &&
                 FindHidInterface(descriptor, kLength, protocol, endpoint)) {
                 return true;
             }
@@ -204,124 +84,51 @@ bool UsbDevice<Owner>::enumerate(XhciHost& host, uint8_t protocol, KeyboardEp& e
 }
 
 template <typename Owner>
-bool UsbDevice<Owner>::spin_for_control(XhciHost& host) {
-    for (unsigned long spin = 0; spin < kSpinLimit; ++spin) {
-        host.drain_events();
-        if (control_done_) {
-            return control_code_ == kCompletionSuccess;
-        }
-        if (host.unhealthy()) {
-            return false;
-        }
-        arch::CpuRelax();
-    }
-    return false;
+bool UsbDevice<Owner>::set_configuration(HostDriver& host, uint8_t config_value) {
+    return host.set_configuration(seat_, config_value);
 }
 
 template <typename Owner>
-bool UsbDevice<Owner>::control_read(XhciHost& host, uint16_t value, void* data, uint16_t length) {
-    auto* const    kRing   = base::PtrAt<Trb>(mm::DirectMapVirt(ep0_page_));
-    const uint64_t kBuffer = ep0_page_ + kControlBufferOffset;
-    const uint32_t kSlot   = static_cast<uint32_t>(slot_) << 24U;
-    control_trb_           = 0;
-    control_done_          = false;
-    control_code_          = 0;
-    control_stages(kRing, ep0_, ep0_page_, PackSetup(0x80, 0x06, value, 0, length),
-                   kSetupDataIn << 17U, kBuffer, length, true, kSlot, control_trb_);
-    host.write_doorbell(slot_, kControlEndpointId);
-    if (!spin_for_control(host)) {
-        return false;
-    }
-    base::CopyBytes(data, base::PtrAt<const void>(mm::DirectMapVirt(kBuffer)), length);
-    return true;
-}
-
-template <typename Owner>
-bool UsbDevice<Owner>::set_configuration(XhciHost& host, uint8_t config_value) {
-    auto* const    kRing = base::PtrAt<Trb>(mm::DirectMapVirt(ep0_page_));
-    const uint32_t kSlot = static_cast<uint32_t>(slot_) << 24U;
-    control_trb_         = 0;
-    control_done_        = false;
-    control_code_        = 0;
-    control_stages(kRing, ep0_, ep0_page_, PackSetup(0x00, 0x09, config_value, 0, 0),
-                   kSetupNoData << 17U, 0, 0, false, kSlot, control_trb_);
-    host.write_doorbell(slot_, kControlEndpointId);
-    return spin_for_control(host);
-}
-
-template <typename Owner>
-bool UsbDevice<Owner>::configure_interrupt_in(XhciHost& host, uint16_t max_packet,
+bool UsbDevice<Owner>::configure_interrupt_in(HostDriver& host, uint16_t max_packet,
                                               uint8_t interval) {
-    if (interval == 0 || (speed_ >= kSpeedHigh && interval > 16)) {
+    if (interval == 0) {
         return false;
     }
-    auto interval_exponent = static_cast<uint8_t>(interval - 1U);
-    if (speed_ < kSpeedHigh) {
-        interval_exponent = 3;
-        for (unsigned period = interval; period > 1; period /= 2U) {
-            ++interval_exponent;
-        }
-    }
-    auto* const kContext = base::PtrAt<uint32_t>(mm::DirectMapVirt(input_page_));
-    base::SetBytes(kContext, 0, kPageBytes);
-    InitRing(base::PtrAt<Trb>(mm::DirectMapVirt(ep1_page_)), kTransferRingTrbs, ep1_page_);
-    ep1_ = RingState{.index = 0, .cycle = true};
-    SetAddFlags(kContext, 0x9U);
-    BuildSlotContext(kContext + 8, 0, port_, speed_, kInterruptEndpointId);
-    BuildInterruptInEpContext(kContext + 32, ep1_page_, max_packet, interval_exponent);
-    const uint32_t kSlotBits = static_cast<uint32_t>(slot_) << 24U;
-    uint8_t        answered  = 0;
-    return host.run_command(input_page_, TrbControl(kTrbConfigureEndpoint, kSlotBits), answered);
+    return host.configure_interrupt_in(seat_, max_packet, interval);
 }
 
 template <typename Owner>
-void UsbDevice<Owner>::ring_report(XhciHost& host) {
-    auto* const kRing = base::PtrAt<Trb>(mm::DirectMapVirt(ep1_page_));
-    report_trb_       = ep1_page_ + (ep1_.index * sizeof(Trb));
-    EnqueueCommand(kRing, kTransferRingTrbs, ep1_, ep1_page_, ep1_page_ + kReportOffset,
-                   kReportBytes, TrbControl(kTrbNormal, kTrbInterruptOnCompletion));
-    host.write_doorbell(slot_, kInterruptEndpointId);
-}
-
-template <typename Owner>
-void UsbDevice<Owner>::interrupt_read(XhciHost& host, ReportHandler handler, Owner* owner) {
-    report_call_.arm(handler, owner);
-    report_live_ = true;
-    ring_report(host);
-}
-
-template <typename Owner>
-void UsbDevice<Owner>::on_transfer(const Trb& event) {
-    if (event.parameter == control_trb_ && control_trb_ != 0) {
-        control_done_ = true;
-        control_code_ = CompletionCode(event);
-        control_trb_  = 0;
+void UsbDevice<Owner>::interrupt_read(HostDriver& host, ReportHandler handler, Owner* owner) {
+    if (seat_ == nullptr) {
         return;
     }
-    if (report_live_ && event.parameter == report_trb_) {
-        report_live_         = false;
-        report_trb_          = 0;
-        const uint8_t  kCode = CompletionCode(event);
-        const uint32_t kResidual =
-            cinux::base::bit::BitMask<uint32_t>{event.status}.extract(kEventLength);
-        const unsigned long kLength = kResidual <= kReportBytes ? kReportBytes - kResidual : 0;
-        report_call_.invoke(kCode, kLength);
+    if (report_page_ == 0) {
+        const base::PhysAddr kPage = mm::Pmm::self().allocate_page();
+        if (kPage == base::PhysAddr{}) {
+            return;
+        }
+        base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kPage.raw)), 0, kPageBytes);
+        report_page_ = kPage.raw;
     }
+    report_call_.arm(handler, owner);
+    host.arm_interrupt_in(seat_, report_page_ + kReportOffset, kUsbReportBytes,
+                          &UsbDevice::trampoline, this);
 }
 
 template <typename Owner>
-void UsbDevice<Owner>::deliver(void* device, const Trb& event) {
-    static_cast<UsbDevice*>(device)->on_transfer(event);
+void UsbDevice<Owner>::trampoline(void* device, const TransferDone& done) {
+    auto& kSelf = *static_cast<UsbDevice*>(device);
+    kSelf.report_call_.invoke(done.ok ? 0UL : 1UL, done.length);
 }
 
 template <typename Owner>
 const unsigned char* UsbDevice<Owner>::report() const {
-    return base::PtrAt<const unsigned char>(mm::DirectMapVirt(ep1_page_ + kReportOffset));
+    return base::PtrAt<const unsigned char>(mm::DirectMapVirt(report_page_ + kReportOffset));
 }
 
 template <typename Owner>
-uint8_t UsbDevice<Owner>::slot() const {
-    return slot_;
+bool UsbDevice<Owner>::seated() const {
+    return seat_ != nullptr;
 }
 
 }  // namespace cinux::driver::usb

@@ -34,6 +34,9 @@ inline constexpr unsigned long kTransferRingTrbs = 8;
 /// @brief Device slots this bring-up asks the controller to enable.
 inline constexpr unsigned long kXhciSlotsEnabled = 8;
 
+/// @brief Bytes one boot-keyboard report carries.
+inline constexpr unsigned long kUsbReportBytes = 8;
+
 /// @brief Glyphs the keyboard queue keeps between reads.
 inline constexpr unsigned long kUsbKeyQueueCapacity = 16;
 

@@ -123,6 +123,52 @@ constexpr cinux::base::bit::BitRange kPortSpeed{.low = 10, .width = 4};
 /// @brief The PCI shape this controller answers as.
 constexpr uint8_t kPciSubclassUsbLocal = 0x03;
 
+/// @brief Where the control data buffer sits inside the endpoint page.
+constexpr unsigned long kControlBufferOffset = 0x800;
+
+/// @brief Where the report buffer sits inside the interrupt page.
+constexpr unsigned long kReportSeatOffset = 0x800;
+
+/// @brief The interrupt endpoint's doorbell target: endpoint zero is one.
+constexpr unsigned long kInterruptEndpointId = 3;
+
+/// @brief The control endpoint's doorbell target.
+constexpr unsigned long kControlEndpointId = 1;
+
+/// @brief Port speed code for a high-speed device.
+constexpr uint8_t kSpeedHigh = 3;
+
+/// @brief Endpoint zero's packet ceiling at high speed.
+constexpr uint16_t kPacketHigh = 64;
+
+/// @brief Endpoint zero's packet ceiling otherwise.
+constexpr uint16_t kPacketElse = 8;
+
+/// @brief The transfer-length field of an event's status word.
+constexpr cinux::base::bit::BitRange kEventLength{.low = 0, .width = 24};
+
+/// @brief Lays one control transfer's stages on a ring, status last.
+// NOLINTNEXTLINE(readability-function-size) three stages named one by one
+void control_stages(usb::Trb* ring, usb::RingState& state, uint64_t ring_physical, uint64_t setup,
+                    uint32_t setup_extra, uint64_t buffer, uint32_t buffer_length, bool has_data,
+                    uint32_t slot_bits, uint64_t& status_trb) {
+    usb::EnqueueCommand(
+        ring, usb::kTransferRingTrbs, state, ring_physical, setup, usb::kSetupPacketBytes,
+        usb::TrbControl(usb::kTrbSetupStage, setup_extra | usb::kTrbImmediateData |
+                                                 usb::kTrbChain | slot_bits));
+    if (has_data) {
+        usb::EnqueueCommand(ring, usb::kTransferRingTrbs, state, ring_physical, buffer,
+                            buffer_length,
+                            usb::TrbControl(usb::kTrbDataStage,
+                                            usb::kTrbDirIn | usb::kTrbChain | slot_bits));
+    }
+    status_trb = ring_physical + (state.index * sizeof(usb::Trb));
+    usb::EnqueueCommand(ring, usb::kTransferRingTrbs, state, ring_physical, 0, 0,
+                        usb::TrbControl(usb::kTrbStatusStage,
+                                        usb::kTrbDirIn | usb::kTrbInterruptOnCompletion |
+                                            slot_bits));
+}
+
 /// @brief The drain's message handler: one word, no context.
 void drain_thunk() {
     XhciHost::self().drain_events();
@@ -152,19 +198,20 @@ bool XhciHost::init() {
     }
     print::Println("[kern] xhci %X ports %u slots %u running", shape_.version, shape_.max_ports,
                    shape_.max_slots);
+    usb::SeatPrimaryHost(this);
     arm_delivery(kHost);
     return true;
 }
 
-bool XhciHost::present() const {
+bool XhciHost::present() {
     return window_ != nullptr;
 }
 
-unsigned int XhciHost::max_ports() const {
+unsigned int XhciHost::max_ports() {
     return shape_.max_ports;
 }
 
-bool XhciHost::unhealthy() const {
+bool XhciHost::unhealthy() {
     return window_ != nullptr &&
            (read32(regions_.operational + kRegUsbStatus) & kHostSystemError) != 0;
 }
@@ -299,12 +346,7 @@ bool XhciHost::reset_port(unsigned int port, uint8_t& speed) {
     return true;
 }
 
-void XhciHost::seat_device(uint8_t slot, void* device,
-                           void (*deliver)(void* device, const usb::Trb& event)) {
-    if (slot >= 1 && slot <= usb::kXhciSlotsEnabled) {
-        routes_[slot - 1] = usb::DeviceRoute{.port = 0, .device = device, .deliver = deliver};
-    }
-}
+
 
 void XhciHost::consume_event() {
     ++event_index_;
@@ -336,8 +378,8 @@ void XhciHost::drain_events() {
         const uint8_t kType = usb::TrbType(event);
         consume_event();
         if (kType == usb::kTrbTransferEvent && kSlot >= 1 && kSlot <= usb::kXhciSlotsEnabled &&
-            routes_[kSlot - 1].deliver != nullptr) {
-            routes_[kSlot - 1].deliver(routes_[kSlot - 1].device, event);
+            seats_[kSlot - 1].slot != 0) {
+            seat_transfer(seats_[kSlot - 1], event);
             continue;
         }
         if (kType == usb::kTrbCommandCompletion && event.parameter == awaited_trb_) {
@@ -393,6 +435,251 @@ void XhciHost::arm_delivery(const PciDevice* host) {
     }
     write32(regions_.runtime + kInterrupterZero + kRegIman, kInterruptEnable);
     print::Println("[kern] xhci msix armed, vector %u", kSeated.value().value);
+}
+
+
+// ---------------------------------------------------------------------------
+// The neutral HostDriver face: everything a seated device asks of the
+// silicon. Slots, contexts and doorbells end their climb right here.
+// ---------------------------------------------------------------------------
+
+bool XhciHost::port_connected(unsigned int port) {
+    return port >= 1 && port <= max_ports() && (port_status(port) & 1U) != 0;
+}
+
+bool XhciHost::port_taken(unsigned int port) {
+    for (const usb::XhciSeat& seat : seats_) {
+        if (seat.slot != 0 && seat.port == static_cast<uint8_t>(port)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void* XhciHost::address(unsigned int port) {
+    uint8_t slot = 0;
+    if (!run_command(0, usb::TrbControl(usb::kTrbEnableSlot, 0), slot) || slot == 0) {
+        return nullptr;
+    }
+    usb::XhciSeat& seat = seats_[slot - 1];
+
+    const base::PhysAddr kInput  = mm::Pmm::self().allocate_page();
+    const base::PhysAddr kOutput = mm::Pmm::self().allocate_page();
+    const base::PhysAddr kEp0    = mm::Pmm::self().allocate_page();
+    const base::PhysAddr kEp1    = mm::Pmm::self().allocate_page();
+    if (kInput == base::PhysAddr{} || kOutput == base::PhysAddr{} ||
+        kEp0 == base::PhysAddr{} || kEp1 == base::PhysAddr{}) {
+        if (kInput != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kInput);
+        }
+        if (kOutput != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kOutput);
+        }
+        if (kEp0 != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kEp0);
+        }
+        if (kEp1 != base::PhysAddr{}) {
+            mm::Pmm::self().free_page(kEp1);
+        }
+        static_cast<void>(run_command(0, usb::TrbControl(usb::kTrbDisableSlot,
+                                                         static_cast<uint32_t>(slot) << 24U),
+                                      slot));
+        return nullptr;
+    }
+
+    seat = usb::XhciSeat{.slot = slot, .port = static_cast<uint8_t>(port)};
+    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kInput.raw)), 0, kPageBytes);
+    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kOutput.raw)), 0, kPageBytes);
+    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEp0.raw)), 0, kPageBytes);
+    base::SetBytes(base::PtrAt<void>(mm::DirectMapVirt(kEp1.raw)), 0, kPageBytes);
+    seat.input_page                                                        = kInput.raw;
+    seat.output_page                                                       = kOutput.raw;
+    seat.ep0_page                                                          = kEp0.raw;
+    seat.ep1_page                                                          = kEp1.raw;
+    base::PtrAt<uint64_t>(mm::DirectMapVirt(device_page_))[seat.slot] = seat.output_page;
+
+    if (!reset_port(port, seat.speed)) {
+        detach(&seat);
+        return nullptr;
+    }
+
+    auto* const kContext = base::PtrAt<uint32_t>(mm::DirectMapVirt(seat.input_page));
+    usb::InitRing(base::PtrAt<usb::Trb>(mm::DirectMapVirt(seat.ep0_page)),
+                  usb::kTransferRingTrbs, seat.ep0_page);
+    seat.ep0_ = usb::RingState{.index = 0, .cycle = true};
+    usb::SetAddFlags(kContext, 0x3U);
+    usb::BuildSlotContext(kContext + 8, 0, seat.port, seat.speed, 1);
+    usb::BuildControlEpContext(kContext + 16, seat.ep0_page,
+                               seat.speed == kSpeedHigh ? kPacketHigh : kPacketElse);
+    const uint32_t kSlotBits = static_cast<uint32_t>(seat.slot) << 24U;
+    uint8_t        answered  = 0;
+    if (!run_command(seat.input_page, usb::TrbControl(usb::kTrbAddressDevice, kSlotBits),
+                     answered)) {
+        detach(&seat);
+        return nullptr;
+    }
+    return &seat;
+}
+
+bool XhciHost::spin_for_control(usb::XhciSeat& seat) {
+    for (unsigned long spin = 0; spin < kSpinLimit; ++spin) {
+        drain_events();
+        if (seat.control_done) {
+            return seat.control_code == usb::kCompletionSuccess;
+        }
+        if (unhealthy()) {
+            return false;
+        }
+        arch::CpuRelax();
+    }
+    return false;
+}
+
+bool XhciHost::control_read(void* handle, uint16_t value, void* data, uint16_t length) {
+    auto& seat = *static_cast<usb::XhciSeat*>(handle);
+    if (seat.slot == 0) {
+        return false;
+    }
+    auto* const    kRing   = base::PtrAt<usb::Trb>(mm::DirectMapVirt(seat.ep0_page));
+    const uint64_t kBuffer = seat.ep0_page + kControlBufferOffset;
+    const uint32_t kSlot   = static_cast<uint32_t>(seat.slot) << 24U;
+    seat.control_trb       = 0;
+    seat.control_done      = false;
+    seat.control_code      = 0;
+    control_stages(kRing, seat.ep0_, seat.ep0_page,
+                   usb::PackSetup(0x80, 0x06, value, 0, length), usb::kSetupDataIn << 17U,
+                   kBuffer, length, true, kSlot, seat.control_trb);
+    write_doorbell(seat.slot, kControlEndpointId);
+    if (!spin_for_control(seat)) {
+        return false;
+    }
+    base::CopyBytes(data, base::PtrAt<const void>(mm::DirectMapVirt(kBuffer)), length);
+    return true;
+}
+
+bool XhciHost::set_configuration(void* handle, uint8_t config_value) {
+    auto& seat = *static_cast<usb::XhciSeat*>(handle);
+    if (seat.slot == 0) {
+        return false;
+    }
+    auto* const    kRing = base::PtrAt<usb::Trb>(mm::DirectMapVirt(seat.ep0_page));
+    const uint32_t kSlot = static_cast<uint32_t>(seat.slot) << 24U;
+    seat.control_trb     = 0;
+    seat.control_done    = false;
+    seat.control_code    = 0;
+    control_stages(kRing, seat.ep0_, seat.ep0_page,
+                   usb::PackSetup(0x00, 0x09, config_value, 0, 0), usb::kSetupNoData << 17U, 0, 0,
+                   false, kSlot, seat.control_trb);
+    write_doorbell(seat.slot, kControlEndpointId);
+    return spin_for_control(seat);
+}
+
+bool XhciHost::configure_interrupt_in(void* handle, uint16_t max_packet, uint8_t interval) {
+    auto& seat = *static_cast<usb::XhciSeat*>(handle);
+    if (seat.slot == 0 || interval == 0 || (seat.speed >= kSpeedHigh && interval > 16)) {
+        return false;
+    }
+    auto interval_exponent = static_cast<uint8_t>(interval - 1U);
+    if (seat.speed < kSpeedHigh) {
+        interval_exponent = 3;
+        for (unsigned period = interval; period > 1; period /= 2U) {
+            ++interval_exponent;
+        }
+    }
+    auto* const kContext = base::PtrAt<uint32_t>(mm::DirectMapVirt(seat.input_page));
+    base::SetBytes(kContext, 0, kPageBytes);
+    usb::InitRing(base::PtrAt<usb::Trb>(mm::DirectMapVirt(seat.ep1_page)),
+                  usb::kTransferRingTrbs, seat.ep1_page);
+    seat.ep1_ = usb::RingState{.index = 0, .cycle = true};
+    usb::SetAddFlags(kContext, 0x9U);
+    usb::BuildSlotContext(kContext + 8, 0, seat.port, seat.speed, kInterruptEndpointId);
+    usb::BuildInterruptInEpContext(kContext + 32, seat.ep1_page, max_packet, interval_exponent);
+    const uint32_t kSlotBits = static_cast<uint32_t>(seat.slot) << 24U;
+    uint8_t        answered  = 0;
+    return run_command(seat.input_page,
+                       usb::TrbControl(usb::kTrbConfigureEndpoint, kSlotBits), answered);
+}
+
+void XhciHost::ring_report(usb::XhciSeat& seat) {
+    auto* const kRing = base::PtrAt<usb::Trb>(mm::DirectMapVirt(seat.ep1_page));
+    seat.report_trb   = seat.ep1_page + (seat.ep1_.index * sizeof(usb::Trb));
+    usb::EnqueueCommand(kRing, usb::kTransferRingTrbs, seat.ep1_, seat.ep1_page,
+                        seat.ep1_page + kReportSeatOffset, seat.report_bytes,
+                        usb::TrbControl(usb::kTrbNormal, usb::kTrbInterruptOnCompletion));
+    write_doorbell(seat.slot, kInterruptEndpointId);
+}
+
+void XhciHost::arm_interrupt_in(void* handle, uint64_t buffer_physical, unsigned long length,
+                                void (*done)(void* owner, const usb::TransferDone&),
+                                void* owner) {
+    auto& seat = *static_cast<usb::XhciSeat*>(handle);
+    if (seat.slot == 0) {
+        return;
+    }
+    seat.report_target = buffer_physical;
+    seat.done          = done;
+    seat.owner        = owner;
+    seat.report_bytes = length;
+    seat.report_live  = true;
+    ring_report(seat);
+}
+
+void XhciHost::detach(void* handle) {
+    auto& seat = *static_cast<usb::XhciSeat*>(handle);
+    if (seat.slot == 0) {
+        return;
+    }
+    uint8_t answered = 0;
+    if (!run_command(0, usb::TrbControl(usb::kTrbDisableSlot,
+                                        static_cast<uint32_t>(seat.slot) << 24U),
+                     answered)) {
+        return;
+    }
+    base::PtrAt<uint64_t>(mm::DirectMapVirt(device_page_))[seat.slot] = 0;
+    const uint64_t kPages[] = {seat.input_page, seat.output_page, seat.ep0_page, seat.ep1_page};
+    for (const uint64_t kPage : kPages) {
+        if (kPage != 0) {
+            mm::Pmm::self().free_page(base::PhysAddr{kPage});
+        }
+    }
+    seat = usb::XhciSeat{};
+}
+
+void XhciHost::pump() {
+    drain_events();
+}
+
+void XhciHost::seat_transfer(usb::XhciSeat& seat, const usb::Trb& event) {
+    if (event.parameter == seat.control_trb && seat.control_trb != 0) {
+        seat.control_done = true;
+        seat.control_code = usb::CompletionCode(event);
+        seat.control_trb  = 0;
+        return;
+    }
+    if (seat.report_live && event.parameter == seat.report_trb) {
+        seat.report_live = false;
+        seat.report_trb  = 0;
+        const uint8_t  kCode = usb::CompletionCode(event);
+        const uint32_t kResidual =
+            cinux::base::bit::BitMask<uint32_t>{event.status}.extract(kEventLength);
+        const unsigned long kLength =
+            kResidual <= seat.report_bytes ? seat.report_bytes - kResidual : 0;
+        if (kLength != 0 && seat.report_target != 0) {
+            // The ring lands the bytes in the endpoint's DMA page; the
+            // neutral layer reads them from the page it handed over.
+            base::CopyBytes(base::PtrAt<void>(mm::DirectMapVirt(seat.report_target)),
+                            base::PtrAt<const void>(mm::DirectMapVirt(seat.ep1_page +
+                                                                     kReportSeatOffset)),
+                            kLength);
+        }
+        if (seat.done != nullptr) {
+            seat.done(seat.owner,
+                      usb::TransferDone{
+                          .ok = kCode == usb::kCompletionSuccess ||
+                                kCode == usb::kCompletionShortPacket,
+                          .length = kLength});
+        }
+    }
 }
 
 }  // namespace cinux::driver

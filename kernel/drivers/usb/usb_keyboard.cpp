@@ -23,8 +23,8 @@
 #include "cinux/result.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/device/device.hpp"
-#include "kernel/drivers/usb/xhci.hpp"
-#include "kernel/drivers/usb/xhci_layout.hpp"
+#include "kernel/drivers/usb/hcd.hpp"
+
 #include "kernel/fs/devfs/devfs.hpp"
 
 namespace cinux::driver {
@@ -54,34 +54,37 @@ const fs::DeviceOps kKeyboardOps{
 }  // namespace
 
 bool UsbKeyboard::init() {
-    if (device_.slot() != 0) {
+    if (device_.seated()) {
         return true;
     }
-    XhciHost&       host = XhciHost::self();
+    usb::HostDriver* host = usb::PrimaryHost();
+    if (host == nullptr) {
+        return false;
+    }
     usb::KeyboardEp keyboard{};
-    if (!device_.enumerate(host, 1, keyboard)) {
+    if (!device_.enumerate(*host, 1, keyboard)) {
         return false;
     }
-    if (keyboard.address != 0x81 || !device_.set_configuration(host, keyboard.config_value)) {
-        static_cast<void>(device_.detach(host));
+    if (keyboard.address != 0x81 || !device_.set_configuration(*host, keyboard.config_value)) {
+        static_cast<void>(device_.detach(*host));
         return false;
     }
-    if (!device_.configure_interrupt_in(host, keyboard.max_packet, keyboard.interval)) {
-        static_cast<void>(device_.detach(host));
+    if (!device_.configure_interrupt_in(*host, keyboard.max_packet, keyboard.interval)) {
+        static_cast<void>(device_.detach(*host));
         return false;
     }
-    device_.interrupt_read(host, &UsbKeyboard::report_arrived, this);
+    device_.interrupt_read(*host, &UsbKeyboard::report_arrived, this);
     print::Println("[kern] usb keyboard seated, config %u ep %X max %u interval %u",
                    keyboard.config_value, keyboard.address, keyboard.max_packet, keyboard.interval);
     return true;
 }
 
-uint8_t UsbKeyboard::seated_slot() const {
-    return device_.slot();
+bool UsbKeyboard::seated() const {
+    return device_.seated();
 }
 
 void UsbKeyboard::report_arrived(UsbKeyboard& self, unsigned long status, unsigned long length) {
-    if (status == usb::kCompletionSuccess && length == sizeof(self.previous_)) {
+    if (status == 0 && length == sizeof(self.previous_)) {
         const unsigned char* report = self.device_.report();
         const char           kGlyph = usb::HidReportKey(report, self.previous_);
         base::CopyBytes(self.previous_, report, sizeof(self.previous_));
@@ -89,11 +92,15 @@ void UsbKeyboard::report_arrived(UsbKeyboard& self, unsigned long status, unsign
             self.events_.push(kGlyph);
         }
     }
-    self.device_.interrupt_read(XhciHost::self(), &UsbKeyboard::report_arrived, &self);
+    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
+        self.device_.interrupt_read(*kHost, &UsbKeyboard::report_arrived, &self);
+    }
 }
 
 bool UsbKeyboard::poll() {
-    XhciHost::self().drain_events();
+    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
+        kHost->pump();
+    }
     return events_.count() != 0;
 }
 
