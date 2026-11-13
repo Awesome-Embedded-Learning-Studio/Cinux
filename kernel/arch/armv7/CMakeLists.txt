@@ -55,6 +55,10 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getpid.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_lseek.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_open.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/fork_resume.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fork.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_wait.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/user_access.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
@@ -133,6 +137,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/base/src/path.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
+    cow_clone.cpp
     cow_release.cpp
     cow_repair.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp

@@ -74,6 +74,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUESTHELLO=[guest] hello from the loaded image"
             "-DEXPECTED_GUESTBRK=[guest] brk ok, heap page reads back"
             "-DEXPECTED_GUESTMMAP=[guest] mmap ok, anon page reads back"
+            "-DEXPECTED_GUESTFORK=[guest] fork ok, child reaped with own page"
             "-DEXPECTED_SEATWRITE=[seat] scheduler task writes from user m"
             "-DEXPECTED_SEATOK=sched user seat ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"

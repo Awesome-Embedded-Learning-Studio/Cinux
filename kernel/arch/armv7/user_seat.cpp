@@ -262,6 +262,36 @@ void SeatExit(unsigned long status) {
     SeatReturnToKernel();
 }
 
+extern "C" void SaveContextResumeTrap(cinux::arch::CpuContext* save,
+                                      cinux::arch::UserTrap* trap);
+
+/// The fork child's first resume: the neutral fork path arms the young
+/// task's context here with the parent's episode frame copied to the
+/// child's kernel stack top. This entry is the child's own seat body:
+/// it adopts the seat state, leaves for user mode with r0 zero, and a
+/// later park or exit switches back into this frame to retire.
+extern "C" void SeatForkChildEntry() {
+    proc::Task* const kSelf = proc::Scheduler::self().current();
+    // The frame address is a fact of the task's stack top, not of this
+    // call: the compiler's own prologue has already spent words by the
+    // time any local runs.
+    auto* const kTrap = reinterpret_cast<cinux::arch::UserTrap*>(
+        kSelf->stack_base + proc::kStackBytes - sizeof(cinux::arch::UserTrap));
+    cinux::arch::CpuContext body{};
+    SeatRun run{.space  = kSelf->space.get(),
+                .ranges = kSelf->vmas.get(),
+                .body   = &body};
+    kSelf->arch_seat = &run;
+
+    cinux::arch::space::SwitchRoot(kSelf->user_root);
+    SaveContextResumeTrap(&body, kTrap);  // leaves for user mode, r0 zero
+    // A park or exit switched back here: the run is over either way.
+    cinux::arch::space::SwitchRoot(mm::KernelPageRoot());
+    run.spoke       = true;
+    kSelf->arch_seat = nullptr;
+    proc::Scheduler::self().exit_current(static_cast<long long>(run.exit_status));
+}
+
 bool RunSchedulerUserSelfCheck() {
     InstallFaultRepair(&SeatRepairPage);
     if (!run_probe_world()) {

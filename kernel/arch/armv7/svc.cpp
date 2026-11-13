@@ -25,6 +25,8 @@
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
+#include "kernel/syscall/sys_fork.hpp"
+#include "kernel/syscall/sys_wait.hpp"
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_getpid.hpp"
@@ -151,6 +153,14 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},
     {cinux::armv7::syscall_nr::kFstat, &cinux::syscall::HandleFstat},
     {cinux::armv7::syscall_nr::kGetdents, &cinux::syscall::HandleGetdents},
+    // The fork face: the neutral builder copies the parent's episode
+    // frame into the child before this service returns, so the port
+    // entry reads the real frame, not the neutral picture.
+    {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
+    // Linux spells arm's wait4 as 114: the neutral wait face serves it,
+    // while the bring-up round-robin keeps its own mask dialect for
+    // the episodes that run before any seat exists.
+    {cinux::armv7::syscall_nr::kWait, &cinux::syscall::HandleWait4},
 };
 
 const NeutralService* find_neutral_service(unsigned long number) {

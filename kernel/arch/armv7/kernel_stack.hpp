@@ -26,11 +26,14 @@ inline void SetKernelStackTop(unsigned long top) {
     per_cpu::self().kernel_stack_top = top;
 }
 
-/// Reads the kernel stack pointer this CPU is running on.
+/// Reads the kernel stack pointer this CPU is running on. The banked
+/// word is 32 bits here: collecting it through a wider local would
+/// leave the high half as whatever ran before, so the read goes
+/// through the port's own width first.
 inline unsigned long long CurrentKernelStack() {
-    unsigned long long sp = 0;
+    unsigned long sp = 0;
     asm volatile("mov %0, sp" : "=r"(sp));
-    return sp;
+    return static_cast<unsigned long long>(sp);
 }
 
 }  // namespace cinux::arch

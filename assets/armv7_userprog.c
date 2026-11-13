@@ -244,6 +244,39 @@ void guest_main(void) {
         }
         sys3(6UL, (unsigned long)kRoot, 0UL, 0UL);
     }
+    // Fork: the child proves COW (its write stays private) and exits
+    // with a word, the parent reaps it through wait4 and checks both
+    // the identity and the exit code.
+    {
+        static const char kForkA[] = "[guest] fork refused\n";
+        static const char kForkB[] = "[guest] fork ok, child reaped with own page\n";
+        volatile unsigned long* shared =
+            (volatile unsigned long*)(unsigned long)sys6(
+                90UL, 0UL, 0x1000UL, 0x3UL, 0x22UL, ~0UL, 0UL);  // mmap the duel page
+        *shared = 0x1111UL;
+        const long kPid = sys3(2UL, 0UL, 0UL, 0UL);  // fork
+        if (kPid < 0) {
+            sys3(4UL, 1UL, (unsigned long)kForkA, slen(kForkA));
+        } else if (kPid == 0) {
+            // Child: the duel page must start as the parent left it,
+            // and this side's write must not need anyone's leave.
+            const unsigned long kVerdict =
+                (*shared == 0x1111UL) ? 7UL : 8UL;
+            *shared = 0x2222UL;
+            sys3(1UL, kVerdict, 0UL, 0UL);  // exit(kVerdict)
+            for (;;) {
+            }
+        } else {
+            unsigned int status = 0xFFFFU;
+            const long kReaped = sys3(114UL, (unsigned long)kPid,
+                                      (unsigned long)&status, 0UL);  // wait4
+            if (kReaped == kPid && status == 7U && *shared == 0x1111UL) {
+                sys3(4UL, 1UL, (unsigned long)kForkB, slen(kForkB));
+            } else {
+                sys3(4UL, 1UL, (unsigned long)kForkA, slen(kForkA));
+            }
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }

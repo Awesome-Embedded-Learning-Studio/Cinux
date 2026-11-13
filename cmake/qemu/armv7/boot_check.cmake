@@ -200,6 +200,7 @@ expect_literal(EXPECTED_GUESTLOAD "the neutral loader did not seat the guest ima
 expect_literal(EXPECTED_GUESTRUN "the guest did not ride the real scheduler.")
 expect_literal(EXPECTED_GUESTEXIT "the guest process did not exit cleanly.")
 expect_literal(EXPECTED_GUESTMOTD "the guest did not read the motd through the neutral read path.")
+expect_literal(EXPECTED_GUESTFORK "the seated fork/wait/cow duel did not answer.")
 expect_literal(EXPECTED_GUESTHELLO "the loaded guest did not speak from user mode.")
 expect_literal(EXPECTED_SEATWRITE "the seated task's console write did not answer.")
 expect_literal(EXPECTED_SEATOK "the scheduler-seat user round trip did not finish.")

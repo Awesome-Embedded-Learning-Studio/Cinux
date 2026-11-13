@@ -47,3 +47,15 @@ ResumeTrap:
 user_entry_stub:
     ldr     r0, [sp, #-4]           @ the task's argument, from its own stack
     b       user_program_c
+
+@ SeatForkChildEntry helper: save the caller's eleven words into the
+@ seat body image, then fall into ResumeTrap on the copied parent
+@ frame. The saved lr is the word after this call, so a park that
+@ switches back to the body resumes right here like any seated body.
+.global SaveContextResumeTrap
+SaveContextResumeTrap:
+    stmia   r0, {r4-r11, sp, lr}
+    mrs     r2, spsr
+    str     r2, [r0, #40]
+    mov     r0, r1
+    b       ResumeTrap
