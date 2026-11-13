@@ -50,6 +50,29 @@ void HandleDataAbort() {
     cinux::arch::Halt();
 }
 
+/// A user-mode prefetch abort: the fetch missed, so the demand pager
+/// gets the same chance a data miss gets and the instruction runs
+/// again on the filled page. The fault words live in the instruction
+/// fault registers, not the data ones.
+extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap) {
+    unsigned long fault_address = 0;
+    unsigned long fault_status  = 0;
+    asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(fault_address));  // IFAR
+    asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r"(fault_status));   // IFSR
+    const unsigned long long code =
+        cinux::arch::isr::FaultCodeFromStatus(fault_status, trap->spsr);
+    if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
+        return trap;  // the fetch runs again on the new mapping
+    }
+    if (auto* const kHandled = c_user_fault_handler(trap, fault_address, code);
+        kHandled != nullptr) {
+        return kHandled;
+    }
+    cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address,
+                          code);
+    c_user_faulted();
+}
+
 extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
     unsigned long fault_address = 0;
     unsigned long fault_status  = 0;

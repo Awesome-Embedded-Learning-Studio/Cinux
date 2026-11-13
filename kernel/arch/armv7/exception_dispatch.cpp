@@ -24,6 +24,7 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap);
 void HandleIrq();
 extern "C" cinux::arch::UserTrap* c_irq_trap(cinux::arch::UserTrap* trap);
 extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap);
+extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap);
 
 void HandleDataAbort();
 
@@ -36,6 +37,9 @@ extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsi
     g_current_trap = trap;
     if (is_svc == 2) {
         return c_abort_trap(trap);
+    }
+    if (is_svc == 3) {
+        return c_prefetch_trap(trap);
     }
     if (is_svc != 0) {
         return c_svc_dispatch(trap);

@@ -21,7 +21,19 @@ _vec0: mov r0, #0
        b   _dispatch
 _vec1: mov r0, #1
        b   _dispatch
-_vec3: b _prefetch_dump
+@ Prefetch abort: a user-mode fetch miss is served exactly like a
+@ user data miss - the page arrives, the instruction runs again. Only
+@ a kernel-mode fetch miss goes to the dump.
+_vec3:  stmdb sp!, {r3}
+        mrs   r3, spsr
+        and   r3, r3, #0x1F
+        cmp   r3, #0x10              @ only a user fetch may be repaired
+        bne   _prefetch_plain
+        ldmia sp!, {r3}
+        b     _prefetch_trap_save
+_prefetch_plain:
+        add   sp, sp, #4
+        b     _prefetch_dump
 _vec4: sub  lr, lr, #8
        stmdb sp!, {r3}            @ park r3 while the mode is checked
        mrs  r3, spsr
@@ -158,6 +170,36 @@ _abort_trap_save:
 
 @ A kernel-mode prefetch abort: dump the kernel world and stop. The
 @ frame shape matches the abort save path so C can read it the same way.
+@ A user-mode prefetch abort: same frame shape as the data-abort
+@ save, taken in the prefetch-abort bank. lr already names the
+@ faulting instruction, so resuming re-executes it uncorrected.
+_prefetch_trap_save:
+       sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
+       stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
+       cps   #0x1F                 @ System mode shares the user sp bank
+       mov   r1, sp
+       cps   #0x1B                 @ back to prefetch-abort mode
+       mov   r2, lr                @ the faulting instruction
+       mrs   r3, spsr
+       str   r1, [sp, #52]         @ user sp
+       str   r2, [sp, #56]         @ user pc
+       str   r3, [sp, #60]         @ user SPSR
+       mov   r0, sp
+       mov   r1, #3
+       bl    c_trap_entry
+       mov   r3, r0
+       add   sp, sp, #64
+       ldr   r1, [r3, #52]         @ user sp
+       ldr   r2, [r3, #60]         @ SPSR
+       ldr   r12, [r3, #56]        @ user pc
+       cps   #0x1F
+       mov   sp, r1
+       cps   #0x13
+       msr   spsr_cxsf, r2
+       mov   lr, r12
+       ldmia r3, {r0-r12}
+       movs  pc, lr
+
 _prefetch_dump:
        sub   sp, sp, #12
        stmdb sp!, {r0-r12}
