@@ -110,10 +110,15 @@ extern "C" unsigned long CurrentTick();
 
 namespace cinux::armv7 {
 void SeatReturnToKernel() __attribute__((noreturn));
+void SeatExit(unsigned long status) __attribute__((noreturn));
+bool SeatWorldActive();
 }
 
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
+    if (kNumber == cinux::armv7::syscall_nr::kExit && cinux::armv7::SeatWorldActive()) {
+        cinux::armv7::SeatExit(trap->r0);
+    }
     if (kNumber == 0x1000UL) {
         // The seated process asks the kernel to take it back; the
         // switch into its waiting body does not come through here.

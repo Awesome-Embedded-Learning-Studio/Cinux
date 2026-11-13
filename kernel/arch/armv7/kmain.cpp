@@ -185,16 +185,16 @@ extern "C" [[noreturn]] void kmain() {
                                               : "[armv7] two tasks FAILED");
                     const unsigned long kPagesBefore =
                         cinux::mm::Pmm::self().free_page_count();
-                    const bool          kTasksOk = cinux::armv7::RunUserModeSelfCheck();
+                    const bool kTasksOk = cinux::armv7::RunUserModeSelfCheck();
+                    const bool kSeatOk  = cinux::armv7::RunSchedulerUserSelfCheck();
                     const unsigned long kPagesAfter = cinux::mm::Pmm::self().free_page_count();
                     cinux::print::Println("[armv7] tasks pages %u -> %u", kPagesBefore,
                                           kPagesAfter);
-                    cinux::print::Println((kTasksOk && kPagesAfter == kPagesBefore)
+                    cinux::print::Println(kSeatOk ? "[armv7] sched user seat ok"
+                                                  : "[armv7] sched user seat FAILED");
+                    cinux::print::Println((kTasksOk && kSeatOk && kPagesAfter == kPagesBefore)
                                               ? "[armv7] user mode round trip ok"
                                               : "[armv7] user mode round trip FAILED");
-                    cinux::print::Println(cinux::armv7::RunSchedulerUserSelfCheck()
-                                              ? "[armv7] sched user seat ok"
-                                              : "[armv7] sched user seat FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
                     const unsigned long long kWait =

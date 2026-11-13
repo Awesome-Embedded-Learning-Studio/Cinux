@@ -616,6 +616,19 @@ r4..spsr 十一个字恰好是一张 CpuContext 图像，不需要新汇编。
 真调度器上的有座用户进程。下一片把 g_tasks 的散件（wait/fork/mmap/brk）
 逐一搬到中立 proc 件上，搬完拆旧轨。
 
+## guest 搬上真调度器：旧轨第一次真正让位
+
+guest 不再坐 g_tasks 的 task 4。席位机制泛化成一个共享任务体：SeatWorld 带
+着 space/entry/栈顶进任务，任务体登自己的 FileTable、切根、切入用户态；回
+来或退出都经 ContextSwitch 例外返回。svc 表的 exit 分支先问席位——有座客
+在跑就把退出词记下、切回任务体、走调度器的 exit_current，旧轮转根本不被打
+扰。
+
+于是交叉编译的 guest 成了真正的进程：真 proc::Task、自己的文件表、自己的
+世界、干净的退出。g_tasks 回归纯自检角色，guest 生命周期挪出后，
+RunUserModeSelfCheck 与席位自检共用一个页账窗口（before 在 userfs 装载前、
+after 在 guest 世界 teardown 后），64638 -> 64638 依旧分毫不差。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

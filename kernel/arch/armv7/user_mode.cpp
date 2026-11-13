@@ -1459,28 +1459,6 @@ __attribute__((noinline)) bool RunUserModeSelfCheck() {
         g_tasks[slot].in_use    = false;
         g_tasks[slot].wait_target = kTaskCount;
     }
-    // The loader's guest joins the round as task 4: same table, same
-    // syscall faces, only its pages came from an ELF instead of the
-    // built-in self-check image.
-    if (userfs::take_guest() != nullptr) {
-        UserTask& guest   = g_tasks[4];
-        guest            = UserTask{};
-        guest.state      = TaskState::kRunnable;
-        guest.wait_target = kTaskCount;
-        guest.break_top  = kBrkBase;
-        guest.files      = cinux::base::MakeShared<cinux::fs::FileTable>();
-        seat_console(guest.files);
-        guest.in_use     = true;
-        guest.parent     = 0;
-        guest.mmap_top   = kMmapBase;
-        guest.space      = userfs::take_guest();
-        guest.trap       = cinux::arch::UserTrap{};
-        guest.trap.lr    = userfs::guest_entry();
-        guest.trap.sp    = 0x40011000UL;
-        guest.trap.spsr  = 0x10UL;
-        userfs::guest_seated();
-        cinux::print::Println("[armv7] guest seated as task 4 entry %X", guest.trap.lr);
-    }
     g_running = true;
     g_current = 0;
     cinux::arch::per_cpu::self().slice_ticks = 1;

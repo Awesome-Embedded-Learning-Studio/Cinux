@@ -29,4 +29,12 @@ namespace cinux::armv7 {
 /// back to the waiting kernel body. Does not return.
 [[noreturn]] void SeatReturnToKernel();
 
+/// True while a seated process's service call may arrive: the svc
+/// table asks before touching the bring-up round-robin.
+[[nodiscard]] bool SeatWorldActive();
+
+/// The exit service for a seated process: records the exit word and
+/// parks the user frame back into its waiting body. Does not return.
+[[noreturn]] void SeatExit(unsigned long status);
+
 }  // namespace cinux::armv7
