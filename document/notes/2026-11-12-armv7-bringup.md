@@ -713,6 +713,31 @@ builtin/console/framebuffer/pty、落两个输入源。提取 fs::SeatDeviceTree
 
 arm_boot 3/3，host 单测全绿。
 
+## ioctl 中立化与 armv7 的 pty 往返
+
+### 做了什么
+
+- `kernel/syscall/sys_ioctl.cpp` 现在是纯中立的：socket 接口询问分支整块搬进 `kernel/net/socket.cpp` 的 `kOps.ioctl` 槽（`socket_if_ioctl` 适配器转调 `socket_if_ioctl_impl`），net 头文件不再出现在 sys_ioctl 里。
+- HandleIoctl 的分派语义补齐：没有 span 的 ioctl 词不再一律 -ENOTTY，而是把 argument 原样传给 backend。说整个结构的后端（socket 的 ifconf/ifreq 族）自己持有用户拷贝，只认 stage 词的后端照旧对陌生词答 -ENOTTY。pty 的 TIOCGPTN/TIOCSPTLCK 已有 span，走 stage。
+- `kernel/net/ifaces.cpp` 对 NetWorld 的硬绑改成注入面：`net::SetWireFactsSource(WireFactsSource)`，NetWorld::init 注入自家闭包。中立测试和没有网线的 lane 不再为了接口名册拖进整个网世界。
+- tcp.cpp 两处 `std::min` 在 32 位 arm 上的类型收窄（kTcpMssBytes、kCeiling 差值）补 cast。
+- armv7 链接面接上完整 net 栈（ifaces/net_world/loopback/arp/icmp/ipv4/net_stack/net_layout/local_socket/raw/socket/tcp/udp）加 `kernel/time/timer_table.cpp` 与 `kernel/syscall/sys_ioctl.cpp`，svc 表加 `kIoctl = 54`。
+- 测试框架新增共享 `test/framework/console_host.cpp`（console::PutString 桩），test_net_socket 里的本地副本删除，test_syscall_face 补链 ifaces.cpp。
+- guest 程序加 pty 往返探针：open /dev/ptmx，TIOCGPTN 问从端号，open /dev/pts/N，master 写 "ping\n"，slave canonical 读回。注意 canonical 行要换行才交出。
+- run.cmake 期望更新：guest entry 40000000（新链接参数 -Ttext 0x40000000），新增 EXPECTED_PTY。
+
+### 怎么验证的
+
+- `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green。
+- 全部 host 测试 0 failed，`ninja -C build` 零错误。
+- 手动 QEMU 引导确认 guest 五行探针全过：hello、motd、brk、mmap、pty，随后 status 0 退出。
+
+### 踩坑
+
+- guest 的 assets/armv7_userprog.elf 是预编译产物，改 .c 后要手动用 arm-none-eabi-gcc 重链（-Ttext 0x40000000 -e guest_main），CMake 只负责把 elf 嵌进镜像。
+- 拖 test_syscall_face 依赖链（net_world -> task_runtime -> arch 汇编）是死路，中立测试不能碰 arch 符号，正确解法是 ifaces 的注入面。
+- 32 位 size_t 与 uint32_t 常量同传 std::min 会推导失败，arm 报错而 x86 因 64 位 size_t 恰好通过。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

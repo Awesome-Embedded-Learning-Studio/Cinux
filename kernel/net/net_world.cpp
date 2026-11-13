@@ -1,4 +1,6 @@
+#include "kernel/net/ifaces.hpp"
 #include "kernel/net/net_world.hpp"
+#include "kernel/arch/halt.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -43,7 +45,33 @@ void send_via_ipv4(void* context, const OutboundDatagram& datagram) {
 
 }  // namespace
 
+namespace {
+
+/// The wired network's mask and frame ceiling, the ifconfig shapes.
+constexpr uint32_t kWireMask = 0xFFFFFF00;
+constexpr uint32_t kWireMtu  = 1500;
+constexpr uint16_t kHardwareEthernet = 1;
+
+/// The injected wire facts: the world knows its own wire, the roll
+/// does not. Installed once, when the world wakes.
+bool the_wire_facts(InterfaceFacts& into) {
+    const NetWorld& world = NetWorld::self();
+    if (!world.wired()) {
+        return false;
+    }
+    into.address       = kUserNetworkSelf;
+    into.netmask       = kWireMask;
+    into.broadcast     = (into.address & into.netmask) | ~into.netmask;
+    into.hardware_type = kHardwareEthernet;
+    into.mtu           = kWireMtu;
+    into.hardware      = world.wire()->mac();
+    return true;
+}
+
+}  // namespace
+
 void NetWorld::init() {
+    SetWireFactsSource(&the_wire_facts);
     wire_port_ = nullptr;
     driver::net::Loopback::self().init();
     loopback_port_.adopt(driver::net::Loopback::self());

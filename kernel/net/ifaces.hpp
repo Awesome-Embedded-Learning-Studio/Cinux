@@ -80,6 +80,26 @@ struct InterfaceFacts {
 };
 
 /**
+ * @brief         The one real wire's facts, or false when no wire answered.
+ * @param[out]    into   The facts to fill.
+ * @return        Whether a wire answered.
+ * @note          Injected by whoever owns a wired world; lanes
+ *                without a wire leave it unset and the roll answers
+ *                the loopback alone.
+ * @since         0.8.0
+ * @ingroup       kernel_net
+ */
+using WireFactsSource = bool (*)(InterfaceFacts& into);
+
+/**
+ * @brief         Installs the wire's facts source.
+ * @param[in]     source   The wire's answer, or null to clear.
+ * @since         0.8.0
+ * @ingroup       kernel_net
+ */
+void SetWireFactsSource(WireFactsSource source);
+
+/**
  * @brief         Reads one interface's facts by name.
  *
  * @param[in]     name   The interface's name, NUL-terminated.
@@ -89,7 +109,7 @@ struct InterfaceFacts {
  * @since         0.7.0
  * @ingroup       kernel_net
  */
-[[nodiscard]] bool ReadInterfaceFacts(const char* name, InterfaceFacts& into);
+bool ReadInterfaceFacts(const char* name, InterfaceFacts& into);
 
 /**
  * @brief         Names the ordinal-th interface of the roll.

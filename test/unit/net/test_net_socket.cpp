@@ -61,13 +61,6 @@ unsigned long long RealtimeNanoseconds() {
 
 }  // namespace cinux::syscall
 
-namespace cinux::console {
-
-// NOLINTNEXTLINE(misc-use-internal-linkage) the link stub must stay external
-void PutString(const char* /*text*/, bool /*newline*/) {}
-
-}  // namespace cinux::console
-
 namespace cinux::proc {
 
 TaskBuilder& TaskBuilder::set_entry(void (* /*entry*/)()) {

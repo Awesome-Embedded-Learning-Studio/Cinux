@@ -18,6 +18,7 @@ function(add_cinux_test spec)
         ${ARGN}
         framework/framework.cpp
         framework/assert_host.cpp
+        framework/console_host.cpp
         framework/per_cpu_host.cpp
         framework/irq_guard_host.cpp)
     target_include_directories(test_${name} PRIVATE ${TEST_INCLUDE_DIRS})
@@ -36,6 +37,7 @@ function(add_cinux_arch_test name)
         ${ARGN}
         framework/framework.cpp
         framework/assert_host.cpp
+        framework/console_host.cpp
         framework/per_cpu_host.cpp
         framework/irq_guard_host.cpp)
     target_include_directories(test_${name} PRIVATE ${TEST_INCLUDE_DIRS})
@@ -149,7 +151,8 @@ add_cinux_test(drivers/nvme)
 add_cinux_arch_test(madt ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/acpi/madt.cpp)
 add_cinux_test(drivers/font)
 add_cinux_test(drivers/console)
-add_cinux_test(syscall/syscall_face ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
+add_cinux_test(syscall/syscall_face ${CMAKE_SOURCE_DIR}/kernel/net/ifaces.cpp
+                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_capability.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_tgkill.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_close.cpp

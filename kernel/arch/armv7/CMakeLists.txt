@@ -59,6 +59,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_ioctl.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_munmap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_common.cpp
@@ -97,6 +98,20 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/console_tty.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/pty.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/ifaces.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/net_world.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/net/loopback.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/time/timer_table.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/arp.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/icmp.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/ipv4.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/net_stack.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/net_layout.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/local_socket.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/socket.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/raw.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/net/udp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp

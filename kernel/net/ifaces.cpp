@@ -5,7 +5,6 @@
 
 #include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/net_config.hpp"
-#include "kernel/net/net_world.hpp"
 
 namespace cinux::net {
 
@@ -32,21 +31,24 @@ void copy_name(char* out, const char* name) {
     out[index] = '\0';
 }
 
-bool wire_facts(InterfaceFacts& into) {
-    const NetWorld& world = NetWorld::self();
-    if (!world.wired()) {
-        return false;
-    }
-    into.address       = kUserNetworkSelf;
-    into.netmask       = kWireMask;
-    into.broadcast     = (into.address & into.netmask) | ~into.netmask;
-    into.hardware_type = kHardwareEthernet;
-    into.mtu           = kWireMtu;
-    into.hardware      = world.wire()->mac();
-    return true;
+}  // namespace
+
+/// The one wire's facts, injected by whoever owns a wired world. A
+/// lane without a wire leaves it null and the roll answers the
+/// loopback alone.
+WireFactsSource g_wire_facts = nullptr;
+
+void SetWireFactsSource(WireFactsSource source) {
+    g_wire_facts = source;
 }
 
-}  // namespace
+bool wire_facts(InterfaceFacts& into) {
+    return g_wire_facts != nullptr && g_wire_facts(into);
+}
+
+bool wire_present() {
+    return g_wire_facts != nullptr;
+}
 
 bool ReadInterfaceFacts(const char* name, InterfaceFacts& into) {
     if (name == nullptr) {
@@ -77,7 +79,7 @@ bool NameInterfaceAt(unsigned long ordinal, char* out) {
         copy_name(out, kLoopbackName);
         return true;
     }
-    if (ordinal == 1 && NetWorld::self().wired()) {
+    if (ordinal == 1 && wire_present()) {
         copy_name(out, kWireName);
         return true;
     }
@@ -85,7 +87,7 @@ bool NameInterfaceAt(unsigned long ordinal, char* out) {
 }
 
 unsigned long InterfaceCount() {
-    return NetWorld::self().wired() ? 2 : 1;
+    return wire_present() ? 2 : 1;
 }
 
 }  // namespace cinux::net

@@ -95,6 +95,54 @@ void guest_main(void) {
             sys3(4UL, 1UL, (unsigned long)kMapA, slen(kMapA));
         }
     }
+    // Pty round trip: ask the master for its slave number, open the
+    // slave by name, and hear the echo both ways.
+    {
+        static const char kPtyA[] = "[guest] pty refused\n";
+        static const char kPtyB[] = "[guest] pty ok, master and slave echo\n";
+        const long kMaster = sys3(5UL, (unsigned long)"/dev/ptmx", 2UL, 0UL);
+        if (kMaster < 0) {
+            sys3(4UL, 1UL, (unsigned long)kPtyA, slen(kPtyA));
+        } else {
+            unsigned int number = 0xFFFFU;
+            const long kAsk =
+                sys3(54UL, (unsigned long)kMaster, 0x80045430UL,
+                     (unsigned long)&number);  // ioctl TIOCGPTN
+            if (kAsk != 0 || number >= 4U) {
+                sys3(4UL, 1UL, (unsigned long)kPtyA, slen(kPtyA));
+            } else {
+                static const char kSlaveA[] = "/dev/pts/0";
+                static const char kSlaveB[] = "/dev/pts/1";
+                static const char kSlaveC[] = "/dev/pts/2";
+                static const char kSlaveD[] = "/dev/pts/3";
+                const char* kSlave = kSlaveA;
+                if (number == 1U) {
+                    kSlave = kSlaveB;
+                } else if (number == 2U) {
+                    kSlave = kSlaveC;
+                } else if (number == 3U) {
+                    kSlave = kSlaveD;
+                }
+                const long kSlaveFd = sys3(5UL, (unsigned long)kSlave, 2UL, 0UL);
+                if (kSlaveFd < 0) {
+                    sys3(4UL, 1UL, (unsigned long)kPtyA, slen(kPtyA));
+                } else {
+                    static const char kHello[] = "ping\n";
+                    sys3(4UL, (unsigned long)kMaster, (unsigned long)kHello, 5UL);
+                    char back[5];
+                    const long kGot =
+                        sys3(3UL, (unsigned long)kSlaveFd, (unsigned long)back, 5UL);
+                    if (kGot == 5 && back[0] == 'p' && back[3] == 'g') {
+                        sys3(4UL, 1UL, (unsigned long)kPtyB, slen(kPtyB));
+                    } else {
+                        sys3(4UL, 1UL, (unsigned long)kPtyA, slen(kPtyA));
+                    }
+                    sys3(6UL, (unsigned long)kSlaveFd, 0UL, 0UL);
+                }
+            }
+            sys3(6UL, (unsigned long)kMaster, 0UL, 0UL);
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }
