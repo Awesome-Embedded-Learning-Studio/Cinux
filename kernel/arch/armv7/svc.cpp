@@ -24,6 +24,13 @@
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/arch/armv7/frame_bridge.hpp"
+#include "kernel/syscall/sys_close.hpp"
+#include "kernel/syscall/sys_getpid.hpp"
+#include "kernel/syscall/sys_lseek.hpp"
+#include "kernel/syscall/sys_open.hpp"
+#include "kernel/syscall/sys_read.hpp"
+#include "kernel/syscall/sys_write.hpp"
 
 namespace {
 
@@ -114,10 +121,56 @@ void SeatExit(unsigned long status) __attribute__((noreturn));
 bool SeatWorldActive();
 }
 
+namespace {
+
+/// One neutral handler per number: the seated world's services run on
+/// the same bodies the x86 lane built.
+struct NeutralService {
+    unsigned long number;
+    long long (*handler)(const cinux::syscall::SyscallFrame&);
+};
+
+const NeutralService kNeutralServices[] = {
+    {cinux::armv7::syscall_nr::kRead,   &cinux::syscall::HandleRead},
+    {cinux::armv7::syscall_nr::kOpen,   &cinux::syscall::HandleOpen},
+    {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
+    {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},
+    {cinux::armv7::syscall_nr::kGetPid, &cinux::syscall::HandleGetpid},
+};
+
+const NeutralService* find_neutral_service(unsigned long number) {
+    for (const auto& service : kNeutralServices) {
+        if (service.number == number) {
+            return &service;
+        }
+    }
+    return nullptr;
+}
+
+/// Serves one seated service call through the neutral frame.
+cinux::arch::UserTrap* serve_seated_neutral(cinux::arch::UserTrap* trap, unsigned long number) {
+    const NeutralService* const kService = find_neutral_service(number);
+    if (kService == nullptr) {
+        return nullptr;  // not ours; the caller falls through
+    }
+    cinux::syscall::SyscallFrame frame{};
+    cinux::arch::frame::Load(*trap, frame);
+    frame.rax = static_cast<unsigned long long>(kService->handler(frame));
+    cinux::arch::frame::Store(frame, *trap);
+    return trap;
+}
+
+}  // namespace
+
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
-    if (kNumber == cinux::armv7::syscall_nr::kExit && cinux::armv7::SeatWorldActive()) {
-        cinux::armv7::SeatExit(trap->r0);
+    if (cinux::armv7::SeatWorldActive()) {
+        if (kNumber == cinux::armv7::syscall_nr::kExit) {
+            cinux::armv7::SeatExit(trap->r0);
+        }
+        if (cinux::arch::UserTrap* const kServed = serve_seated_neutral(trap, kNumber)) {
+            return kServed;
+        }
     }
     if (kNumber == 0x1000UL) {
         // The seated process asks the kernel to take it back; the

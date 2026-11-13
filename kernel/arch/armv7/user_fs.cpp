@@ -288,6 +288,7 @@ void init() {
             .file_ops      = kGuestView.value().ops,
             .file_self     = kGuestView.value().self,
             .file_lifetime = kGuestView.value().lifetime,
+            .preheat_anonymous = true,
         };
         loader::EntryFacts facts{};
         base::safety::Check(loader::LoadElfIntoSpace(image, taken, kLoadWorld, facts),

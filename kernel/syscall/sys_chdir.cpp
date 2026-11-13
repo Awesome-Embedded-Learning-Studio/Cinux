@@ -3,7 +3,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "kernel/arch/irq_guard.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -17,7 +17,7 @@ long long HandleChdir(const SyscallFrame& frame) {
     if (kLength < 0) {
         return kLength;
     }
-    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(storage);
+    const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(storage);
     if (!kView.ok()) {
         return -ErrnoFrom(kView.error());
     }

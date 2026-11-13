@@ -18,7 +18,7 @@
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/fs/file_table.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
@@ -242,7 +242,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     if (kFolded < 0) {
         return kFolded;
     }
-    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(path);
+    const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(path);
     if (!kView.ok()) {
         return -kEnoent;
     }

@@ -629,6 +629,21 @@ guest 不再坐 g_tasks 的 task 4。席位机制泛化成一个共享任务体�
 RunUserModeSelfCheck 与席位自检共用一个页账窗口（before 在 userfs 装载前、
 after 在 guest 世界 teardown 后），64638 -> 64638 依旧分毫不差。
 
+## guest 吃上中立 syscall 件：read 一段就绪
+
+中立 SyscallFrame 是一块寄存器坐席表（名字来自第一港，坐席本身中立：号
+码、调用者栈、返回地址、标志、六参）。armv7 的 frame_bridge 把 UserTrap 映
+上这些坐席再映回，中立件因此不识港口。svc 表为席位世界接了 read/open/
+close/lseek/getpid（HandleRead 等），guest 升级成真文件公民：open /motd、
+read、write 回显 "hi there"、close、exit(0)，每步都是 x86 同款件。
+
+loader 补中立件 preheat_anonymous：匿名段原本只登记 VMA，等缺页补页——
+x86 有缺页员，armv7 没有。LoadWorld 加一个开关：x86 维持 false 按需补页，
+armv7 置 true 在装载时就把零页补齐（起点对齐 file 尾页之后，不与
+map_tail 重叠），一个 loader 服务两港。syscall 层残留的 6 处
+FileWorld::self().resolve 顺手换 kernel_vfs().resolve；mount/sync 的
+FileWorld 卷管理面留给下一片。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

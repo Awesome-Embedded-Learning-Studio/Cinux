@@ -64,6 +64,9 @@ struct LoadWorld {
     std::uint64_t                base{};  ///< Where the image lands; the default zero serves the
                                           ///< program's absolute addresses, an interpreter brings
                                           ///< its fixed base.
+    bool preheat_anonymous{};  ///< Fill anonymous pages eagerly: ports without
+                               ///< a demand pager do it at load; the x86 lane
+                               ///< leaves false and lets faults supply pages.
 };
 
 /**
