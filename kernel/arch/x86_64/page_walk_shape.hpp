@@ -89,6 +89,25 @@ constexpr bool IsLeafLevel(WalkLevel level) {
     return level == kLeafLevel;
 }
 
+/// Reports whether a slot maps something. On this port the present bit
+/// is the grammar, so the predicate reads it directly.
+constexpr bool IsPresent(const Entry& entry) {
+    return entry.has(kPresent);
+}
+
+/// Reports whether an upper-level slot is a plain table pointer rather
+/// than a large-page leaf.
+constexpr bool IsTableEntry(const Entry& entry, WalkLevel /*level*/) {
+    return !entry.has(kLarge);
+}
+
+/// Reads a leaf's permission terms back in encoder-flag form. The x86
+/// leaf bits are the encoder bits, so this just drops the software
+/// copy-on-write mark: the child maps fresh and MarkPageShared re-marks.
+constexpr Entry LeafTermsOf(const Entry& leaf) {
+    return leaf & ~kCow;
+}
+
 /**
  * @brief         Reports whether a level may hold a large leaf.
  * @param[in]     level   The level asked about.

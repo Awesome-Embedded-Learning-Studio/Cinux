@@ -117,6 +117,58 @@ void ReleaseFrame(unsigned long long frame);
  * @since         0.2.0
  * @ingroup       kernel_mm
  */
+/**
+ * @brief         Mark the child side of one cloned mapping as shared.
+ *
+ * @param[in]     root    The child space's page-table root.
+ * @param[in]     virtual_address   The cloned page.
+ * @param[in]     parent_was_shared   Whether the parent leaf had
+ *              already lost its write permission before this clone.
+ * @return        true when a present 4 KiB mapping was marked.
+ * @note          Every port counts shares its own way: one that counts
+ *          marks retains on both hooks, one that counts address spaces
+ *          retains only on the transitions that add a space. The flag
+ *          tells the child hook which world it stands in.
+ * @since         0.3.0
+ * @ingroup       kernel_mm
+ */
+[[nodiscard]] bool MarkChildShared(unsigned long root, unsigned long virtual_address,
+                                   bool parent_was_shared);
+
+/**
+ * @brief         Clone a parent's user half into an existing space.
+ *
+ * @param[in]     parent   The world fork copies, read-only.
+ * @param[out]    child    The prepared, empty child space.
+ * @param[in]     ranges   Address ranges to clone; all when null.
+ * @return        true when every user leaf found a child mapping.
+ * @note          The walk itself is neutral: per-arch table shapes
+ *          drive it through EntriesAt and IsUserSlot, and the two
+ *          marking hooks carry each port's share accounting.
+ * @since         0.3.0
+ * @ingroup       kernel_mm
+ */
+[[nodiscard]] bool CloneInto(const AddressSpace& parent, AddressSpace& child,
+                             const VmaStore* ranges = nullptr);
+
+/**
+ * @brief         Build a child address space sharing the parent's pages.
+ *
+ * @param[in]     ranges   Address ranges to clone; all when null.
+ * @param[in]     parent   The world fork copies, read-only.
+ * @return        The heap-owned child space, or nullptr when memory
+ *                ran out.
+ * @note          Walks the parent's user half, maps every 4 KiB leaf
+ *                into the child at the same address, and marks both
+ *                sides shared. The first write from either side
+ *                then earns a private copy through the fault path.
+ *                A large page in the user half stops the machine
+ *                loudly: nothing that maps user memory makes one.
+ * @warning       None
+ * @throws        None
+ * @since         0.2.0
+ * @ingroup       kernel_mm
+ */
 [[nodiscard]] AddressSpace* CloneSharedSpace(const AddressSpace& parent,
                                              const VmaStore*     ranges = nullptr);
 

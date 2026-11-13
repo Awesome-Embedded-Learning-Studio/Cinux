@@ -71,6 +71,7 @@ set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/proc/lockdep.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fpu_gate.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/cow.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/cow_resolve.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/demand.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fault_resolve.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp

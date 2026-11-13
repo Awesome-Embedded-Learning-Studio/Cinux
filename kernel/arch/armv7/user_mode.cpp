@@ -50,7 +50,6 @@
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
-#include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -1262,7 +1261,7 @@ bool setup_task(unsigned long index, unsigned long code_va, unsigned long stack_
         return false;
     }
     if (parent != nullptr) {
-        if (!cinux::armv7::CloneUserSpace(*parent, *task.space) ||
+        if (!cinux::mm::cow::CloneInto(*parent, *task.space) ||
             !privatize_stack(*task.space, *parent, stack_va, index)) {
             return false;
         }
@@ -1746,7 +1745,7 @@ cinux::arch::UserTrap* schedule_next(unsigned long number) {
         UserTask& parent = g_tasks[g_current];
         auto* const space = new cinux::mm::AddressSpace{};
         if (space == nullptr || !space->init() ||
-            !cinux::armv7::CloneUserSpace(*parent.space, *space) ||
+            !cinux::mm::cow::CloneInto(*parent.space, *space) ||
             !privatize_stack(*space, *parent.space, kTaskAStack, slot)) {
             delete space;
             parent.trap.r0 = static_cast<unsigned long>(cinux::armv7::errno::kNoMem);

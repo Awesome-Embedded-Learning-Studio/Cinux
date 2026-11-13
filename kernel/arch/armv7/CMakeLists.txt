@@ -137,7 +137,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/base/src/path.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
-    cow_clone.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/cow.cpp
     cow_release.cpp
     cow_repair.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp

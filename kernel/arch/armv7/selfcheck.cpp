@@ -9,7 +9,6 @@
 #include "kernel/proc/task.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
-#include "kernel/arch/armv7/clone_space.hpp"
 #include "kernel/arch/armv7/shared_map.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/arch/context.hpp"
@@ -222,7 +221,7 @@ bool RunForkSelfCheck() {
     if (!parent->map_user(0x40008000UL, kFrame.raw)) {
         return false;
     }
-    if (!cinux::armv7::CloneUserSpace(*parent, *child)) {
+    if (!cinux::mm::cow::CloneInto(*parent, *child)) {
         return false;
     }
     if (parent->translate(0x40008000UL) != kFrame.raw ||

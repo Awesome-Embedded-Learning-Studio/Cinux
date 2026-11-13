@@ -40,6 +40,7 @@ using cinux::arch::page::SmallLeafTarget;
 using cinux::arch::page::TableTarget;
 using cinux::arch::page::IndexRange;
 using cinux::arch::page::kEntriesPerTable;
+using cinux::arch::page::EntriesAt;
 using cinux::arch::page::kLeafLevel;
 using cinux::arch::page::kUpperLevels;
 using cinux::arch::page::HasLargeLeaf;

@@ -79,6 +79,38 @@ constexpr bool DescriptorIsLeaf(const Entry& entry, WalkLevel level) {
     return level == WalkLevel::kL1 ? (entry.raw & 0x3U) == 0x2U : (entry.raw & 0x3U) != 0;
 }
 
+/// Reports whether a slot maps something, in the neutral walk's words.
+constexpr bool IsPresent(const Entry& entry) {
+    return DescriptorPresent(entry);
+}
+
+/// Reports whether an upper-level slot is a table pointer rather than a
+/// section leaf. Only level 1 sits above the leaf tables on this port.
+constexpr bool IsTableEntry(const Entry& entry, WalkLevel level) {
+    return level == WalkLevel::kL1 && (entry.raw & 0x3U) == 0x1U;
+}
+
+/// Reads a small-page leaf's permissions back in encoder-flag form.
+/// AP decodes into the user and writable terms, bit 0 into no-execute.
+constexpr Entry LeafTermsOf(const Entry& leaf) {
+    using cinux::arch::page::Entry;
+    using cinux::arch::page::kNoExec;
+    using cinux::arch::page::kUser;
+    using cinux::arch::page::kWritable;
+    const unsigned int kAp = (leaf.raw >> 4U) & 0x3U;
+    Entry terms{};
+    if (kAp != 0x1U) {
+        terms = terms | kUser;
+    }
+    if (kAp == 0x3U) {
+        terms = terms | kWritable;
+    }
+    if ((leaf.raw & 0x1U) != 0U) {
+        terms = terms | kNoExec;
+    }
+    return terms;
+}
+
 /**
  * @brief         Builds a pointer to a second-level table.
  * @param[in]     physical   Physical address of the table (1 KiB aligned).
