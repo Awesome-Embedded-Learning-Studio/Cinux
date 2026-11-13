@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/cpuid.hpp"
 #include "kernel/arch/page_walk.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/heap_runtime.hpp"
@@ -148,6 +149,16 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunPerCpuSelfCheck()
                                               ? "[armv7] per-cpu ok"
                                               : "[armv7] per-cpu FAILED");
+                    {
+                        // The identity probe exercises the port's MIDR
+                        // decode on real hardware; QEMU's Cortex-A7
+                        // answers implementer 0x41, part 0xC07.
+                        const auto kIdentity = cinux::arch::ReadCpuIdentity(0);
+                        cinux::print::Println("[armv7] cpu id %s %X",
+                                              kIdentity.vendor[0] != '\0' ? kIdentity.vendor
+                                                                          : "unknown",
+                                              kIdentity.model);
+                    }
                     cinux::print::Println(cinux::armv7::RunCowSelfCheck()
                                               ? "[armv7] cow ledger ok"
                                               : "[armv7] cow ledger FAILED");

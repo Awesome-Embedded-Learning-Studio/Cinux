@@ -122,60 +122,16 @@ bool source_nth_cpu(void* /*context*/, unsigned long ordinal, ProcCpuFacts& into
     if (ordinal >= arch::OnlineCpuCount()) {
         return false;
     }
-    into               = ProcCpuFacts{};
-    into.processor     = ordinal;
-    into.apic_id       = arch::CpuHardwareId(static_cast<unsigned int>(ordinal));
-    const auto kVendor = arch::ReadCpuId(0, 0);
-    base::CopyBytes(into.vendor_id, &kVendor.ebx, sizeof(kVendor.ebx));
-    base::CopyBytes(into.vendor_id + sizeof(kVendor.ebx), &kVendor.edx, sizeof(kVendor.edx));
-    base::CopyBytes(into.vendor_id + sizeof(kVendor.ebx) + sizeof(kVendor.edx), &kVendor.ecx,
-                    sizeof(kVendor.ecx));
-    if (kVendor.eax >= 1) {
-        const auto kIdentity = arch::ReadCpuId(1, 0);
-        using Word           = base::bit::BitMask<std::uint32_t>;
-        constexpr base::bit::BitRange kStepping{.low = 0, .width = 4};
-        constexpr base::bit::BitRange kBaseModel{.low = 4, .width = 4};
-        constexpr base::bit::BitRange kBaseFamily{.low = 8, .width = 4};
-        constexpr base::bit::BitRange kExtendedModel{.low = 16, .width = 4};
-        constexpr base::bit::BitRange kExtendedFamily{.low = 20, .width = 8};
-        const Word                    kSignature{kIdentity.eax};
-        const auto                    kFamily = kSignature.extract(kBaseFamily);
-        into.family = kFamily == 15 ? kFamily + kSignature.extract(kExtendedFamily) : kFamily;
-        Word model{kSignature.extract(kBaseModel)};
-        if (kFamily == 6 || kFamily == 15) {
-            model.deposit(kBaseModel, kSignature.extract(kExtendedModel));
-        }
-        into.model    = model.raw;
-        into.stepping = kSignature.extract(kStepping);
-        struct CpuFlag {
-            unsigned char position;
-            const char*   name;
-        };
-        constexpr CpuFlag kFlags[] = {
-            {.position = 0, .name = "fpu"},   {.position = 4, .name = "tsc"},
-            {.position = 9, .name = "apic"},  {.position = 12, .name = "mtrr"},
-            {.position = 15, .name = "cmov"}, {.position = 22, .name = "acpi"},
-            {.position = 23, .name = "mmx"},  {.position = 24, .name = "fxsr"},
-            {.position = 25, .name = "sse"},  {.position = 26, .name = "sse2"},
-        };
-        const Word    kFeatures{kIdentity.edx};
-        unsigned long used = 0;
-        for (const auto& flag : kFlags) {
-            if (kFeatures.has(base::bit::MaskBit<std::uint32_t>(flag.position))) {
-                if (used != 0) {
-                    into.flags[used++] = ' ';
-                }
-                used += base::CopyText(std::span{into.flags}.subspan(used), flag.name);
-            }
-        }
-    }
-    if (arch::ReadCpuId(0x80000000U, 0).eax >= 0x80000004U) {
-        for (unsigned int leaf = 0; leaf < 3; ++leaf) {
-            const auto         kBrand   = arch::ReadCpuId(0x80000002U + leaf, 0);
-            const unsigned int kWords[] = {kBrand.eax, kBrand.ebx, kBrand.ecx, kBrand.edx};
-            base::CopyBytes(into.model_name + (leaf * sizeof(kWords)), kWords, sizeof(kWords));
-        }
-    }
+    const arch::CpuIdentity kIdentity = arch::ReadCpuIdentity(ordinal);
+    into            = ProcCpuFacts{};
+    into.processor  = ordinal;
+    into.apic_id    = kIdentity.hardware_id;
+    into.family     = kIdentity.family;
+    into.model      = kIdentity.model;
+    into.stepping   = kIdentity.stepping;
+    base::CopyBytes(into.vendor_id, kIdentity.vendor, sizeof(into.vendor_id));
+    base::CopyBytes(into.model_name, kIdentity.model_name, sizeof(into.model_name));
+    base::CopyBytes(into.flags, kIdentity.flags, sizeof(into.flags));
     return true;
 }
 

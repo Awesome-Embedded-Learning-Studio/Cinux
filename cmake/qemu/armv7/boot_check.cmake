@@ -177,6 +177,7 @@ expect_literal(EXPECTED_COW "the share ledger never balanced.")
 expect_literal(EXPECTED_TEARDOWN "the space teardown never balanced.")
 
 expect_literal(EXPECTED_PERCPU "the per-CPU block check failed.")
+expect_literal(EXPECTED_CPUID "the MIDR identity probe did not answer.")
 
 expect_literal(EXPECTED_CONTEXT "the context switch round trip failed.")
 

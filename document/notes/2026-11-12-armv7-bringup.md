@@ -440,6 +440,20 @@ FPEXC.EN：编译器为搬 64 位常量发的 vldr d16 在没点亮的 VFP 上�
 口。地址 0x14 恰是这些越界错位叠出的表象，前面的打印扰动让症状来回变脸，
 正是内存错位的典型做派。
 
+## cpuinfo 的架构钩子：解码搬进端口，中立形状只有一份
+
+x86 那边的审计结论：procfs_init.cpp 是通用层文件，却直接调 ReadCpuId 解
+vendor/family/model——CPUID 的语义硬编码在 fs 层，armv7 一编就缺
+armv7/cpuid.hpp（试编时 18 缺 1 缺的正是它）。修正不是给 armv7 造一个假
+CPUID，而是把解码搬回它所属的地方：两个端口各自在 kernel/arch/<port>/
+cpuid.hpp 里发布同形状的 CpuIdentity 与 ReadCpuIdentity(ordinal)，x86 用
+CPUID 解码（连 flags 名字表一起搬走），armv7 用 MIDR 解 implementer/型号
+号/修订号、MPIDR 解亲和号，解不出的字段（brand string、特性表）老实留空。
+procfs_init 的 source_nth_cpu 从 60 行解码缩成纯搬运，行为逐字节不变。
+
+armv7 车道加了一条开机探针：读真 MIDR 打 cpu id ARM C07（QEMU 的
+Cortex-A7），挂进 arm_boot 期望，解码在新车道上真跑过一次而不只是可编。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
