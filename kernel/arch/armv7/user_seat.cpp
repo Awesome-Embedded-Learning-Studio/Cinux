@@ -22,6 +22,7 @@
  */
 
 #include "kernel/arch/armv7/user_seat.hpp"
+#include "kernel/arch/armv7/cow_repair.hpp"
 
 #include "kernel/arch/space_control.hpp"
 #include "kernel/arch/armv7/per_cpu.hpp"
@@ -170,7 +171,11 @@ bool run_probe_world() {
         kCodeBytes[index] =
             index < kProgBytes ? static_cast<unsigned char>(SeatProgStart[index]) : 0U;
     }
-    if (!kSpace->map_user(0x40000000UL, kCode.raw) ||
+    // The code page is law: read-only and executable. A guest write
+    // against it faults, and the seat's repair seam hands back a
+    // private writable copy through the one armv7 cow door.
+    if (!kSpace->map_user(0x40000000UL, kCode.raw,
+                          cinux::arch::page::UserLeafTerms(false, true)) ||
         !kSpace->map_user(0x40010000UL, kStack.raw)) {
         kSpace->teardown();
         delete kSpace;
@@ -180,11 +185,17 @@ bool run_probe_world() {
 }
 
 /// The abort repair door: the seated world's not-present pages are the
-/// neutral demand pager's business. One fill, and the instruction that
-/// faulted runs again.
+/// neutral demand pager's business, and its write faults against shared
+/// or read-only leaves go through the one armv7 copy seam - the same
+/// RepairWriteFault the legacy task world serves. One fill or one
+/// private copy, and the instruction that faulted runs again.
 bool SeatRepairPage(unsigned long address, unsigned long status) {
     if (!SeatWorldActive() || g_seat_world.ranges == nullptr) {
         return false;
+    }
+    if ((status & arch::isr::kDfsrWrite) != 0 &&
+        mm::cow::RepairWriteFault(g_seat_world.space->root(), address)) {
+        return true;
     }
     unsigned long spsr = 0;
     asm volatile("mrs %0, spsr" : "=r"(spsr));

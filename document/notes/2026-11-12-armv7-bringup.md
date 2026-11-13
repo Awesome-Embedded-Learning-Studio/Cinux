@@ -839,6 +839,25 @@ arm_boot 3/3，host 单测全绿。
 - `./scripts/check-armv7.sh --repeat 3` both lanes green。
 - 84 个 host 测试 0 failed,`ninja -C build` 干净。
 
+## armv7 写异常修复统一到单一接缝
+
+### 审计
+- 旧 g_tasks 世界的 RepairUserPage 里混着两段几乎相同的复制逻辑: 共享帧离开账本(cow copy)与私有只读页换可写帧(ro copy), 仅差旧帧是否还有别的持有者。
+- 座位世界的 SeatRepairPage 只接中立需求分页器, 写异常无人修——fork 迁移前必须补上。
+
+### 提取
+- kernel/arch/armv7/cow_repair.cpp: mm::cow::RepairWriteFault(root, address) 一个函数吞并两分支: 帧在账本里 >= 2 份为共享, 否则查 UserPageIsWritable 拒绝非本门的异常; 复制帧、重挂可写叶、ReleaseFrame 旧帧, 日志按共享/私有分别报 cow copy/ro copy。
+- 旧世界 RepairUserPage 与座位 SeatRepairPage 都改为调它, 复制逻辑只剩一份。ReleaseFrame 补进 cow_ledger.hpp 声明。
+
+### 座位侧验证
+- 座位代码页本就映射为可写(默认 leaf bits), 改为 UserLeafTerms(false, true) 只读可执行。
+- guest 探针写自己代码页尾垫料 0x40000FF0: 触发座位世界首个真实 COW 修复, 回读断言, 输出 `[guest] cow seat ok, code write repaired`, EXPECTED_SEATCOW/EXPECTED_SEATROCOPY 入期望表。
+- 内核日志出现座位世界的 `ro copy at 40000000`, 与旧世界的 40030000 互不干扰。
+
+### 验证
+- `./scripts/check-armv7.sh --repeat 3` both lanes green。
+- 84 个 host 测试 0 failed,`ninja -C build` 干净。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

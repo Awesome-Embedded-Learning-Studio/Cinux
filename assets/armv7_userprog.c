@@ -159,6 +159,16 @@ void guest_main(void) {
             sys3(4UL, 1UL, (unsigned long)kLiA, slen(kLiA));
         }
     }
+    // The code page is read-only: a write faults, and the seat's cow
+    // seam must hand back a private writable copy before the readback.
+    {
+        static const char kRoA[] = "[guest] code page stayed read-only\n";
+        static const char kRoB[] = "[guest] cow seat ok, code write repaired\n";
+        volatile unsigned char* kPad = (volatile unsigned char*)0x40000FF0UL;
+        *kPad = 0xA5;
+        sys3(4UL, 1UL, (unsigned long)(*kPad == 0xA5 ? kRoB : kRoA),
+             *kPad == 0xA5 ? slen(kRoB) : slen(kRoA));
+    }
     // Nonblocking stdin: F_SETFL arms O_NONBLOCK, and the empty
     // line answers EAGAIN instead of parking the caller.
     {

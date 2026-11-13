@@ -63,6 +63,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"
             "-DEXPECTED_GETDENTS=getdents ok, root holds five entries with hello"
             "-DEXPECTED_STDIN=stdin ok, line read back"
+            "-DEXPECTED_SEATCOW=cow seat ok, code write repaired"
+            "-DEXPECTED_SEATROCOPY=ro copy at 40000000"
             "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
             "-DSTDIN_DELAY=6"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"

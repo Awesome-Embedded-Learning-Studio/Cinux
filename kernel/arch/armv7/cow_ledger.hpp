@@ -22,6 +22,9 @@ namespace cinux::mm::cow {
 /// Records one more owner for a frame; the second owner makes it shared.
 void RetainFrame(unsigned long long frame);
 
+/// Drops one owner; the last release returns the frame to the allocator.
+void ReleaseFrame(unsigned long long frame);
+
 /// Reports the recorded owners, 0 when the frame is exclusive.
 [[nodiscard]] unsigned long FrameShares(unsigned long long frame);
 

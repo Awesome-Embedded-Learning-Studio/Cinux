@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/cow_repair.hpp"
 #include "kernel/arch/armv7/entropy.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
 #include "kernel/arch/armv7/user_seat.hpp"
@@ -1334,69 +1335,17 @@ cinux::arch::UserTrap g_user_trap;
 namespace cinux::armv7 {
 
 bool RepairUserPage(unsigned long address, unsigned long status) {
-    // A write to a shared, read-only page gets a private copy: the frame
-    // the leaf names is duplicated, this space points at the copy, and
-    // this owner leaves the shared ledger.
+    // Every write fault against a present leaf - shared frames leaving
+    // the ledger, private read-only pages turning writable - is the one
+    // repair seam's business. The demand window below is the rest.
     const unsigned long kPage = address & ~(cinux::arch::page::kSize - 1UL);
-    {
-        cinux::mm::KernelTables tables;
-        const unsigned long     root = cinux::arch::space::ActiveRoot();
-        const unsigned long     frame = cinux::mm::walk::TranslatePage(tables, root, kPage);
-        if (frame != 0 && (status & cinux::arch::isr::kDfsrWrite) != 0 &&
-            cinux::mm::cow::FrameShares(frame) >= 2) {
-            const auto kCopy = cinux::mm::Pmm::self().allocate_page();
-            if (kCopy.raw == 0) {
-                return false;
-            }
-            const auto* const source = reinterpret_cast<const unsigned char*>(frame);
-            auto* const       target = reinterpret_cast<unsigned char*>(kCopy.raw);
-            for (unsigned long index = 0; index < cinux::arch::page::kSize; ++index) {
-                target[index] = source[index];
-            }
-            auto* const table = cinux::mm::walk::EnsureLeafTable(tables, root, kPage,
-                                                                 cinux::arch::page::kUser);
-            if (table == nullptr) {
-                return false;
-            }
-            table[cinux::arch::page::SlotIndex(kPage, cinux::arch::page::kLeafLevel)] =
-                cinux::arch::page::MakePageEntry(
-                    kCopy.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
-            cinux::arch::space::InvalidatePage(kPage);
-            cinux::mm::cow::ReleaseFrame(frame);
-            cinux::print::Println("[armv7] cow copy at %X", kPage);
-            return true;
-        }
-    }
-
     cinux::mm::KernelTables tables;
     const unsigned long     root = cinux::arch::space::ActiveRoot();
-    const unsigned long     mapped = cinux::mm::walk::TranslatePage(tables, root, kPage);
-    if (mapped != 0 && (status & cinux::arch::isr::kDfsrWrite) != 0 &&
-        !cinux::arch::UserPageIsWritable(kPage)) {
-        // A private page mapped read-only: copy it and hand back a
-        // writable frame. Nobody else shares it, so the old one goes.
-        const auto kCopy = cinux::mm::Pmm::self().allocate_page();
-        if (kCopy.raw == 0) {
-            return false;
-        }
-        const auto* const source = reinterpret_cast<const unsigned char*>(mapped);
-        auto* const       target = reinterpret_cast<unsigned char*>(kCopy.raw);
-        for (unsigned long index = 0; index < cinux::arch::page::kSize; ++index) {
-            target[index] = source[index];
-        }
-        auto* const table = cinux::mm::walk::EnsureLeafTable(tables, root, kPage,
-                                                             cinux::arch::page::kUser);
-        if (table == nullptr) {
-            return false;
-        }
-        table[cinux::arch::page::SlotIndex(kPage, cinux::arch::page::kLeafLevel)] =
-            cinux::arch::page::MakePageEntry(
-                kCopy.raw, cinux::arch::page::kUser | cinux::arch::page::kWritable);
-        cinux::arch::space::InvalidatePage(kPage);
-        cinux::mm::cow::ReleaseFrame(mapped);
-        cinux::print::Println("[armv7] ro copy at %X", kPage);
+    if ((status & cinux::arch::isr::kDfsrWrite) != 0 &&
+        cinux::mm::cow::RepairWriteFault(root, address)) {
         return true;
     }
+    const unsigned long mapped = cinux::mm::walk::TranslatePage(tables, root, kPage);
 
     // Only the demand-page window is fillable; every other fault (the
     // cross-table probe included) must fall through to the task ending.
