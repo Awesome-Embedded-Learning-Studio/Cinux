@@ -31,7 +31,7 @@ base::Result<void> ReclaimUserSpan(const proc::Task& self, unsigned long start,
     mm::KernelTables tables;
     for (unsigned long spot = start; spot < start + bytes; spot += cinux::arch::page::kSize) {
         const mm::walk::Entry kOld = mm::walk::UnmapPage(tables, self.space->root(), spot);
-        if (kOld.has(cinux::arch::page::kPresent)) {
+        if (mm::walk::DescriptorPresent(kOld)) {
             mm::cow::ReleaseFrame(mm::walk::EntryTarget(kOld));
             cinux::arch::space::InvalidatePage(spot);
         }

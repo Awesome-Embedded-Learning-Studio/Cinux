@@ -105,7 +105,7 @@ FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned
         }
         KernelTables       world;
         const walk::SlotAt kSlot = walk::FindSlot(world, space.root(), kPage);
-        if (kSlot.entry != nullptr && kSlot.entry->has(cinux::arch::page::kPresent)) {
+        if (kSlot.entry != nullptr && walk::DescriptorPresent(*kSlot.entry)) {
             return FillOutcome::kRetry;
         }
         if (kRegion->shared.holds()) {
@@ -183,7 +183,7 @@ FillOutcome FillPage(const AddressSpace& space, const VmaStore& ranges, unsigned
         }
         KernelTables       world;
         const walk::SlotAt kSlot = walk::FindSlot(world, space.root(), kPage);
-        if (kSlot.entry != nullptr && kSlot.entry->has(cinux::arch::page::kPresent)) {
+        if (kSlot.entry != nullptr && walk::DescriptorPresent(*kSlot.entry)) {
             // Another filler won the race while the read ran: its page
             // is the answer, and this frame goes back to the ledger.
             Pmm::self().free_page(kFrame);

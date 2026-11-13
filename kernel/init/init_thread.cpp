@@ -141,12 +141,7 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     const bool   kStackExecutable =
         loader::ReadGnuStackFlags(program.get(), program_bytes, gnu_stack_flags) &&
         (gnu_stack_flags & loader::kSegmentExec) != 0;
-    constexpr unsigned long long kBrkSlideMask  = 0xFFF'000;
-    constexpr unsigned long long kMmapSlideMask = 0x3FFF'FF000;
-    vmas->seed_heap(cinux::base::math::AlignUp(vmas->max_end(), cinux::arch::page::kSize) +
-                        (arch::random::Word() & kBrkSlideMask),
-                    mm::kUserBrkMmapSplit);
-    vmas->set_mmap_ceiling(mm::kUserMmapTop - (arch::random::Word() & kMmapSlideMask));
+    loader::SeedProcessLayout(*vmas);
     char        interpreter_path[fs::kFsPathMax]{};
     const char* interpreter = nullptr;
     if (loader::ReadInterpreterPath(program.get(), program_bytes, interpreter_path,

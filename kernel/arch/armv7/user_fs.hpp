@@ -24,6 +24,7 @@ class Vfs;
 }  // namespace cinux::fs
 
 namespace cinux::mm {
+class VmaStore;
 class AddressSpace;
 }  // namespace cinux::mm
 
@@ -49,6 +50,10 @@ inline constexpr unsigned long kScratchRoom = 64;
 /// The loaded guest's world, or null when no image seated: the neutral
 /// loader's output, waiting for the user-mode lane to run it.
 cinux::mm::AddressSpace* take_guest();
+
+/// The loader-written promise register for the guest's segments; the
+/// seated task adopts it so the neutral demand pager fills its pages.
+cinux::mm::VmaStore* take_guest_ranges();
 
 /// Where the loaded guest's first instruction lives.
 unsigned long guest_entry();

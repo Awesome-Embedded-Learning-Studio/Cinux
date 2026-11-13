@@ -25,9 +25,12 @@
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
+#include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_getpid.hpp"
 #include "kernel/syscall/sys_lseek.hpp"
+#include "kernel/syscall/sys_mmap.hpp"
+#include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_write.hpp"
@@ -136,6 +139,9 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
     {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},
     {cinux::armv7::syscall_nr::kGetPid, &cinux::syscall::HandleGetpid},
+    {cinux::armv7::syscall_nr::kBrk,    &cinux::syscall::HandleBrk},
+    {cinux::armv7::syscall_nr::kMmap,   &cinux::syscall::HandleMmap},
+    {cinux::armv7::syscall_nr::kMunmap, &cinux::syscall::HandleMunmap},
 };
 
 const NeutralService* find_neutral_service(unsigned long number) {

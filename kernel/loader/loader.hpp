@@ -205,7 +205,13 @@ unsigned long WriteEntryPicture(const EntryStack& stack, const EntryRuns& runs,
  * @since         0.2.0
  * @ingroup       kernel_loader
  */
-[[nodiscard]] bool LoadElfIntoSpace(const std::uint8_t* data, std::size_t bytes,
+/// Seeds the freshly loaded program's heap and mmap band: the break
+/// starts past the last segment with a random slide, the mmap ceiling
+/// sits under the user top with its own. One face, both ports, the
+/// init lane included.
+void SeedProcessLayout(mm::VmaStore& ranges);
+
+bool LoadElfIntoSpace(const std::uint8_t* data, std::size_t bytes,
                                     const LoadWorld& world, EntryFacts& facts);
 
 /**

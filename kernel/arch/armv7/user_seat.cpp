@@ -36,10 +36,16 @@
 #include "kernel/fs/file_table.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/vmm.hpp"
+#include "kernel/arch/armv7/isr.hpp"
+#include "kernel/mm/demand.hpp"
+#include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 
 extern "C" cinux::arch::UserTrap g_user_trap;
+
+using FaultRepair = bool (*)(unsigned long address, unsigned long status);
+void InstallFaultRepair(FaultRepair hook);
 
 extern "C" char SeatProgStart[];
 extern "C" char SeatProgEnd[];
@@ -65,7 +71,7 @@ struct SeatWorld {
     unsigned long     exit_status = 0;
     bool              exited      = false;
     bool              spoke       = false;
-    bool              owns_space  = true;
+    mm::VmaStore*     ranges      = nullptr;
 };
 
 SeatWorld g_seat_world{};
@@ -99,24 +105,36 @@ void SeatProcessBody() {
     g_seat_files.reset();
     g_seat_world.spoke = true;
 
-    if (g_seat_world.owns_space) {
-        kSpace->teardown();
-        delete kSpace;
-    }
     proc::Scheduler::self().exit_current(static_cast<long long>(g_seat_world.exit_status));
 }
 
 /// Runs one seated world through a fresh scheduler task.
 bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned long stack_top,
-                      bool owns_space, bool expect_exit, unsigned long expect_status,
+                      bool /*owns_space*/, bool expect_exit, unsigned long expect_status,
                       const char* name) {
-    g_seat_world = SeatWorld{.space = space, .entry = entry, .stack_top = stack_top,
-                             .owns_space = owns_space};
+    mm::VmaStore* const kCarried = g_seat_world.ranges;  // a caller's store rides along
+    g_seat_world = SeatWorld{.space     = space,
+                             .entry     = entry,
+                             .stack_top = stack_top,
+                             .ranges    = kCarried};
     proc::Task* const kTask =
         proc::TaskBuilder().set_entry(SeatProcessBody).set_name(name).build();
     if (kTask == nullptr) {
         return false;
     }
+    // The register of promises the neutral demand pager fills against;
+    // the loader already wrote the guest's segments into its own store,
+    // the probe starts a fresh one.
+    if (g_seat_world.ranges == nullptr) {
+        kTask->vmas = base::MakeShared<mm::VmaStore>();
+        g_seat_world.ranges = kTask->vmas.get();
+    } else {
+        kTask->vmas = base::Shared<mm::VmaStore>(g_seat_world.ranges);
+    }
+    // The task owns the space: the neutral syscall faces read it, and
+    // its Shared release runs the teardown once the task retires.
+    kTask->space    = base::Shared<mm::AddressSpace>(space);
+    kTask->user_root = space->root();
     if (!proc::Scheduler::self().seat(*kTask)) {
         return false;
     }
@@ -126,6 +144,19 @@ bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned lon
     }
     return !expect_exit ||
            (g_seat_world.exited && g_seat_world.exit_status == expect_status);
+}
+
+/// Runs one seated world that carries its own promise register: the
+/// guest's segments were written into the loader's store.
+bool run_seated_world_with_ranges(mm::AddressSpace* space, unsigned long entry,
+                                  unsigned long stack_top, bool owns_space, bool expect_exit,
+                                  unsigned long expect_status, const char* name,
+                                  mm::VmaStore* ranges) {
+    g_seat_world.ranges = ranges;
+    const bool kOk = run_seated_world(space, entry, stack_top, owns_space, expect_exit,
+                                      expect_status, name);
+    g_seat_world.ranges = nullptr;
+    return kOk;
 }
 
 /// Builds the probe's own world: one code page, one stack page.
@@ -153,6 +184,21 @@ bool run_probe_world() {
         return false;
     }
     return run_seated_world(kSpace, 0x40000000UL, 0x40011000UL, true, false, 0, "seatprog");
+}
+
+/// The abort repair door: the seated world's not-present pages are the
+/// neutral demand pager's business. One fill, and the instruction that
+/// faulted runs again.
+bool SeatRepairPage(unsigned long address, unsigned long status) {
+    if (!SeatWorldActive() || g_seat_world.ranges == nullptr) {
+        return false;
+    }
+    unsigned long spsr = 0;
+    asm volatile("mrs %0, spsr" : "=r"(spsr));
+    const unsigned long long kCode = arch::isr::FaultCodeFromStatus(status, spsr);
+    const mm::demand::FillOutcome kFilled =
+        mm::demand::FillPage(*g_seat_world.space, *g_seat_world.ranges, address, kCode);
+    return kFilled != mm::demand::FillOutcome::kUnhandled;
 }
 
 }  // namespace
@@ -185,6 +231,7 @@ void SeatExit(unsigned long status) {
 }
 
 bool RunSchedulerUserSelfCheck() {
+    InstallFaultRepair(&SeatRepairPage);
     if (!run_probe_world()) {
         return false;
     }
@@ -197,8 +244,9 @@ bool RunSchedulerUserSelfCheck() {
     }
     cinux::print::Println("[armv7] guest runs on the scheduler entry %X",
                           userfs::guest_entry());
-    const bool kGuestOk =
-        run_seated_world(kGuest, userfs::guest_entry(), 0x40011000UL, true, true, 0, "guest");
+    mm::VmaStore* const kGuestRanges = userfs::take_guest_ranges();
+    const bool kGuestOk = run_seated_world_with_ranges(
+        kGuest, userfs::guest_entry(), 0x40011000UL, true, true, 0, "guest", kGuestRanges);
     cinux::print::Println(kGuestOk ? "[armv7] guest exited with status 0"
                                    : "[armv7] guest run FAILED");
     return kGuestOk;

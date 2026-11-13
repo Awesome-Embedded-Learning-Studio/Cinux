@@ -49,12 +49,16 @@ add_executable(arm_image
     entropy.cpp
     seat_prog.S
     uart_input.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/demand.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_close.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getpid.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_lseek.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_open.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_munmap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_common.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_path.cpp

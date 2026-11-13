@@ -293,6 +293,7 @@ void init() {
         loader::EntryFacts facts{};
         base::safety::Check(loader::LoadElfIntoSpace(image, taken, kLoadWorld, facts),
                             "guest elf refused the neutral loader");
+        loader::SeedProcessLayout(*g_guest_ranges);
         base::safety::Check(facts.program_entry >= 0x40000000U &&
                                 facts.program_entry < 0x40100000UL,
                             "guest elf entry did not land where it was linked");
@@ -305,6 +306,10 @@ void init() {
         cinux::print::Println("[armv7] load guest entry %X phnum %u", g_guest_entry,
                               facts.header_count);
     }
+}
+
+mm::VmaStore* take_guest_ranges() {
+    return g_guest_ranges;
 }
 
 mm::AddressSpace* take_guest() {

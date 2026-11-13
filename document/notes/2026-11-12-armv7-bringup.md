@@ -659,6 +659,28 @@ mount_tmpfs/umount_tmpfs 的座位表（RamFs 卷 + MountLease + 前缀）原住
 持座位表与锁，两港经同一 syscall 面到达。FileWorld 的 TmpFsSeat、座位表、
 mount_gate_ 一并删除，sys_mount 直接问中立件。
 
+## 席位世界接中立缺页员：brk/mmap/munmap 全通
+
+x86 的缺页承诺员（mm::demand::FillPage）本就是中立件，armv7 数据异常的修复
+门（InstallFaultRepair）也早已就位——只差接线。席位任务 adopt 空间与承诺
+表（task->space/task->vmas/task->user_root），SeatRepairPage 把 not-present
+异常交给 FillPage 按 VMA 补页。为此拔了两颗钉子：
+
+一是 demand.cpp/munmap 里 x86 专用的 entry->has(page::kPresent)，改走 walk
+转发的 DescriptorPresent。二是 seed 面重复：sys_exec 与 init_thread 各抄一
+段 heap/mmap 布局种子，提取 loader::SeedProcessLayout，armv7 的 guest 装载
+也走同一面；armv7 布局常量原是 x86 照抄（3G 用户区），实际用户窗口只有
+0x40000000 起 1MiB，收紧为 heap 带 0x40080000、mmap 顶 0x400F0000，滑动量
+成为 arch 常量且中立件统一页对齐（歪的 ceiling 会发不对齐的承诺）。
+
+svc 席位分派表接 kBrk/kMmap/kMunmap 中立件。guest 升级为内存公民：brk 问
+基址再伸页、写读经真缺页补页、匿名 mmap 两次触碰补页、munmap 收回。途中
+两处教训：run_seated_world 重置 SeatWorld 会把调用方捎带的 ranges 清掉；
+heap 承诺从非对齐基址起，写页首等于写承诺之外。
+
+席位空间生命周期改由任务 Shared 接管（析构自动 teardown），SeatWorld 的
+owns_space 双轨删除退役。arm_boot 3/3，host 单测全绿，ledger 64634 平衡。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

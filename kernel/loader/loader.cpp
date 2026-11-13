@@ -1,6 +1,8 @@
 #include "kernel/arch/abi.hpp"
 #include "kernel/loader/loader.hpp"
 
+#include "kernel/arch/random.hpp"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -115,6 +117,20 @@ bool map_segment(const LoadWorld& world, const ElfSegment& segment,
 }
 
 }  // namespace
+
+void SeedProcessLayout(mm::VmaStore& ranges) {
+    // Both slides stay page aligned: a crooked break start or mmap
+    // ceiling would hand out unaligned promises.
+    const unsigned long long kPageMask     = cinux::arch::page::kSize - 1ULL;
+    const unsigned long long kBrkSlideMask =
+        (arch::space::kBrkSlideBytes - 1ULL) & ~kPageMask;
+    const unsigned long long kMmapSlideMask =
+        (arch::space::kMmapSlideBytes - 1ULL) & ~kPageMask;
+    ranges.seed_heap(cinux::base::math::AlignUp(ranges.max_end(), cinux::arch::page::kSize) +
+                         (arch::random::Word() & kBrkSlideMask),
+                     mm::kUserBrkMmapSplit);
+    ranges.set_mmap_ceiling(mm::kUserMmapTop - (arch::random::Word() & kMmapSlideMask));
+}
 
 bool LoadElfIntoSpace(const std::uint8_t* data, std::size_t bytes, const LoadWorld& world,
                       EntryFacts& facts) {

@@ -12,6 +12,20 @@ static long sys3(unsigned long number, unsigned long a, unsigned long b,
     return r0;
 }
 
+static long sys6(unsigned long number, unsigned long a, unsigned long b, unsigned long c,
+                  unsigned long d, unsigned long e, unsigned long f) {
+    register long r0 __asm__("r0") = (long)a;
+    register long r1 __asm__("r1") = (long)b;
+    register long r2 __asm__("r2") = (long)c;
+    register long r3 __asm__("r3") = (long)d;
+    register long r4 __asm__("r4") = (long)e;
+    register long r5 __asm__("r5") = (long)f;
+    register long r7 __asm__("r7") = (long)number;
+    __asm__ volatile("svc #0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5), "r"(r7)
+                     : "memory");
+    return r0;
+}
+
 static unsigned long slen(const char* s) {
     unsigned long n = 0;
     while (s[n] != 0) {
@@ -42,6 +56,44 @@ void guest_main(void) {
     } else {
         static const char kNo[] = "[guest] motd open failed\n";
         sys3(4UL, 1UL, (unsigned long)kNo, slen(kNo));
+    }
+    // The heap: extend brk, touch the fresh page (a not-present fault
+    // the neutral pager fills), and read the words back.
+    const unsigned long kBase    = (unsigned long)sys3(45UL, 0UL, 0UL, 0UL);
+    const unsigned long kWanted  = (kBase + 0xFFFFUL) & ~0xFFFUL;
+    const unsigned long kBrk     = (unsigned long)sys3(45UL, kWanted, 0UL, 0UL);
+    static const char kBrkA[] = "[guest] brk refused\n";
+    static const char kBrkB[] = "[guest] brk ok, heap page reads back\n";
+    if (kBrk != kWanted) {
+        sys3(4UL, 1UL, (unsigned long)kBrkA, slen(kBrkA));
+    } else {
+        volatile unsigned int* heap = (volatile unsigned int*)(kWanted - 0x800UL);
+        heap[0] = 0x600D600DU;
+        heap[1] = 0xC0DEC0DEU;
+        if (heap[0] == 0x600D600DU && heap[1] == 0xC0DEC0DEU) {
+            sys3(4UL, 1UL, (unsigned long)kBrkB, slen(kBrkB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kBrkA, slen(kBrkA));
+        }
+    }
+    // Anonymous mmap: the pager fills this one page by page on touch.
+        const long kMap = sys6(90UL, 0UL, 0x1000UL, 0x3UL /* PROT_RW */,
+                           0x22UL /* MAP_PRIVATE|MAP_ANON */, ~0UL, 0UL);
+    static const char kMapA[] = "[guest] mmap refused\n";
+    static const char kMapB[] = "[guest] mmap ok, anon page reads back\n";
+    if (kMap < 0) {
+        sys3(4UL, 1UL, (unsigned long)kMapA, slen(kMapA));
+    } else {
+        volatile unsigned char* anon = (volatile unsigned char*)kMap;
+        anon[0]      = 0x5AU;
+        anon[0x0FFU] = 0xA5U;
+        // The promise held: both touches were filled by the pager.
+        const long kUn = sys3(91UL, (unsigned long)kMap, 0x1000UL, 0UL);
+        if (kUn == 0) {
+            sys3(4UL, 1UL, (unsigned long)kMapB, slen(kMapB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kMapA, slen(kMapA));
+        }
     }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {

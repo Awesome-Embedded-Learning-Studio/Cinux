@@ -42,8 +42,12 @@ inline constexpr unsigned long kUserTop = 0xC0000000UL;
 inline constexpr unsigned long kUserNullTop         = 64_KiB;
 inline constexpr unsigned long kUserInterpreterBase = 0x10000000UL;  // 256 MiB
 inline constexpr unsigned long kUserExecImageBase   = 0x20000000UL;  // 512 MiB
-inline constexpr unsigned long kUserBrkMmapSplit    = 0x40000000UL;  // 1 GiB
-inline constexpr unsigned long kUserMmapTop         = 0xB0000000UL;  // 2.75 GiB
+// The one-section user window (1 MiB at 0x40000000) seats the program
+// low, the heap band next, and the mmap band above it.
+inline constexpr unsigned long kUserBrkMmapSplit    = 0x40080000UL;
+inline constexpr unsigned long kUserMmapTop         = 0x400F0000UL;
+inline constexpr unsigned long kBrkSlideBytes       = 64_KiB;
+inline constexpr unsigned long kMmapSlideBytes      = 128_KiB;
 inline constexpr unsigned long kUserStackTop        = kUserTop - cinux::arch::page::kSize;
 inline constexpr unsigned long kUserStackBytes      = 1_MiB;
 inline constexpr unsigned long kUserStackBottom =
