@@ -57,10 +57,6 @@ unsigned long long wall_clock() {
 
 }  // namespace
 
-bool FileWorld::sync() {
-    return volume_ == nullptr || volume_->sync();
-}
-
 void FileWorld::init() {
     queue_                = new driver::BlockQueue(driver::Ahci::self());
     const auto kAvailable = mm::Pmm::self().free_page_count() * arch::page::kSize;

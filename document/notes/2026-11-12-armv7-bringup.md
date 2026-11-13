@@ -644,6 +644,14 @@ map_tail 重叠），一个 loader 服务两港。syscall 层残留的 6 处
 FileWorld::self().resolve 顺手换 kernel_vfs().resolve；mount/sync 的
 FileWorld 卷管理面留给下一片。
 
+## 卷同步走挂载表：FileWorld::sync 退役
+
+sync 的真义是"把持久卷冲干净"，卷都挂在 Vfs 挂载表上——面应该在那里。Vfs
+加可选钩子 sync（FsOps 尾部声明，EraseFs 用 if constexpr (requires...) 只在
+backend 说 sync 时填，ramfs/devfs 零改动），加 sync_all 遍历挂载表逐个冲。
+sys_fsync/sys_sync/sys_reboot 全改问 kernel_vfs().sync_all()，FileWorld::sync
+声明与定义一并删除——x86 单例又瘦一圈。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

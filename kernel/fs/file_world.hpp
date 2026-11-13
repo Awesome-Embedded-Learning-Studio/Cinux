@@ -78,7 +78,6 @@ public:
      * @brief Flushes the persistent root cache and waits for the device.
      * @return True when every pending write and the device flush succeeded.
      */
-    [[nodiscard]] bool sync();
 
     /**
      * @brief         Maps an absolute path onto the deepest mount.
