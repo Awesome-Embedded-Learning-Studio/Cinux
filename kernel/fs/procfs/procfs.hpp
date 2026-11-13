@@ -23,7 +23,10 @@
 
 #include <string_view>
 
+#include "cinux/memory.hpp"
 #include "cinux/result.hpp"
+#include "kernel/arch/cpuid.hpp"
+#include "kernel/arch/smp_control.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/proc/task_snapshot.hpp"
@@ -140,6 +143,35 @@ struct ProcSource {
     /// The word every seat receives back.
     void* context = nullptr;
 };
+
+/**
+ * @brief         The nth_cpu seat over the port's identity decode.
+ * @param[in]     context   Unused; the port reads its own registers.
+ * @param[in]     ordinal   Zero-based index into the online set.
+ * @param[out]    into      The facts to fill.
+ * @return        False past the last online processor.
+ * @note          The one seat every port can share: the decoding lives
+ *                in kernel/arch/<port>/cpuid.hpp behind the neutral
+ *                CpuIdentity shape, and this helper only copies.
+ * @since         0.1.0
+ * @ingroup kernel_fs
+ */
+inline bool NthCpuFromIdentity(void* /*context*/, unsigned long ordinal, ProcCpuFacts& into) {
+    if (ordinal >= arch::OnlineCpuCount()) {
+        return false;
+    }
+    const arch::CpuIdentity kIdentity = arch::ReadCpuIdentity(ordinal);
+    into            = ProcCpuFacts{};
+    into.processor  = ordinal;
+    into.apic_id    = kIdentity.hardware_id;
+    into.family     = kIdentity.family;
+    into.model      = kIdentity.model;
+    into.stepping   = kIdentity.stepping;
+    base::CopyBytes(into.vendor_id, kIdentity.vendor, sizeof(into.vendor_id));
+    base::CopyBytes(into.model_name, kIdentity.model_name, sizeof(into.model_name));
+    base::CopyBytes(into.flags, kIdentity.flags, sizeof(into.flags));
+    return true;
+}
 
 /**
  * @brief   Read-only directory of living facts, generated on demand.

@@ -454,6 +454,16 @@ procfs_init 的 source_nth_cpu 从 60 行解码缩成纯搬运，行为逐字节
 armv7 车道加了一条开机探针：读真 MIDR 打 cpu id ARM C07（QEMU 的
 Cortex-A7），挂进 arm_boot 期望，解码在新车道上真跑过一次而不只是可编。
 
+## /proc 落进 armv7 的 vfs
+
+通用 ProcFs 实例在 userfs::init 里挂到 /proc，来源只填两个座位：memory 走
+mm::Pmm 的通用计数，nth_cpu 用上一节提的共用座位 NthCpuFromIdentity（放
+procfs.hpp，x86 的 WireKernelProcSource 也改用它，八行搬运只留一份）。填不
+了的座位留空，读出来是安静的空文件而不是编造。init 尾部回读探针经真 vfs
+resolve /proc/cpuinfo 读 96 字节并确认带 ARM 字样，打印 proc cpuinfo 96
+bytes 挂进 arm_boot 期望。链接上补了 base/src/parse.cpp（procfs 的 lookup
+解析十进制 inode 号要用）。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

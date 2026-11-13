@@ -27,16 +27,20 @@
 #include "kernel/fs/ramfs/ramfs.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
+#include "kernel/fs/procfs/procfs.hpp"
+#include "kernel/mm/pmm.hpp"
 
 namespace cinux::armv7::userfs {
 namespace {
 
 /// Heap-owned on purpose: a static would construct before the kernel
 /// heap exists, and the RamFs root is heap-born.
-fs::RamFs* g_ram = nullptr;
-fs::Vfs*   g_vfs = nullptr;
+fs::RamFs* g_ram  = nullptr;
+fs::Vfs*   g_vfs  = nullptr;
+fs::ProcFs* g_proc = nullptr;
 
 /// One seeded regular file: create it, then lay its bytes in. The plain
 /// make_file hands back a borrowed handle, so nothing is released here.
@@ -138,6 +142,41 @@ void init() {
     seed_file("scratch", "", 0);
     const base::Result<void> kRoot = g_vfs->mount("/", *g_ram, "ramfs");
     base::safety::Check(kRoot.ok(), "root mount failed");
+    // The facts instance answers from the port's own identity decode
+    // and the page manager; every seat the arm lane cannot fill yet
+    // stays null and reads as a quiet empty file.
+    g_proc = new fs::ProcFs();
+    g_proc->set_source(fs::ProcSource{
+        .memory =
+            [](void*, unsigned long& free_pages, unsigned long& total_pages) {
+                free_pages  = mm::Pmm::self().free_page_count();
+                total_pages = mm::Pmm::self().managed_page_count();
+            },
+        .memory_page_bytes = arch::page::kSize,
+        .nth_cpu           = fs::NthCpuFromIdentity,
+    });
+    const base::Result<void> kProc = g_vfs->mount("/proc", *g_proc, "proc");
+    base::safety::Check(kProc.ok(), "proc mount failed");
+    // Read-back probe: /proc/cpuinfo must answer through the very vfs
+    // the syscalls use, and the first record carries the port's vendor.
+    const auto kView = g_vfs->resolve("/proc/cpuinfo");
+    base::safety::Check(kView.ok(), "proc cpuinfo resolve failed");
+    const auto kNode = kView.value().ops->lookup(kView.value().self, kView.value().rest);
+    base::safety::Check(kNode.ok(), "proc cpuinfo lookup failed");
+    char              record[96]{};
+    const auto        kRead =
+        kView.value().ops->read(kView.value().self, kNode.value(), 0, record, sizeof(record));
+    base::safety::Check(kRead.ok() && kRead.value() != 0, "proc cpuinfo read failed");
+    const unsigned long kBytes = kRead.value();
+    bool                saw_vendor = false;
+    for (unsigned long index = 0; index + 4 < kBytes; ++index) {
+        if (record[index] == 'A' && record[index + 1] == 'R' && record[index + 2] == 'M') {
+            saw_vendor = true;
+            break;
+        }
+    }
+    base::safety::Check(saw_vendor, "proc cpuinfo lacks the vendor line");
+    cinux::print::Println("[armv7] proc cpuinfo %u bytes", kBytes);
 }
 
 fs::Vfs& vfs() {

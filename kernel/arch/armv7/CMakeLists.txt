@@ -32,6 +32,8 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/procfs/procfs.cpp
+    ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
     proc_shim.cpp

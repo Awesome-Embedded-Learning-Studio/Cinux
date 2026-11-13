@@ -118,23 +118,6 @@ void source_memory(void* /*context*/, unsigned long& free_pages, unsigned long& 
     total_pages = mm::Pmm::self().managed_page_count();
 }
 
-bool source_nth_cpu(void* /*context*/, unsigned long ordinal, ProcCpuFacts& into) {
-    if (ordinal >= arch::OnlineCpuCount()) {
-        return false;
-    }
-    const arch::CpuIdentity kIdentity = arch::ReadCpuIdentity(ordinal);
-    into            = ProcCpuFacts{};
-    into.processor  = ordinal;
-    into.apic_id    = kIdentity.hardware_id;
-    into.family     = kIdentity.family;
-    into.model      = kIdentity.model;
-    into.stepping   = kIdentity.stepping;
-    base::CopyBytes(into.vendor_id, kIdentity.vendor, sizeof(into.vendor_id));
-    base::CopyBytes(into.model_name, kIdentity.model_name, sizeof(into.model_name));
-    base::CopyBytes(into.flags, kIdentity.flags, sizeof(into.flags));
-    return true;
-}
-
 bool source_nth_device(void* /*context*/, unsigned long ordinal, ProcDeviceFacts& into) {
     driver::DeviceFacts facts{};
     if (!driver::DeviceModel::self().nth_device(ordinal, facts)) {
@@ -169,7 +152,7 @@ void WireKernelProcSource(ProcFs& procfs) {
         .memory_page_bytes = arch::page::kSize,
         .nth_device        = source_nth_device,
         .nth_net_iface     = source_nth_net_iface,
-        .nth_cpu           = source_nth_cpu,
+        .nth_cpu           = NthCpuFromIdentity,
         .context           = nullptr,
     };
     procfs.set_source(kSource);
