@@ -165,36 +165,14 @@ inline bool CopyToUser(unsigned long destination, const void* source, unsigned l
  * @param[in]     bytes         Byte count.
  * @return        False when the range is not usable.
  * @note          The port-neutral door face: one symmetric copy the
- *                syscall layer points at both ways, mirroring the
- *                x86-64 port's windowed rep-movsb in behaviour while
- *                this port pays with a page-table walk instead.
+ *                syscall layer points at both ways. Defined in
+ *                user_access.cpp, where the demand pager stands behind
+ *                pages the walk finds missing.
  * @since         0.1.0
  * @ingroup kernel_arch
  */
-inline bool MoveUserBytes(unsigned long long destination, unsigned long long source,
-                          unsigned long long bytes) {
-    if (bytes == 0) {
-        return true;
-    }
-    // Exactly one end is the user world (the other is a kernel buffer
-    // the caller owns); only the user end needs the page walk.
-    const unsigned long long kUserTop = space::kUserTop;
-    const bool kDestUser = destination <= kUserTop;
-    const bool kSourceUser = source <= kUserTop;
-    if (kDestUser == kSourceUser) {
-        return false;  // kernel-to-kernel or user-to-user is not this door
-    }
-    const unsigned long user_address = static_cast<unsigned long>(kDestUser ? destination : source);
-    if (!UserRangeIsMapped(user_address, static_cast<unsigned long>(bytes))) {
-        return false;
-    }
-    auto*       out = reinterpret_cast<unsigned char*>(destination);
-    const auto* in  = reinterpret_cast<const unsigned char*>(source);
-    for (unsigned long long index = 0; index < bytes; ++index) {
-        out[index] = in[index];
-    }
-    return true;
-}
+bool MoveUserBytes(unsigned long long destination, unsigned long long source,
+                   unsigned long long bytes);
 
 /**
  * @brief         Records whether supervisor-window hardware is armed.

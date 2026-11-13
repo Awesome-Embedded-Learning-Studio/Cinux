@@ -90,27 +90,6 @@ bool map_segment(const LoadWorld& world, const ElfSegment& segment,
         if (!world.vmas.register_range(region).ok()) {
             return false;
         }
-        if (world.preheat_anonymous) {
-            // No demand pager on this port: the same zero pages the
-            // fault handler would supply, handed over at load time.
-            // The file tail page, when one exists, is already mapped.
-            const std::uint64_t kFillFrom = segment.file_bytes == 0
-                                                ? region.start
-                                                : base::math::AlignUp(kFileEnd, kSize);
-            for (std::uint64_t at = kFillFrom; at < region.end; at += kSize) {
-                const auto kFrame = mm::Pmm::self().allocate_page();
-                if (kFrame == mm::Pmm::PhysAddr{}) {
-                    return false;
-                }
-                base::SetBytes(base::PtrAt<std::uint8_t>(mm::DirectMapVirt(kFrame.raw)), 0, kSize);
-                if (!world.space.map_user(at, kFrame.raw,
-                                          arch::page::UserLeafTerms(region.writable,
-                                                                    region.executable))) {
-                    mm::Pmm::self().free_page(kFrame);
-                    return false;
-                }
-            }
-        }
     }
     return segment.file_bytes == 0 || kFileEnd == kWholeEnd ||
            (world.file_ops != nullptr && map_tail(world, region, kFileEnd));

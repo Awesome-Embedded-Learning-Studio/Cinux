@@ -55,6 +55,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getpid.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_lseek.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_open.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/user_access.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp

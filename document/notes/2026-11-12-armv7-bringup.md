@@ -681,6 +681,19 @@ heap 承诺从非对齐基址起，写页首等于写承诺之外。
 席位空间生命周期改由任务 Shared 接管（析构自动 teardown），SeatWorld 的
 owns_space 双轨删除退役。arm_boot 3/3，host 单测全绿，ledger 64634 平衡。
 
+## preheat 退役：armv7 转纯按需装载
+
+缺页员接线后，LoadWorld 的 preheat_anonymous 急填零页成为第二条实现同一
+机制的轨道，按原则删除。guest 的 bss 从此和 x86 一样按需补零。
+
+连带暴露一处真分歧：armv7 的 uaccess 是先查映射再搬运（内核直写用户地址
+会变成无法修复的内核异常），bss 页不在表里时 read 直接 -EFAULT，偶发
+"motd read failed"。修法不是绕开，而是让 uaccess 站到缺页员后面——
+MoveUserBytes 的实现从头件挪进 user_access.cpp，查到缺失页时先请中立
+FillPage 补页再搬运。旧轨任务没有承诺表，保持原拒绝语义不变。
+
+arm_boot 5/5，host 单测全绿。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
