@@ -27,6 +27,7 @@
 #include "kernel/arch/space.hpp"
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/cow_ledger.hpp"
+#include "kernel/arch/armv7/entropy.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/errno.hpp"
@@ -1424,6 +1425,7 @@ bool RepairUserPage(unsigned long address, unsigned long status) {
 }
 
 __attribute__((noinline)) bool RunUserModeSelfCheck() {
+    cinux::arch::SeedKernelRandom();
     cinux::armv7::userfs::init();
     InstallFaultRepair(&RepairUserPage);
     const auto kShared = cinux::mm::Pmm::self().allocate_page();

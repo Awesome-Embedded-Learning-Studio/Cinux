@@ -287,7 +287,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     }
     facts.page_bytes             = cinux::arch::page::kSize;
     facts.platform               = loader::kPlatformName;
-    unsigned int gnu_stack_flags = 0;
+    std::uint32_t gnu_stack_flags = 0;
     const bool   kStackExecutable =
         loader::ReadGnuStackFlags(program.get(), program_size, gnu_stack_flags) &&
         (gnu_stack_flags & loader::kSegmentExec) != 0;

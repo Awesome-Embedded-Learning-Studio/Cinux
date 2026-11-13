@@ -583,6 +583,21 @@ vfs、中立 devfs/console、本端口 svc 面，全部串起来跑。x86 的 ex
 小账：g_guest_ranges 全局未随任务回收（VmaStore 不持页，页账不受影响），
 等调度器最后一跳换真 Scheduler 时一并处理。
 
+## syscall 层中立体检：只差四个真 x86 件
+
+为 exec 换血铺路，先审中立 syscall 层（kernel/syscall/，六十余件）在
+armv7 交叉编译下的成色。结论：除 sys_arch_prctl（fs_base）、sys_mprotect
+与 sys_munmap（x86 页表旗语）、sys_reboot（ACPI）四件真架构专属外，全部
+语法通过——read/write/open/close/exec/fork/wait/futex/mmap/signals 全是
+中立件，armv7 换血时直接接。
+
+补了 armv7 缺的最后一块拼图：random port 头。板子没有硬件 RNG，QEMU 也
+不模型一个，所以诚实写法是 entropy 池（中立 xorshift）种自 Generic Timer
+计数器与链接地址，Word() 永远有答案，TryWord() 永远说没有——契约里写明
+这是 bring-up 熵不是密码学源，x86 的 rdrand 路径在 armv7 上明确缺席而非
+假装。sys_exec 顺手修了一处 ABI 敏感：gnu_stack_flags 从 unsigned int 改
+std::uint32_t（uint32_t 在 arm 是 unsigned long，中立层必须定宽）。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

@@ -46,6 +46,7 @@ add_executable(arm_image
     svc.cpp
     user_mode.cpp
     lcdif.cpp
+    entropy.cpp
     uart_input.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/elf_layout.cpp
