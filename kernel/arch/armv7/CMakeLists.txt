@@ -15,6 +15,20 @@ add_custom_command(
     DEPENDS ${CMAKE_SOURCE_DIR}/assets/font.psf
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+set(USERPROG_SOURCE ${CMAKE_SOURCE_DIR}/assets/armv7_userprog.elf)
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/userprog_blob.o
+    COMMAND ${CMAKE_COMMAND} -E copy ${USERPROG_SOURCE} userprog.elf
+    COMMAND ${CMAKE_OBJCOPY} -I binary -O elf32-littlearm -B arm
+            --rename-section .data=.rodata.userprog
+            --redefine-sym _binary_userprog_elf_start=g_userprog_start
+            --redefine-sym _binary_userprog_elf_end=g_userprog_end
+            --set-section-flags .rodata.userprog=alloc,load,readonly,data
+            userprog.elf
+            userprog_blob.o
+    DEPENDS ${USERPROG_SOURCE}
+    COMMENT "objcopy userprog blob")
+
 add_executable(arm_image
     start.S
     kmain.cpp
@@ -33,7 +47,13 @@ add_executable(arm_image
     user_mode.cpp
     lcdif.cpp
     uart_input.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/elf_layout.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/entry_picture.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/exec_arguments.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/interpreter.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
+    ${CMAKE_CURRENT_BINARY_DIR}/userprog_blob.o
     ${CMAKE_SOURCE_DIR}/kernel/drivers/framebuffer/framebuffer.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/serial/serial.cpp

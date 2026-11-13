@@ -46,4 +46,20 @@ enum class WalkLevel : unsigned char {
     kL2 = 1,
 };
 
+
+/// The one grammar for every leaf the kernel maps into the user half:
+/// the User bit plus the two permission bits the caller names, so no
+/// site invents its own flags and a forgotten no-execute bit cannot
+/// hide in a private composition.
+constexpr Entry UserLeafTerms(bool writable, bool executable) {
+    Entry terms = kUser;
+    if (writable) {
+        terms = terms | kWritable;
+    }
+    if (!executable) {
+        terms = terms | kNoExec;
+    }
+    return terms;
+}
+
 }  // namespace cinux::arch::page

@@ -26,6 +26,7 @@
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/ramfs/ramfs.hpp"
 #include "kernel/fs/vfs.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
@@ -40,7 +41,15 @@
 #include "kernel/drivers/input/input_config.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
+#include "kernel/loader/loader.hpp"
+#include "kernel/mm/address_space.hpp"
+#include "kernel/mm/vma.hpp"
 #include "kernel/mm/pmm.hpp"
+
+extern "C" {
+extern unsigned char g_userprog_start[];
+extern unsigned char g_userprog_end[];
+}
 
 namespace cinux::armv7::userfs {
 namespace {
@@ -237,6 +246,53 @@ void init() {
                             "dev event0 wire lacked the key report");
         cinux::print::Println("[armv7] dev event0 %u bytes",
                               static_cast<unsigned long>(kChunk.value()));
+
+        // The loader lane: the guest ELF rides the blob into ramfs,
+        // then the very loader x86 execs through reads it back and
+        // maps its segments into a fresh user space.
+        const unsigned long kImageBytes =
+            static_cast<unsigned long>(g_userprog_end - g_userprog_start);
+        const base::Result<fs::FsNode> kGuest = g_ram->make_file("guest.elf");
+        base::safety::Check(kGuest.ok(), "guest elf staging refused");
+        const auto kSeated = g_ram->write(kGuest.value(), 0,
+                                          reinterpret_cast<const char*>(g_userprog_start),
+                                          kImageBytes);
+        base::safety::Check(kSeated.ok() && kSeated.value() == kImageBytes,
+                            "guest elf staging short");
+        const auto kGuestView = g_vfs->resolve("/guest.elf");
+        base::safety::Check(kGuestView.ok(), "guest elf resolve failed");
+        const auto kGuestNode =
+            kGuestView.value().ops->lookup(kGuestView.value().self, kGuestView.value().rest);
+        base::safety::Check(kGuestNode.ok(), "guest elf lookup failed");
+        unsigned char* image = new unsigned char[kImageBytes];
+        unsigned long  taken = 0;
+        while (taken < kImageBytes) {
+            const auto kChunk2 =
+                kGuestView.value().ops->read(kGuestView.value().self, kGuestNode.value(), taken,
+                                             image + taken, kImageBytes - taken);
+            base::safety::Check(kChunk2.ok() && kChunk2.value() != 0, "guest elf read failed");
+            taken += static_cast<unsigned long>(kChunk2.value());
+        }
+        mm::AddressSpace fresh;
+        base::safety::Check(fresh.init(), "guest elf address space refused to init");
+        mm::VmaStore ranges;
+        const loader::LoadWorld kLoadWorld{
+            .space         = fresh,
+            .vmas          = ranges,
+            .file          = kGuestNode.value(),
+            .file_bytes    = kImageBytes,
+            .file_ops      = kGuestView.value().ops,
+            .file_self     = kGuestView.value().self,
+            .file_lifetime = kGuestView.value().lifetime,
+        };
+        loader::EntryFacts facts{};
+        base::safety::Check(loader::LoadElfIntoSpace(image, taken, kLoadWorld, facts),
+                            "guest elf refused the neutral loader");
+        base::safety::Check(facts.program_entry == 0x40000000U,
+                            "guest elf entry did not land where it was linked");
+        cinux::print::Println("[armv7] load guest entry %X phnum %u",
+                              static_cast<unsigned long>(facts.program_entry),
+                              facts.header_count);
     }
 }
 
@@ -253,3 +309,9 @@ const fs::FsOps* console_ops() {
 }
 
 }  // namespace cinux::armv7::userfs
+
+namespace cinux::fs {
+Vfs& kernel_vfs() {
+    return cinux::armv7::userfs::vfs();
+}
+}  // namespace cinux::fs

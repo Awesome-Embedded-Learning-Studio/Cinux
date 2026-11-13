@@ -92,6 +92,16 @@ public:
     [[nodiscard]] base::Result<FsView> resolve(std::string_view path);
 
     /**
+     * @brief   Hands out the mount table this world owns.
+     * @return  The one Vfs the kernel booted with.
+     * @note    The kernel_vfs() face backs onto this; read-only wiring
+     *          that only resolves paths should prefer that face.
+     * @since   0.1.0
+     * @ingroup kernel_fs
+     */
+    [[nodiscard]] Vfs& vfs();
+
+    /**
      * @brief         Seats a table's standard streams on the console.
      *
      * @param[in,out] table   The table receiving seats zero through two.

@@ -11,6 +11,7 @@
  */
 
 #include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 
 #include <string_view>
 
@@ -114,6 +115,14 @@ void FileWorld::init() {
 
 base::Result<FsView> FileWorld::resolve(std::string_view path) {
     return vfs_.resolve(path);
+}
+
+Vfs& FileWorld::vfs() {
+    return vfs_;
+}
+
+Vfs& kernel_vfs() {
+    return FileWorld::self().vfs();
 }
 
 base::Result<void> FileWorld::mount_tmpfs(std::string_view target) {

@@ -1,6 +1,6 @@
 #include "cinux/own.hpp"
 #include "cinux/result.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/loader.hpp"
@@ -15,7 +15,7 @@ base::Result<EntryFacts> LoadInterpreter(const char* path, const mm::AddressSpac
     if (path == nullptr) {
         return EntryFacts{};
     }
-    const auto kView = fs::FileWorld::self().resolve(path);
+    const auto kView = fs::kernel_vfs().resolve(path);
     if (!kView.ok()) {
         return kView.error();
     }

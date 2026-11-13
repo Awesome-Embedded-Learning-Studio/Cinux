@@ -551,6 +551,22 @@ PollUartKeyboard 挂在轮询路径，event1 的座位真实但安静——这�
 InputOpen）。探针发布一条 KEY_A 报告，adopt 后单次读回 72 字节，逐字段校
 验 wire 布局，打印 dev event0 72 bytes 挂进 arm_boot 期望。
 
+## 中立 ELF loader 上车：guest 镜像装进 armv7 用户窗口
+
+审计 x86 的 exec 链发现 loader 五件（loader/elf_layout/entry_picture/
+exec_arguments/interpreter）本就中立，armv7 缺的只是三小件：abi port 头
+（ELFCLASS32/EM_ARM/4 字 ABI 词）、page 的 UserLeafTerms 组合式、和一个统一
+的 vfs 入口。第三件顺手立了中立面 kernel_vfs()——loader 不再抱 x86 的
+FileWorld 单例，两端口各在自己的 vfs 坐骑旁定义这一个函数，一个机制一个
+实现不变。
+
+探针走真链：guest ELF 用 arm-none-eabi-gcc 链到 0x40000000（objcopy 成 blob
+复刻 font 规则），写进 ramfs，经 vfs 读回，交 LoadElfIntoSpace 装进新
+AddressSpace，打印 load guest entry 40000000 phnum 1 挂进期望。中途挖出
+armv7 用户区的真边界：IsUserSlot 只认 0x40000000 那一个 L1 槽，bring-up 的
+用户窗口就这一段，内核 identity 从 0x8000 起占着低区，guest 老老实实链进
+窗口。将来用户区扩张时这个槽位约定要重新谈。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
