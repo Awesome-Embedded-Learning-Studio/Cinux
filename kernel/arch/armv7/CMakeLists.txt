@@ -23,7 +23,6 @@ add_executable(arm_image
     selfcheck.cpp
     console.cpp
     user_fs.cpp
-    proc_shim.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap_runtime.cpp
@@ -33,10 +32,16 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/procfs/procfs.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/scheduler.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/futex.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
-    proc_shim.cpp
     cow_release.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
@@ -53,6 +58,7 @@ target_compile_options(arm_image PRIVATE
     -fno-rtti
     -fno-pie
     -fno-stack-protector
+    -fno-threadsafe-statics
     -Wall
     -Wextra
     -O2

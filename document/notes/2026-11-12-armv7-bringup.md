@@ -464,6 +464,26 @@ resolve /proc/cpuinfo 读 96 字节并确认带 ARM 字样，打印 proc cpuinfo
 bytes 挂进 arm_boot 期望。链接上补了 base/src/parse.cpp（procfs 的 lookup
 解析十进制 inode 号要用）。
 
+## 通用调度器真件链入，proc_shim 退役
+
+审计结果比预想顺利：kernel/proc/task.cpp 与 scheduler.cpp 在 armv7 下语法直
+接全过（CpuContext/FpuImage 的转发头早已就位）。把 task、scheduler、
+signals、futex、uaccess、sys_clock、vma 七个通用件编进 arm 镜像，链接只
+追出四个缺口，逐个中立化补齐：
+
+- IsCanonicalAddress：armv7/context.hpp 补 32 位规则（高 32 位为零恒真）。
+- MoveUserBytes/ArmUserWindows：armv7/user_access.hpp 补对称搬运门——恰好
+  一端在用户区才做页表走查，两端同侧拒之；SMAP 座为空操作。
+- MonotonicNanoseconds 的 HPET 依赖：提 platform::FineClockNanoseconds()，
+  x86 答 HPET，armv7 答 0 退共享 tick。
+- boot_wall 的 RTC 依赖：提 platform::BootWallSeconds()，x86 读 RTC，armv7
+  无电池钟答 0（纪元即开机）。
+
+proc_shim.cpp 的四个符号与真件撞名，使命结束删除；Mutex 竞争路径补一处
+null 任务断言，让 task-less 调用响亮拒绝而不是把空指针穿进等待链。arm 车
+道补 -fno-threadsafe-statics（与其余车道同款）。arm_boot 3/3 过，host 单
+测全绿。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

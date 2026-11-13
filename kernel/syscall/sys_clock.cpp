@@ -1,7 +1,6 @@
 #include "kernel/syscall/sys_clock.hpp"
 
 #include "kernel/platform/clock.hpp"
-#include "kernel/drivers/rtc/rtc.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/uaccess.hpp"
 #include "kernel/time/tick.hpp"
@@ -10,11 +9,12 @@ namespace cinux::syscall {
 
 namespace {
 
-/// Wall seconds at boot, asked of the RTC once and never again: the
-/// hardware read is slow and the wall only moves forward from here.
+/// Wall seconds at boot, asked of the port's clock once and never
+/// again: the hardware read is slow and the wall only moves forward
+/// from here. Ports without a battery-backed clock answer zero, so
+/// time starts at the epoch.
 unsigned long long boot_wall() {
-    static const unsigned long long kRead = driver::Rtc::self().now_seconds();
-    return kRead;
+    return platform::BootWallSeconds();
 }
 
 /// Splits monotonic nanoseconds into whole seconds and the tail.
@@ -33,9 +33,8 @@ ClockSplit split_ns(unsigned long long total_ns) {
 }  // namespace
 
 unsigned long long MonotonicNanoseconds() {
-    const driver::Hpet& fine = driver::Hpet::self();
-    if (fine.present()) {
-        return fine.since_boot_ns();
+    if (const unsigned long long kFine = platform::FineClockNanoseconds(); kFine != 0ULL) {
+        return kFine;
     }
     const unsigned long long kTicks = time::Tick::self().since_boot();
     return kTicks * 10'000'000ULL;

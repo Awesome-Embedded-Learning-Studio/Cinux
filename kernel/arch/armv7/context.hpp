@@ -60,6 +60,20 @@ extern "C" void ContextSwitch(CpuContext* from, const CpuContext* to);
 /// SPSR picks the mode, so a user task resumes as user.
 extern "C" void ContextSwitchIntoUser(CpuContext* from, const CpuContext* to);
 
+/**
+ * @brief         Reports whether a user pointer is addressable as one
+ *                word on this port.
+ * @param[in]     value   The address in question.
+ * @return        True whenever the value fits the 32-bit user space —
+ *                this port has no non-canonical hole, so the answer is
+ *                the same check the caller's limit already made.
+ * @since         0.1.0
+ * @ingroup kernel_arch
+ */
+[[nodiscard]] constexpr bool IsCanonicalAddress(unsigned long long value) {
+    return (value & 0xFFFFFFFF00000000ULL) == 0ULL;
+}
+
 }  // namespace cinux::arch
 
 extern "C" {
