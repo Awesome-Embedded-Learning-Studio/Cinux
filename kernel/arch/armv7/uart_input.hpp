@@ -41,6 +41,5 @@ namespace cinux::armv7 {
  * @since         0.1.0
  * @ingroup kernel_arch
  */
-void PollUartKeyboard();
 
 }  // namespace cinux::armv7

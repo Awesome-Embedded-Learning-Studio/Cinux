@@ -41,7 +41,6 @@ cinux::fs::Vfs& vfs();
 cinux::fs::RamFs& ram();
 
 /// The erased face of the UART console behind descriptors 0-2.
-const cinux::fs::FsOps* console_ops();
 
 /// The scratch file's byte ceiling; writes past it answer ENOSPC,
 /// matching the stand-in's fixed window.

@@ -76,75 +76,6 @@ void seed_file(const char* name, const char* text, unsigned long bytes) {
     }
 }
 
-/// The console's read: line discipline over the UART, kernel buffer in,
-/// user buffer out. Returns the byte count; -1 on a refused copy.
-long console_read(unsigned long buffer, unsigned long count) {
-    unsigned long received = 0;
-    while (received < count && cinux::armv7::UartReceiveReady()) {
-        const char          kChar = cinux::armv7::UartReadChar();
-        const unsigned char kByte = static_cast<unsigned char>(kChar);
-        if (!cinux::arch::CopyToUser(buffer + received, &kByte, 1)) {
-            return -1;
-        }
-        ++received;
-        if (kChar == '\n' || kChar == '\r') {
-            break;
-        }
-    }
-    return static_cast<long>(received);
-}
-
-/// The console's write: chunked copies out of user memory onto the UART.
-long console_write(unsigned long buffer, unsigned long count) {
-    constexpr unsigned long kChunkBytes = 64;
-    unsigned char           chunk[kChunkBytes];
-    unsigned long           offset = 0;
-    while (offset < count) {
-        const unsigned long kTake =
-            (count - offset) < kChunkBytes ? (count - offset) : kChunkBytes;
-        if (!cinux::arch::CopyFromUser(chunk, buffer + offset, kTake)) {
-            return -static_cast<long>(cinux::armv7::errno::kFault);
-        }
-        for (unsigned long index = 0; index < kTake; ++index) {
-            cinux::armv7::UartPutChar(chunk[index]);
-        }
-        offset += kTake;
-    }
-    return static_cast<long>(count);
-}
-
-/// The erased console face. The node handle is empty: the console has
-/// exactly one instance, so the backend pointer carries nothing and
-/// every hook either forwards to the UART or is a no-op.
-constexpr fs::FsOps kConsoleOps{
-    /* lookup      = */ nullptr,
-    /* make_file   = */ nullptr,
-    /* make_dir    = */ nullptr,
-    /* unlink      = */ nullptr,
-    /* read        = */
-    [](void*, fs::FsNode, unsigned long, void*, unsigned long) {
-        return base::Result<unsigned long>{base::KernelError::kNotSupported};
-    },
-    /* write       = */
-    [](void*, fs::FsNode, unsigned long, const void*, unsigned long) {
-        return base::Result<unsigned long>{base::KernelError::kNotSupported};
-    },
-    /* read_dir    = */ nullptr,
-    /* stat        = */
-    [](void*, fs::FsNode, fs::FsStat& probed) {
-        probed = fs::FsStat{};
-        return base::Result<void>{};
-    },
-    /* retain      = */ [](void*, fs::FsNode) {},
-    /* release     = */ [](void*, fs::FsNode) {},
-    /* readable    = */ [](void*, fs::FsNode) { return true; },
-    /* ioctl       = */ nullptr,
-    /* adopt_open  = */
-    [](void*, fs::FsNode node, std::string_view) {
-        return base::Result<fs::FsNode>{node};
-    },
-};
-
 }  // namespace
 
 void init() {
@@ -340,10 +271,6 @@ fs::Vfs& vfs() {
 
 fs::RamFs& ram() {
     return *g_ram;
-}
-
-const fs::FsOps* console_ops() {
-    return &kConsoleOps;
 }
 
 }  // namespace cinux::armv7::userfs
