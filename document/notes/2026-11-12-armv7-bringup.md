@@ -517,6 +517,25 @@ lcdif.cpp 恰好只编这张脸——320x240 一帧 order-9 页块，首图红�
 到 GUI 的路还差：devfs 的 /dev/fb0 座位（把这块帧缓冲交给用户态 vesper
 桌面）、event 键鼠、vesper 本体在 armv7 的交叉编译。
 
+## /dev/fb0 坐进 armv7，serial 与 console 收编中立
+
+审计 x86 的 fb 链发现整条都是中立的：Framebuffer 单例吃 boot 的
+FramebufferInfo，devfs 的 fb0 节点只是一组 DeviceOps。armv7 缺的不是中立
+层，是喂进去的信息——user_fs 现在把 LCDIF 的 320x240 XRGB8888 折成一份
+FramebufferInfo 交给单例，经 DeviceModel 绑进真 devfs，挂上 /dev，探针
+resolve /dev/fb0 打印 dev fb0 320x240。
+
+追缺口时顺手收编了两条双实现。serial：8250 语法从 serial.cpp 搬进
+x86_64/platform/serial.hpp（platform 头，serial 进
+CINUX_PLATFORM_HEADERS），armv7 侧同一个头转发 i.MX UART1，serial.cpp
+变成纯转发壳，armv7 的 UART 补了 UartDrain（UTS1 TXEMPTY）。console：
+armv7/console.cpp 退役删除，中立 console.cpp 顶上——它本来就是
+SerialPutChar 加惰性 TextConsole，Serial 收编后 UART 输出一字不差，
+arm_boot 期望全数照旧。字体 blob 用 arm 格式 objcopy 复刻 x86 规则。
+
+至此 GUI 内核侧只差输入：event0/event1 的键鼠后端与 pty/console 节点还
+坐在 x86 的键盘鼠标驱动上，那是下一块中立审计。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

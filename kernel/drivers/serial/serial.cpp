@@ -1,58 +1,42 @@
+/**
+ * @file    serial.cpp
+ * @brief   The Serial face: a forwarding shell over the port's serial.
+ *
+ * The register grammar lives in each port's platform serial header;
+ * this file only keeps the neutral names the drivers include stable.
+ *
+ * @author  Charliechen114514
+ * @date    2026-11-13
+ * @version 0.2.0
+ * @since   0.1.0
+ * @ingroup kernel_driver
+ * @copyright Copyright (c) 2026
+ */
+
 #include "kernel/drivers/serial/serial.hpp"
 
-#include <stdint.h>
-
-#include "kernel/platform/io.hpp"
+#include "cinux/platform/serial.hpp"
 
 namespace cinux::driver {
 
-namespace {
-
-constexpr uint16_t kCom1Base = 0x3F8;
-
-constexpr uint8_t kRegData = 0x0;
-constexpr uint8_t kRegIer  = 0x1;
-constexpr uint8_t kRegFcr  = 0x2;
-constexpr uint8_t kRegLcr  = 0x3;
-constexpr uint8_t kRegMcr  = 0x4;
-constexpr uint8_t kRegLsr  = 0x5;
-
-constexpr uint8_t kLsrThre = 0x20;
-constexpr uint8_t kLsrTemt = 0x40;
-constexpr uint8_t kLsrDr   = 0x01;
-
-constexpr PortWrite kInitSequence[] = {
-    {.port = kCom1Base + kRegIer, .value = 0x00},  {.port = kCom1Base + kRegLcr, .value = 0x80},
-    {.port = kCom1Base + kRegData, .value = 0x01}, {.port = kCom1Base + kRegIer, .value = 0x00},
-    {.port = kCom1Base + kRegLcr, .value = 0x03},  {.port = kCom1Base + kRegFcr, .value = 0xC7},
-    {.port = kCom1Base + kRegMcr, .value = 0x0B},
-};
-
-}  // namespace
-
 void SerialInit() {
-    OutB(kInitSequence);
+    cinux::platform::SerialInit();
 }
 
 void SerialPutChar(char character) {
-    WaitBitsSet(kCom1Base + kRegLsr, kLsrThre);
-    OutB({.port = kCom1Base + kRegData, .value = static_cast<uint8_t>(character)});
+    cinux::platform::SerialPutChar(character);
 }
 
 void SerialDrain() {
-    WaitBitsSet(kCom1Base + kRegLsr, kLsrTemt);
+    cinux::platform::SerialDrain();
 }
 
 bool SerialTryGetChar(char* out) {
-    if ((InB(kCom1Base + kRegLsr) & kLsrDr) == 0) {
-        return false;
-    }
-    *out = static_cast<char>(InB(kCom1Base + kRegData));
-    return true;
+    return cinux::platform::SerialTryGetChar(out);
 }
 
 bool SerialHasKey() {
-    return (InB(kCom1Base + kRegLsr) & kLsrDr) != 0;
+    return cinux::platform::SerialHasKey();
 }
 
 }  // namespace cinux::driver

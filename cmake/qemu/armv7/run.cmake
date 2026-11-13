@@ -56,6 +56,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_PROCCPU=proc cpuinfo"
             "-DEXPECTED_SCHED=sched roundtrip ok"
             "-DEXPECTED_LCDIF=lcdif 320x240 fb"
+            "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_TEARDOWN=space teardown ok"
             "-DEXPECTED_COW=cow ledger ok"
             "-DEXPECTED_SHARED=shared frame ok"

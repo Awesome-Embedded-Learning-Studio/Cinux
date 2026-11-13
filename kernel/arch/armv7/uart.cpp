@@ -59,6 +59,13 @@ void UartPutChar(char character) {
                   static_cast<std::uint32_t>(static_cast<unsigned char>(character)));
 }
 
+void UartDrain() {
+    // UTS1's TXEMPTY covers the whole transmit path, FIFO and shifter.
+    auto* const base = reinterpret_cast<volatile std::uint32_t*>(kUart1Base);
+    while ((base[uart_reg::kUts1 / 4U] & uart_reg::kUts1TxEmpty) == 0) {
+    }
+}
+
 bool UartReceiveReady() {
     // UTS1's RXEMPTY is the authoritative "is anything queued" bit. The
     // USR2 RDR bit is cleared by reading URXD, so it under-reports when a

@@ -40,6 +40,8 @@ inline constexpr std::uint32_t kUts1 = 0xB4;
 inline constexpr std::uint32_t kUsr2Rdr = 1U << 0U;
 /// UTS1 bit 5: the receive FIFO is empty.
 inline constexpr std::uint32_t kUts1RxEmpty = 1U << 5U;
+/// UTS1 bit 6: the whole transmit path, FIFO and shifter, is empty.
+inline constexpr std::uint32_t kUts1TxEmpty = 1U << 6U;
 inline constexpr std::uint32_t kUbir = 0xA4;
 inline constexpr std::uint32_t kUbmr = 0xA8;
 }  // namespace uart_reg
@@ -49,6 +51,10 @@ void UartInit();
 
 /// Sends one byte, waiting for the transmitter to be ready.
 void UartPutChar(char character);
+
+/// Waits until the transmitter has fully emptied, transmit FIFO and
+/// shift register both, so the last byte has left the machine.
+void UartDrain();
 
 /// Sends a NUL-terminated string.
 void UartWrite(const char* text);

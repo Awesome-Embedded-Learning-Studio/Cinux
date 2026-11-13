@@ -1,6 +1,20 @@
 # armv7 bring-up image: a freestanding Cortex-A7 binary that QEMU's
 # mcimx6ul-evk can load with -kernel.
 
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/assets/font.psf
+            ${CMAKE_CURRENT_BINARY_DIR}/font.psf
+    COMMAND ${CMAKE_OBJCOPY} -I binary -O elf32-littlearm -B arm
+            --rename-section .data=.rodata.font
+            --redefine-sym _binary_font_psf_start=g_font_psf_start
+            --redefine-sym _binary_font_psf_end=g_font_psf_end
+            --set-section-flags .rodata.font=alloc,load,readonly,data
+            font.psf
+            font_blob.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/assets/font.psf
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(arm_image
     start.S
     kmain.cpp
@@ -18,11 +32,20 @@ add_executable(arm_image
     svc.cpp
     user_mode.cpp
     lcdif.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/framebuffer/framebuffer.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/serial/serial.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/console/console.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/console/font.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/console/screen.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/fb_node.cpp
     fdt.cpp
     vmm_bringup.cpp
     assert_hook.cpp
     selfcheck.cpp
-    console.cpp
     user_fs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap.cpp

@@ -30,7 +30,12 @@
 #include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
+#include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
+#include "kernel/fs/devfs/devfs.hpp"
+#include "kernel/fs/devfs/fb_node.hpp"
+#include "kernel/drivers/device/device.hpp"
+#include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/mm/pmm.hpp"
 
 namespace cinux::armv7::userfs {
@@ -177,6 +182,37 @@ void init() {
     }
     base::safety::Check(saw_vendor, "proc cpuinfo lacks the vendor line");
     cinux::print::Println("[armv7] proc cpuinfo %u bytes", kBytes);
+
+    // The screen joins the fs: the LCDIF's frame, adopted by the
+    // neutral Framebuffer singleton, seats fb0 inside a real devfs.
+    const unsigned long kFrame = lcdif::InitFramebuffer();
+    if (kFrame != 0) {
+        const boot::FramebufferInfo kInfo{
+            .physical   = kFrame,
+            .pitch      = static_cast<std::uint32_t>(lcdif::kWidth * 4),
+            .width      = static_cast<std::uint32_t>(lcdif::kWidth),
+            .height     = static_cast<std::uint32_t>(lcdif::kHeight),
+            .bpp        = 32,
+            .red_size   = 8,
+            .red_shift  = 16,
+            .green_size = 8,
+            .green_shift = 8,
+            .blue_size  = 8,
+            .blue_shift = 0,
+        };
+        base::safety::Check(driver::Framebuffer::self().init(kInfo),
+                            "framebuffer refused the LCDIF geometry");
+        auto* const kDev = new fs::DevFs();
+        driver::DeviceModel::self().bind(*kDev);
+        fs::RegisterFramebufferDevice();
+        const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
+        base::safety::Check(kDevMount.ok(), "devfs mount failed");
+        const auto kFbView = g_vfs->resolve("/dev/fb0");
+        base::safety::Check(kFbView.ok(), "dev fb0 resolve failed");
+        cinux::print::Println("[armv7] dev fb0 %ux%u",
+                              driver::Framebuffer::self().width(),
+                              driver::Framebuffer::self().height());
+    }
 }
 
 fs::Vfs& vfs() {
