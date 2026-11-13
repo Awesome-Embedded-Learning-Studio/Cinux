@@ -217,7 +217,12 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     {
         static const char kRoA[] = "[guest] code page stayed read-only\n";
         static const char kRoB[] = "[guest] cow seat ok, code write repaired\n";
-        volatile unsigned char* kPad = (volatile unsigned char*)0x40000FF0UL;
+        // The pad lands inside its own sacrificial rodata bytes: an
+        // address picked bare once landed on kRoB's own space byte and
+        // the "corrupted" UART byte was the probe rewriting itself.
+        static const unsigned char kScratch[16] = {1, 2, 3, 4, 5, 6, 7, 8,
+                                                   9, 10, 11, 12, 13, 14, 15, 16};
+        volatile unsigned char* kPad = (volatile unsigned char*)kScratch + 8;
         *kPad = 0xA5;
         sys3(4UL, 1UL, (unsigned long)(*kPad == 0xA5 ? kRoB : kRoA),
              *kPad == 0xA5 ? slen(kRoB) : slen(kRoA));
