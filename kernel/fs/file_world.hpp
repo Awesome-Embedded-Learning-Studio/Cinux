@@ -128,7 +128,6 @@ public:
      * @since         0.4.0
      * @ingroup       kernel_fs
      */
-    [[nodiscard]] base::Result<void> mount_tmpfs(std::string_view target);
 
     /**
      * @brief         Takes one tmpfs seat back, and only a tmpfs seat.
@@ -141,7 +140,6 @@ public:
      * @since         0.4.0
      * @ingroup       kernel_fs
      */
-    [[nodiscard]] base::Result<void> umount_tmpfs(std::string_view target, bool lazy = false);
 
     /**
      * @brief Formats the current mount table for procfs.
@@ -163,23 +161,6 @@ private:
     driver::BlockQueue* queue_  = nullptr;
     driver::BlockCache* cache_  = nullptr;
     ext2::Ext2*         volume_ = nullptr;
-
-    static constexpr unsigned long kTmpFsSeats = 4;
-
-    /**
-     * @brief   One runtime-mounted memory volume and the prefix it owns.
-     * @since   0.4.0
-     * @ingroup kernel_fs
-     */
-    struct TmpFsSeat {
-        RamFs*        volume = nullptr;
-        MountLease*   lifetime{};  ///< Mount ownership; views and opens retain separate holds.
-        unsigned long prefix_len         = 0;
-        char          prefix[kFsPathMax] = {};
-    };
-
-    TmpFsSeat   tmpfs_seats_[kTmpFsSeats] = {};
-    proc::Mutex mount_gate_;  ///< Serializes runtime mount-seat updates.
 };
 
 }  // namespace cinux::fs

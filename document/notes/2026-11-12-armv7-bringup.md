@@ -652,6 +652,13 @@ backend 说 sync 时填，ramfs/devfs 零改动），加 sync_all 遍历挂载�
 sys_fsync/sys_sync/sys_reboot 全改问 kernel_vfs().sync_all()，FileWorld::sync
 声明与定义一并删除——x86 单例又瘦一圈。
 
+## tmpfs 挂载出走：FileWorld 又瘦一圈
+
+mount_tmpfs/umount_tmpfs 的座位表（RamFs 卷 + MountLease + 前缀）原住在 x86
+的 FileWorld 里，逻辑本身完全中立。搬进新中立件 kernel/fs/tmpfs_mount：自
+持座位表与锁，两港经同一 syscall 面到达。FileWorld 的 TmpFsSeat、座位表、
+mount_gate_ 一并删除，sys_mount 直接问中立件。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、
