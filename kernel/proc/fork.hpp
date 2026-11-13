@@ -47,5 +47,21 @@ namespace cinux::proc {
  * @ingroup       kernel_proc
  */
 [[nodiscard]] Task* BuildForkChild(unsigned long long frame_address);
+/**
+ * @brief         Stages a forked child's first resume; the port's half
+ *                of BuildForkChild.
+ * @param[out]    child          The freshly built task, stack_base unset.
+ * @param[in]     parent         The forking task, still current.
+ * @param[in]     frame_address  The parent's syscall entry frame.
+ * @param[in]     stack_top      One past the child's kernel stack.
+ * @note          Everything portable about a fork - spaces, ranges,
+ *                files, signals - is already done; this writes only the
+ *                port's register image and return trampoline.
+ * @since         0.2.0
+ * @ingroup       kernel_proc
+ */
+void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame_address,
+                       unsigned long long stack_top);
+
 
 }  // namespace cinux::proc

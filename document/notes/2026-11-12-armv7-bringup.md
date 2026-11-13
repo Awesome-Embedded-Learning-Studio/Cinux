@@ -858,6 +858,29 @@ arm_boot 3/3，host 单测全绿。
 - `./scripts/check-armv7.sh --repeat 3` both lanes green。
 - 84 个 host 测试 0 failed,`ninja -C build` 干净。
 
+## fork 中立化: 接缝提取与逐任务陷入帧设计
+
+### 审计结论
+- 中立 BuildForkChild(kernel/proc/fork.cpp)的肩膀以下只有三处架构私有: 子进程首次恢复(ForkChildEntry/ctx.rip/rsp/帧拷贝)、CloneSharedSpace 的走查词汇、以及输入帧本身。
+- SyscallFrame 的 r12-r15 在 armv7 已由 frame::Load 桥好; CurrentKernelStack 两端口都有; guard_spawn_depth 可移植。
+- 真正的阻塞件: armv7 的用户陷入帧 g_user_trap 是全局单帧(vectors.S 的 svc/irq/abort 三路共用), 两个用户任务并存(fork)后互相覆盖。x86 的帧天生在每个任务自己的 ring-0 栈上, 这是 armv7 要补齐的形状。
+
+### 本轮完成: PrepareForkResume 接缝
+- kernel/proc/fork.cpp 只留可移植的装配(空间/区间/文件/信号/栈), 子进程首次恢复交给 proc::PrepareForkResume(child, parent, frame, stack_top)。
+- x86_64 侧 kernel/arch/x86_64/fork_resume.cpp 原样搬运旧逻辑(帧拷到子栈顶, ctx 指向 ForkChildEntry), 行为不变, host 84 测试全绿。
+
+### 下一轮主体: 逐任务陷入帧(vectors.S 改造设计)
+- 目标形状: 帧压进被打断任务自己的内核栈(即 SVC 模式 sp 所指的那张), C 返回要恢复谁的帧指针, 恢复路径按指针还原——与 x86 同构。
+- 三条路径的差异: svc 与 abort 可先 cps #0x13 用任务内核栈压帧; IRQ bank 的 sp 是共享栈, 必须切到 supervisor sp(= 被打断任务的内核栈, 由 ContextSwitch 恢复)再压, 需先用 gdb 验证 IRQ-from-user 时 supervisor sp 的归属。
+- 压帧布局(UserTrap 16 字, sp 递减): 先 stmdb sp!, {r0-r12}(13 字), 此时 r1-r3 可作草稿; cps #0x1F 读用户 sp 进 r1, r2=lr(用户 pc), mrs r3, spsr, 再 stmdb sp!, {r1, r2, r3} → r1@52, r2@56, r3@60, 恰为 UserTrap。
+- 恢复尾声在 movs pc, lr 前补 add sp, sp, #64(SVC 路径 sp 即帧基)。
+- 旧世界 34 处 g_user_trap 引用改经 c_trap_entry 传入的帧指针(先引入 g_current_trap 指针做机械替换, 再逐处参数化); 座位退出门 SeatReturnToKernel 的 CpuContext 像(&trap->r4)直接取当次帧。
+- 验收: 单任务行为逐位不变(3 次 boot 全绿), 再接 fork 子任务经 ResumeTrap 重入用户态。
+
+### 验证(本轮)
+- x86 `ninja -C build` 干净, 84 个 host 测试 0 failed。
+- `./scripts/check-armv7.sh --repeat 1` both lanes green(armv7 未接入该接缝, 零行为变化)。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

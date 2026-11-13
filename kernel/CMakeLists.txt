@@ -73,7 +73,8 @@ set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/mm/cow.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/demand.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fault_resolve.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp)
+    ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/fork_resume.cpp)
 
 set_source_files_properties(${CINUX_KERNEL_NO_SSE_ISLAND} PROPERTIES COMPILE_OPTIONS "-mgeneral-regs-only")
 

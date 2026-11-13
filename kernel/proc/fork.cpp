@@ -24,21 +24,6 @@
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/uaccess.hpp"
 
-extern "C" {
-
-/**
- * @brief         The child side of a fork, entered only once per fork.
- * @note          The mirror of the syscall return tail: unwinds the
- *                entry frame synthesized on the child's kernel stack
- *                and leaves for ring 3 through sysretq with rax zero,
- *                which is the whole difference between parent and
- *                child from the caller's chair.
- * @since         0.1.0
- * @ingroup       kernel_proc
- */
-void ForkChildEntry();
-}
-
 namespace cinux::proc {
 
 namespace {
@@ -58,11 +43,6 @@ void guard_spawn_depth(const Task& spawner) {
 
 Task* BuildForkChild(unsigned long long frame_address) {
     const arch::IrqGuard kEntryGuard;
-    const auto& parent_frame = *cinux::base::PtrAt<const syscall::SyscallFrame>(frame_address);
-    const unsigned long long kUserR12  = parent_frame.r12;
-    const unsigned long long kUserR13  = parent_frame.r13;
-    const unsigned long long kUserR14  = parent_frame.r14;
-    const unsigned long long kUserR15  = parent_frame.r15;
     const auto&              scheduler = Scheduler::self();
     Task* const              kParent   = scheduler.current();
     cinux::base::safety::Check(kParent != nullptr, "fork outside any task");
@@ -87,19 +67,12 @@ Task* BuildForkChild(unsigned long long frame_address) {
         mm::Pmm::self().free_pages(kStack, kStackOrder);
         return nullptr;
     }
-    Task* const kBorn              = child.get();
-    kBorn->ctx                     = kParent->ctx;
-    kBorn->ctx.fpu                 = kParent->entry_fpu;
-    kBorn->ctx.r12                 = kUserR12;
-    kBorn->ctx.r13                 = kUserR13;
-    kBorn->ctx.r14                 = kUserR14;
-    kBorn->ctx.r15                 = kUserR15;
-    kBorn->ctx.rip                 = reinterpret_cast<unsigned long long>(&ForkChildEntry);
+    Task* const kBorn = child.get();
+    // The first resume is the port's business: how a fresh task returns
+    // to the parent's ring-3 chair with the fork result zeroed. The
+    // stack top hands the arch its frame staging room.
     const unsigned long kStackVirt = mm::DirectMapVirt(kStack.raw);
-    kBorn->ctx.rsp                 = kStackVirt + kStackBytes - sizeof(syscall::SyscallFrame);
-    cinux::base::CopyBytes(cinux::base::PtrAt<void>(kBorn->ctx.rsp),
-                           cinux::base::PtrAt<const void>(frame_address),
-                           sizeof(syscall::SyscallFrame));
+    PrepareForkResume(*kBorn, *kParent, frame_address, kStackVirt + kStackBytes);
     kBorn->state      = TaskState::kReady;
     kBorn->name       = kParent->name;
     kBorn->stack_base = kStackVirt;
