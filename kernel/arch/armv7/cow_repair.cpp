@@ -32,6 +32,9 @@ namespace cinux::mm::cow {
 
 bool RepairWriteFault(unsigned long root, unsigned long address) {
     const unsigned long  kPage = address & ~(cinux::arch::page::kSize - 1UL);
+    if (!cinux::arch::space::IsUserSlot(kPage >> 20U)) {
+        return false;  // outside the user window: a protection violation, not a repair
+    }
     KernelTables kTables;
     const unsigned long kFrame = walk::TranslatePage(kTables, root, kPage);
     if (kFrame == 0) {

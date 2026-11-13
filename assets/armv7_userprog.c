@@ -401,6 +401,31 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(4UL, 1UL, (unsigned long)kLitA, slen(kLitA));
         }
     }
+    // Grim: a child that walks into unmapped memory must die a clean
+    // seated death - reaped through wait4 with the fault word, never a
+    // hang and never a jump through a stale handler.
+    {
+        static const char kGmA[] = "[guest] grim reaper refused\n";
+        static const char kGmB[] = "[guest] grim reaper ok, faulted child answered DEAD\n";
+        const long kChild = sys3(2UL, 0UL, 0UL, 0UL);  // fork
+        if (kChild < 0) {
+            sys3(4UL, 1UL, (unsigned long)kGmA, slen(kGmA));
+        } else if (kChild == 0) {
+            volatile unsigned long* doom =
+                (volatile unsigned long*)0x50000000UL;  // never mapped
+            *doom = 0x1UL;
+            sys3(1UL, 9UL, 0UL, 0UL);  // unreachable on a clean death
+            for (;;) {
+            }
+        } else {
+            unsigned int status = 0;
+            const long kReaped = sys3(114UL, (unsigned long)kChild,
+                                      (unsigned long)&status, 0UL);
+            sys3(4UL, 1UL,
+                 (unsigned long)(kReaped == kChild && status == 0xDEADU ? kGmB : kGmA),
+                 slen(kReaped == kChild && status == 0xDEADU ? kGmB : kGmA));
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }

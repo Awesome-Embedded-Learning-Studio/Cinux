@@ -203,6 +203,7 @@ expect_literal(EXPECTED_GUESTMOTD "the guest did not read the motd through the n
 expect_literal(EXPECTED_GUESTFORK "the seated fork/wait/cow duel did not answer.")
 expect_literal(EXPECTED_GUESTLITTER "the multi-process litter probe did not answer.")
 expect_literal(EXPECTED_GUESTEDGES "the syscall edge probe did not answer.")
+expect_literal(EXPECTED_GUESTGRIM "the faulted-child reaper probe did not answer.")
 expect_literal(EXPECTED_GUESTHELLO "the loaded guest did not speak from user mode.")
 expect_literal(EXPECTED_SEATWRITE "the seated task's console write did not answer.")
 expect_literal(EXPECTED_SEATOK "the scheduler-seat user round trip did not finish.")

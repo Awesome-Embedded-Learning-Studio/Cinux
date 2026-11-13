@@ -2178,11 +2178,28 @@ extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap
 
 extern "C" void ResumeTrap(cinux::arch::UserTrap* frame);
 
+namespace cinux::armv7 {
+/// The seated world's clean exits: a fault the seat could not repair
+/// must retire through the same door a voluntary exit takes, never
+/// through this table whose slots are stale by then.
+void SeatExit(unsigned long status) __attribute__((noreturn));
+bool SeatWorldActive();
+}  // namespace cinux::armv7
+
 /// A fault with a registered handler resumes in user mode with the handler
 /// in place of the faulting instruction; without one it ends the task.
 extern "C" cinux::arch::UserTrap* c_user_fault_handler(cinux::arch::UserTrap* trap,
                                                        unsigned long address,
                                                        unsigned long code) {
+    if (cinux::armv7::SeatWorldActive()) {
+        // The bring-up table below speaks the retired task world only;
+        // a seated fault that reached here is a death, and the seat's
+        // exit switch unwinds this trap context the same way the exit
+        // service does.
+        static_cast<void>(address);
+        static_cast<void>(code);
+        cinux::armv7::SeatExit(0xDEADUL);
+    }
     if (g_tasks[g_current].fault_handler == 0) {
         return nullptr;
     }

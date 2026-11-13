@@ -77,6 +77,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUESTFORK=[guest] fork ok, child reaped with own page"
             "-DEXPECTED_GUESTLITTER=[guest] litter ok, three young and a grandchild"
             "-DEXPECTED_GUESTEDGES=[guest] edges ok, refusals refused and hints honored"
+            "-DEXPECTED_GUESTGRIM=[guest] grim reaper ok, faulted child answered DEAD"
             "-DEXPECTED_SEATWRITE=[seat] scheduler task writes from user m"
             "-DEXPECTED_SEATOK=sched user seat ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"
