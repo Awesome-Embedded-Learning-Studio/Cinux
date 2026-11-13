@@ -700,6 +700,19 @@ arm_boot 5/5，host 单测全绿。
 仍在别名化任务 Shared 将要释放的对象。take_* 改为单向移交（取走即置
 空），顺带删掉已无调用者的 guest_seated 残面。
 
+## 设备树装配中立化：SeatDeviceTree
+
+x86 的 FileWorld::init 里烧着一段每港都该走的装配次序——绑设备模型、注册
+builtin/console/framebuffer/pty、落两个输入源。提取 fs::SeatDeviceTree，
+两港同走一面：armv7 只贡献自己的两个事件流（UART 键盘 + 板指针），
+顺带获得完整 /dev 树，ptmx 从此在 arm 车道上落座。
+
+连带把 console_tty 的键源中立化：纪律类原本直连 PS/2 与 USB 键盘单例，
+改为 ConsoleKeyTap 注入对——x86 在装配时装 PS/2+USB 轮询，armv7 只剩
+串口。tty/pty 栈全部文件 armv7 交叉语法零错。
+
+arm_boot 3/3，host 单测全绿。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

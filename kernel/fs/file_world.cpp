@@ -33,7 +33,11 @@
 #include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/drivers/usb/usb_tablet.hpp"
 #include "kernel/fs/devfs/console_node.hpp"
+#include "kernel/drivers/keyboard/keyboard.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
+#include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
+#include "kernel/fs/device_tree.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
 #include "kernel/fs/devfs/input_node.hpp"
 #include "kernel/fs/devfs/pty_node.hpp"
@@ -71,16 +75,30 @@ void FileWorld::init() {
     const base::Result<void> kRoot = vfs_.mount("/", *volume_, "ext2");
     base::safety::Check(kRoot.ok(), "ext2 root mount failed");
 
-    driver::DeviceModel::self().bind(devfs_);
-    RegisterBuiltinDevices();
-    RegisterConsoleDevice();
-    RegisterFramebufferDevice();
-    RegisterPtyDevices();
+    // The tree grows through the neutral face; only the two input
+    // sources and the console key tap are this port's words.
+    driver::SetConsoleKeyTap(driver::ConsoleKeyTap{
+        .take = +[](char* out) {
+            const char kMaybe = driver::Keyboard::self().take(false);
+            if (kMaybe != 0) {
+                *out = kMaybe;
+                return true;
+            }
+            if (driver::UsbKeyboard::self().poll()) {
+                *out = driver::UsbKeyboard::self().take();
+                return true;
+            }
+            return false;
+        },
+        .has = +[] {
+            return driver::Keyboard::self().poll() || driver::UsbKeyboard::self().poll();
+        },
+    });
     [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
     const bool                  kTablet      = driver::UsbTablet::self().init();
-    RegisterInputDevices(
-        driver::Keyboard::self().events(),
-        kTablet ? driver::UsbTablet::self().events() : driver::Ps2Mouse::self().events());
+    SeatDeviceTree(devfs_, driver::Keyboard::self().events(),
+                   kTablet ? driver::UsbTablet::self().events()
+                           : driver::Ps2Mouse::self().events());
     const base::Result<void> kSata = driver::DeviceModel::self().seat({
         .klass       = driver::DeviceClass::kBlock,
         .name        = "sata0",

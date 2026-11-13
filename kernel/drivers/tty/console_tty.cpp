@@ -2,37 +2,32 @@
 
 #include "kernel/console/console.hpp"
 #include "kernel/console/screen.hpp"
-#include "kernel/drivers/keyboard/keyboard.hpp"
 #include "kernel/drivers/serial/serial.hpp"
 #include "kernel/drivers/tty/tty.hpp"
 #include "kernel/drivers/tty/tty_config.hpp"
-#include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/proc/scheduler.hpp"
 
 namespace cinux::driver {
 
 namespace {
 
-/// One pass over both input seats: the serial line first, because the
-/// hosted world types there, then the PS/2 keyboard the QEMU monitor feeds.
+/// The port's keyboard tap, installed before the first console read.
+ConsoleKeyTap g_key_tap{};
+
+/// The serial line first — the hosted world types there — then
+/// whatever keyboard the port sat behind the tap.
 bool console_take_key(void* /*context*/, char* out) {
     if (SerialTryGetChar(out)) {
         return true;
     }
-    const char kMaybe = Keyboard::self().take(false);
-    if (kMaybe != 0) {
-        *out = kMaybe;
-        return true;
-    }
-    if (UsbKeyboard::self().poll()) {
-        *out = UsbKeyboard::self().take();
+    if (g_key_tap.take != nullptr && g_key_tap.take(out)) {
         return true;
     }
     return false;
 }
 
 bool console_has_key(void* /*context*/) {
-    return SerialHasKey() || Keyboard::self().poll() || UsbKeyboard::self().poll();
+    return SerialHasKey() || (g_key_tap.has != nullptr && g_key_tap.has());
 }
 
 void console_echo(void* /*context*/, char key) {
@@ -64,6 +59,10 @@ void shape_window(Tty& terminal) {
 }
 
 }  // namespace
+
+void SetConsoleKeyTap(const ConsoleKeyTap& tap) {
+    g_key_tap = tap;
+}
 
 Tty& ConsoleTty() {
     static constinit Tty terminal{};

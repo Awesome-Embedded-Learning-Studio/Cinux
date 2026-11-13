@@ -35,6 +35,7 @@
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
+#include "kernel/fs/device_tree.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
 #include "kernel/fs/devfs/input_node.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
@@ -219,8 +220,10 @@ void init() {
         base::safety::Check(driver::Framebuffer::self().init(kInfo),
                             "framebuffer refused the LCDIF geometry");
         fs::DevFs* const kDev = new fs::DevFs();
-        driver::DeviceModel::self().bind(*kDev);
-        fs::RegisterFramebufferDevice();
+        // The same tree both ports grow: console, fb0, ptmx and the
+        // two input seats. event0 speaks the UART's keys, event1 sits
+        // quiet: the pointer has no source on this board.
+        fs::SeatDeviceTree(*kDev, armv7::UartKeyboardEvents(), armv7::BoardPointerEvents());
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
         base::safety::Check(kDevMount.ok(), "devfs mount failed");
         const auto kFbView = g_vfs->resolve("/dev/fb0");
@@ -228,11 +231,13 @@ void init() {
         cinux::print::Println("[armv7] dev fb0 %ux%u",
                               driver::Framebuffer::self().width(),
                               driver::Framebuffer::self().height());
+        // ptmx answers through the very vfs the syscalls use.
+        const auto kPtmxView = g_vfs->resolve("/dev/ptmx");
+        base::safety::Check(kPtmxView.ok(), "dev ptmx resolve failed");
+        cinux::print::Println("[armv7] dev ptmx seated");
 
-        // event0 speaks the UART's keys, event1 sits quiet: the
-        // pointer has no source on this board. The probe plants one
-        // key report and reads it back through the very vfs.
-        fs::RegisterInputDevices(armv7::UartKeyboardEvents(), armv7::BoardPointerEvents());
+        // The probe plants one key report and reads it back through
+        // the very vfs.
         armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 1);
         armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 0);
         armv7::UartKeyboardEvents().publish_report();

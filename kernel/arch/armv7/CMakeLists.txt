@@ -76,9 +76,12 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/font.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/screen.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/device_tree.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/console_node.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/devfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/fb_node.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/input_node.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/devfs/pty_node.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/input/event_stream.cpp
     fdt.cpp
     vmm_bringup.cpp
@@ -91,6 +94,9 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/mm/heap_runtime.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/address_space.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_table.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/console_tty.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/pty.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/tty/tty.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp

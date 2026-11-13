@@ -34,4 +34,23 @@ namespace cinux::driver {
  */
 Tty& ConsoleTty();
 
+/**
+ * @brief         One seat of extra console keys, as a pair of polls.
+ * @param[out]    out   Where a taken key lands.
+ * @return        take: whether a key came; has: whether one waits.
+ * @note          The console reads the serial line itself; whatever
+ *                else types — a PS/2 or USB keyboard on one port, a
+ *                UART-fed event stream on another — arrives through
+ *                this tap, so the discipline class stays neutral.
+ * @since         0.6.0
+ * @ingroup       kernel_driver
+ */
+struct ConsoleKeyTap {
+    bool (*take)(char* out);
+    bool (*has)();
+};
+
+/// Installs the port's keyboard tap. Null keeps the serial line alone.
+void SetConsoleKeyTap(const ConsoleKeyTap& tap);
+
 }  // namespace cinux::driver
