@@ -694,6 +694,12 @@ FillPage 补页再搬运。旧轨任务没有承诺表，保持原拒绝语义�
 
 arm_boot 5/5，host 单测全绿。
 
+## guest 全局指针单向移交
+
+席位任务接管空间与承诺表后，user_fs 的 g_guest_space/g_guest_ranges 全局
+仍在别名化任务 Shared 将要释放的对象。take_* 改为单向移交（取走即置
+空），顺带删掉已无调用者的 guest_seated 残面。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

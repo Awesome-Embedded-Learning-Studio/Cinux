@@ -308,20 +308,26 @@ void init() {
 }
 
 mm::VmaStore* take_guest_ranges() {
-    return g_guest_ranges;
+    // The seated task adopts the register; this hand-off is one-way,
+    // so the global stops aliasing what the task's Shared will free.
+    mm::VmaStore* const kTaken = g_guest_ranges;
+    g_guest_ranges              = nullptr;
+    return kTaken;
 }
 
 mm::AddressSpace* take_guest() {
-    return g_guest_space;
+    // Same one-way hand-off as the register: the task's Shared owns
+    // the teardown from here on.
+    mm::AddressSpace* const kTaken = g_guest_space;
+    g_guest_space                    = nullptr;
+    return kTaken;
 }
 
 unsigned long guest_entry() {
     return g_guest_entry;
 }
 
-void guest_seated() {
-    g_guest_space = nullptr;
-}
+
 
 fs::Vfs& vfs() {
     return *g_vfs;

@@ -59,6 +59,5 @@ cinux::mm::VmaStore* take_guest_ranges();
 unsigned long guest_entry();
 
 /// Marks the guest as owned by its task; the loader's copy retires.
-void guest_seated();
 
 }  // namespace cinux::armv7::userfs
