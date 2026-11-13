@@ -12,11 +12,6 @@ SECTIONS
         KEEP(*(.text.start))
         *(.text*)
     }
-    .user_text : {
-        __user_text_start = .;
-        *(.user_text*)
-        __user_text_end = .;
-    }
     .rodata : { *(.rodata*) }
     .data   : { *(.data*) }
 
@@ -52,8 +47,3 @@ SECTIONS
         __und_stack_top = .;
     }
 }
-
-/* Three pages are reserved for user code between code_va and the stack;
-   growing past them must fail here, not at run time. */
-ASSERT(__user_text_end - __user_text_start <= 3 * 4096,
-       "user text outgrew the three pages reserved for it")

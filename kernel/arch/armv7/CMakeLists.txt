@@ -44,7 +44,6 @@ add_executable(arm_image
     faults.cpp
     exception_dispatch.cpp
     svc.cpp
-    user_mode.cpp
     lcdif.cpp
     entropy.cpp
     seat_prog.S
@@ -53,6 +52,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_close.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getpid.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getppid.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_lseek.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_open.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/fork_resume.cpp

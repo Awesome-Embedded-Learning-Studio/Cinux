@@ -186,23 +186,13 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");
-                    const unsigned long kPagesBefore =
-                        cinux::mm::Pmm::self().free_page_count();
-                    const bool kTasksOk = cinux::armv7::RunUserModeSelfCheck();
-                    // The first pass's heap growth stays resident, so the
-                    // leak question is whether a second pass costs more
-                    // pages, not whether the first one did.
-                    const unsigned long kPagesMid = cinux::mm::Pmm::self().free_page_count();
-                    const bool kTasksAgain = kTasksOk && cinux::armv7::RunUserModeSelfCheck();
-                    const unsigned long kPagesAfter = cinux::mm::Pmm::self().free_page_count();
-                    const bool kSeatOk  = cinux::armv7::RunSchedulerUserSelfCheck();
-                    cinux::print::Println("[armv7] tasks pages %u -> %u -> %u", kPagesBefore,
-                                          kPagesMid, kPagesAfter);
+                    // The bring-up task world is gone: the seated
+                    // scheduler world is the one user-mode round trip.
+                    const bool kSeatOk = cinux::armv7::RunSchedulerUserSelfCheck();
                     cinux::print::Println(kSeatOk ? "[armv7] sched user seat ok"
                                                   : "[armv7] sched user seat FAILED");
-                    cinux::print::Println((kTasksAgain && kSeatOk && kPagesAfter == kPagesMid)
-                                              ? "[armv7] user mode round trip ok"
-                                              : "[armv7] user mode round trip FAILED");
+                    cinux::print::Println(kSeatOk ? "[armv7] user mode round trip ok"
+                                                  : "[armv7] user mode round trip FAILED");
                     asm volatile("cpsie if" ::: "memory");
                     cinux::armv7::UartWrite("[armv7] irq on, timer armed\n");
                     const unsigned long long kWait =

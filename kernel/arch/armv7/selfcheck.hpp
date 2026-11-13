@@ -51,7 +51,6 @@ namespace cinux::armv7 {
 [[nodiscard]] bool RunTaskSelfCheck();
 
 /// Drops to user mode, makes one svc, and comes back through a second.
-[[nodiscard]] bool RunUserModeSelfCheck();
 
 /// A kernel task built, seated, and retired through the shared
 /// scheduler: one round trip from main into a real Task and back.

@@ -43,9 +43,6 @@ void print_unsigned(unsigned long value) {
     }
 }
 
-/// The scheduler gets every tick so a blocked wait can expire.
-extern "C" void SchedulerOnTick(unsigned long ticks);
-
 void serve_tick() {
     const unsigned long interrupt = cinux::armv7::GicAcknowledge();
     cinux::armv7::GicEnd(interrupt);
@@ -56,13 +53,9 @@ void serve_tick() {
         cinux::armv7::UartWrite("\n");
     }
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
-    SchedulerOnTick(g_ticks);
 }
 
 }  // namespace
-
-extern "C" bool SchedulerRunning();
-extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap);
 
 /// An interrupt taken in the kernel: tick and return through the stub.
 void HandleIrq() {
@@ -86,18 +79,10 @@ extern "C" cinux::arch::UserTrap* c_irq_trap_seated(cinux::arch::UserTrap* trap)
     return trap;
 }
 
-/// An interrupt taken in user mode: the trap may be exchanged for another.
+/// A user-mode interrupt that reached the legacy door: with the
+/// bring-up task world gone, every user episode is seated and takes
+/// the homing door, so this only answers the tick and resumes.
 extern "C" cinux::arch::UserTrap* c_irq_trap(cinux::arch::UserTrap* trap) {
     serve_tick();
-    if (!SchedulerRunning()) {
-        return trap;
-    }
-    unsigned long& slice = cinux::arch::per_cpu::self().slice_ticks;
-    if (slice != 0) {
-        --slice;
-        if (slice != 0) {
-            return trap;
-        }
-    }
-    return c_preempt_from_irq(trap);
+    return trap;
 }

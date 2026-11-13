@@ -21,9 +21,11 @@
 #include "kernel/boot/print.hpp"
 
 extern "C" [[noreturn]] void c_user_faulted();
-extern "C" cinux::arch::UserTrap* c_user_fault_handler(cinux::arch::UserTrap* trap,
-                                                       unsigned long address,
-                                                       unsigned long code);
+namespace cinux::armv7 {
+/// The only user world left is the seated one: a fault the seat could
+/// not repair retires the task through the exit door, cleanly.
+[[noreturn]] void SeatFaultDeath();
+}  // namespace cinux::armv7
 
 using RepairHook = bool (*)(unsigned long address, unsigned long status);
 
@@ -64,13 +66,9 @@ extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap) {
     if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
         return trap;  // the fetch runs again on the new mapping
     }
-    if (auto* const kHandled = c_user_fault_handler(trap, fault_address, code);
-        kHandled != nullptr) {
-        return kHandled;
-    }
     cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address,
                           code);
-    c_user_faulted();
+    cinux::armv7::SeatFaultDeath();
 }
 
 extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
@@ -88,10 +86,6 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
     if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
         return trap;  // the same instruction runs again on the new mapping
     }
-    if (auto* const kHandled = c_user_fault_handler(trap, fault_address, code);
-        kHandled != nullptr) {
-        return kHandled;  // the handler runs in user mode instead
-    }
     cinux::print::Println("[armv7] user fault caught at %X code %X", fault_address, code);
-    c_user_faulted();
+    cinux::armv7::SeatFaultDeath();
 }

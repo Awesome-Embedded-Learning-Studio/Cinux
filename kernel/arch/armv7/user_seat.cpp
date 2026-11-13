@@ -48,7 +48,9 @@
 extern "C" unsigned long c_seat_irq_door;
 #include "kernel/proc/task.hpp"
 
-extern "C" cinux::arch::UserTrap* g_current_trap;
+/// The trap frame the seat is servicing; born in user_mode.cpp with
+/// the bring-up world, now the seat's own word.
+extern "C" cinux::arch::UserTrap* g_current_trap = nullptr;
 
 using FaultRepair = bool (*)(unsigned long address, unsigned long status);
 void InstallFaultRepair(FaultRepair hook);
@@ -265,6 +267,12 @@ void SeatReturnToKernel() {
     __builtin_unreachable();
 }
 
+/// A fault the seat could not repair: the same door a voluntary exit
+/// takes, with the fault word the reaper expects.
+void SeatFaultDeath() {
+    SeatExit(0xDEADUL);
+}
+
 void SeatExit(unsigned long status) {
     // The exit service: same switch as the return, but the body reads
     // the exit word and retires through the scheduler's exit path.
@@ -304,6 +312,9 @@ extern "C" void SeatForkChildEntry() {
 }
 
 bool RunSchedulerUserSelfCheck() {
+    // The seated world owns the user file system now: ram files, the
+    // devfs tree and the guest ELF all come up with it.
+    userfs::init();
     InstallFaultRepair(&SeatRepairPage);
     if (!run_probe_world()) {
         return false;
