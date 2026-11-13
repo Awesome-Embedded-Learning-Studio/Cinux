@@ -59,6 +59,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"
+            "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
             "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
             "-DEXPECTED_GUESTEXIT=guest exited with status 0"

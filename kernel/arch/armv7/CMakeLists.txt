@@ -59,6 +59,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fcntl.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_ioctl.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_write.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_munmap.cpp

@@ -762,6 +762,22 @@ arm_boot 3/3，host 单测全绿。
 - `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green。
 - 全部 host 测试 0 failed，`ninja -C build` 零错误。
 
+## fcntl 上中立表：非阻塞 stdin 探针
+
+### 做了什么
+
+- `kFcntl = 55`（ARM EABI 号）进 armv7 svc 中立表，`HandleFcntl` 本就全中立（FileTable + status flags），无需改动。`sys_fcntl.cpp` 链入 armv7 镜像。
+- guest 新增非阻塞探针：`fcntl(0, F_SETFL, O_NONBLOCK)` 后空 stdin 的 read 立即答 -EAGAIN，不再有无输入时的阻塞风险。
+
+### 细节
+
+- console tty 的 FsOps 没有 try_read 槽，但 sys_read 的等待循环对 `WouldBlock + O_NONBLOCK` 组合同样立即转 EAGAIN，探针走的正是这条路径。
+
+### 怎么验证的
+
+- `./scripts/check-armv7.sh --repeat 3`：arm_boot 3/3，both lanes green（新增 EXPECTED_FCNTL）。
+- 全部 host 测试 0 failed，`ninja -C build` 零错误。
+
 ## 静默失败补回声
 
 `open` 没空槽、`lseek` 参数不对、`read` 缓冲不对，这三条原先都只返回错误码、

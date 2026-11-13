@@ -143,6 +143,20 @@ void guest_main(void) {
             sys3(6UL, (unsigned long)kMaster, 0UL, 0UL);
         }
     }
+    // Nonblocking stdin: F_SETFL arms O_NONBLOCK, and the empty
+    // line answers EAGAIN instead of parking the caller.
+    {
+        static const char kNbA[] = "[guest] fcntl refused\n";
+        static const char kNbB[] = "[guest] fcntl ok, empty stdin answers EAGAIN\n";
+        const long kArmed = sys3(55UL, 0UL, 4UL, 0x800UL);  // fcntl F_SETFL O_NONBLOCK
+        char back[8];
+        const long kGot = sys3(3UL, 0UL, (unsigned long)back, sizeof(back));  // read stdin
+        if (kArmed == 0 && kGot == -11L) {
+            sys3(4UL, 1UL, (unsigned long)kNbB, slen(kNbB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kNbA, slen(kNbA));
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }
