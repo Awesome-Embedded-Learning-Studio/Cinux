@@ -42,6 +42,10 @@
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
+
+/// The vector stub's seated door: raised while seated episodes run, so
+/// their IRQ frames take the task-owned homing path.
+extern "C" unsigned long c_seat_irq_door;
 #include "kernel/proc/task.hpp"
 
 extern "C" cinux::arch::UserTrap* g_current_trap;
@@ -168,8 +172,15 @@ bool run_seated_world_with_ranges(mm::AddressSpace* space, unsigned long entry,
                                   unsigned long expect_status, const char* name,
                                   mm::VmaStore* ranges) {
     g_seat_launch.ranges = ranges;
+    // The seated episodes may park mid-frame while the neutral scheduler
+    // lends the CPU elsewhere, so their IRQ frames need the task-owned
+    // door and their ticks need the scheduler's preemption.
+    ::c_seat_irq_door = 1;
+    cinux::proc::Scheduler::self().set_preemption(true);
     const bool kOk = run_seated_world(space, entry, stack_top, owns_space, expect_exit,
                                       expect_status, name);
+    cinux::proc::Scheduler::self().set_preemption(false);
+    ::c_seat_irq_door = 0;
     g_seat_launch.ranges = nullptr;
     return kOk;
 }

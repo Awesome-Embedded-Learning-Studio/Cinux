@@ -426,6 +426,35 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
                  slen(kReaped == kChild && status == 0xDEADU ? kGmB : kGmA));
         }
     }
+    // Slice: two spinners, one core. Whichever starts first keeps the
+    // CPU for its whole run unless the timer preempts it - without IRQ
+    // preemption through the neutral scheduler this line never prints.
+    {
+        static const char kSlA[] = "[guest] slice refused\n";
+        static const char kSlB[] = "[guest] slice ok, two spinners shared one core\n";
+        volatile unsigned long spin = 0;
+        const long              kChild = sys3(2UL, 0UL, 0UL, 0UL);  // fork
+        if (kChild < 0) {
+            sys3(4UL, 1UL, (unsigned long)kSlA, slen(kSlA));
+        } else if (kChild == 0) {
+            while (spin < 50000000UL) {
+                ++spin;
+            }
+            sys3(1UL, 6UL, 0UL, 0UL);
+            for (;;) {
+            }
+        } else {
+            while (spin < 50000000UL) {
+                ++spin;
+            }
+            unsigned int status = 0;
+            const long    kReaped = sys3(114UL, (unsigned long)kChild,
+                                         (unsigned long)&status, 0UL);
+            const int     kOk = kReaped == kChild && status == 6U;
+            sys3(4UL, 1UL, (unsigned long)(kOk ? kSlB : kSlA),
+                 slen(kOk ? kSlB : kSlA));
+        }
+    }
     sys3(1UL, 0UL, 0UL, 0UL);
     for (;;) {
     }

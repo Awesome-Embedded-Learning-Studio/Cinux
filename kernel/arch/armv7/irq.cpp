@@ -20,6 +20,8 @@
 #include "kernel/arch/armv7/timer.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/syscall/sys_clock.hpp"
 
 namespace {
 
@@ -65,6 +67,23 @@ extern "C" cinux::arch::UserTrap* c_preempt_from_irq(cinux::arch::UserTrap* trap
 /// An interrupt taken in the kernel: tick and return through the stub.
 void HandleIrq() {
     serve_tick();
+}
+
+/// The seated door the vector stub reads before any C runs. The user
+/// image is still in the registers at that point, so the stub may only
+/// load this word - a call would eat the user's r0-r3, lr. The seat
+/// world raises it for its episodes and drops it on the way out.
+extern "C" unsigned long c_seat_irq_door = 0;
+
+/// The seated IRQ service: the frame is homed on the interrupted
+/// task's own supervisor stack, so the tick may switch this task away
+/// mid-frame and the switch saves a stack the task owns. The neutral
+/// scheduler gets the same tick the x86 timer hands it.
+extern "C" cinux::arch::UserTrap* c_irq_trap_seated(cinux::arch::UserTrap* trap) {
+    serve_tick();
+    cinux::proc::Scheduler::self().on_timer_tick(cinux::syscall::MonotonicNanoseconds());
+    cinux::proc::Scheduler::self().maybe_preempt();
+    return trap;
 }
 
 /// An interrupt taken in user mode: the trap may be exchanged for another.
