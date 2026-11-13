@@ -24,6 +24,7 @@
 #include "kernel/arch/armv7/fdt.hpp"
 #include "kernel/arch/armv7/firmware.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
+#include "kernel/drivers/usb/ehci.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/arch/armv7/task_switch.hpp"
 #include "kernel/boot/boot_info.hpp"
@@ -193,6 +194,24 @@ extern "C" [[noreturn]] void kmain() {
                         cinux::print::Println("[armv7] lcdif 320x240 fb %X",
                                               kFrame != 0 ? kFrame : 0);
                     }
+                    for (const unsigned long kBase : {0x02184000UL, 0x02184200UL}) {
+                        if (cinux::driver::usb::EhciHost::self().init(kBase)) {
+                            for (unsigned int port = 1;
+                                 port <= cinux::driver::usb::EhciHost::self().max_ports() &&
+                                 port <= 15; ++port) {
+                                cinux::print::Println(
+                                    "[armv7] ehci %X rev %X ports %u, port %u %s", kBase,
+                                    cinux::driver::usb::EhciHost::self().revision(),
+                                    cinux::driver::usb::EhciHost::self().max_ports(), port,
+                                    cinux::driver::usb::EhciHost::self().port_connected(port)
+                                        ? "attached"
+                                        : "quiet");
+                            }
+                        }
+                    }
+                    cinux::print::Println(cinux::driver::usb::EhciHost::self().present()
+                                              ? "[armv7] ehci host running"
+                                              : "[armv7] ehci absent");
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

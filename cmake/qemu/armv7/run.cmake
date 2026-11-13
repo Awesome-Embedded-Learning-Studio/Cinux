@@ -12,7 +12,7 @@ set(CINUX_ARM_DTB_ADDR 0x81000000)
 add_custom_target(run
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -nographic -monitor none
+            -nographic -monitor none -device usb-kbd
     DEPENDS arm_image arm_dtb
     USES_TERMINAL
     COMMENT "Booting the armv7 bring-up image")
@@ -57,6 +57,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_PROCCPU=proc cpuinfo"
             "-DEXPECTED_SCHED=sched roundtrip ok"
             "-DEXPECTED_LCDIF=lcdif 320x240 fb"
+            "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
             "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"

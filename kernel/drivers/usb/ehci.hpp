@@ -1,0 +1,86 @@
+/**
+ * @file    ehci.hpp
+ * @brief   The EHCI host controller: bring-up and port presence.
+ *
+ * One USB host controller face behind the standard EHCI register
+ * vocabulary — the shape the i.MX6 UL's chipidea blocks answer to in
+ * host mode, and any PCI-less lane this tree grows. This first slice
+ * owns the capability walk, the reset dance, and root-port presence;
+ * transfers land here as the armv7 USB lane grows.
+ *
+ * @author  Charliechen114514
+ * @date    2026-11-14
+ * @version 0.1
+ * @since   0.9.0
+ * @ingroup kernel_driver
+ * @copyright Copyright (c) 2026
+ */
+
+#pragma once
+
+#include <stdint.h>
+
+#include "cinux/singleton.hpp"
+#include "kernel/drivers/usb/hcd.hpp"
+
+namespace cinux::driver::usb {
+
+/**
+ * @brief   The EHCI controller this lane carries.
+ * @note    Register state only: the capability window's shape and the
+ *          operational words. None of it changes shape after init, so
+ *          the zero-construction rule holds.
+ * @since   0.9.0
+ * @ingroup kernel_driver
+ */
+class EhciHost : public HostDriver, public base::Singleton<EhciHost> {
+    friend class base::Singleton<EhciHost>;
+
+public:
+    /**
+     * @brief         Walks the capability window and starts the controller.
+     *
+     * @param[in]     base   The controller's first bus address.
+     * @return        True when the controller runs; false when the
+     *                window stayed silent or the reset stalled.
+     * @since         0.9.0
+     * @ingroup       kernel_driver
+     */
+    [[nodiscard]] bool init(uint64_t base);
+
+    /// The interface revision the capability window stated, 0 before init.
+    [[nodiscard]] uint16_t revision() const;
+
+    // HostDriver overrides. The transfer faces stay dark this slice.
+    [[nodiscard]] bool present() override;
+    [[nodiscard]] unsigned int max_ports() override;
+    [[nodiscard]] bool port_connected(unsigned int port) override;
+    [[nodiscard]] bool port_taken(unsigned int port) override;
+    [[nodiscard]] void* address(unsigned int port) override;
+    [[nodiscard]] bool control_read(void* seat, uint16_t value, void* data,
+                                    uint16_t length) override;
+    [[nodiscard]] bool set_configuration(void* seat, uint8_t config_value) override;
+    [[nodiscard]] bool configure_interrupt_in(void* seat, uint16_t max_packet,
+                                              uint8_t interval) override;
+    void arm_interrupt_in(void* seat, uint64_t buffer_physical, unsigned long length,
+                          void (*done)(void* owner, const TransferDone&),
+                          void* owner) override;
+    void detach(void* seat) override;
+    void pump() override;
+    [[nodiscard]] bool unhealthy() override;
+
+private:
+    EhciHost() = default;
+
+    [[nodiscard]] uint32_t read32(unsigned long offset) const;
+    void                   write32(unsigned long offset, uint32_t value);
+    [[nodiscard]] bool     wait_clear(unsigned long offset, uint32_t mask);
+
+    volatile unsigned char* window_    = nullptr;
+    unsigned long           op_base_   = 0;
+    unsigned int            ports_     = 0;
+    uint16_t                revision_  = 0;
+    bool                    unhealthy_ = false;
+};
+
+}  // namespace cinux::driver::usb

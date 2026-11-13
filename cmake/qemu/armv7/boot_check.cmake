@@ -5,7 +5,7 @@
 # swallow them right after, so the wait skips both windows.
 if(STDIN_FILE)
     execute_process(
-        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -nographic -monitor none"
+        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -nographic -monitor none -device usb-kbd"
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
@@ -14,7 +14,7 @@ else()
     execute_process(
         COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
                 -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
-                -nographic -monitor none
+                -nographic -monitor none -device usb-kbd
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
@@ -103,6 +103,7 @@ expect_literal(EXPECTED_CPUID "the MIDR identity probe did not answer.")
 expect_literal(EXPECTED_PROCCPU "the /proc/cpuinfo read-back probe did not answer.")
 expect_literal(EXPECTED_SCHED "the shared-scheduler round trip did not answer.")
 expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
+expect_literal(EXPECTED_EHCI "the ehci host never reported its seated keyboard.")
 expect_literal(EXPECTED_FB0 "the /dev/fb0 seat did not answer.")
 expect_literal(EXPECTED_EVENT0 "the /dev/event0 seat did not answer.")
 expect_literal(EXPECTED_GUESTLOAD "the neutral loader did not seat the guest image.")
