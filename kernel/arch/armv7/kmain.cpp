@@ -35,6 +35,7 @@
 #include "kernel/arch/armv7/mmu.hpp"
 #include "kernel/arch/armv7/timer.hpp"
 #include "kernel/arch/armv7/uart.hpp"
+#include "kernel/arch/armv7/instructions.hpp"
 #include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_keyboard.hpp"
 
@@ -270,13 +271,7 @@ extern "C" [[noreturn]] void kmain() {
                         static_cast<unsigned long long>(cinux::armv7::TimerFrequency()) / 5U;
                     const unsigned long long kStart = cinux::armv7::TimerCounter();
                     while (cinux::armv7::TimerCounter() - kStart < kWait) {
-                        // The interrupt street only moves while this
-                        // window lets the machine's workers run.
-                        if (cinux::driver::usb::HostDriver* kHost =
-                                cinux::driver::usb::PrimaryHost();
-                            kHost != nullptr) {
-                            kHost->pump();
-                        }
+                        cinux::arch::CpuIdle();
                     }
                     cinux::armv7::UartWrite("[armv7] kernel fault probe\n");
                     // Deliberately unmapped: the abort reporter should name it.
@@ -289,11 +284,9 @@ extern "C" [[noreturn]] void kmain() {
             }
         }
     }
+    // The USB street drains on read through the class driver's poll
+    // hook, the same face the x86 lane owns; nothing needs polling here.
     for (;;) {
-        if (cinux::driver::usb::HostDriver* kHost = cinux::driver::usb::PrimaryHost();
-            kHost != nullptr) {
-            kHost->pump();
-        }
-        asm volatile("wfi");
+        cinux::arch::CpuIdle();
     }
 }
