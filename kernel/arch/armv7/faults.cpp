@@ -19,6 +19,7 @@
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/proc/scheduler.hpp"
 
 extern "C" [[noreturn]] void c_user_faulted();
 namespace cinux::armv7 {
@@ -90,6 +91,7 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
     if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
         return trap;  // the same instruction runs again on the new mapping
     }
-    cinux::print::Println("[armv7] user fault caught at %X code %X", fault_address, code);
+    cinux::print::Println("[armv7] user fault caught at %X code %X pid %u", fault_address, code,
+                          (unsigned)cinux::proc::Scheduler::self().current()->pid);
     cinux::armv7::SeatFaultDeath();
 }
