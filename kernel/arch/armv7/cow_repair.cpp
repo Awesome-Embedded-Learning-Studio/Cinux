@@ -28,6 +28,14 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 
+namespace cinux::arch::page {
+
+bool LeafIsShareMarked(const Entry& leaf) {
+    return cinux::mm::cow::FrameShares(LeafPhysical(leaf)) >= 2;
+}
+
+}  // namespace cinux::arch::page
+
 namespace cinux::mm::cow {
 
 bool RepairWriteFault(unsigned long root, unsigned long address) {

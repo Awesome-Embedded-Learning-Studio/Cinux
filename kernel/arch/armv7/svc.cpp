@@ -28,6 +28,7 @@
 #include "kernel/syscall/sys_getppid.hpp"
 #include "kernel/syscall/sys_lseek.hpp"
 #include "kernel/syscall/sys_mmap.hpp"
+#include "kernel/syscall/sys_mprotect.hpp"
 #include "kernel/syscall/sys_yield.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
@@ -86,6 +87,7 @@ const NeutralService kNeutralServices[] = {
     // the adapter scales it once and the neutral face sees bytes, as the
     // first port describes them.
     {cinux::armv7::syscall_nr::kMmap2, &cinux::armv7::HandleMmap2},
+    {cinux::armv7::syscall_nr::kMprotect,      &cinux::syscall::HandleMprotect},
     {cinux::armv7::syscall_nr::kWritev,        &cinux::syscall::HandleWritev},
     {cinux::armv7::syscall_nr::kSetTidAddress, &cinux::syscall::HandleSetTidAddress},
     {cinux::armv7::syscall_nr::kSetRobustList, &cinux::syscall::HandleUnsupportedProbe},

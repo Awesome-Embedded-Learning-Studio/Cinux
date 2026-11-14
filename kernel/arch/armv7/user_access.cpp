@@ -20,10 +20,12 @@
 #include "kernel/arch/armv7/user_access.hpp"
 
 #include "kernel/arch/armv7/isr.hpp"
+#include "kernel/arch/armv7/space_control.hpp"
 
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"
+#include "kernel/mm/vmm.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/syscall_internal.hpp"
 
@@ -56,11 +58,38 @@ bool ensure_paged(unsigned long address, unsigned long bytes, bool write) {
 
 }  // namespace
 
+/// Runs the copy with the task's own tables live. The exit paths park
+/// on the kernel root before a task's last word is written back, and a
+/// user address has no meaning under those tables; the door therefore
+/// lends the CPU the world the address belongs to and hands it back.
+class SpaceLender {
+public:
+    explicit SpaceLender(proc::Task* task) : previous_(space::ActiveRoot()) {
+        if (task != nullptr && task->space.holds() &&
+            task->space->root() != previous_) {
+            space::SwitchRoot(task->space->root());
+            lent_ = true;
+        }
+    }
+    ~SpaceLender() {
+        if (lent_) {
+            space::SwitchRoot(previous_);
+        }
+    }
+    SpaceLender(const SpaceLender&)            = delete;
+    SpaceLender& operator=(const SpaceLender&) = delete;
+
+private:
+    unsigned long previous_ = 0;
+    bool          lent_     = false;
+};
+
 bool MoveUserBytes(unsigned long long destination, unsigned long long source,
                    unsigned long long bytes) {
     if (bytes == 0) {
         return true;
     }
+    const SpaceLender kLender(cinux::syscall::CurrentTask());
     const unsigned long long kUserTop = space::kUserTop;
     const bool kDestUser   = destination <= kUserTop;
     const bool kSourceUser = source <= kUserTop;

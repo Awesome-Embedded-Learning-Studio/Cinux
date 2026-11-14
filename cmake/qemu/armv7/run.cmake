@@ -58,6 +58,13 @@ foreach(_arm_def IN LISTS _arm_defs)
     list(APPEND _arm_names "${_arm_name}")
 endforeach()
 
+# The glibc station rides an optional artifact: only a host with the
+# cross toolchain built it, so its judgement joins only there.
+set(_arm_glibc_arg "")
+if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
+    set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
+endif()
+
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
             "-DQEMU_PROGRAM=${CINUX_ARM_QEMU}"
@@ -94,6 +101,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUEST_USBKBD=usbkbd ok, empty answers EAGAIN or a glyph"
             "-DEXPECTED_GUEST_DISK_MOTD=[guest] disk motd: Cinux says hello from a real disk."
             "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
+            ${_arm_glibc_arg}
+
             "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"

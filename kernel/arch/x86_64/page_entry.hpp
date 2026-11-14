@@ -236,4 +236,5 @@ constexpr uint64_t LargePageBase(uint64_t physical) {
     return physical / kLargePageSize * kLargePageSize;
 }
 
+
 }  // namespace cinux::arch::page

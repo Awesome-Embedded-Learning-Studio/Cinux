@@ -55,6 +55,13 @@ constexpr Entry UserLeafTerms(bool writable, bool executable) {
     Entry terms = kUser;
     if (writable) {
         terms = terms | kWritable;
+    } else {
+        // The encoder treats "writable" as both worlds write and names
+        // a user-read-only leaf separately, so a leaf that must refuse
+        // user writes has to say so with the read-only flag; without
+        // it the page lands writable and a later mprotect would have
+        // nothing to tighten.
+        terms = terms | kReadOnly;
     }
     if (!executable) {
         terms = terms | kNoExec;

@@ -47,6 +47,7 @@ inline constexpr unsigned long kSetTls      = 0x0F0005UL;
 // whose word the kernel clears at death, the futex robust list, and
 // the restartable sequence slot. The neutral faces already exist.
 inline constexpr unsigned long kWritev        = 146;
+inline constexpr unsigned long kMprotect      = 125;
 inline constexpr unsigned long kSetTidAddress = 256;
 inline constexpr unsigned long kSetRobustList = 338;
 inline constexpr unsigned long kRseq          = 398;

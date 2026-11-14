@@ -251,4 +251,53 @@ inline unsigned long LeafFrame(const Entry& slot, WalkLevel level) {
 /// Slots of level 1 below the 3 GiB user boundary.
 constexpr unsigned int kUserHalfSlots = 3072;
 
+/**
+ * @brief         Reports whether a leaf is a large-page mapping.
+ * @param[in]     leaf   The leaf entry.
+ * @return        true for a section descriptor: one 1 MiB mapping
+ *                standing where a 4 KiB leaf would, which a permission
+ *                rewrite must not mistake for one.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr bool IsLargeLeaf(const Entry& leaf) {
+    return (leaf.raw & 0x3U) == 0x2U;
+}
+
+/**
+ * @brief         The frame a small leaf names.
+ * @param[in]     leaf   A 4 KiB leaf entry.
+ * @return        Physical base of the frame.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr unsigned long LeafPhysical(const Entry& leaf) {
+    return static_cast<unsigned long>(leaf.raw & ~0xFFFUL);
+}
+
+/**
+ * @brief         Reports whether a leaf's frame is shared with someone.
+ * @param[in]     leaf   The leaf entry.
+ * @return        true when the frame ledger counts more than one owner.
+ * @note          This port states sharing in the frame ledger, not in a
+ *                descriptor bit: the repair path copies when the count
+ *                says two, so the count is the one truth a rewrite may
+ *                read.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+bool LeafIsShareMarked(const Entry& leaf);
+
+/**
+ * @brief         Stamps sharing onto freshly built terms.
+ * @param[in]     terms   The terms a leaf is about to be built with.
+ * @return        The same terms: this port has no bit to stamp, the
+ *                frame ledger already says the share.
+ * @since         0.3.0
+ * @ingroup       kernel_arch
+ */
+constexpr Entry ShareMarked(Entry terms) {
+    return terms;
+}
+
 }  // namespace cinux::arch::page

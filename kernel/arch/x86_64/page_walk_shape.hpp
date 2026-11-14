@@ -89,6 +89,25 @@ constexpr bool IsLeafLevel(WalkLevel level) {
     return level == kLeafLevel;
 }
 
+
+/// Reports whether a leaf is a large-page mapping: a 2 MiB leaf stands
+/// where a 4 KiB leaf would, and a permission rewrite must not mistake
+/// it for one.
+constexpr bool IsLargeLeaf(const Entry& leaf) {
+    return leaf.has(kLarge);
+}
+
+/// Reports whether a leaf carries the copy-on-write mark: the frame is
+/// shared and a write must copy before it lands.
+constexpr bool LeafIsShareMarked(const Entry& leaf) {
+    return leaf.has(kCow);
+}
+
+/// Stamps the copy-on-write mark onto freshly built terms.
+constexpr Entry ShareMarked(Entry terms) {
+    return terms | kCow;
+}
+
 /// Reports whether a slot maps something. On this port the present bit
 /// is the grammar, so the predicate reads it directly.
 constexpr bool IsPresent(const Entry& entry) {
@@ -271,5 +290,16 @@ constexpr unsigned long TableTarget(const Entry& slot) {
 constexpr unsigned long SmallLeafTarget(const Entry& slot) {
     return EntryTarget(slot);
 }
+/**
+ * @brief         The frame a small leaf names, in one neutral name.
+ * @param[in]     leaf   A 4 KiB leaf entry.
+ * @return        Physical base of the frame.
+ * @since         0.3.0
+ * @ingroup       base_page
+ */
+constexpr unsigned long LeafPhysical(const Entry& leaf) {
+    return SmallLeafTarget(leaf);
+}
+
 
 }  // namespace cinux::arch::page
