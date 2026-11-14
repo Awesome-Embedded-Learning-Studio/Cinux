@@ -260,6 +260,34 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(6UL, kFd, 0UL, 0UL);  // close
         }
     }
+    // The real disk: the ext2 volume's motd answers through the very
+    // syscall ladder everything else uses. The first line names the
+    // volume's baker.
+    {
+        static const char kDmA[] = "[guest] disk motd refused\n";
+        static const char kDmB[] = "[guest] disk motd: Cinux says hello from a real disk.\n";
+        static const char kPath[] = "/disk/etc/motd";
+        const long kFd = sys3(5UL, (unsigned long)kPath, 0UL, 0UL);  // open
+        char back[48];
+        unsigned long line = 0;
+        long got = kFd >= 0 ? sys3(3UL, kFd, (unsigned long)back, sizeof(back)) : -1L;
+        for (long i = 0; i < got; ++i) {
+            if (back[i] == '\n') {
+                line = (unsigned long)i;
+                break;
+            }
+        }
+        // 34 = strlen of the expected first line.
+        if (kFd >= 0 && got >= 34 && line == 34) {
+            back[34] = 0;
+            sys3(4UL, 1UL, (unsigned long)kDmB, slen(kDmB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kDmA, slen(kDmA));
+        }
+        if (kFd >= 0) {
+            sys3(6UL, kFd, 0UL, 0UL);  // close
+        }
+    }
     // fstat: the motd's shape, regular file with its byte count.
     {
         static const char kStA[] = "[guest] fstat refused\n";

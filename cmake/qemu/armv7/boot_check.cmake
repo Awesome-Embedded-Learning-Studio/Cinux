@@ -109,6 +109,7 @@ expect_literal(EXPECTED_USDHC_WRITE "the usdhc street could not write and read a
 expect_literal(EXPECTED_MMCBLK0 "the mmcblk0 seat never answered through the block port.")
 expect_literal(EXPECTED_MMCBLK1 "the partition table never told its first entry.")
 expect_literal(EXPECTED_EXT2 "the ext2 volume never mounted or its motd never answered.")
+expect_literal(EXPECTED_GUEST_DISK_MOTD "the guest never read the ext2 motd through its own syscalls.")
 expect_literal(EXPECTED_EHCI "the ehci host never reported its seated keyboard.")
 expect_literal(EXPECTED_EHCI_SEATED "the ehci host seated no keyboard: the control street never delivered the device descriptor.")
 expect_literal(EXPECTED_EHCI_KEYBOARD "the ehci keyboard never walked the neutral street: the periodic schedule seated no report door.")
