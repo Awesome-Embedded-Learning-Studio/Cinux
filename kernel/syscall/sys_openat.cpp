@@ -1,3 +1,4 @@
+#include "kernel/boot/print.hpp"
 #include "kernel/syscall/sys_openat.hpp"
 
 #include <cstdint>
@@ -14,6 +15,13 @@ long long HandleOpenat(const SyscallFrame& frame) {
     char raw[fs::kFsPathMax]{};
     if (const auto kBad = CopyUserPath(frame.rsi, raw, sizeof(raw)); kBad < 0) {
         return kBad;
+    }
+    // An empty path with AT_EMPTY_PATH names the descriptor itself:
+    // that is how a libc folds fstat onto fstatat without a second
+    // metadata road into the file system.
+    constexpr unsigned long kAtEmptyPath = 0x1000;
+    if (raw[0] == '\0' && (frame.r10 & kAtEmptyPath) != 0) {
+        return StatDescriptor(frame.rdi, frame.rdx);
     }
     if (raw[0] != '/' && static_cast<std::int32_t>(frame.rdi) != kAtFdcwd) {
         const auto kDir = LiveSlot(frame.rdi);
@@ -36,9 +44,17 @@ long long HandleOpenat(const SyscallFrame& frame) {
 }
 
 long long HandleNewfstatat(const SyscallFrame& frame) {
+#include "kernel/boot/print.hpp"
     char raw[fs::kFsPathMax]{};
     if (const auto kBad = CopyUserPath(frame.rsi, raw, sizeof(raw)); kBad < 0) {
         return kBad;
+    }
+    // An empty path with AT_EMPTY_PATH names the descriptor itself:
+    // that is how a libc folds fstat onto fstatat without a second
+    // metadata road into the file system.
+    constexpr unsigned long kAtEmptyPath = 0x1000;
+    if (raw[0] == '\0' && (frame.r10 & kAtEmptyPath) != 0) {
+        return StatDescriptor(frame.rdi, frame.rdx);
     }
     if (raw[0] != '/' && static_cast<std::int32_t>(frame.rdi) != kAtFdcwd) {
         const auto kDir = LiveSlot(frame.rdi);

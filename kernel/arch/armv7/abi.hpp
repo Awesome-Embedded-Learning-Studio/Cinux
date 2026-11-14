@@ -44,4 +44,65 @@ inline constexpr unsigned long kIovecBaseBytes    = 4;
 inline constexpr unsigned long kIovecLengthOffset = 4;
 inline constexpr unsigned long kIovecLengthBytes  = 4;
 
+
+/**
+ * @brief One stat record as this ABI lays it out.
+ * @note  This is the EABI struct stat64: a 64-bit device word with four
+ *        pad bytes, a legacy 32-bit inode beside the real one, 32-bit
+ *        permission and link words, 64-bit size and blocks, four-byte
+ *        timestamps, and the 64-bit inode at the tail. A libc built for
+ *        the port reads exactly these offsets.
+ */
+struct StatLayout {
+    unsigned long bytes;
+    unsigned long dev_off, dev_size;
+    unsigned long ino_off, ino_size;
+    unsigned long ino_low_off, ino_low_size;  ///< legacy 32-bit ino, zero when absent
+    unsigned long mode_off, mode_size;
+    unsigned long links_off, links_size;
+    unsigned long uid_off, uid_size;
+    unsigned long gid_off, gid_size;
+    unsigned long rdev_off, rdev_size;
+    unsigned long size_off, size_size;
+    unsigned long blksize_off, blksize_size;
+    unsigned long blocks_off, blocks_size;
+    unsigned long atime_off, atime_nsec_off;
+    unsigned long mtime_off, mtime_nsec_off;
+    unsigned long ctime_off, ctime_nsec_off;
+    unsigned long time_size;
+};
+
+/// The EABI record: mixed widths, 96 bytes, the shape the ABI defines.
+inline constexpr StatLayout kStatLayout = {
+    .bytes           = 96,
+    .dev_off         = 0,
+    .dev_size        = 8,
+    .ino_off         = 88,
+    .ino_size        = 8,
+    .ino_low_off     = 12,
+    .ino_low_size    = 4,
+    .mode_off        = 16,
+    .mode_size       = 4,
+    .links_off       = 20,
+    .links_size      = 4,
+    .uid_off         = 24,
+    .uid_size        = 4,
+    .gid_off         = 28,
+    .gid_size        = 4,
+    .rdev_off        = 32,
+    .rdev_size       = 8,
+    .size_off        = 44,
+    .size_size       = 8,
+    .blksize_off     = 52,
+    .blksize_size    = 4,
+    .blocks_off      = 56,
+    .blocks_size     = 8,
+    .atime_off       = 64,
+    .atime_nsec_off  = 68,
+    .mtime_off       = 72,
+    .mtime_nsec_off  = 76,
+    .ctime_off       = 80,
+    .ctime_nsec_off  = 84,
+    .time_size       = 4,
+};
 }  // namespace cinux::arch::abi

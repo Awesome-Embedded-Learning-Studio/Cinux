@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
 
     // The hand-off to a real userland: busybox, statically linked, run
     // as its `echo` applet. Success never returns here.
-    char* const kArgs[] = {(char*)"busybox", (char*)"echo", (char*)"armv7 busybox ok", NULL};
+    char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/disk/prog", NULL};
     execve("/disk/bb", kArgs, NULL);
     static const char kNoBb[] = "[glibc] busybox exec refused\n";
     write(STDOUT_FILENO, kNoBb, sizeof(kNoBb) - 1U);

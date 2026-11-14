@@ -292,22 +292,29 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     {
         static const char kStA[] = "[guest] fstat refused\n";
         static const char kStB[] = "[guest] fstat ok, motd is a regular 9-byte file\n";
-        struct GuestStat {
+        // The EABI struct stat64 the kernel writes for this port. The
+        // ABI packs its 64-bit size at byte 44, so the mirror must not
+        // let the compiler align it further.
+        struct __attribute__((packed)) GuestStat {
             unsigned long long dev;
-            unsigned long long ino;
-            unsigned long long links;
+            unsigned int       pad0;
+            unsigned int       ino_low;
             unsigned int       mode;
+            unsigned int       links;
             unsigned int       uid;
             unsigned int       gid;
-            unsigned int       padding;
             unsigned long long rdev;
+            unsigned int       pad3;
             long long          size;
-            long long          blksize;
-            long long          blocks;
-            unsigned long long atime;
-            unsigned long long mtime;
-            unsigned long long ctime;
-            unsigned int       unused[4];
+            unsigned int       blksize;
+            unsigned long long blocks;
+            unsigned long      atime;
+            unsigned long      atime_nsec;
+            unsigned long      mtime;
+            unsigned long      mtime_nsec;
+            unsigned long      ctime;
+            unsigned long      ctime_nsec;
+            unsigned long long ino;
         } stat;
         const long kMotd = sys3(5UL, (unsigned long)"/motd", 0UL, 0UL);
         const long kSt   = sys3(108UL, (unsigned long)kMotd, (unsigned long)&stat, 0UL);

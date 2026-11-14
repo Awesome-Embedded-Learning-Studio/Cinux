@@ -86,6 +86,24 @@ arm 的项是 8 字节，第一次 writev 吐出来的是二进制里的字符�
 量 `armv7 busybox ok` 只在产物存在时加入。调用约定按 busybox 的规矩：
 `argv[0]` 得是 `busybox`，applet 名放 `argv[1]`。
 
+## 元数据这一面
+
+`ls`、`stat` 这类 applet 撞上的是一整条元数据街，这一版补齐了三处：
+
+- **statx（397）**：记录是跨架构固定的 256 字节，所以写成一份中立实现，
+  两边共用。`AT_EMPTY_PATH`（`flags` 里的 0x1000，第三个参数）表示
+  “看这个描述符自己”，是 libc 把 fstat 折到 statx 的用法；空路径要在
+  折叠之前判掉，因为路径折叠把空串当非法路径拒绝。
+- **fstatat64（327）/ fcntl64（221）**：EABI 的拼法各有各的号，接到中立面
+  即可。
+- **stat 记录按 ABI 写**：`arch::abi::kStatLayout` 描述字段偏移与宽度，
+  x86-64 是 144 字节八字节字段，EABI 是 96 字节混合宽度（64 位 size 在
+  第 44 字节，未对齐）。中立层按布局逐字段写，客人自检里的 stat 结构也
+  跟着改成了 EABI 那份，并且要 `packed`，否则编译器会把 size 对齐到 48。
+
+现在的终幕是盘上 glibc 程序 exec `busybox stat /disk/prog`，判定字面量
+`File: /disk/prog`。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补

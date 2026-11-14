@@ -73,7 +73,9 @@ foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-busybox/busybox"
     endif()
 endforeach()
 if(_arm_busybox_bin)
-    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=armv7 busybox ok")
+    # busybox runs one applet: `stat` proves the binary started, the
+    # metadata street answered, and the record reached its own libc.
+    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /disk/prog")
 endif()
 
 # The glibc station rides an optional artifact: only a host with the

@@ -152,6 +152,7 @@ add_cinux_arch_test(madt ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/acpi/ma
 add_cinux_test(drivers/font)
 add_cinux_test(drivers/console)
 add_cinux_test(syscall/syscall_face ${CMAKE_SOURCE_DIR}/kernel/net/ifaces.cpp
+                           ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_stat_record.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_capability.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_tgkill.cpp

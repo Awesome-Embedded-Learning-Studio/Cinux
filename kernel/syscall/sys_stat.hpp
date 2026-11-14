@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "kernel/fs/vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
 
 namespace cinux::syscall {
@@ -46,5 +47,31 @@ long long StatPath(const char* path, unsigned long long destination);
  */
 long long StatPathAt(unsigned long long descriptor, const char* relative,
                      unsigned long long destination);
+
+/**
+ * @brief         Fills one caller-visible stat record from an internal
+ *                summary, in the layout this ABI's libc expects.
+ * @param[out]    sink    Record-sized buffer.
+ * @param[in]     probed  The backend's answer.
+ * @note          Field offsets come from arch::abi::kStatLayout, so the
+ *                neutral layer writes a 96-byte EABI record or a
+ *                144-byte x86-64 one without knowing which is which.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed);
+
+/**
+ * @brief         Stats the node one descriptor already holds open.
+ * @param[in]     descriptor   The caller's descriptor.
+ * @param[in]     destination  Where the record goes.
+ * @return        0 on success, a negative errno otherwise.
+ * @note          This is the AT_EMPTY_PATH case libc reaches for when
+ *                it implements fstat on top of fstatat: no path is
+ *                walked, the descriptor's own node answers.
+ * @since         0.3.0
+ * @ingroup       kernel_syscall
+ */
+long long StatDescriptor(unsigned long long descriptor, unsigned long long destination);
 
 }  // namespace cinux::syscall

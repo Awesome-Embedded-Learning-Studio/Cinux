@@ -32,10 +32,12 @@
 #include "kernel/syscall/sys_yield.hpp"
 #include "kernel/syscall/sys_fcntl.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
+#include "kernel/syscall/sys_statx.hpp"
 #include "kernel/syscall/sys_getdents.hpp"
 #include "kernel/syscall/sys_ioctl.hpp"
 #include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
+#include "kernel/syscall/sys_openat.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_exec.hpp"
 #include "kernel/syscall/sys_probe.hpp"
@@ -94,6 +96,8 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kWrite,  &cinux::syscall::HandleWrite},
     {cinux::armv7::syscall_nr::kOpen,   &cinux::syscall::HandleOpen},
     {cinux::armv7::syscall_nr::kOpenAt, &cinux::armv7::HandleOpenAt},
+    {cinux::armv7::syscall_nr::kStatx,  &cinux::syscall::HandleStatx},
+    {cinux::armv7::syscall_nr::kFstatat64, &cinux::syscall::HandleNewfstatat},
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
     {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},
     {cinux::armv7::syscall_nr::kGetPid, &cinux::syscall::HandleGetpid},
@@ -115,6 +119,9 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kMunmap, &cinux::syscall::HandleMunmap},
     {cinux::armv7::syscall_nr::kIoctl, &cinux::syscall::HandleIoctl},
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},
+    // EABI spells fcntl with a 64-bit-name sibling under its own number;
+    // the commands are the same words, so the neutral face serves both.
+    {cinux::armv7::syscall_nr::kFcntl64, &cinux::syscall::HandleFcntl},
     {cinux::armv7::syscall_nr::kFstat, &cinux::syscall::HandleFstat},
     // EABI spells the 64-bit stat pair with their own numbers; the
     // neutral face serves both spellings.

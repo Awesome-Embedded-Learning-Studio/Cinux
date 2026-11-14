@@ -1,8 +1,11 @@
+#include "kernel/boot/print.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
+#include "kernel/syscall/sys_stat.hpp"
 
 #include <cstdint>
 
 #include "cinux/result.hpp"
+#include "kernel/arch/abi.hpp"
 #include "cinux/shared.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/open_file.hpp"
@@ -31,14 +34,10 @@ long long HandleFstat(const SyscallFrame& frame) {
     if (!kProbed.ok()) {
         return -ErrnoFrom(kProbed.error());
     }
-    SyscallStat sink{};
-    sink.ino   = probed.ino;
-    sink.mode  = probed.mode;
-    sink.links = probed.links;
-    sink.size  = static_cast<std::int64_t>(probed.size);
-    sink.rdev  = probed.rdev;
-    sink.mtime = probed.mtime;
-    if (!uaccess::CopyToUser(frame.rsi, &sink, sizeof(sink))) {
+#include "kernel/boot/print.hpp"
+    unsigned char record[arch::abi::kStatLayout.bytes] = {};
+    WriteStatRecord(record, probed);
+    if (!uaccess::CopyToUser(frame.rsi, record, sizeof(record))) {
         return -kEfault;
     }
     return 0;
