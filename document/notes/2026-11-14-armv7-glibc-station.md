@@ -374,8 +374,13 @@ trace[26] keyup 28 0 0
 顺带修了 pty 的一个小口子：窗口尺寸原来只能从从设备那一侧设置，主设备
 （`TIOCSWINSZ`）问不到答案；现在两边都落到同一个窗口上。
 
-复跑：`scripts/click-armv7-terminal.sh`（双击图标、打字、截图，报 click delivered
-与 shell answered）。
+复跑：`scripts/check-armv7-desk.sh`。它把整条 GUI 路都判了五条：面板开了、循环
+起来了、点击落到图标上、shell 从 pty 答了话，最后一条是**看屏幕**——在终端窗口的
+方框里数像素：底色要占一半以上（说明窗口真的开着），字色至少 40 个点（说明文字
+真的画上去了）。用错误的坐标点一下，最后这条会如实报 MISSING。
+
+也可以单独跑 `scripts/click-armv7-terminal.sh`：双击图标、打字、截图，报
+click delivered 与 shell answered。
 
 ## 还缺什么
 
