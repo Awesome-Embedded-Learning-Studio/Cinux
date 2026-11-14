@@ -24,11 +24,13 @@ namespace cinux::arch::space {
 using cinux::base::operator""_KiB;
 using cinux::base::operator""_MiB;
 
-/// The one first-level slot reserved for a task's own pages. The board's
-/// kernel and device mappings live below it, so it is the only window a
-/// new world must start empty.
+/// The task's own window: every first-level slot from 1 GiB up to the
+/// heap reservation's base belongs to the world, and the kernel half
+/// below 1 GiB is the identity map's. A new world starts with these
+/// slots empty and fills them on demand, one private second level at a
+/// time.
 constexpr bool IsUserSlot(unsigned long index) {
-    return index == (0x40000000UL >> 20U);
+    return index >= (0x40000000UL >> 20U) && index < (0x80000000UL >> 20U);
 }
 
 /// The kernel heap window's virtual base: just past the managed RAM, so
@@ -41,17 +43,18 @@ inline constexpr unsigned long kHeapBase = 0x90000000UL;
 /// private second level under whichever root happens to be live.
 inline constexpr unsigned long kHeapReserveBytes = 16_MiB;
 
-/// Highest user-visible address plus one: the classic 3 GiB split.
-inline constexpr unsigned long kUserTop = 0xC0000000UL;
+/// Highest user-visible address plus one: the kernel's own identity
+// map starts here, so a user mapping can never shadow the kernel image.
+inline constexpr unsigned long kUserTop = 0x80000000UL;
 
 // The user-space seats for a 32-bit address space.
 inline constexpr unsigned long kUserNullTop         = 64_KiB;
-inline constexpr unsigned long kUserInterpreterBase = 0x10000000UL;  // 256 MiB
-inline constexpr unsigned long kUserExecImageBase   = 0x20000000UL;  // 512 MiB
-// The one-section user window (1 MiB at 0x40000000) seats the program
-// low, the heap band next, and the mmap band above it.
-inline constexpr unsigned long kUserBrkMmapSplit    = 0x40080000UL;
-inline constexpr unsigned long kUserMmapTop         = 0x400F0000UL;
+inline constexpr unsigned long kUserInterpreterBase = 0x50000000UL;  // 1.25 GiB
+inline constexpr unsigned long kUserExecImageBase   = 0x40000000UL;  // the window's foot
+// The window seats the program and its break low, the mmap band above,
+// and the entry stack at the very top, under the heap reservation.
+inline constexpr unsigned long kUserBrkMmapSplit    = 0x60000000UL;
+inline constexpr unsigned long kUserMmapTop         = 0x7FEDE000UL;
 inline constexpr unsigned long kBrkSlideBytes       = 64_KiB;
 inline constexpr unsigned long kMmapSlideBytes      = 128_KiB;
 inline constexpr unsigned long kUserStackTop        = kUserTop - cinux::arch::page::kSize;

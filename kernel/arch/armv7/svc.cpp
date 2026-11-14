@@ -37,6 +37,9 @@
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_exec.hpp"
+#include "kernel/syscall/sys_probe.hpp"
+#include "kernel/syscall/sys_writev.hpp"
+#include "kernel/syscall/sys_set_tid_address.hpp"
 #include "kernel/syscall/sys_write.hpp"
 
 namespace cinux::armv7 {
@@ -83,6 +86,10 @@ const NeutralService kNeutralServices[] = {
     // the adapter scales it once and the neutral face sees bytes, as the
     // first port describes them.
     {cinux::armv7::syscall_nr::kMmap2, &cinux::armv7::HandleMmap2},
+    {cinux::armv7::syscall_nr::kWritev,        &cinux::syscall::HandleWritev},
+    {cinux::armv7::syscall_nr::kSetTidAddress, &cinux::syscall::HandleSetTidAddress},
+    {cinux::armv7::syscall_nr::kSetRobustList, &cinux::syscall::HandleUnsupportedProbe},
+    {cinux::armv7::syscall_nr::kRseq,          &cinux::syscall::HandleUnsupportedProbe},
     {cinux::armv7::syscall_nr::kMunmap, &cinux::syscall::HandleMunmap},
     {cinux::armv7::syscall_nr::kIoctl, &cinux::syscall::HandleIoctl},
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},
@@ -144,6 +151,15 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
         if (cinux::arch::UserTrap* const kServed = serve_seated_neutral(trap, kNumber)) {
             return kServed;
         }
+    }
+    if (kNumber == cinux::armv7::syscall_nr::kSetTls) {
+        // ARM's own door behind the user TLS register: TPIDRURO is
+        // read-only at EL0, so a libc installs its thread pointer by
+        // asking the kernel to write the register on its behalf. The
+        // value rides in r0 and the door answers zero.
+        asm volatile("mcr p15, 0, %0, c13, c0, 3" : : "r"(trap->r0) : "memory");
+        trap->r0 = 0;
+        return trap;
     }
     if (kNumber == 0x1000UL) {
         // The seated process asks the kernel to take it back; the

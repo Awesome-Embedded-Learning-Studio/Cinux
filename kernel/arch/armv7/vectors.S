@@ -24,7 +24,8 @@ _vec1: mov r0, #1
 @ Prefetch abort: a user-mode fetch miss is served exactly like a
 @ user data miss - the page arrives, the instruction runs again. Only
 @ a kernel-mode fetch miss goes to the dump.
-_vec3:  stmdb sp!, {r3}
+_vec3:  sub   lr, lr, #4             @ the fetch reports its address + 4
+        stmdb sp!, {r3}
         mrs   r3, spsr
         and   r3, r3, #0x1F
         cmp   r3, #0x10              @ only a user fetch may be repaired
@@ -33,6 +34,7 @@ _vec3:  stmdb sp!, {r3}
         b     _prefetch_trap_save
 _prefetch_plain:
         add   sp, sp, #4
+        add   lr, lr, #4
         b     _prefetch_dump
 _vec4: sub  lr, lr, #8
        stmdb sp!, {r3}            @ park r3 while the mode is checked

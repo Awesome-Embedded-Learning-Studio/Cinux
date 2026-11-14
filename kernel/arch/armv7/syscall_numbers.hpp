@@ -38,6 +38,18 @@ inline constexpr unsigned long kSignal      = 67;
 inline constexpr unsigned long kGetTicks    = 78;
 inline constexpr unsigned long kMmap        = 90;
 inline constexpr unsigned long kMmap2       = 192;
+/// The ARM-private service numbers live above the generic table: this
+/// one asks the kernel to write the user TLS register, which EL0 may
+/// read but never write.
+inline constexpr unsigned long kSetTls      = 0x0F0005UL;
+
+// The thread bookkeeping trio every libc startup pays: the address
+// whose word the kernel clears at death, the futex robust list, and
+// the restartable sequence slot. The neutral faces already exist.
+inline constexpr unsigned long kWritev        = 146;
+inline constexpr unsigned long kSetTidAddress = 256;
+inline constexpr unsigned long kSetRobustList = 338;
+inline constexpr unsigned long kRseq          = 398;
 inline constexpr unsigned long kMunmap      = 91;
 inline constexpr unsigned long kIoctl       = 54;
 inline constexpr unsigned long kFstat       = 108;

@@ -71,8 +71,7 @@ extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap) {
     if (g_repair != nullptr && g_repair(fault_address, kStatus)) {
         return trap;  // the fetch runs again on the new mapping
     }
-    cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address,
-                          code);
+    cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address, code);
     cinux::armv7::SeatFaultDeath();
 }
 

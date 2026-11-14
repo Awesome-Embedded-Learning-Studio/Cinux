@@ -64,21 +64,20 @@ void note_program_identity(proc::Task& self, const char* path) {
     }
 }
 
-/// Draws the sixteen bytes the entry picture offers as AT_RANDOM; a
-/// machine without a working draw reports none and the picture omits
-/// the entry.
+/// Draws the sixteen bytes the entry picture offers as AT_RANDOM. A
+/// port with a hardware source draws from it; a port without one falls
+/// back to its seeded pool, because every libc builds its stack guard
+/// from these bytes and a picture without them hands the program a
+/// null random pointer to dereference.
 const std::uint8_t* draw_entry_random(unsigned char (&bytes)[16]) {
-    unsigned long long word  = 0;
-    unsigned long      drawn = 0;
-    if (arch::random::TryWord(word)) {
-        cinux::base::CopyBytes(bytes, &word, sizeof(word));
-        ++drawn;
+    for (unsigned long offset = 0; offset < sizeof(bytes); offset += sizeof(unsigned long long)) {
+        unsigned long long word = 0;
+        if (!arch::random::TryWord(word)) {
+            word = arch::random::Word();
+        }
+        cinux::base::CopyBytes(bytes + offset, &word, sizeof(word));
     }
-    if (arch::random::TryWord(word)) {
-        cinux::base::CopyBytes(bytes + sizeof(word), &word, sizeof(word));
-        ++drawn;
-    }
-    return drawn > 0 ? bytes : nullptr;
+    return bytes;
 }
 
 /// One load bias for the seat the program image takes: zero serves the

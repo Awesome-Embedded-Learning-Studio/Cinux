@@ -36,4 +36,12 @@ using AbiWord = unsigned long long;
 /// Bytes one initial-stack word occupies on the wire.
 inline constexpr unsigned long kAbiWordBytes = sizeof(AbiWord);
 
+/// The scatter-gather vector as this ABI lays it out: a pointer and a
+/// length, eight bytes each, packed with no padding.
+inline constexpr unsigned long kIovecBytes        = 16;
+inline constexpr unsigned long kIovecBaseOffset   = 0;
+inline constexpr unsigned long kIovecBaseBytes    = 8;
+inline constexpr unsigned long kIovecLengthOffset = 8;
+inline constexpr unsigned long kIovecLengthBytes  = 8;
+
 }  // namespace cinux::arch::abi

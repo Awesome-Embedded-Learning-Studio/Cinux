@@ -65,6 +65,9 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_exec.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_writev.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_set_tid_address.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_probe.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fcntl.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fstat.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getdents.cpp
