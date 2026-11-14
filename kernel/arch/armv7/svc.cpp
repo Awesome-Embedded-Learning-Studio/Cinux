@@ -162,6 +162,7 @@ const NeutralService kNeutralServices[] = {
     // entry reads the real frame, not the neutral picture.
     {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
     {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleClone},
+    {cinux::armv7::syscall_nr::kVfork, &cinux::syscall::HandleFork},
     {cinux::armv7::syscall_nr::kPoll,           &cinux::syscall::HandlePoll},
     {cinux::armv7::syscall_nr::kPpoll,          &cinux::syscall::HandlePpoll},
     // 263 asks in the native shape the neutral writer now honours by
@@ -173,7 +174,10 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kGetpgid,        &cinux::syscall::HandleGetpgid},
     {cinux::armv7::syscall_nr::kGetsid,         &cinux::syscall::HandleGetsid},
     {cinux::armv7::syscall_nr::kGetpgrp,        &cinux::syscall::HandleGetpgrp},
+    {cinux::armv7::syscall_nr::kDup,            &cinux::syscall::HandleDup},
     {cinux::armv7::syscall_nr::kDup2,           &cinux::syscall::HandleDup2},
+    {cinux::armv7::syscall_nr::kPipe,           &cinux::syscall::HandlePipe},
+    {cinux::armv7::syscall_nr::kPipe2,          &cinux::syscall::HandlePipe2},
     {cinux::armv7::syscall_nr::kKill,           &cinux::syscall::HandleKill},
     {cinux::armv7::syscall_nr::kRtSigaction,    &cinux::syscall::HandleRtSigaction},
     {cinux::armv7::syscall_nr::kRtSigprocmask,  &cinux::syscall::HandleRtSigprocmask},

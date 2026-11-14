@@ -40,9 +40,15 @@ CINUX_ARM_SD_IMAGE="${image}" cmake --build "${build}" --target arm_image >/dev/
 rm -f "${image}"
 /bin/sh "${here}/create_armv7_sd.sh" "${image}" >/dev/null
 
-log="$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)"
+log="${CINUX_ARM_DESK_LOG:-$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)}"
 qmp="$(mktemp -u /tmp/cinux-desk-qmp.XXXXXX.sock)"
-trap 'rm -f "${log}" "${qmp}"' EXIT
+# A caller who named the log keeps it for the post-mortem; the default
+# scratch file still goes away.
+if [ -z "${CINUX_ARM_DESK_LOG:-}" ]; then
+    trap 'rm -f "${log}" "${qmp}"' EXIT
+else
+    trap 'rm -f "${qmp}"' EXIT
+fi
 rm -f "${shot}" "${shot2}" "${shot3}"
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.

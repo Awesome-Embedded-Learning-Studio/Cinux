@@ -39,6 +39,13 @@ constexpr uint16_t kKeyDown     = 108;
 constexpr uint16_t kKeyLeft     = 105;
 constexpr uint16_t kKeyRight    = 106;
 
+/// One key and whether a shift has to ride it: the shifted symbols are
+/// their key's twin, so a shell line's quote or pipe is a pair of words.
+struct KeyStroke {
+    uint16_t code = 0;
+    bool     shift = false;
+};
+
 /// The serial line's ASCII bytes, in the evdev codes a keymap expects.
 /// Unshifted letters and digits plus the editing keys are enough for a
 /// shell; anything else is swallowed rather than guessed.
@@ -59,20 +66,54 @@ uint16_t evdev_code_for(char character) {
     if (character >= '1' && character <= '9') {
         return static_cast<uint16_t>(2 + (character - '1'));
     }
+    if (character == '0') {
+        return 11;
+    }
+    return 0;
+}
+
+/// The punctuation, in the same walk: a shifted symbol names its key.
+KeyStroke punctuation_for(char character) {
     switch (character) {
-        case '0': return 11;
+        case ' ': return {57, false};
+        case '-': return {12, false};
+        case '=': return {13, false};
+        case '[': return {26, false};
+        case ']': return {27, false};
+        case '\\': return {43, false};
+        case ';': return {39, false};
+        case '\'': return {40, false};
+        case ',': return {51, false};
+        case '.': return {52, false};
+        case '/': return {53, false};
+        case '`': return {41, false};
+        case '\t': return {15, false};
         case '\r':
-        case '\n': return 28;   // KEY_ENTER
-        case '\t': return 15;   // KEY_TAB
-        case 0x7F:
-        case '\b': return 14;   // KEY_BACKSPACE
-        case ' ': return 57;     // KEY_SPACE
-        case '-': return 12;
-        case '=': return 13;
-        case '.': return 52;
-        case ',': return 51;
-        case '/': return 53;
-        default: return 0;
+        case '\n': return {28, false};
+        case '\b': return {14, false};
+        case 0x7F: return {14, false};
+        case '!': return {2, true};
+        case '"': return {40, true};
+        case '#': return {4, true};
+        case '$': return {5, true};
+        case '%': return {6, true};
+        case '&': return {8, true};
+        case '(': return {10, true};
+        case ')': return {11, true};
+        case '*': return {9, true};
+        case '+': return {13, true};
+        case ':': return {39, true};
+        case '<': return {51, true};
+        case '>': return {52, true};
+        case '?': return {53, true};
+        case '@': return {3, true};
+        case '^': return {7, true};
+        case '_': return {12, true};
+        case '{': return {26, true};
+        case '|': return {43, true};
+        case '}': return {27, true};
+        case '~': return {41, true};
+        default: return {};
     }
 }
 
@@ -80,10 +121,20 @@ uint16_t evdev_code_for(char character) {
 
 namespace {
 
-/// One key press and its release, the pair every consumer expects.
-void emit_key(uint16_t code) {
+constexpr uint16_t kKeyLeftShift = 42;
+
+/// One key press and its release, the pair every consumer expects. A
+/// shifted symbol carries the modifier: down, the key, the key up, then
+/// the modifier up.
+void emit_key(uint16_t code, bool shift = false) {
+    if (shift) {
+        g_keyboard_stream.publish(driver::kEvKey, kKeyLeftShift, 1);
+    }
     g_keyboard_stream.publish(driver::kEvKey, code, 1);
     g_keyboard_stream.publish(driver::kEvKey, code, 0);
+    if (shift) {
+        g_keyboard_stream.publish(driver::kEvKey, kKeyLeftShift, 0);
+    }
     g_keyboard_stream.publish_report();
 }
 
@@ -152,15 +203,21 @@ void NoteSerialByte(char character) {
         }
         return;
     }
-    const uint16_t kCode = evdev_code_for(character);
-    if (kCode == 0) {
+    if (const uint16_t kCode = evdev_code_for(character); kCode != 0) {
+        emit_key(kCode);
         return;
     }
-    emit_key(kCode);
+    const KeyStroke kStroke = punctuation_for(character);
+    if (kStroke.code != 0) {
+        emit_key(kStroke.code, kStroke.shift);
+    }
 }
 
 void PollSerialKeyboard() {
-    for (unsigned long budget = 0; budget < 8; ++budget) {
+    // The receive FIFO is thirty-two bytes deep: a line pasted at once
+    // has to come out in one pass, or the tail overflows and the shell
+    // never sees its newline.
+    for (unsigned long budget = 0; budget < 32; ++budget) {
         char character = 0;
         if (!cinux::platform::SerialTryGetChar(&character) &&
             !cinux::driver::UsbKeyboard::self().take(&character)) {

@@ -475,6 +475,26 @@ ESC[B -> keydown 273 / keyup 273      （下）
 
 272/273 是 visor 给箭头的带外码，99 是它折叠后的字母 c。
 
+## 让 shell 真的能用
+
+把一句带引号、反斜杠和管道的命令打进去，才发现三处缺口：
+
+- **字符表太窄**。原来只映射了字母、数字与少数标点，`"`、`\`、`|`、`{}` 这些
+  直接丢掉，一句 `printf "a\nb\n" | wc -l` 会被打成 `printf anbn | wc`。现在补齐
+  整个可打印 ASCII（0x20..0x7E），带 shift 的符号按“按下 Shift、按键、放开键、
+  放开 Shift”发。
+- **管道没接**。EABI 的 `pipe`(42)、`pipe2`(359)、`dup`(41) 从来没在表里，于是
+  shell 报 `can't create pipe: Bad file descriptor`。接上之后这句话消失。
+- **applet 找不到**。busybox 的 shell 没开 `FEATURE_SH_STANDALONE`，`wc` 这类
+  要走 PATH，而我们的内存根里只有 `/bin/sh`。打开 `FEATURE_SH_STANDALONE` 与
+  `FEATURE_PREFER_APPLETS` 重建之后，`wc: not found` 没有了。
+- **vfork 没接**。busybox 起外部命令走 `vfork`(190)，我们只接了 `fork` 与 `clone`，
+  于是 `sh: can't fork`。`vfork` 接成 fork 语义（子进程拿一份自己的副本，父进程
+  的地址空间不受影响）——这是这一轮最后落的一处，验证还差一张截图。
+
+顺带：串口泵原来每拍只取 8 字节，一行 30 多字节粘进去会让接收 FIFO 溢出、丢掉
+结尾（shell 永远等不到回车）。现在按 FIFO 深度一次取满 32 字节。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补

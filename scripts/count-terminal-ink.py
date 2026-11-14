@@ -89,10 +89,14 @@ def main() -> int:
     left, right = columns[0], columns[-1] + 1
 
     box_pixels = (right - left) * (bottom - top)
+    # The frame's own 1px light border and the title bar's text sit on the
+    # box's edge, so the ink is counted well inside it: an empty terminal
+    # has no light pixels there at all, a written one has the glyphs.
+    inset = 6
     ink = 0
-    for y in range(top, bottom):
+    for y in range(top + inset, bottom - inset):
         base = y * width * 3
-        for x in range(left, right):
+        for x in range(left + inset, right - inset):
             at = base + x * 3
             if near(pixels[at : at + 3], INK):
                 ink += 1
