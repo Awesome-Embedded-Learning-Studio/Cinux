@@ -63,24 +63,6 @@ bool SeatWorldActive();
 
 namespace cinux::armv7 {
 
-/// The old 32-bit clock door: EABI's timespec is two four-byte words,
-/// while the neutral face writes the 64-bit pair. The adapter asks the
-/// neutral clock and lays its answer down in the caller's shape.
-long long HandleClockGettime32(const cinux::syscall::SyscallFrame& frame) {
-    unsigned long long pair[2] = {0, 0};
-    cinux::syscall::SyscallFrame ask = frame;
-    ask.rsi                          = reinterpret_cast<unsigned long long>(pair);
-    if (const long long kBad = cinux::syscall::HandleClockGettime(ask); kBad < 0) {
-        return kBad;
-    }
-    const unsigned int words[2] = {static_cast<unsigned int>(pair[0]),
-                                   static_cast<unsigned int>(pair[1])};
-    if (!cinux::syscall::uaccess::CopyToUser(frame.rsi, words, sizeof(words))) {
-        return -14;  // EFAULT
-    }
-    return 0;
-}
-
 /// The EABI clone door: a libc's fork() asks for a child sharing
 /// nothing but a SIGCHLD notice, with no stack and no tid words. That
 /// shape is the plain fork the seat already serves; a clone that wants
@@ -182,8 +164,10 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleClone},
     {cinux::armv7::syscall_nr::kPoll,           &cinux::syscall::HandlePoll},
     {cinux::armv7::syscall_nr::kPpoll,          &cinux::syscall::HandlePpoll},
-    {cinux::armv7::syscall_nr::kClockGettime,   &cinux::armv7::HandleClockGettime32},
-    {cinux::armv7::syscall_nr::kClockGettime64, &cinux::syscall::HandleClockGettime},
+    // 263 asks in the native shape the neutral writer now honours by
+    // itself; 403 is the time64 spelling, two eight-byte words.
+    {cinux::armv7::syscall_nr::kClockGettime,   &cinux::syscall::HandleClockGettime},
+    {cinux::armv7::syscall_nr::kClockGettime64, &cinux::syscall::HandleClockGettime64},
     {cinux::armv7::syscall_nr::kSetsid,         &cinux::syscall::HandleSetsid},
     {cinux::armv7::syscall_nr::kSetpgid,        &cinux::syscall::HandleSetpgid},
     {cinux::armv7::syscall_nr::kGetpgid,        &cinux::syscall::HandleGetpgid},

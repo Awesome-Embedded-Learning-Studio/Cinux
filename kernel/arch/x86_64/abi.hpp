@@ -188,4 +188,27 @@ inline constexpr InputEventLayout kInputEventLayout = {
     .value_off    = 20,
     .value_size   = 4,
 };
+
+/**
+ * @brief One struct timespec (and one timeval) as this ABI lays it out.
+ * @note  The two words are `long`s, so a 64-bit port carries sixteen
+ *        bytes and EABI eight; a neutral reader that assumes sixteen
+ *        would take the neighbouring word as nanoseconds.
+ */
+struct TimePairLayout {
+    unsigned long bytes;
+    unsigned long seconds_off, seconds_size;
+    unsigned long nanoseconds_off, nanoseconds_size;
+};
+
+inline constexpr TimePairLayout kTimespecLayout = {
+    .bytes           = 16,
+    .seconds_off     = 0,
+    .seconds_size    = 8,
+    .nanoseconds_off = 8,
+    .nanoseconds_size = 8,
+};
+
+/// A timeval's second word is microseconds: same width, same offsets.
+inline constexpr TimePairLayout kTimevalLayout = kTimespecLayout;
 }  // namespace cinux::arch::abi

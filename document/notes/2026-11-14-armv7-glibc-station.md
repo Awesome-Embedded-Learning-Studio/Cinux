@@ -382,6 +382,17 @@ trace[26] keyup 28 0 0
 也可以单独跑 `scripts/click-armv7-terminal.sh`：双击图标、打字、截图，报
 click delivered 与 shell answered。
 
+## 时间记录也按 ABI
+
+`struct timespec` / `struct timeval` 的两个词都是 `long`：x86-64 是十六字节，EABI
+是八字节。中立读取器原来固定读十六字节，在 ARM 上会把紧挨着的那一个字当成纳秒，
+于是 `nanosleep`、`futex` 的超时、`ppoll` 的期限都算错。
+
+现在 `arch::abi::kTimespecLayout` 描述它与 `kTimevalLayout`（同形）：
+`gettimeofday` 与 `clock_gettime` 都按调用者的形状落盘。`clock_gettime64`（EABI
+的 403）另走一个门，那个形状在两边都是两个八字节词——于是 ARM 上原先那个 32 位
+适配器撤掉，只剩一套机制。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
