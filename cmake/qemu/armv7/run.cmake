@@ -74,6 +74,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_LCDIF=lcdif 320x240 fb"
             "-DEXPECTED_USDHC=usdhc card 16384 sectors mbr 55AA"
             "-DEXPECTED_USDHC_WRITE=usdhc write readback ok"
+            "-DEXPECTED_MMCBLK0=dev mmcblk0 16384 sectors mbr 55AA"
             "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
             "-DEXPECTED_EHCI_SEATED=ehci device 0627:0001 seated"
     "-DEXPECTED_EHCI_KEYBOARD=ehci keyboard street ok"

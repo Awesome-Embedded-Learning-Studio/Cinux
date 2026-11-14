@@ -41,7 +41,9 @@
 #include "kernel/fs/devfs/input_node.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
 #include "kernel/drivers/input/input_config.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/drivers/device/device.hpp"
+#include "kernel/drivers/usdhc/usdhc.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/loader/loader.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -160,6 +162,30 @@ void init() {
         // hand-over lands it in this tree as the usbkbd character node.
         if (driver::SeatUsbKeyboard()) {
             cinux::print::Println("[armv7] dev usbkbd seated");
+        }
+        // The block street joins the model the same way the x86 drives
+        // do: facts only, no devfs leaf. The card is reached through
+        // the erased BlockPort, so this seat never learns the driver's
+        // type — exactly the face BlockQueue will adopt later.
+        if (driver::UsdhcHost::self().block_count() != 0) {
+            driver::BlockPort port;
+            port.adopt(driver::UsdhcHost::self());
+            static unsigned char kProbe[512] = {};
+            const bool kRead = port.read_blocks(driver::Lba{0},
+                                                driver::BlockSpan{1}, kProbe);
+            const base::Result<void> kMmc = driver::DeviceModel::self().seat({
+                .klass       = driver::DeviceClass::kBlock,
+                .name        = "mmcblk0",
+                .number      = fs::MakeDeviceId(179, 0),
+                .ops         = nullptr,
+                .bus         = "usdhc",
+                .driver_name = "usdhc",
+            });
+            base::safety::Check(kMmc.ok(), "device model refused the mmcblk0 seat");
+            cinux::print::Println(kRead && kProbe[510] == 0x55 && kProbe[511] == 0xAA
+                                      ? "[armv7] dev mmcblk0 %llu sectors mbr 55AA"
+                                      : "[armv7] dev mmcblk0 read FAILED",
+                                  port.block_count());
         }
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
         base::safety::Check(kDevMount.ok(), "devfs mount failed");
