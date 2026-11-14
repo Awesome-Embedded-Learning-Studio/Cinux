@@ -11,6 +11,7 @@
  */
 
 #include <fcntl.h>
+
 #include <sys/mman.h>
 #include <errno.h>
 #include <stdio.h>
@@ -71,11 +72,11 @@ int main(int argc, char** argv) {
         const int fb = open("/dev/fb0", O_RDWR);
         int painted = 0;
         if (fb >= 0) {
-            const unsigned long kBytes = 320UL * 240UL * 4UL;
+            const unsigned long kBytes = 640UL * 480UL * 4UL;
             unsigned int* const pixels = mmap(NULL, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fb,
                                               0);
             if (pixels != MAP_FAILED) {
-                const unsigned long kProof = 200UL * 320UL + 5UL;
+                const unsigned long kProof = (480UL - 4UL) * 640UL + 5UL;
                 // What the kernel stamped before this process started:
                 // a match proves this mapping is the panel's memory.
                 const unsigned int kSeed = pixels[kProof];
@@ -113,8 +114,18 @@ int main(int argc, char** argv) {
 
     // The hand-off to a real userland: busybox, statically linked, run
     // as its `echo` applet. Success never returns here.
+#ifdef CINUX_ARM_PROBE_DESK
+    // The demo hand-off: run the desktop itself. The devfs seats its
+    // input streams flat under /dev, so the desk gets told where they
+    // are instead of guessing Linux's layout. The desk never returns;
+    // this mode exists for looking at the screen, not for the check.
+    char* const kArgs[] = {(char*)"desk", (char*)"/dev/fb0", (char*)"/dev/event0",
+                           (char*)"/dev/event1", NULL};
+    execve("/disk/desk", kArgs, NULL);
+#else
     char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/disk/prog", NULL};
     execve("/disk/bb", kArgs, NULL);
+#endif
     static const char kNoBb[] = "[glibc] busybox exec refused\n";
     write(STDOUT_FILENO, kNoBb, sizeof(kNoBb) - 1U);
     return 0;

@@ -105,4 +105,32 @@ inline constexpr StatLayout kStatLayout = {
     .ctime_nsec_off  = 84,
     .time_size       = 4,
 };
+
+/**
+ * @brief One fb_fix_screeninfo as this ABI lays it out.
+ * @note  EABI keeps `unsigned long` at four bytes, so the record is 64
+ *        bytes and every field after smem_start sits twelve bytes
+ *        earlier than the 64-bit shape.
+ */
+struct FbFixLayout {
+    unsigned long bytes;
+    unsigned long smem_start_off, smem_start_size;
+    unsigned long smem_len_off;
+    unsigned long line_length_off;
+    unsigned long mmio_start_off, mmio_start_size;
+    unsigned long mmio_len_off;
+    unsigned long capabilities_off;
+};
+
+inline constexpr FbFixLayout kFbFixLayout = {
+    .bytes            = 64,
+    .smem_start_off   = 16,
+    .smem_start_size  = 4,
+    .smem_len_off     = 20,
+    .line_length_off  = 44,
+    .mmio_start_off   = 48,
+    .mmio_start_size  = 4,
+    .mmio_len_off     = 52,
+    .capabilities_off = 60,
+};
 }  // namespace cinux::arch::abi

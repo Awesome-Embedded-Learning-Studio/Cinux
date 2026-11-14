@@ -103,4 +103,33 @@ inline constexpr StatLayout kStatLayout = {
     .ctime_nsec_off  = 112,
     .time_size       = 8,
 };
+
+/**
+ * @brief One fb_fix_screeninfo as this ABI lays it out.
+ * @note  The record mixes 32-bit fields with `unsigned long` ones, so
+ *        its width and the placement of smem_start/line_length follow
+ *        the ABI rather than one machine's furniture.
+ */
+struct FbFixLayout {
+    unsigned long bytes;
+    unsigned long smem_start_off, smem_start_size;
+    unsigned long smem_len_off;
+    unsigned long line_length_off;
+    unsigned long mmio_start_off, mmio_start_size;
+    unsigned long mmio_len_off;
+    unsigned long capabilities_off;
+};
+
+/// x86-64: eight-byte `unsigned long`s, 80 bytes with alignment holes.
+inline constexpr FbFixLayout kFbFixLayout = {
+    .bytes            = 80,
+    .smem_start_off   = 16,
+    .smem_start_size  = 8,
+    .smem_len_off     = 24,
+    .line_length_off  = 48,
+    .mmio_start_off   = 56,
+    .mmio_start_size  = 8,
+    .mmio_len_off     = 64,
+    .capabilities_off = 72,
+};
 }  // namespace cinux::arch::abi

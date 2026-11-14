@@ -33,6 +33,10 @@ if(_arm_busybox_bin)
     set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
         OBJECT_DEPENDS "${_arm_busybox_bin}")
 endif()
+if(_arm_desk_bin)
+    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
+        OBJECT_DEPENDS "${_arm_desk_bin}")
+endif()
 
 add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
 
@@ -60,6 +64,16 @@ foreach(_arm_def IN LISTS _arm_defs)
             "arm_boot: -D${_arm_name} appears twice; only the last would survive")
     endif()
     list(APPEND _arm_names "${_arm_name}")
+endforeach()
+
+# The desktop station rides the same rule: built by
+# scripts/build-armv7-vesper-desk.sh on a host with the GCC 14 armhf tree.
+set(_arm_desk_bin "")
+foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk"
+        "${CMAKE_BINARY_DIR}/armv7-vesper/desk")
+    if(EXISTS "${_arm_candidate}" AND NOT _arm_desk_bin)
+        set(_arm_desk_bin "${_arm_candidate}")
+    endif()
 endforeach()
 
 # The busybox station rides the same optional-artifact rule: built by
@@ -113,7 +127,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_CPUID=cpu id ARM C07"
             "-DEXPECTED_PROCCPU=proc cpuinfo"
             "-DEXPECTED_SCHED=sched roundtrip ok"
-            "-DEXPECTED_LCDIF=lcdif 320x240 fb"
+            "-DEXPECTED_LCDIF=lcdif 640x480 fb"
             "-DEXPECTED_USDHC=usdhc card 16384 sectors mbr 55AA"
             "-DEXPECTED_USDHC_WRITE=usdhc write readback ok"
             "-DEXPECTED_MMCBLK0=dev mmcblk0 16384 sectors mbr 55AA"
@@ -129,7 +143,7 @@ add_test(NAME arm_boot
             ${_arm_glibc_arg}
             ${_arm_busybox_arg}
 
-            "-DEXPECTED_FB0=dev fb0 320x240"
+            "-DEXPECTED_FB0=dev fb0 640x480"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"
             "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"

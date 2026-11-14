@@ -22,9 +22,11 @@
 
 namespace cinux::armv7::lcdif {
 
-/// Panel this bring-up drives: small enough for one order-8 block.
-constexpr unsigned long kWidth  = 320;
-constexpr unsigned long kHeight = 240;
+/// Panel this bring-up drives: 640x480, the smallest geometry the
+/// desktop station accepts, and 1.2 MiB of XRGB8888 inside one
+/// order-9 block.
+constexpr unsigned long kWidth  = 640;
+constexpr unsigned long kHeight = 480;
 
 /// Reports whether the controller answers at its register window.
 [[nodiscard]] bool Probe();

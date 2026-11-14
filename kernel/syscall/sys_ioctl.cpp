@@ -1,3 +1,4 @@
+#include "kernel/arch/abi.hpp"
 #include "kernel/syscall/sys_ioctl.hpp"
 
 #include <cstdint>
@@ -52,7 +53,10 @@ const WordSpan kWordSpans[] = {
     },
     {
         .word         = driver::kFbGetFixScreeninfo,
-        .bytes        = driver::kFbFixScreeninfoBytes,
+        // The record's width is the ABI's, not the 64-bit shape's: a
+        // four-byte-`long` port reads 64 bytes, and writing 80 would
+        // trample whatever sits beside the caller's struct.
+        .bytes        = arch::abi::kFbFixLayout.bytes,
         .caller_gives = false,
     },
     {.word = driver::kEvdevGetAbsX, .bytes = sizeof(driver::InputAbsInfo), .caller_gives = false},

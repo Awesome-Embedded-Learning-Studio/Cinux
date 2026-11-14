@@ -1,3 +1,4 @@
+#include "kernel/arch/abi.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
 
 #include <cstdint>
@@ -35,6 +36,37 @@ constexpr uint32_t kFbVisualTrue = 2;
 /// Dress the two fbdev geometry records from one layout; every word the
 /// records carry that the layout cannot name lands at its honest zero,
 /// and the identity copies at most fifteen bytes.
+/// Writes the fixed-geometry record in this ABI's layout: the wire
+/// struct keeps the 64-bit shape for reads, and the writer places the
+/// same values where a four-byte-`long` libc expects them.
+void WriteFixRecord(driver::FbFixScreeninfoWire& fix, const cinux::boot::FramebufferInfo& from) {
+    constexpr arch::abi::FbFixLayout kLayout = arch::abi::kFbFixLayout;
+    static_assert(sizeof(driver::FbFixScreeninfoWire) >= kLayout.bytes ||
+                      kLayout.bytes == sizeof(driver::FbFixScreeninfoWire),
+                  "the record buffer holds this ABI's shape");
+    unsigned char bytes[sizeof(driver::FbFixScreeninfoWire)] = {};
+    for (unsigned long index = 0; index < sizeof(fix.id); ++index) {
+        bytes[index] = static_cast<unsigned char>(fix.id[index]);
+    }
+    const auto put = [&bytes](unsigned long offset, unsigned long long value,
+                              unsigned long width) {
+        for (unsigned long index = 0; index < width; ++index) {
+            bytes[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+        }
+    };
+    put(kLayout.smem_start_off, from.physical, kLayout.smem_start_size);
+    put(kLayout.smem_len_off, from.pitch * from.height, 4);
+    put(kLayout.line_length_off, from.pitch, 4);
+    put(kLayout.mmio_start_off, 0, kLayout.mmio_start_size);
+    put(kLayout.mmio_len_off, 0, 4);
+    put(kLayout.capabilities_off, 0, 2);
+    // type and visual sit between smem_len and the halved step words in
+    // both shapes; their offsets are fixed by the u32 run before them.
+    put(24 + (kLayout.bytes == 80 ? 4 : 0), kFbTypePacked, 4);
+    put(28 + (kLayout.bytes == 80 ? 4 : 0), kFbVisualTrue, 4);
+    base::CopyBytes(&fix, bytes, sizeof(bytes));
+}
+
 void fill_geometry(const cinux::boot::FramebufferInfo& from, const char* identity,
                    driver::FbVarScreeninfoWire& var, driver::FbFixScreeninfoWire& fix) {
     var                = driver::FbVarScreeninfoWire{};
@@ -54,11 +86,14 @@ void fill_geometry(const cinux::boot::FramebufferInfo& from, const char* identit
     const unsigned long kNamed =
         identity == nullptr ? 0UL : base::StrLength(identity, sizeof(fix.id) + 1U);
     base::CopyText(std::span<char>{fix.id, sizeof(fix.id)}, std::string_view{identity, kNamed});
-    fix.smem_start  = from.physical;
-    fix.smem_len    = from.pitch * from.height;
-    fix.type        = kFbTypePacked;
-    fix.visual      = kFbVisualTrue;
-    fix.line_length = from.pitch;
+    fix.type    = kFbTypePacked;
+    fix.visual  = kFbVisualTrue;
+    // The record's own width belongs to the ABI: `unsigned long` fields
+    // are eight bytes on x86-64 and four on EABI, so the fields after
+    // smem_start move with it. The wire struct above is the 64-bit
+    // shape; WriteFixRecord re-places the values the way this port's
+    // libc reads them.
+    WriteFixRecord(fix, from);
 }
 
 /// Answers the changeable-geometry question: the stage word points at a

@@ -40,6 +40,23 @@ if [[ -n "${busybox_bin}" && -f "${busybox_bin}" ]]; then
     echo "[armv7-sd] busybox seeded at /bb"
 fi
 
+# The desktop station's binary: cross-built vesper fbdev desk, a build
+# artifact like the others.
+desk_bin="${CINUX_ARM_DESK:-}"
+if [[ -z "${desk_bin}" ]]; then
+    for candidate in "${script_dir}/../build/armv7-vesper/desk" \
+                     "${script_dir}/../build-armv7/armv7-vesper/desk"; do
+        if [[ -f "${candidate}" ]]; then
+            desk_bin="${candidate}"
+            break
+        fi
+    done
+fi
+if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then
+    debugfs -w -R "write ${desk_bin} /desk" "${volume}" >/dev/null 2>&1
+    echo "[armv7-sd] vesper desk seeded at /desk"
+fi
+
 # The glibc station's program rides along only when its image exists:
 # building it needs the arm-none-linux-gnueabihf toolchain, which is a
 # host-side concern, not a lane requirement. The check stays green with

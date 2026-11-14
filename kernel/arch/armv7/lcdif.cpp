@@ -88,7 +88,7 @@ unsigned long InitFramebuffer() {
         }
     // A marker a program can read through its own frame mapping: seeing
     // this word proves the mapping and the panel are the same memory.
-    kPixels[(200UL * kWidth) + 5UL] = 0xABCD1234U;
+    kPixels[((kHeight - 4UL) * kWidth) + 5UL] = 0xABCD1234U;
     }
 
     // Program the face the model answers, in the order it needs: the

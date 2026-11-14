@@ -195,7 +195,7 @@ extern "C" [[noreturn]] void kmain() {
                                               : "[armv7] sched roundtrip FAILED");
                     {
                         const unsigned long kFrame = cinux::armv7::lcdif::InitFramebuffer();
-                        cinux::print::Println("[armv7] lcdif 320x240 fb %X",
+                        cinux::print::Println("[armv7] lcdif 640x480 fb %X",
                                               kFrame != 0 ? kFrame : 0);
                     }
                     for (const unsigned long kBase : {0x02184000UL, 0x02184200UL}) {

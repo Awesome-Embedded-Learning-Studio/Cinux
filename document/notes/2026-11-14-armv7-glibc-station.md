@@ -1,4 +1,4 @@
-# armv7 的 glibc、busybox 与画面车站
+# armv7 的 glibc、busybox、画面与桌面车站
 
 状态：盘上程序能接力 exec 到静态链接的 glibc 程序，程序用 malloc、printf、
 open/read 跑完，再 exec 到静态链接的 busybox，busybox 的 echo 打出
@@ -121,6 +121,35 @@ LCDIF 在 bring-up 时就往自己的帧里画了一张测试卡：绿色场加�
 `ReleaseFrame` 早就有 `IsHardwarePage` 这一道，armv7 原来没有，于是同一帧被
 映射两次时拆卸会还两次、触发 PMM 双重释放。
 
+## 桌面这一站
+
+同一份 `third_party/vesper` 交叉编译到了 armv7，两个车道跑一个桌面而不是两个。
+
+工具链是 Ubuntu 的 armhf GCC 14 交叉包，解包在 `~/.local/opt/arm-cross14`：桌面源码
+用了 C++23 的 `<print>`，GCC 14 才有。`cmake/toolchains/armv7-linux-gnueabihf.cmake`
+把编译器、sysroot 与 EABI 参数一起交给 CMake，`scripts/build-armv7-vesper-desk.sh`
+出一份 1.7MB 的静态 ELF，链在用户窗口内。
+
+跑起来这一路修了两处 ABI 错位，都是“x86 形状搬到 32 位”的老毛病：
+
+- `fb_fix_screeninfo` 里 `unsigned long` 在两边宽度不同：x86-64 八十字节、EABI
+  六十四字节。中立 ioctl 原来按 x86 的八十字节回写，把调用者紧挨着的记录抹了
+  十六字节——桌面的 `vinfo` 前三个字被清零，于是它看到 0x0 的屏。
+  现在 `arch::abi::kFbFixLayout` 描述字段位置，span 宽度也按它取。
+- 面板从 320x240 改成 640x480：桌面要求至少 640x480。
+
+跑起来的样子：
+
+```
+vesper-fbdev: fb 640x480 (frame 640x480), kbd /dev/event0, pointer /dev/event1
+vesper-fbdev: cannot spawn /bin/sh under a pty: Function not implemented
+```
+
+第二行是还缺的那块：桌面自带的终端要 `posix_openpt`/`posix_spawn` 那一族。
+
+演示模式：`CINUX_ARM_PROBE_DESK=1 ./scripts/build-armv7-glibc-prog.sh` 让盘上的
+glibc 程序最后 exec 桌面而不是 busybox；默认构建仍走可判定的那条链。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
@@ -128,5 +157,5 @@ LCDIF 在 bring-up 时就往自己的帧里画了一张测试卡：绿色场加�
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
 - busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
-- 真正的桌面还没上车：vesper 的 fbdev 后端要交叉编译 C++ 工具链
+- 桌面的终端子进程要 `posix_openpt` / `posix_spawn` 一族调用
 - 设备帧的多重映射与拆卸计数仍需更完整的账本
