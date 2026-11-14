@@ -91,9 +91,11 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
     if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
         return trap;  // the same instruction runs again on the new mapping
     }
-    cinux::print::Println("[armv7] user fault caught at %X code %X pid %u pc %X", fault_address,
-                          code,
+    cinux::print::Println("[armv7] user fault at %X code %X pid %u pc %X r0 %X r1 %X r2 %X r3 %X",
+                          fault_address, code,
                           (unsigned)cinux::proc::Scheduler::self().current()->pid,
-                          (unsigned long)trap->lr);
+                          (unsigned long)trap->lr, (unsigned long)trap->r0,
+                          (unsigned long)trap->r1, (unsigned long)trap->r2,
+                          (unsigned long)trap->r3);
     cinux::armv7::SeatFaultDeath();
 }

@@ -178,7 +178,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_TASKS=two tasks ok"
             "-DEXPECTED_USER=user mode round trip ok"
             "-DEXPECTED_ROTATE=two tasks ok"
-            "-DEXPECTED_USERFAULT=user fault caught at 50000000"
+            "-DEXPECTED_USERFAULT=user fault at 50000000"
             "-DEXPECTED_FAULT=data abort at 51000000 status 805 code 2"
             "-DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log"
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)

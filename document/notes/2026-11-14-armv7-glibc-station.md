@@ -535,10 +535,18 @@ shell。已经把串口抽取挂到了三个地方（每拍、系统调用入口
 `user fault caught at 0 code 7 pc 401266C6`。
 
 这一轮把 pc 在未剥离的 busybox 里查了符号：落点是 glibc 的
-`__futex_abstimed_wait_common`——也就是 cat 在某个 libc 锁上等 futex，而那个锁的
-字地址是 0（一个空指针）。`ls` 与 `head` 走同样的 fork/exec 路径却是好的，所以要么
-是 cat 触发的某个 libc 状态在 fork 之后是空的，要么是我们的 futex/COW 在这条路上
-漏了一页。下一轮从这两头查。
+`__futex_abstimed_wait_common`。给 user fault 的打印补上 r0..r3 之后看得更清楚：
+
+```
+[armv7] user fault at 0 code 7 pid 12 pc 401266C6 r0 0 r1 7FFFE9AC r2 0 r3 40183B18
+```
+
+r0 是那个 futex 字——就是 0。而且内核里一次 `[futex]` 调用都没有（临时打点确认
+过），所以崩溃发生在 glibc 自己做的原子比较交换上，不是系统调用失败。
+
+范围也缩小了：不是 cat 专属——`head /motd` 一样崩，同样的 pc 与寄存器。而
+`ls /` 与管道里的 `head` 是好的。差别在于**按路径打开并读一个文件**。下一轮用
+gdb 接上子进程取调用栈，看是哪个 FILE/锁指针是空的。
 
 顺带修掉一个真的 ABI 缺口：EABI 的 `stat64`（104 字节，size 在 48、ino 在 96）与
 `stat`（96 字节，size 在 44、ino 在 88）不是一个形状，而 `fstat64`(197) 原来写的是
