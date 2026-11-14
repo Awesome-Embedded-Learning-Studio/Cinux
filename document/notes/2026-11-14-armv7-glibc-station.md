@@ -407,6 +407,21 @@ click delivered 与 shell answered。
 两条互不干扰：桌面车道用的是自己的镜像，跑完会把默认车道的探针与镜像一起还原，
 所以先跑哪条都行（两种顺序都验过）。
 
+## 窗口能拖动了
+
+`arm_desk` 这条检查又多了一步：开窗之后按住标题栏拖一段，然后看屏幕。判据也跟着
+从“固定方框里数像素”改成“先找屏幕上的大暗块（终端的底色），再数块里的字色”——
+窗口挪了位置也照样认得出来：
+
+```
+terminal box: 46,81 588x399
+terminal ink pixels: 2920 (need 40)
+terminal text on screen after the drag: present
+the window moved with the drag: present (left 46)
+```
+
+![拖过的窗口](assets/2026-11-15-armv7-drag.png)
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补

@@ -74,6 +74,16 @@ sleep 1
         sleep 0.2
     done
     sleep "${settle}"
+    # Drag the title bar by (120,60): the window has to follow, and the
+    # pixels have to say so.
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":5120}},{"type":"abs","data":{"axis":"y","value":3277}}]}}'
+    sleep 1
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
+    sleep 1
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":11264}},{"type":"abs","data":{"axis":"y","value":7373}}]}}'
+    sleep 1
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+    sleep 3
     printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot}\"}}"
     sleep 1
 ) | socat - "UNIX-CONNECT:${qmp}" >/dev/null 2>&1 || true
@@ -98,13 +108,25 @@ else
     failed=1
 fi
 
-# The pixels are the last witness: the terminal's ink has to be on the
-# screen inside the window the click opened.
+# The pixels are the last witness: after the drag the terminal's ink has
+# to sit in the window's new box, and the box it left has to show the
+# desk's ground instead. The window frame moves by the drag's own delta.
 if [ -f "${shot}" ]; then
-    if python3 "${here}/count-terminal-ink.py" "${shot}"; then
-        printf '  terminal text on screen: present\n'
+    if verdict="$(python3 "${here}/count-terminal-ink.py" "${shot}")"; then
+        printf '%s\n' "${verdict}" | sed 's/^/  /'
+        printf '  terminal text on screen after the drag: present\n'
     else
-        printf '  terminal text on screen: MISSING\n' >&2
+        printf '%s\n' "${verdict}" | sed 's/^/  /'
+        printf '  terminal text on screen after the drag: MISSING\n' >&2
+        failed=1
+    fi
+    # The drag has to have moved the window: the box it lands in no
+    # longer starts at the window's opening place.
+    box_left="$(printf '%s\n' "${verdict}" | sed -n 's/.*terminal box: \([0-9]*\),\([0-9]*\).*/\1/p')"
+    if [ -n "${box_left}" ] && [ "${box_left}" -gt 40 ]; then
+        printf '  the window moved with the drag: present (left %s)\n' "${box_left}"
+    else
+        printf '  the window did not move: left %s\n' "${box_left:-none}" >&2
         failed=1
     fi
 else

@@ -1,36 +1,28 @@
 #!/usr/bin/env python3
-"""Judges one PPM screendump: is the desktop's terminal showing text?
+"""Judges one PPM screendump: is the desktop's terminal showing text, and
+where is it?
 
-The terminal window opens at a fixed place on the 640x480 desk, its
-ground is the theme's dark Foreground, and its glyphs are the light
-Background ink. Counting light pixels strictly inside the window's
-content box answers "did the text reach the screen" without trusting
-the serial log.
+The terminal is the screen's big dark box; its glyphs are the theme's
+light ink. Finding the box first makes the check independent of where
+the window sits -- the desk can move one -- and counting the ink inside
+it answers "did the text reach the screen" without trusting any log.
 
-Exit status is 0 when the ink is there, 1 when it is not.
+Prints the box and the ink count, then exits 0 when the box carries
+text, 1 when it does not.
 """
 from __future__ import annotations
 
 import sys
 
-# The desk's terminal window: WindowFrame at (20,40), 600x400, with the
-# title bar and the frame's one-pixel border cut away.
-CONTENT_LEFT = 26
-CONTENT_TOP = 58
-CONTENT_RIGHT = 613
-CONTENT_BOTTOM = 432
-
-# The theme's light ink and its dark ground, as the desk paints them.
+# The theme's inks, as the desk paints them.
 GROUND = (43, 38, 32)
 INK = (246, 242, 234)
-INK_TOLERANCE = 24
+TOLERANCE = 24
 
-# Enough light cells to be words, not the cursor block or a stray pixel,
-# and enough dark ground under them to know the terminal is really open:
-# a closed terminal leaves the desk's own cream ground in that box, which
-# would otherwise read as ink.
+# A terminal content box this large is a window, not a title bar or a
+# panel strip; and this much ink is words, not a lone cursor block.
+MIN_BOX_PIXELS = 20000
 MIN_INK_PIXELS = 40
-MIN_GROUND_FRACTION = 0.5
 
 
 def read_ppm(path: str) -> tuple[int, int, bytes]:
@@ -42,38 +34,52 @@ def read_ppm(path: str) -> tuple[int, int, bytes]:
     return width, height, fields[3]
 
 
+def near(pixel: bytes, want: tuple[int, int, int]) -> bool:
+    return all(abs(pixel[i] - want[i]) <= TOLERANCE for i in range(3))
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: count-terminal-ink.py SHOT.ppm")
     width, height, pixels = read_ppm(sys.argv[1])
-    if (width, height) != (640, 480):
-        raise SystemExit(f"{sys.argv[1]}: unexpected size {width}x{height}")
 
-    ink = 0
-    ground = 0
-    box = 0
-    for y in range(CONTENT_TOP, min(CONTENT_BOTTOM, height)):
+    # Rows of the dark ground, the terminal's paint.
+    dark_rows: list[int] = []
+    for y in range(height):
         row = y * width * 3
-        for x in range(CONTENT_LEFT, min(CONTENT_RIGHT, width)):
+        dark = 0
+        for x in range(width):
             at = row + x * 3
-            r, g, b = pixels[at], pixels[at + 1], pixels[at + 2]
-            box += 1
-            if (
-                abs(r - INK[0]) <= INK_TOLERANCE
-                and abs(g - INK[1]) <= INK_TOLERANCE
-                and abs(b - INK[2]) <= INK_TOLERANCE
-            ):
+            if near(pixels[at : at + 3], GROUND):
+                dark += 1
+        if dark > width // 2:
+            dark_rows.append(y)
+    if not dark_rows:
+        print("  terminal box: none")
+        return 1
+
+    top, bottom = dark_rows[0], dark_rows[-1] + 1
+    # The columns the box spans, taken from its middle row.
+    middle = (top + bottom) // 2
+    row = middle * width * 3
+    columns = [x for x in range(width) if near(pixels[row + x * 3 : row + x * 3 + 3], GROUND)]
+    left, right = columns[0], columns[-1] + 1
+
+    box_pixels = (right - left) * (bottom - top)
+    ink = 0
+    for y in range(top, bottom):
+        base = y * width * 3
+        for x in range(left, right):
+            at = base + x * 3
+            if near(pixels[at : at + 3], INK):
                 ink += 1
-            elif (
-                abs(r - GROUND[0]) <= INK_TOLERANCE
-                and abs(g - GROUND[1]) <= INK_TOLERANCE
-                and abs(b - GROUND[2]) <= INK_TOLERANCE
-            ):
-                ground += 1
-    share = ground / box if box else 0.0
-    print(f"  terminal ground: {share:.2%} of the box (need {MIN_GROUND_FRACTION:.0%})")
+
+    print(f"  terminal box: {left},{top} {right - left}x{bottom - top}")
     print(f"  terminal ink pixels: {ink} (need {MIN_INK_PIXELS})")
-    return 0 if share >= MIN_GROUND_FRACTION and ink >= MIN_INK_PIXELS else 1
+    if box_pixels < MIN_BOX_PIXELS:
+        print("  terminal box: too small to be a window")
+        return 1
+    return 0 if ink >= MIN_INK_PIXELS else 1
 
 
 if __name__ == "__main__":
