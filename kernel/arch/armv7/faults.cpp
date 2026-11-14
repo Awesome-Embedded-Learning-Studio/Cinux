@@ -61,9 +61,14 @@ extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap) {
     unsigned long fault_status  = 0;
     asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(fault_address));  // IFAR
     asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r"(fault_status));   // IFSR
-    const unsigned long long code =
-        cinux::arch::isr::FaultCodeFromStatus(fault_status, trap->spsr);
-    if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
+    // The IFSR has no write marker: its bit 11 means something else
+    // entirely, so the status is handed on with that bit cleared. A
+    // fetch is a read by definition, and a decoder that read the bit
+    // as "this was a write" would refuse to fill a read-only code page
+    // the image is perfectly entitled to execute from.
+    const unsigned long kStatus = fault_status & ~cinux::arch::isr::kDfsrWrite;
+    const unsigned long long code = cinux::arch::isr::FaultCodeFromStatus(kStatus, trap->spsr);
+    if (g_repair != nullptr && g_repair(fault_address, kStatus)) {
         return trap;  // the fetch runs again on the new mapping
     }
     cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address,

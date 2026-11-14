@@ -19,8 +19,16 @@ add_custom_command(
     COMMAND /bin/sh ${CMAKE_SOURCE_DIR}/scripts/create_armv7_sd.sh ${CINUX_ARM_SD_IMG}
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_armv7_sd.sh
             ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/motd.txt
+            ${CMAKE_SOURCE_DIR}/assets/armv7_diskprog.elf
     VERBATIM
     COMMENT "Molding the armv7 SD bring-up image")
+
+# The glibc station's program is optional: only a host with the cross
+# toolchain builds it, and the image remolds when it appears.
+if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
+    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
+        OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
+endif()
 
 add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
 

@@ -224,19 +224,24 @@ bool run_probe_world() {
 /// RepairWriteFault the legacy task world serves. One fill or one
 /// private copy, and the instruction that faulted runs again.
 bool SeatRepairPage(unsigned long address, unsigned long status) {
-    SeatRun* const kSeat = current_seat();
-    if (kSeat == nullptr || kSeat->ranges == nullptr) {
+    // The seat's cached worlds go stale the moment an exec replaces
+    // them, so the live task's own holds are the only truth here: read
+    // them fresh on every fault instead of trusting the launch-time
+    // pointers the run was born with.
+    proc::Task* const kTask = proc::Scheduler::self().current();
+    if (current_seat() == nullptr || kTask == nullptr || !kTask->space.holds() ||
+        !kTask->vmas.holds()) {
         return false;
     }
     if ((status & arch::isr::kDfsrWrite) != 0 &&
-        mm::cow::RepairWriteFault(kSeat->space->root(), address)) {
+        mm::cow::RepairWriteFault(kTask->space->root(), address)) {
         return true;
     }
     unsigned long spsr = 0;
     asm volatile("mrs %0, spsr" : "=r"(spsr));
     const unsigned long long kCode = arch::isr::FaultCodeFromStatus(status, spsr);
     const mm::demand::FillOutcome kFilled =
-        mm::demand::FillPage(*kSeat->space, *kSeat->ranges, address, kCode);
+        mm::demand::FillPage(*kTask->space, *kTask->vmas, address, kCode);
     return kFilled != mm::demand::FillOutcome::kUnhandled;
 }
 

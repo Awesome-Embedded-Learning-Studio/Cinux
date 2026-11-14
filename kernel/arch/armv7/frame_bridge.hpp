@@ -66,7 +66,17 @@ inline void Store(const cinux::syscall::SyscallFrame& frame, UserTrap& trap) {
     // every ordinary call and the new world's doorway for exec. The
     // trap's SPSR stays: mode and state belong to the CPU seat, not
     // to the program being replaced.
-    trap.lr = static_cast<unsigned long>(frame.rcx);
+    // An odd resume address is the arm way of spelling Thumb code: the
+    // bit is a state marker, not part of the instruction address, so
+    // the program counter takes the even word and the state moves into
+    // the SPSR's T bit. A normal call seeded the same value from the
+    // trap, so this reads identically for ARM-state callers.
+    unsigned long kResume = static_cast<unsigned long>(frame.rcx);
+    if ((kResume & 1UL) != 0UL) {
+        trap.spsr |= 0x20UL;
+        kResume &= ~1UL;
+    }
+    trap.lr = kResume;
     trap.sp = static_cast<unsigned long>(frame.user_rsp);
 }
 
