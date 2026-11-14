@@ -324,8 +324,19 @@ trace[26] keyup 28 0 0
 `echo hi` 被桌面解析成 `keydown 28`/`keyup 28` 之类，随后 `trace` 里出现
 `pty=1`——shell 收到按键并有回话。
 
-还差的最后一小步：终端里的文字没有画出来。pty 有回答、桌面也读到了，但窗口里
-只有光标块，没有提示符与回显。下一轮从 `term_source.pump` 到终端绘制的这一段查。
+按键的字符是错的，这一轮查出两个真问题：
+
+- **字母码不是顺排的**。Linux 的 evdev 字母码分三行走（a=30、b=48、c=46、
+  d=32、e=18…），我按 `KEY_A + 偏移` 顺排，于是 "echo" 变成 "gdkz"。
+  换成真表之后字节流对上了。
+- **一个键发了两遍**。发布挪到 `SerialTryGetChar` 之后，每拍的泵又调了一次
+  `NoteSerialByte`，每个字符都进两次。去掉泵里的那次，pty 里读到的就是
+  `65 63 68 6F 20 68 69 0A 68 69 0A 3E 20`——"echo hi"、回车、shell 回显
+  "hi"、再一个提示符 "> "。shell 真的在跑。
+
+还差的最后一小步：终端里的文字没有画出来。字节确认进了终端（`receive` 收到
+"> " 与 "echo hi…"），但窗口里只有光标块，光标也没往前挪。下一轮从
+`Terminal::receive` 的 `put()` 到 `on_draw` 这条线查。
 
 复跑：`scripts/click-armv7-terminal.sh`（双击图标、打字、截图，报 click delivered
 与 shell answered）。
