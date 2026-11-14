@@ -5,7 +5,7 @@
 # swallow them right after, so the wait skips both windows.
 if(STDIN_FILE)
     execute_process(
-        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -nographic -monitor none -device usb-kbd"
+        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none -device usb-kbd"
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
@@ -14,6 +14,7 @@ else()
     execute_process(
         COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
                 -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
+                -sd ${SD_FILE}
                 -nographic -monitor none -device usb-kbd
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
@@ -103,6 +104,8 @@ expect_literal(EXPECTED_CPUID "the MIDR identity probe did not answer.")
 expect_literal(EXPECTED_PROCCPU "the /proc/cpuinfo read-back probe did not answer.")
 expect_literal(EXPECTED_SCHED "the shared-scheduler round trip did not answer.")
 expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
+expect_literal(EXPECTED_USDHC "the usdhc street never read the card: the block lane stayed dark.")
+expect_literal(EXPECTED_USDHC_WRITE "the usdhc street could not write and read a sector back.")
 expect_literal(EXPECTED_EHCI "the ehci host never reported its seated keyboard.")
 expect_literal(EXPECTED_EHCI_SEATED "the ehci host seated no keyboard: the control street never delivered the device descriptor.")
 expect_literal(EXPECTED_EHCI_KEYBOARD "the ehci keyboard never walked the neutral street: the periodic schedule seated no report door.")

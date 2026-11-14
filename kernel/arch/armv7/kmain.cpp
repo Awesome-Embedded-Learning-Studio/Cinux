@@ -38,6 +38,7 @@
 #include "kernel/arch/armv7/instructions.hpp"
 #include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_keyboard.hpp"
+#include "kernel/drivers/usdhc/usdhc.hpp"
 
 namespace {
 
@@ -252,6 +253,53 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::driver::UsbKeyboard::self().init()
                                               ? "[armv7] ehci keyboard street ok"
                                               : "[armv7] ehci keyboard street FAILED");
+                    // The block street: the card's whole walk lives in
+                    // the driver; the probe only reads the first
+                    // sector back and names what it finds.
+                    if (cinux::driver::UsdhcHost::self().init(0x02190000UL)) {
+                        static unsigned char kMbr[512] = {};
+                        if (cinux::driver::UsdhcHost::self().read_blocks(
+                                cinux::driver::Lba{0},
+                                cinux::driver::BlockSpan{1}, kMbr)) {
+                            cinux::print::Println(
+                                kMbr[510] == 0x55 && kMbr[511] == 0xAA
+                                    ? "[armv7] usdhc card %llu sectors mbr 55AA"
+                                    : "[armv7] usdhc card %llu sectors mbr missing",
+                                cinux::driver::UsdhcHost::self().block_count());
+                            // The write street: the image is molded anew
+                            // on every build, so stamping a sector and
+                            // reading it back never spoils anything.
+                            static unsigned char kStamp[512] = {};
+                            for (unsigned i = 0; i < 512; ++i) {
+                                kStamp[i] = static_cast<unsigned char>(0xC0 ^ i);
+                            }
+                            if (cinux::driver::UsdhcHost::self().write_blocks(
+                                    cinux::driver::Lba{2},
+                                    cinux::driver::BlockSpan{1}, kStamp)) {
+                                static unsigned char kEcho[512] = {};
+                                cinux::print::Println(
+                                    cinux::driver::UsdhcHost::self().read_blocks(
+                                        cinux::driver::Lba{2},
+                                        cinux::driver::BlockSpan{1}, kEcho) &&
+                                            kEcho[0] == kStamp[0] &&
+                                            kEcho[511] == kStamp[511]
+                                        ? "[armv7] usdhc write readback ok"
+                                        : "[armv7] usdhc write readback FAILED");
+                            } else {
+                                cinux::print::Println(
+                                    "[armv7] usdhc write FAILED %u",
+                                    cinux::driver::UsdhcHost::self().last_fail());
+                            }
+                        } else {
+                            cinux::print::Println(
+                                "[armv7] usdhc read FAILED %u",
+                                cinux::driver::UsdhcHost::self().last_fail());
+                        }
+                    } else {
+                        cinux::print::Println("[armv7] usdhc init FAILED %u",
+                                              cinux::driver::UsdhcHost::self()
+                                                  .last_fail());
+                    }
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

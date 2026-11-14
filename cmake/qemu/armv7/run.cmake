@@ -9,11 +9,25 @@ set(CINUX_ARM_RUN_SECONDS 30 CACHE STRING "How long the arm_boot check lets QEMU
 
 set(CINUX_ARM_DTB_ADDR 0x81000000)
 
+# The bring-up SD card: an eight-megabyte raw image whose MBR carries the
+# boot signature and whose second sector a marker string. Deterministic
+# bytes, so the block street's reads have something to recognize.
+set(CINUX_ARM_SD_IMG ${CMAKE_BINARY_DIR}/armv7-sd.img)
+add_custom_command(
+    OUTPUT ${CINUX_ARM_SD_IMG}
+    COMMAND /bin/sh -c
+            "dd if=/dev/zero of='${CINUX_ARM_SD_IMG}' bs=1M count=8 status=none && printf '\\x55\\xAA' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=510 conv=notrunc status=none && printf CINUXSDMK | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=512 conv=notrunc status=none"
+    VERBATIM
+    COMMENT "Molding the armv7 SD bring-up image")
+
+add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
+
 add_custom_target(run
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
+            -sd ${CINUX_ARM_SD_IMG}
             -nographic -monitor none -device usb-kbd
-    DEPENDS arm_image arm_dtb
+    DEPENDS arm_image arm_dtb arm_sd_image
     USES_TERMINAL
     COMMENT "Booting the armv7 bring-up image")
 
@@ -41,6 +55,7 @@ add_test(NAME arm_boot
             "-DRUN_SECONDS=${CINUX_ARM_RUN_SECONDS}"
             "-DDEVICE_FILE=${CINUX_ARM_DTB}"
             "-DDEVICE_ADDR=${CINUX_ARM_DTB_ADDR}"
+            "-DSD_FILE=${CINUX_ARM_SD_IMG}"
             "-DEXPECTED=Cinux armv7: alive on i.MX6ULL"
             "-DEXPECTED_TICK=tick 1"
             "-DEXPECTED_MEMORY=dtb memory 0x80000000"
@@ -57,6 +72,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_PROCCPU=proc cpuinfo"
             "-DEXPECTED_SCHED=sched roundtrip ok"
             "-DEXPECTED_LCDIF=lcdif 320x240 fb"
+            "-DEXPECTED_USDHC=usdhc card 16384 sectors mbr 55AA"
+            "-DEXPECTED_USDHC_WRITE=usdhc write readback ok"
             "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
             "-DEXPECTED_EHCI_SEATED=ehci device 0627:0001 seated"
     "-DEXPECTED_EHCI_KEYBOARD=ehci keyboard street ok"
