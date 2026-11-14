@@ -1,3 +1,4 @@
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/syscall/sys_ppoll.hpp"
 
 #include "cinux/memory.hpp"
@@ -166,7 +167,11 @@ long long HandlePpoll(const SyscallFrame& frame) {
             }
             return 0;
         }
+        // The wait lets the tick in: a parked task whose clock cannot
+        // advance waits forever.
+        const unsigned long long kIrq = arch::SaveAndEnableIrq();
         proc::Scheduler::self().yield();
+        arch::RestoreIrq(kIrq);
     }
 }
 
@@ -204,7 +209,11 @@ long long HandlePoll(const SyscallFrame& frame) {
             }
             return 0;
         }
+        // The wait lets the tick in: a parked task whose clock cannot
+        // advance waits forever.
+        const unsigned long long kIrq = arch::SaveAndEnableIrq();
         proc::Scheduler::self().yield();
+        arch::RestoreIrq(kIrq);
     }
 }
 

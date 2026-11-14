@@ -279,10 +279,20 @@ CP15 的物理定时器寄存器，`TVAL` 在递减、`CTL` 是 1、`IAR` 是 10
 `reap_pending` 里沿着环走，而这段是关着中断的——整台机器就这么卡死了。修法是不
 重复挂（挂之前先查表，走查也带上上限），回收器的走查同样带上限。
 
-**还在自旋**。修完退役之后 QEMU 的 `info registers` 显示 CPU 停在
-`atomic_flag::test_and_set`、`PSR` 是 `60030093`（SVC、I=1）——拿着一把自旋锁在
-关中断的状态下等一个永远不会再跑的持有者。这是下一轮的正题：查这把锁是谁拿了、
-在什么路径上拿了之后又让出了 CPU。
+**时钟冻死的真正原因**。修完退役还卡，用 gdb 接上 QEMU 的调试端口取回溯，栈是：
+
+```
+HandlePpoll → Scheduler::yield → rotate_from_interrupt → switch_tasks → …
+```
+
+也就是说桌面卡在 `poll` 的等待循环里。ARM 的 SVC 入口本来就带着 I=1，`yield()`
+自己又全程关中断——于是一个停下来的任务**永远等不到 tick**，它的期限永远不过期，
+循环就一直转，而定时器中断一次也进不来。x86 上没暴露是因为那边进内核时中断是开
+着的。
+
+修法是给等待路径开一道门：`arch::SaveAndEnableIrq()` 记下当前状态并放开中断，
+`yield()` 之后再 `RestoreIrq()` 恢复。改完 tick 从 7 一路跑到 341，桌面的轮询也
+不再卡死。
 
 复跑：`scripts/press-armv7-keys.sh "ls"`，它会起桌面、在桌面进入循环之后把一行
 字打进去，然后报“keys: arrived / none reached”。
