@@ -63,6 +63,8 @@ endforeach()
 set(_arm_glibc_arg "")
 if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
     set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
+    list(APPEND _arm_glibc_arg
+         "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok")
 endif()
 
 add_test(NAME arm_boot

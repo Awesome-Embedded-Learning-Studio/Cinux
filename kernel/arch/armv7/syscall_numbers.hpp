@@ -48,6 +48,7 @@ inline constexpr unsigned long kSetTls      = 0x0F0005UL;
 // the restartable sequence slot. The neutral faces already exist.
 inline constexpr unsigned long kWritev        = 146;
 inline constexpr unsigned long kMprotect      = 125;
+inline constexpr unsigned long kOpenAt        = 322;
 inline constexpr unsigned long kSetTidAddress = 256;
 inline constexpr unsigned long kSetRobustList = 338;
 inline constexpr unsigned long kRseq          = 398;
