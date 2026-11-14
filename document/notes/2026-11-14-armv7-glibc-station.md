@@ -334,9 +334,24 @@ trace[26] keyup 28 0 0
   `65 63 68 6F 20 68 69 0A 68 69 0A 3E 20`——"echo hi"、回车、shell 回显
   "hi"、再一个提示符 "> "。shell 真的在跑。
 
-还差的最后一小步：终端里的文字没有画出来。字节确认进了终端（`receive` 收到
-"> " 与 "echo hi…"），但窗口里只有光标块，光标也没往前挪。下一轮从
-`Terminal::receive` 的 `put()` 到 `on_draw` 这条线查。
+**文字其实在格子里**。窗口里看不到，是“收下之后没有重画”——把终端窗口的标题
+栏拖一下，让桌面重新刷那块区域，文字就出来了：
+
+![terminal text](assets/2026-11-15-armv7-terminal-text.png)
+
+```
+> echo hi
+> hi
+> 
+```
+
+所以 `Terminal::receive` 的格子与光标都是对的，缺的是它 `invalidate(bounds())`
+之后的那次重画没有落到屏幕上。这是桌面侧（vesper 的脏区管线）的事，不是内核的
+事：同一个终端只要被任何别的重画覆盖到，内容就正确。下一轮决定怎么处理这条——
+给上游报，还是在这个仓库里带一个记录清楚的补丁。
+
+顺带修了 pty 的一个小口子：窗口尺寸原来只能从从设备那一侧设置，主设备
+（`TIOCSWINSZ`）问不到答案；现在两边都落到同一个窗口上。
 
 复跑：`scripts/click-armv7-terminal.sh`（双击图标、打字、截图，报 click delivered
 与 shell answered）。
