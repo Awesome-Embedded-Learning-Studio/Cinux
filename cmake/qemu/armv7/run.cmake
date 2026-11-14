@@ -60,6 +60,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
             "-DEXPECTED_EHCI_SEATED=ehci device 0627:0001 seated"
     "-DEXPECTED_EHCI_KEYBOARD=ehci keyboard street ok"
+            "-DEXPECTED_USBKBD=dev usbkbd seated"
+            "-DEXPECTED_GUEST_USBKBD=usbkbd ok, empty answers EAGAIN or a glyph"
             "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"

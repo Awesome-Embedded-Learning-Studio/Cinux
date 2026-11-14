@@ -28,6 +28,7 @@
 #include "kernel/fs/vfs.hpp"
 #include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
@@ -155,6 +156,11 @@ void init() {
         // two input seats. event0 speaks the UART's keys, event1 sits
         // quiet: the pointer has no source on this board.
         fs::SeatDeviceTree(*kDev, armv7::UartKeyboardEvents(), armv7::BoardPointerEvents());
+        // The USB keyboard walked its street at bring-up; the neutral
+        // hand-over lands it in this tree as the usbkbd character node.
+        if (driver::SeatUsbKeyboard()) {
+            cinux::print::Println("[armv7] dev usbkbd seated");
+        }
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
         base::safety::Check(kDevMount.ok(), "devfs mount failed");
         const auto kFbView = g_vfs->resolve("/dev/fb0");

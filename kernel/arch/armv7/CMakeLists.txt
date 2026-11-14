@@ -84,6 +84,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/drivers/serial/serial.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/ehci.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_device.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_keyboard.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci_layout.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/console.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp

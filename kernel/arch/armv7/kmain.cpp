@@ -37,8 +37,6 @@
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_keyboard.hpp"
-#include "kernel/drivers/usb/usb_device.hpp"
-#include "kernel/drivers/usb/xhci_layout.hpp"
 
 namespace {
 
@@ -69,27 +67,6 @@ void PrintHex(unsigned long long value) {
             cinux::armv7::UartPutChar(kDigits[nibble]);
             started = true;
         }
-    }
-}
-
-}  // namespace
-
-namespace {
-
-/// The neutral device walk's shadow owner: the report callback is typed
-/// on it, its state stays untouched on this lane.
-cinux::driver::usb::UsbDevice<cinux::driver::UsbKeyboard> k_probe_device;
-
-void probe_report(cinux::driver::UsbKeyboard& /*self*/, unsigned long status,
-                  unsigned long length) {
-    if (status == 0 && length != 0) {
-        const unsigned char* kReport = k_probe_device.report();
-        cinux::print::Println("[armv7] ehci report %02X %02X %02X", kReport[0], kReport[1],
-                              kReport[2]);
-    }
-    if (cinux::driver::usb::HostDriver* kHost = cinux::driver::usb::PrimaryHost();
-        kHost != nullptr) {
-        k_probe_device.interrupt_read(*kHost, &probe_report, &cinux::driver::UsbKeyboard::self());
     }
 }
 
@@ -268,26 +245,12 @@ extern "C" [[noreturn]] void kmain() {
                             cinux::driver::usb::PrimaryHost()->detach(seat);
                         }
                     }
-                    if (cinux::driver::usb::HostDriver* kHost =
-                            cinux::driver::usb::PrimaryHost();
-                        kHost != nullptr) {
-                        cinux::driver::usb::KeyboardEp kEndpoint{};
-                        if (k_probe_device.enumerate(
-                                *kHost, cinux::driver::usb::kHidProtocolBootKeyboard,
-                                kEndpoint) &&
-                            k_probe_device.set_configuration(*kHost,
-                                                             kEndpoint.config_value) &&
-                            k_probe_device.configure_interrupt_in(*kHost, kEndpoint.max_packet,
-                                                                  kEndpoint.interval)) {
-                            k_probe_device.interrupt_read(
-                                *kHost, &probe_report, &cinux::driver::UsbKeyboard::self());
-                            cinux::print::Println("[armv7] ehci keyboard street ok");
-                        } else {
-                            cinux::print::Println("[armv7] ehci keyboard street FAILED %u",
-                                                  cinux::driver::usb::EhciHost::self()
-                                                      .last_fail());
-                        }
-                    }
+                    // The whole neutral walk — enumerate, configure,
+                    // arm — lives in the class driver now; this lane
+                    // only asks for its seat and keeps the verdict.
+                    cinux::print::Println(cinux::driver::UsbKeyboard::self().init()
+                                              ? "[armv7] ehci keyboard street ok"
+                                              : "[armv7] ehci keyboard street FAILED");
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

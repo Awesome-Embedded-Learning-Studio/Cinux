@@ -31,9 +31,19 @@ namespace cinux::driver {
 
 namespace {
 
-base::Result<unsigned long> silent_read(void* /*context*/, void* /*sink*/,
-                                        unsigned long /*count*/) {
-    return 0;
+base::Result<unsigned long> glyph_read(void* /*context*/, void* sink, unsigned long count) {
+    if (!UsbKeyboard::self().poll()) {
+        return base::KernelError::kWouldBlock;
+    }
+    auto* const kOut = static_cast<unsigned char*>(sink);
+    for (unsigned long index = 0; index < count; ++index) {
+        const char kGlyph = UsbKeyboard::self().take();
+        if (kGlyph == 0) {
+            return index;
+        }
+        kOut[index] = static_cast<unsigned char>(kGlyph);
+    }
+    return count;
 }
 
 base::Result<unsigned long> accept_write(void* /*context*/, const void* /*source*/,
@@ -41,10 +51,14 @@ base::Result<unsigned long> accept_write(void* /*context*/, const void* /*source
     return count;
 }
 
+bool glyph_has_input(void* /*context*/) {
+    return UsbKeyboard::self().poll();
+}
+
 const fs::DeviceOps kKeyboardOps{
-    .read      = silent_read,
+    .read      = glyph_read,
     .write     = accept_write,
-    .has_input = nullptr,
+    .has_input = glyph_has_input,
     .ioctl     = nullptr,
     .release   = nullptr,
     .context   = nullptr,
@@ -111,9 +125,19 @@ char UsbKeyboard::take() {
     return code;
 }
 
+namespace {
+/// One devfs hand-over per boot: a second ask answers what the first won.
+bool kUsbKeyboardSeated = false;
+}  // namespace
+
 bool SeatUsbKeyboard() {
     if (!UsbKeyboard::self().init()) {
         return false;
+    }
+    // A lane that walked the street at bring-up already holds its seat;
+    // this is only the devfs hand-over.
+    if (UsbKeyboard::self().seated() && kUsbKeyboardSeated) {
+        return true;
     }
     const base::Result<void> kSeat = DeviceModel::self().seat({
         .klass       = DeviceClass::kCharacter,
@@ -123,6 +147,7 @@ bool SeatUsbKeyboard() {
         .bus         = "usb",
         .driver_name = "xhci-hid",
     });
+    kUsbKeyboardSeated = kSeat.ok();
     return kSeat.ok();
 }
 

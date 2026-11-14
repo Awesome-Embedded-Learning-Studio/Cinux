@@ -241,6 +241,25 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(4UL, 1UL, (unsigned long)kNbA, slen(kNbA));
         }
     }
+    // USB keyboard seat: the usbkbd node answers through the very
+    // glyph face the class driver owns; with no keys pressed the
+    // nonblocking read must refuse with EAGAIN, not park or lie.
+    {
+        static const char kKbA[] = "[guest] usbkbd refused\n";
+        static const char kKbB[] = "[guest] usbkbd ok, empty answers EAGAIN or a glyph\n";
+        const long kFd = sys3(5UL, (unsigned long)"/dev/usbkbd", 0UL, 0UL);  // open
+        const long kArm = kFd >= 0 ? sys3(55UL, kFd, 4UL, 0x800UL) : -1L;    // O_NONBLOCK
+        char back[4];
+        const long kGot = kArm == 0 ? sys3(3UL, kFd, (unsigned long)back, sizeof(back)) : -1L;
+        if (kFd >= 0 && kArm == 0 && (kGot == -11L || kGot >= 1L)) {
+            sys3(4UL, 1UL, (unsigned long)kKbB, slen(kKbB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kKbA, slen(kKbA));
+        }
+        if (kFd >= 0) {
+            sys3(6UL, kFd, 0UL, 0UL);  // close
+        }
+    }
     // fstat: the motd's shape, regular file with its byte count.
     {
         static const char kStA[] = "[guest] fstat refused\n";
