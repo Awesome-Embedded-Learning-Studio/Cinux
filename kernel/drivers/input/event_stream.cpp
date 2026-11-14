@@ -1,3 +1,4 @@
+#include "kernel/arch/abi.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
 
 #include <stdint.h>
@@ -60,15 +61,38 @@ void EventStream::publish(uint16_t type, uint16_t code, int32_t value) {
     }
 }
 
+namespace {
+
+/// Lays one record down in this ABI's shape: a four-byte timeval on
+/// EABI, an eight-byte one on x86-64.
+void write_record(unsigned char* sink, const InputEventWire& record) {
+    constexpr arch::abi::InputEventLayout kLayout = arch::abi::kInputEventLayout;
+    for (unsigned long index = 0; index < kLayout.bytes; ++index) {
+        sink[index] = 0;
+    }
+    const auto put = [sink](unsigned long offset, unsigned long width, unsigned long long value) {
+        for (unsigned long index = 0; index < width; ++index) {
+            sink[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+        }
+    };
+    put(kLayout.seconds_off, kLayout.seconds_size, record.seconds);
+    put(kLayout.micros_off, kLayout.micros_size, record.microseconds);
+    put(kLayout.type_off, kLayout.type_size, record.type);
+    put(kLayout.code_off, kLayout.code_size, record.code);
+    put(kLayout.value_off, kLayout.value_size, static_cast<unsigned int>(record.value));
+}
+
+}  // namespace
+
 void EventStream::publish_report() {
     publish(kEvSyn, kSynReport, 0);
 }
 
-base::Result<unsigned long> EventStream::read(void* sink, unsigned long count, const void* owner) {
+base::Result<unsigned long>EventStream::read(void* sink, unsigned long count, const void* owner) {
     if (poll_hook_ != nullptr) {
         poll_hook_();
     }
-    const unsigned long kRecords = count / kInputEventBytes;
+    const unsigned long kRecords = count / arch::abi::kInputEventLayout.bytes;
     if (kRecords == 0) {
         return base::KernelError::kInvalidArgument;
     }
@@ -105,14 +129,13 @@ base::Result<unsigned long> EventStream::read(void* sink, unsigned long count, c
         if (record.type == kEvKey && record.code < delivered_keys_.size()) {
             delivered_keys_[record.code] = record.value != 0;
         }
-        base::CopyBytes(static_cast<unsigned char*>(sink) + (handed * kInputEventBytes), &record,
-                        kInputEventBytes);
+        write_record(static_cast<unsigned char*>(sink) + (handed * arch::abi::kInputEventLayout.bytes), record);
         ++handed;
     }
     if (handed == 0) {
         return base::KernelError::kWouldBlock;
     }
-    return handed * kInputEventBytes;
+    return handed * arch::abi::kInputEventLayout.bytes;
 }
 
 bool EventStream::poll(const void* owner) const {

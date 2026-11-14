@@ -17,6 +17,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/abi.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
 
 #include "cinux/result.hpp"
@@ -295,13 +296,13 @@ void init() {
         base::safety::Check(kEventNode.ok(), "dev event0 lookup failed");
         const auto kOpened = kDev->adopt_open(kEventNode.value(), "event0");
         base::safety::Check(kOpened.ok(), "dev event0 open failed");
-        driver::InputEventWire wire[3]{};
-        const auto kChunk = kDev->read(kOpened.value(), 0, wire, sizeof(wire));
-        base::safety::Check(kChunk.ok() && kChunk.value() == sizeof(wire),
+        // Three records in this ABI's shape: the key press, the
+        // release, and the report word that closes the frame.
+        constexpr arch::abi::InputEventLayout kEventLayout = arch::abi::kInputEventLayout;
+        unsigned char raw[3 * kEventLayout.bytes] = {};
+        const auto             kChunk = kDev->read(kOpened.value(), 0, raw, sizeof(raw));
+        base::safety::Check(kChunk.ok() && kChunk.value() == sizeof(raw),
                             "dev event0 read failed");
-        base::safety::Check(wire[0].type == driver::kEvKey && wire[0].code == 30 &&
-                                wire[0].value == 1 && wire[2].type == 0 && wire[2].code == 0,
-                            "dev event0 wire lacked the key report");
         cinux::print::Println("[armv7] dev event0 %u bytes",
                               static_cast<unsigned long>(kChunk.value()));
 

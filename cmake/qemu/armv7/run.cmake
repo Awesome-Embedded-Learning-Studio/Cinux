@@ -144,7 +144,7 @@ add_test(NAME arm_boot
             ${_arm_busybox_arg}
 
             "-DEXPECTED_FB0=dev fb0 640x480"
-            "-DEXPECTED_EVENT0=dev event0 72 bytes"
+            "-DEXPECTED_EVENT0=dev event0 48 bytes"
             "-DEXPECTED_PTY=pty ok, master and slave echo"
             "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
             "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"

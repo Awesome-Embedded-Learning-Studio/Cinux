@@ -159,4 +159,33 @@ inline constexpr SigActionLayout kSigActionLayout = {
     .mask_off     = 24,
     .mask_size    = 8,
 };
+
+/**
+ * @brief One struct input_event as this ABI lays it out.
+ * @note  The stamp's words are `long`s, so the record is 24 bytes with
+ *        an eight-byte timeval on a 64-bit port and 16 bytes with a
+ *        four-byte one on EABI.
+ */
+struct InputEventLayout {
+    unsigned long bytes;
+    unsigned long seconds_off, seconds_size;
+    unsigned long micros_off, micros_size;
+    unsigned long type_off, type_size;
+    unsigned long code_off, code_size;
+    unsigned long value_off, value_size;
+};
+
+inline constexpr InputEventLayout kInputEventLayout = {
+    .bytes        = 24,
+    .seconds_off  = 0,
+    .seconds_size = 8,
+    .micros_off   = 8,
+    .micros_size  = 8,
+    .type_off     = 16,
+    .type_size    = 2,
+    .code_off     = 18,
+    .code_size    = 2,
+    .value_off    = 20,
+    .value_size   = 4,
+};
 }  // namespace cinux::arch::abi
