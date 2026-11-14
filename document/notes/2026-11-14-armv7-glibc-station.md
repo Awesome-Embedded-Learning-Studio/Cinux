@@ -294,6 +294,18 @@ HandlePpoll → Scheduler::yield → rotate_from_interrupt → switch_tasks → 
 `yield()` 之后再 `RestoreIrq()` 恢复。改完 tick 从 7 一路跑到 341，桌面的轮询也
 不再卡死。
 
+**按键于是通了**。中断活过来之后每拍的泵能取到串口字节，桌面这边也就收到了——
+把桌面的 `VESPER_FBDEV_TRACE=1` 打开，串口日志里能看到它自己解析出来的按键：
+
+```
+trace[25] keydown 28 0 0
+trace[25] poll=1 used=1 kbd=1 ptr=0 pty=0
+trace[26] keyup 28 0 0
+```
+
+回车键（evdev 码 28）从串口一路走到桌面的按键事件里。`scripts/press-armv7-keys.sh`
+现在报的是“keys: arrived”。
+
 复跑：`scripts/press-armv7-keys.sh "ls"`，它会起桌面、在桌面进入循环之后把一行
 字打进去，然后报“keys: arrived / none reached”。
 

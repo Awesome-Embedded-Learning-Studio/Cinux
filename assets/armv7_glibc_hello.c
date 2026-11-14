@@ -121,7 +121,11 @@ int main(int argc, char** argv) {
     // this mode exists for looking at the screen, not for the check.
     char* const kArgs[] = {(char*)"desk", (char*)"/dev/fb0", (char*)"/dev/event0",
                            (char*)"/dev/event1", NULL};
-    execve("/disk/desk", kArgs, NULL);
+    // The desk's own event trace is behind this variable: with it set,
+    // every word it decodes is printed, which is how a key that reached
+    // the desktop gets seen from the serial log.
+    char* const kEnv[] = {(char*)"VESPER_FBDEV_TRACE=1", NULL};
+    execve("/disk/desk", kArgs, kEnv);
 #else
     char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/disk/prog", NULL};
     execve("/disk/bb", kArgs, NULL);
