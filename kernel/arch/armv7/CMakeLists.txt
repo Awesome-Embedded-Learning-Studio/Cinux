@@ -62,6 +62,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/user_access.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_exec.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_brk.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_mmap.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_fcntl.cpp
@@ -140,6 +141,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/scheduler.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/signal_trampoline.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/futex.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/task_runtime.cpp

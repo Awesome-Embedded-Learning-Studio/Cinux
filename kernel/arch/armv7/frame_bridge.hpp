@@ -60,6 +60,14 @@ inline void Load(const UserTrap& trap, cinux::syscall::SyscallFrame& frame) {
  */
 inline void Store(const cinux::syscall::SyscallFrame& frame, UserTrap& trap) {
     trap.r0 = static_cast<unsigned long>(frame.rax);
+    // The exec rewrite: the builder zeroed the frame and seated the
+    // new entry, stack, and answer. Load seeded those very seats from
+    // this trap, so writing them back is a lossless round trip for
+    // every ordinary call and the new world's doorway for exec. The
+    // trap's SPSR stays: mode and state belong to the CPU seat, not
+    // to the program being replaced.
+    trap.lr = static_cast<unsigned long>(frame.rcx);
+    trap.sp = static_cast<unsigned long>(frame.user_rsp);
 }
 
 }  // namespace cinux::arch::frame

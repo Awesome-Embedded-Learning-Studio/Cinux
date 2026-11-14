@@ -36,6 +36,7 @@
 #include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
 #include "kernel/syscall/sys_read.hpp"
+#include "kernel/syscall/sys_exec.hpp"
 #include "kernel/syscall/sys_write.hpp"
 
 namespace cinux::armv7 {
@@ -75,6 +76,10 @@ const NeutralService kNeutralServices[] = {
     // frame into the child before this service returns, so the port
     // entry reads the real frame, not the neutral picture.
     {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
+    // The exec face: the neutral builder stages the disk's program,
+    // swaps the address space, and rewrites the frame; the bridge
+    // below carries the new entry into the trap.
+    {cinux::armv7::syscall_nr::kExecve, &cinux::syscall::HandleExecve},
     // Linux spells arm's wait4 as 114: the neutral wait face serves it.
     {cinux::armv7::syscall_nr::kWait, &cinux::syscall::HandleWait4},
     // A seated yield must reach the real scheduler: the tick-driven

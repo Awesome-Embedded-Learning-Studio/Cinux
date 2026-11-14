@@ -20,6 +20,8 @@ truncate -s $((partition_sectors * 512)) "${volume}"
 mkfs.ext2 -q -F -b 1024 -O none -N 64 "${volume}"
 debugfs -w -R 'mkdir /etc' "${volume}" >/dev/null 2>&1
 debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
+disk_prog="${CINUX_DISK_PROG:-${script_dir}/../assets/armv7_diskprog.elf}"
+debugfs -w -R "write ${disk_prog} /prog" "${volume}" >/dev/null 2>&1
 
 # The disk: zeros, the volume at its offset, then the MBR on top.
 truncate -s 8M "${image}"

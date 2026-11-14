@@ -322,7 +322,7 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     // hello included now that the old world releases what it holds.
     {
         static const char kDlA[] = "[guest] getdents refused\n";
-        static const char kDlB[] = "[guest] getdents ok, root holds five entries with hello\n";
+        static const char kDlB[] = "[guest] getdents ok, root holds six entries with hello\n";
         const long kRoot = sys3(5UL, (unsigned long)"/", 0UL, 0UL);
         unsigned char records[512];
         unsigned long names = 0;
@@ -342,7 +342,9 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
                 walk += kLen;
             }
         }
-        if (got > 0 && names == 5 && saw_hello) {
+        // Six now: the five seeded files plus the /disk doorway the
+        // ext2 mount added to the root.
+        if (got > 0 && names == 6 && saw_hello) {
             sys3(4UL, 1UL, (unsigned long)kDlB, slen(kDlB));
         } else {
             sys3(4UL, 1UL, (unsigned long)kDlA, slen(kDlA));
@@ -505,6 +507,17 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             const int     kOk = kReaped == kChild && status == 6U;
             sys3(4UL, 1UL, (unsigned long)(kOk ? kSlB : kSlA),
                  slen(kOk ? kSlB : kSlA));
+        }
+    }
+    // The last act: replace this world with the ext2-resident
+    // program. Success never returns here; the disk image takes the
+    // seat and speaks its own line.
+    {
+        static const char kExA[] = "[guest] exec from disk refused\n";
+        static const char kPath[] = "/disk/prog";
+        const long kVerdict = sys3(11UL, (unsigned long)kPath, 0UL, 0UL);  // execve
+        if (kVerdict != 0) {
+            sys3(4UL, 1UL, (unsigned long)kExA, slen(kExA));
         }
     }
     sys3(1UL, 0UL, 0UL, 0UL);

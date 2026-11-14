@@ -35,6 +35,12 @@ constexpr bool IsUserSlot(unsigned long index) {
 /// the heap's virtual pages never collide with the identity map.
 inline constexpr unsigned long kHeapBase = 0x90000000UL;
 
+/// The heap window's reservation: second-level tables for this many
+/// bytes are created once at bring-up and shared by every address space,
+/// so runtime heap growth edits shared tables instead of installing a
+/// private second level under whichever root happens to be live.
+inline constexpr unsigned long kHeapReserveBytes = 16_MiB;
+
 /// Highest user-visible address plus one: the classic 3 GiB split.
 inline constexpr unsigned long kUserTop = 0xC0000000UL;
 

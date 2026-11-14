@@ -163,6 +163,24 @@ const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& ha
     g_l1[0x40000000UL >> 20U] = cinux::arch::page::MakeTablePointer(
         static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(g_l2)), Entry{0});
 
+    // The heap window's second levels are born here, under the kernel
+    // root, before any task space copies the kernel half: every megabyte
+    // the heap later claims needs a new first-level slot, and a slot
+    // born at growth time would live only in whichever root was loaded
+    // then. Pre-created tables are shared by that copy, so growth edits
+    // the same second level whichever root walks it.
+    KernelTables tables;
+    const unsigned long kHeapTop =
+        cinux::arch::space::kHeapBase + cinux::arch::space::kHeapReserveBytes;
+    for (unsigned long window = cinux::arch::space::kHeapBase; window < kHeapTop;
+         window += 0x100000UL) {
+        const unsigned long kSecond = tables.take_page();
+        if (kSecond == 0) {
+            return nullptr;
+        }
+        g_l1[window >> 20U] = cinux::arch::page::MakeTablePointer(kSecond, Entry{0});
+    }
+
     g_root = static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(g_l1));
     asm volatile("mcr p15, 0, %0, c3, c0, 0" : : "r"(0x55555555U));  // DACR
     asm volatile("mcr p15, 0, %0, c2, c0, 2" : : "r"(0));            // TTBCR
