@@ -1,4 +1,4 @@
-# armv7 的 glibc 与 busybox 车站
+# armv7 的 glibc、busybox 与画面车站
 
 状态：盘上程序能接力 exec 到静态链接的 glibc 程序，程序用 malloc、printf、
 open/read 跑完，再 exec 到静态链接的 busybox，busybox 的 echo 打出
@@ -104,6 +104,23 @@ arm 的项是 8 字节，第一次 writev 吐出来的是二进制里的字符�
 现在的终幕是盘上 glibc 程序 exec `busybox stat /disk/prog`，判定字面量
 `File: /disk/prog`。
 
+## 画面这一面
+
+LCDIF 在 bring-up 时就往自己的帧里画了一张测试卡：绿色场加一条十六行的高亮条，
+外加一个标记字 `0xABCD1234` 放在第 200 行第 5 列。QEMU 抓下来的画面（`screendump`）
+里能看到它——蓝条加绿场，左下那个孤零零的红点就是标记：
+
+![LCDIF test card](assets/2026-11-15-armv7-lcd-card.png)
+
+盘上的 glibc 程序接着走用户侧：`open("/dev/fb0")`、`mmap` 307200 字节（75 个
+4 KiB 页），先读第 200 行第 5 列——读到 `ABCD1234`，说明这个映射就是面板本身的
+内存，不是私有副本；然后整屏填色、再读回自己写的值。判定字面量
+`[glibc] fb seed ABCD1234`。
+
+帧的归属跟着修正了一处：面板的帧属于硬件，不属于分配器。x86 的
+`ReleaseFrame` 早就有 `IsHardwarePage` 这一道，armv7 原来没有，于是同一帧被
+映射两次时拆卸会还两次、触发 PMM 双重释放。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
@@ -111,4 +128,5 @@ arm 的项是 8 字节，第一次 writev 吐出来的是二进制里的字符�
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
 - busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
-- GUI 桌面还没上车
+- 真正的桌面还没上车：vesper 的 fbdev 后端要交叉编译 C++ 工具链
+- 设备帧的多重映射与拆卸计数仍需更完整的账本

@@ -114,6 +114,7 @@ expect_literal(EXPECTED_DISK_EXEC "the exec never brought the disk program into 
 if(DEFINED EXPECTED_GLIBC_EXEC AND NOT EXPECTED_GLIBC_EXEC STREQUAL "")
     expect_literal(EXPECTED_GLIBC_EXEC "the glibc station never printed: a real libc did not run.")
     expect_literal(EXPECTED_GLIBC_LIBC "the libc surface probe never answered: malloc, printf or open failed.")
+    expect_literal(EXPECTED_GLIBC_FB "the guest never read the panel's marker: the frame-buffer mapping stayed private.")
 endif()
 if(DEFINED EXPECTED_ARM_BUSYBOX AND NOT EXPECTED_ARM_BUSYBOX STREQUAL "")
     expect_literal(EXPECTED_ARM_BUSYBOX "busybox never answered: a real userland program did not run.")

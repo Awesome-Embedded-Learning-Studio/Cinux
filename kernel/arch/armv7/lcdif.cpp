@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "kernel/mm/layout.hpp"
+#include "kernel/mm/hardware_frames.hpp"
 #include "kernel/mm/pmm.hpp"
 
 namespace cinux::armv7::lcdif {
@@ -72,7 +73,10 @@ unsigned long InitFramebuffer() {
         return 0;
     }
     const unsigned long kFramePhys = kPages.raw;
-    g_framebuffer                  = cinux::arch::space::DirectMapVirt(kFramePhys);
+    // The panel's frame belongs to the screen from here on: address
+    // spaces may map it, and their teardown must not hand it back to
+    // the allocator while the LCDIF still scans it out.
+    g_framebuffer = cinux::arch::space::DirectMapVirt(kFramePhys);
 
     // A first image worth showing: a green field with a red bar at the
     // top, so a screenshot tells the panel from a black console.
@@ -82,6 +86,9 @@ unsigned long InitFramebuffer() {
             kPixels[row * kWidth + column] =
                 row < 16 ? 0xFF0000FFU : 0xFF00AA00U;
         }
+    // A marker a program can read through its own frame mapping: seeing
+    // this word proves the mapping and the panel are the same memory.
+    kPixels[(200UL * kWidth) + 5UL] = 0xABCD1234U;
     }
 
     // Program the face the model answers, in the order it needs: the

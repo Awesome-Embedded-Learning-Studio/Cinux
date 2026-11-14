@@ -11,6 +11,7 @@
  */
 
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +62,54 @@ int main(int argc, char** argv) {
     printf("[glibc] malloc, printf, open all ok, argc %d, self %s, motd %ld bytes\n", argc,
            kSelf, (long)kGot);
     fflush(stdout);
+
+    // The GUI street: map the panel's own frame buffer and paint it.
+    // The two colours below are the kernel's read-back proof: it looks
+    // at the panel's memory after this process leaves.
+    {
+        static const char kFbLine[] = "[glibc] fb painted, %d bytes mapped\n";
+        const int fb = open("/dev/fb0", O_RDWR);
+        int painted = 0;
+        if (fb >= 0) {
+            const unsigned long kBytes = 320UL * 240UL * 4UL;
+            unsigned int* const pixels = mmap(NULL, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fb,
+                                              0);
+            if (pixels != MAP_FAILED) {
+                const unsigned long kProof = 200UL * 320UL + 5UL;
+                // What the kernel stamped before this process started:
+                // a match proves this mapping is the panel's memory.
+                const unsigned int kSeed = pixels[kProof];
+                char seed[80] = {};
+                const int kSeedLen =
+                    snprintf(seed, sizeof(seed), "[glibc] fb seed %X\n", kSeed);
+                if (kSeedLen > 0) {
+                    write(STDOUT_FILENO, seed, (unsigned long)kSeedLen);
+                }
+                for (unsigned long i = 0; i < kBytes / 4UL; ++i) {
+                    pixels[i] = 0x00102030U;
+                }
+                pixels[kProof] = 0x00FF00FFU;
+                pixels[kProof + 1UL] = 0x0000FF00U;
+                msync(pixels, kBytes, MS_SYNC);
+                char back[96] = {};
+                const int kBackLen = snprintf(back, sizeof(back), "[glibc] fb readback %X %X\n",
+                                              pixels[kProof], pixels[kProof + 1UL]);
+                if (kBackLen > 0) {
+                    write(STDOUT_FILENO, back, (unsigned long)kBackLen);
+                }
+                painted = (int)kBytes;
+                // The mapping stays live through exit on purpose: the
+                // console only repaints its own text while a holder has
+                // the frame, and the kernel's read-back wants to see
+                // these pixels untouched.
+            }
+        }
+        char line[64] = {};
+        const int kLen = snprintf(line, sizeof(line), kFbLine, painted);
+        if (kLen > 0) {
+            write(STDOUT_FILENO, line, (unsigned long)kLen);
+        }
+    }
 
     // The hand-off to a real userland: busybox, statically linked, run
     // as its `echo` applet. Success never returns here.

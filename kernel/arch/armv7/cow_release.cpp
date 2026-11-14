@@ -22,6 +22,7 @@
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/arch/space_control.hpp"
 #include "kernel/mm/page_walk.hpp"
+#include "kernel/mm/hardware_frames.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 
@@ -127,6 +128,11 @@ bool MarkChildShared(unsigned long root, unsigned long virtual_address, bool par
 }
 
 void ReleaseFrame(unsigned long long frame) {
+    // A device's own frame is not the allocator's to take back: the
+    // panel, for one, outlives every mapping that showed it.
+    if (cinux::mm::IsHardwarePage(static_cast<unsigned long>(frame))) {
+        return;
+    }
     if (SharedFrame* entry = find_shared(frame); entry != nullptr) {
         if (entry->count > 1) {
             --entry->count;
