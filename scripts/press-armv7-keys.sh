@@ -33,7 +33,7 @@ trap 'rm -f "${log}"' EXIT
         -kernel "${build}/kernel/arch/armv7/arm.elf" \
         -device "loader,file=${build}/armv7-qemu.dtb,addr=0x81000000,force-raw=on" \
         -drive "file=${image},if=sd,format=raw" \
-        -display none -serial stdio -monitor none -device usb-kbd \
+        -display none -serial stdio -monitor none -device usb-tablet \
         > "${log}" 2>/dev/null || true
 
 if grep -aq 'vesper-fbdev: running' "${log}"; then

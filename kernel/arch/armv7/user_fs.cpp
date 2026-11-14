@@ -30,6 +30,7 @@
 #include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/drivers/usb/usb_keyboard.hpp"
+#include "kernel/drivers/usb/usb_tablet.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
@@ -166,7 +167,14 @@ void init() {
         // The same tree both ports grow: console, fb0, ptmx and the
         // two input seats. event0 speaks the UART's keys, event1 sits
         // quiet: the pointer has no source on this board.
-        fs::SeatDeviceTree(*kDev, armv7::UartKeyboardEvents(), armv7::BoardPointerEvents());
+        // The pointer is the USB tablet when the controller finds one:
+        // the board's own pointer stream has no source behind it, and a
+        // desktop needs a cursor that moves. The board stream stays the
+        // fallback for a machine without a tablet.
+        const bool kTablet = driver::UsbTablet::self().init();
+        fs::SeatDeviceTree(*kDev, armv7::UartKeyboardEvents(),
+                           kTablet ? driver::UsbTablet::self().events()
+                                   : armv7::BoardPointerEvents());
         // The USB keyboard walked its street at bring-up; the neutral
         // hand-over lands it in this tree as the usbkbd character node.
         if (driver::SeatUsbKeyboard()) {

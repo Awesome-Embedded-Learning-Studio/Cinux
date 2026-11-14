@@ -105,6 +105,8 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/ehci.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_device.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_keyboard.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_tablet.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/tablet_report.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usdhc/usdhc.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_queue.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_cache.cpp

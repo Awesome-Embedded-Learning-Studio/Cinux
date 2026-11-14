@@ -309,6 +309,27 @@ trace[26] keyup 28 0 0
 复跑：`scripts/press-armv7-keys.sh "ls"`，它会起桌面、在桌面进入循环之后把一行
 字打进去，然后报“keys: arrived / none reached”。
 
+## 指针与窗口
+
+桌面的指针这一轮接上了 USB 平板：`driver::UsbTablet::self()` 在控制上找到设备就用
+它的事件流，找不到才退回板子自己的空指针流。平板说绝对坐标，所以点击可以直接指
+到像素——用 QMP 的 `input-send-event` 发 `abs` 与 `btn` 事件，桌面按它自己的换算
+落在 (40,110)，正是 TERMINAL 图标那一点。
+
+图标是**双击**激活的（`Icon::on_double_click`），双击之后终端窗口真的开出来了：
+
+![terminal window](assets/2026-11-15-armv7-terminal-window.png)
+
+窗口标题栏、关闭按钮、终端里的光标块都在。按键也随之有了下落：串口打的
+`echo hi` 被桌面解析成 `keydown 28`/`keyup 28` 之类，随后 `trace` 里出现
+`pty=1`——shell 收到按键并有回话。
+
+还差的最后一小步：终端里的文字没有画出来。pty 有回答、桌面也读到了，但窗口里
+只有光标块，没有提示符与回显。下一轮从 `term_source.pump` 到终端绘制的这一段查。
+
+复跑：`scripts/click-armv7-terminal.sh`（双击图标、打字、截图，报 click delivered
+与 shell answered）。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
