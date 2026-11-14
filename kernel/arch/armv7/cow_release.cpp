@@ -28,45 +28,26 @@
 
 namespace cinux::mm::cow {
 
-namespace {
-
-constexpr unsigned long kLedgerEntries = 128;
-
-struct SharedFrame {
-    unsigned long long frame;
-    unsigned long      count;
-};
-
-SharedFrame g_ledger[kLedgerEntries];
-
-SharedFrame* find_shared(unsigned long long frame) {
-    for (auto& entry : g_ledger) {
-        if (entry.frame == frame) {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
-}  // namespace
-
 void RetainFrame(unsigned long long frame) {
-    if (SharedFrame* entry = find_shared(frame); entry != nullptr) {
-        ++entry->count;
-        return;
+    // One mechanism, the allocator's own: a frame's share count lives
+    // beside its bitmap bit, so a process with a thousand shared pages
+    // is no different from one with two. The arm lane used to keep a
+    // 128-entry table of its own, and a fork past that silently forgot
+    // its shares -- the teardown then freed a frame the parent still
+    // walked, which is the double free this replaces.
+    // A frame that was private until now enters the count as the owner
+    // it already had, then the new mapping joins it: two walkers, not
+    // one. Without the owner's own share the first teardown would free a
+    // frame the other world still walks.
+    auto& allocator = cinux::mm::Pmm::self();
+    if (allocator.frame_shares(cinux::base::PhysAddr{static_cast<unsigned long>(frame)}) == 0) {
+        allocator.retain_frame(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
     }
-    for (auto& entry : g_ledger) {
-        if (entry.frame == 0) {
-            entry.frame = frame;
-            entry.count = 2;  // the owner that asked plus the one before
-            return;
-        }
-    }
+    allocator.retain_frame(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
 }
 
 unsigned long FrameShares(unsigned long long frame) {
-    const SharedFrame* entry = find_shared(frame);
-    return entry == nullptr ? 0 : entry->count;
+    return cinux::mm::Pmm::self().frame_shares(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
 }
 
 bool MarkPageShared(unsigned long root, unsigned long virtual_address) {
@@ -133,13 +114,8 @@ void ReleaseFrame(unsigned long long frame) {
     if (cinux::mm::IsHardwarePage(static_cast<unsigned long>(frame))) {
         return;
     }
-    if (SharedFrame* entry = find_shared(frame); entry != nullptr) {
-        if (entry->count > 1) {
-            --entry->count;
-            return;
-        }
-        entry->frame = 0;
-        entry->count = 0;
+    if (Pmm::self().release_frame(cinux::base::PhysAddr{static_cast<unsigned long>(frame)}) != 0) {
+        return;  // someone else still walks it
     }
     Pmm::self().free_page(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
 }

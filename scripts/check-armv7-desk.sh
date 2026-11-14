@@ -19,7 +19,9 @@ shot3="${CINUX_ARM_DESK_CLOSED_SHOT:-${build}/armv7-desk-closed.ppm}"
 icon_x="${CINUX_ARM_ICON_X:-40}"
 icon_y="${CINUX_ARM_ICON_Y:-110}"
 settle="${CINUX_ARM_DESK_DELAY:-16}"
-command_text="${CINUX_ARM_DESK_TEXT:-echo hi}"
+# A pipeline, not a single word: the shell's fork, pipe, exec and
+# redirect all have to survive for its answer to reach the screen.
+command_text="${CINUX_ARM_DESK_TEXT:-ls / | head -2}"
 seconds="${CINUX_ARM_RUN_SECONDS:-34}"
 
 echo '== armv7 desk lane =='
@@ -30,9 +32,12 @@ CINUX_ARM_PROBE_DESK=1 "${here}/build-armv7-glibc-prog.sh" >/dev/null
 # both, so a later `ctest -R arm_boot` sees the lane it expects.
 restore_default_lane() {
     "${here}/build-armv7-glibc-prog.sh" >/dev/null 2>&1 || true
+    # Remove the card first: the target's dependency check alone has been
+    # seen to leave a desk-mode image behind, and a stale one fails the
+    # next arm_boot run.
+    rm -f "${build}/armv7-sd.img"
     cmake --build "${build}" --target arm_sd_image >/dev/null 2>&1 || true
 }
-trap restore_default_lane EXIT
 "${here}/build-armv7-vesper-desk.sh" >/dev/null
 # The image bakes whatever the artifacts currently hold: mold a desk
 # image of its own so the default lane's card stays untouched.
@@ -42,13 +47,16 @@ rm -f "${image}"
 
 log="${CINUX_ARM_DESK_LOG:-$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)}"
 qmp="$(mktemp -u /tmp/cinux-desk-qmp.XXXXXX.sock)"
-# A caller who named the log keeps it for the post-mortem; the default
-# scratch file still goes away.
-if [ -z "${CINUX_ARM_DESK_LOG:-}" ]; then
-    trap 'rm -f "${log}" "${qmp}"' EXIT
-else
-    trap 'rm -f "${qmp}"' EXIT
-fi
+# One exit door for both duties: the lane restores the default art, and
+# a scratch log goes away. A caller who named the log keeps it.
+finish() {
+    restore_default_lane
+    if [ -z "${CINUX_ARM_DESK_LOG:-}" ]; then
+        rm -f "${log}"
+    fi
+    rm -f "${qmp}"
+}
+trap finish EXIT
 rm -f "${shot}" "${shot2}" "${shot3}"
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.

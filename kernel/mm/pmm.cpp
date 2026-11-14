@@ -1,3 +1,4 @@
+#include "kernel/boot/print.hpp"
 #include "kernel/mm/pmm.hpp"
 
 #include <stdint.h>
@@ -62,8 +63,13 @@ void Pmm::free_pages(PhysAddr phys, int order) {
     }
     const unsigned long kIndex =
         cinux::base::math::Floor(phys.raw, cinux::arch::page::kSize);
-    cinux::base::safety::Check(kIndex + (1UL << order) <= kPmmTotalPages && bitmap_.test(kIndex),
-                               "pmm double free");
+    if (kIndex + (1UL << order) > kPmmTotalPages || !bitmap_.test(kIndex)) {
+        // Name the frame before stopping: "double free" alone leaves the
+        // next reader guessing which world freed it twice.
+        cinux::print::Println("[pmm] double free of %X (index %u order %u)", phys.raw, kIndex,
+                              (unsigned)order);
+        cinux::base::safety::Check(false, "pmm double free");
+    }
     bitmap_.clear_range(cinux::base::math::Floor(phys.raw, cinux::arch::page::kSize),
                         1UL << static_cast<unsigned long>(order));
 }
@@ -102,6 +108,13 @@ unsigned long Pmm::release_frame(PhysAddr phys) {
     }
     shares_[kIndex]--;
     return shares_[kIndex];
+}
+
+unsigned long Pmm::frame_shares(PhysAddr phys) const {
+    const cinux::arch::IrqGuard kGuard;
+    const auto                  kLock  = lock_.guard();
+    const unsigned long         kIndex = frame_index(phys);
+    return kIndex < kPmmTotalPages ? shares_[kIndex] : 0;
 }
 
 PhysAddr Pmm::allocate_run(unsigned long page_count) {
