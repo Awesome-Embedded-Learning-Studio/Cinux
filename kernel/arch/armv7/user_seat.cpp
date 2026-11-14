@@ -260,15 +260,13 @@ bool SeatWorldActive() {
 
 void SeatReturnToKernel() {
     // Runs in the service-call context on the seated task's own stack.
-    // The user's saved frame is this episode's own stack frame; its
-    // r4..spsr words are a CpuContext image, and the switch returns
-    // into the body right after its EnterUserModeWithReturn. The body
-    // resumes with its pre-user sp, so the frame's 64 bytes die with
-    // the episode.
-    SeatRun* const kSeat = current_seat();
-    arch::CpuContext* const kUserWords =
-        reinterpret_cast<arch::CpuContext*>(&g_current_trap->r4);
-    arch::ContextSwitch(kUserWords, kSeat->body);
+    // The switch parks this kernel half into a scratch image and resumes
+    // the body right after its EnterUserModeWithReturn; the scratch dies
+    // with the episode, so nothing here needs the trap frame to double
+    // as a context image.
+    SeatRun* const     kSeat = current_seat();
+    arch::CpuContext parked{};
+    arch::ContextSwitch(&parked, kSeat->body);
     __builtin_unreachable();
 }
 

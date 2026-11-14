@@ -47,11 +47,21 @@ struct CpuContext {
     /// switch code compilable and stay zero.
     unsigned long long fs_base = 0;
     unsigned long long gs_base = 0;
+
+    /// The thread pointer: TPIDRURO is one register per CPU, so a
+    /// task's libc TLS base rides in its image and is reloaded on the
+    /// way back in. Without it one process's set_tls would follow the
+    /// CPU into the next process, and an errno write would land in a
+    /// stranger's heap.
+    unsigned long tpidruro = 0;
 };
 
 static_assert(offsetof(CpuContext, spsr) == 10 * sizeof(unsigned long),
               "the switch moves eleven words");
-static_assert(sizeof(CpuContext) == 64, "two address-register words close the context");
+static_assert(offsetof(CpuContext, tpidruro) == 64,
+              "the thread pointer sits where the switch reads it");
+static_assert(sizeof(CpuContext) == 72,
+              "two segment words and the thread pointer close the context");
 
 /// Saves the running world into `from` and resumes `to` in the same mode.
 extern "C" void ContextSwitch(CpuContext* from, const CpuContext* to);

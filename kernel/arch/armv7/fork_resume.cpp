@@ -43,10 +43,14 @@ void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame
     auto* const kImage = cinux::base::PtrAt<cinux::arch::UserTrap>(kFrame);
     cinux::base::CopyBytes(kImage, cinux::arch::g_current_trap, sizeof(cinux::arch::UserTrap));
     kImage->r0 = 0;  // the child's fork answer
-    child.ctx        = arch::CpuContext{};
-    child.ctx.sp     = kFrame;
-    child.ctx.lr     = reinterpret_cast<unsigned long>(&SeatForkChildEntry);
-    child.ctx.spsr   = 0x13UL;  // supervisor: the entry runs as a kernel body
+    child.ctx      = arch::CpuContext{};
+    child.ctx.sp   = kFrame;
+    child.ctx.lr   = reinterpret_cast<unsigned long>(&SeatForkChildEntry);
+    child.ctx.spsr = 0x13UL;  // supervisor: the entry runs as a kernel body
+    // The thread pointer is a register, not memory: a fork's child has
+    // to be handed the parent's, or its first errno write lands at
+    // TP=0 and the child dies before it can exec.
+    asm volatile("mrc p15, 0, %0, c13, c0, 3" : "=r"(child.ctx.tpidruro));
 }
 
 }  // namespace cinux::proc
