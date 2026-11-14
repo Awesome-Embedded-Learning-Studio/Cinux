@@ -212,6 +212,34 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::driver::usb::EhciHost::self().present()
                                               ? "[armv7] ehci host running"
                                               : "[armv7] ehci absent");
+                    if (cinux::driver::usb::EhciHost::self().present()) {
+                        for (unsigned int port = 1;
+                             port <= cinux::driver::usb::EhciHost::self().max_ports(); ++port) {
+                            if (cinux::driver::usb::EhciHost::self().port_taken(port) ||
+                                !cinux::driver::usb::EhciHost::self().port_connected(port)) {
+                                continue;
+                            }
+                            void* seat = cinux::driver::usb::EhciHost::self().address(port);
+                            if (seat == nullptr) {
+                                cinux::print::Println("[armv7] ehci seat refused %u",
+                                                       cinux::driver::usb::EhciHost::self()
+                                                                   .last_fail());
+                                break;
+                            }
+                            unsigned char descriptor[18] = {};
+                            if (cinux::driver::usb::EhciHost::self().control_read(
+                                    seat, 0x0100, descriptor, sizeof(descriptor))) {
+                                const unsigned int kVendor =
+                                    descriptor[8] | (descriptor[9] << 8U);
+                                const unsigned int kProduct =
+                                    descriptor[10] | (descriptor[11] << 8U);
+                                cinux::print::Println("[armv7] ehci device %04X:%04X seated",
+                                                       kVendor, kProduct);
+                            } else {
+                                cinux::print::Println("[armv7] ehci descriptor read FAILED");
+                            }
+                        }
+                    }
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");

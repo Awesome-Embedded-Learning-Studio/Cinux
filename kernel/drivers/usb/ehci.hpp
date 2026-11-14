@@ -72,15 +72,41 @@ public:
 private:
     EhciHost() = default;
 
+    /// @brief One seated device's state, one page of hardware words each.
+    struct Seat {
+        unsigned int  port      = 0;
+        unsigned int  address   = 0;
+        unsigned long page_phys = 0;
+        bool          used      = false;
+    };
+
     [[nodiscard]] uint32_t read32(unsigned long offset) const;
     void                   write32(unsigned long offset, uint32_t value);
     [[nodiscard]] bool     wait_clear(unsigned long offset, uint32_t mask);
+    [[nodiscard]] bool     ring_doorbell();
+    [[nodiscard]] bool     stop_async();
+    [[nodiscard]] bool     queue_control(Seat& seat, bool in, uint8_t request,
+                                         uint16_t value, uint16_t index, void* data,
+                                         uint16_t length);
+    [[nodiscard]] bool     port_reset(unsigned int port);
+
+public:
+    /// Debug: 0 ok, 4 reset, 5 schedule start, 6 timeout, 7 transfer,
+    /// 8 doorbell, 9 schedule stop, 10 unsupported length/direction.
+    [[nodiscard]] unsigned int last_fail() const { return last_fail_; }
+
+private:
+
+    static constexpr unsigned int kSeats = 4;
 
     volatile unsigned char* window_    = nullptr;
     unsigned long           op_base_   = 0;
     unsigned int            ports_     = 0;
     uint16_t                revision_  = 0;
     bool                    unhealthy_ = false;
+    Seat                    seats_[kSeats] = {};
+    unsigned int            next_address_ = 1;
+    unsigned int            last_fail_ = 0;
 };
 
 }  // namespace cinux::driver::usb

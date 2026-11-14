@@ -34,6 +34,17 @@ inline void CpuRelax() {
 }
 
 /**
+ * @brief         Full memory barrier.
+ * @note          Orders loads and stores on this core, matching the
+ *                neutral arch contract the other lanes already honor.
+ * @since         0.9.0
+ * @ingroup       kernel_arch
+ */
+inline void MemoryBarrier() {
+    __asm__ volatile("mfence" : : : "memory");
+}
+
+/**
  * @brief         Read one model-specific register.
  * @param[in]     index  The MSR index the CPU expects in ECX.
  * @return        The full 64-bit value, assembled from EDX:EAX.

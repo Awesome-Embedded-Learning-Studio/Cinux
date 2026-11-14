@@ -104,6 +104,7 @@ expect_literal(EXPECTED_PROCCPU "the /proc/cpuinfo read-back probe did not answe
 expect_literal(EXPECTED_SCHED "the shared-scheduler round trip did not answer.")
 expect_literal(EXPECTED_LCDIF "the LCDIF bring-up line did not answer.")
 expect_literal(EXPECTED_EHCI "the ehci host never reported its seated keyboard.")
+expect_literal(EXPECTED_EHCI_SEATED "the ehci host seated no keyboard: the control street never delivered the device descriptor.")
 expect_literal(EXPECTED_FB0 "the /dev/fb0 seat did not answer.")
 expect_literal(EXPECTED_EVENT0 "the /dev/event0 seat did not answer.")
 expect_literal(EXPECTED_GUESTLOAD "the neutral loader did not seat the guest image.")
