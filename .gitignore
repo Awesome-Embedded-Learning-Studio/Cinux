@@ -21,6 +21,7 @@ Makefile
 *.a
 *.so
 *.elf
+*.elf.inputs
 *.bin
 *.img
 !test/data/ext2_test.img
