@@ -38,10 +38,33 @@ def near(pixel: bytes, want: tuple[int, int, int]) -> bool:
     return all(abs(pixel[i] - want[i]) <= TOLERANCE for i in range(3))
 
 
+def count_box(pixels: bytes, width: int, box: tuple[int, int, int, int],
+              want: tuple[int, int, int]) -> int:
+    left, top, right, bottom = box
+    found = 0
+    for y in range(top, bottom):
+        row = y * width * 3
+        for x in range(left, right):
+            at = row + x * 3
+            if near(pixels[at : at + 3], want):
+                found += 1
+    return found
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: count-terminal-ink.py SHOT.ppm")
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            "usage: count-terminal-ink.py SHOT.ppm [--box L,T,R,B --color R,G,B]")
     width, height, pixels = read_ppm(sys.argv[1])
+    if "--box" in sys.argv:
+        # A plain "how much of this colour sits in this box" question,
+        # the shape a title-bar or a panel check asks.
+        box = tuple(int(part) for part in sys.argv[sys.argv.index("--box") + 1].split(","))
+        colour = tuple(
+            int(part) for part in sys.argv[sys.argv.index("--color") + 1].split(","))
+        found = count_box(pixels, width, box, colour)
+        print(f"  {colour} in {box}: {found} pixels")
+        return 0 if found >= MIN_INK_PIXELS else 1
 
     # Rows of the dark ground, the terminal's paint.
     dark_rows: list[int] = []

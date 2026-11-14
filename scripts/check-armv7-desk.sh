@@ -14,6 +14,7 @@ repo="$(cd "${here}/.." && pwd)"
 build="${CINUX_ARM_BUILD:-${repo}/build-armv7}"
 image="${CINUX_ARM_DESK_IMG:-${build}/armv7-desk.img}"
 shot="${CINUX_ARM_DESK_SHOT:-${build}/armv7-desk.ppm}"
+shot2="${CINUX_ARM_DESK_PAIR_SHOT:-${build}/armv7-desk-pair.ppm}"
 icon_x="${CINUX_ARM_ICON_X:-40}"
 icon_y="${CINUX_ARM_ICON_Y:-110}"
 settle="${CINUX_ARM_DESK_DELAY:-16}"
@@ -41,7 +42,7 @@ rm -f "${image}"
 log="$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)"
 qmp="$(mktemp -u /tmp/cinux-desk-qmp.XXXXXX.sock)"
 trap 'rm -f "${log}" "${qmp}"' EXIT
-rm -f "${shot}"
+rm -f "${shot}" "${shot2}"
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.
 ( sleep 8; cat "${repo}/assets/armv7_stdin.txt"; sleep "${settle}"; printf '%s\r' "${command_text}"; sleep 12 ) |
@@ -86,6 +87,19 @@ sleep 1
     sleep 3
     printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot}\"}}"
     sleep 1
+    # A second window: the WELCOME icon opens its About panel while the
+    # terminal stays open, so the screen has to carry both at once.
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":2048}},{"type":"abs","data":{"axis":"y","value":2731}}]}}'
+    sleep 1
+    for _ in 1 2; do
+        printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
+        sleep 0.2
+        printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+        sleep 0.2
+    done
+    sleep 3
+    printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot2}\"}}"
+    sleep 1
 ) | socat - "UNIX-CONNECT:${qmp}" >/dev/null 2>&1 || true
 wait "${qemu_pid}" 2>/dev/null || true
 
@@ -127,6 +141,17 @@ if [ -f "${shot}" ]; then
         printf '  the window moved with the drag: present (left %s)\n' "${box_left}"
     else
         printf '  the window did not move: left %s\n' "${box_left:-none}" >&2
+        failed=1
+    fi
+    # Two windows at once: the About frame's title bar is the theme's
+    # gold, at its own fixed place, beside the terminal's dark box.
+    if bar="$(python3 "${here}/count-terminal-ink.py" "${shot2}" \
+              --box 162,52,428,64 --color 201,138,45)"; then
+        printf '%s\n' "${bar}" | sed 's/^/  /'
+        printf '  a second window beside the terminal: present\n'
+    else
+        printf '%s\n' "${bar}" | sed 's/^/  /'
+        printf '  a second window beside the terminal: MISSING\n' >&2
         failed=1
     fi
 else
