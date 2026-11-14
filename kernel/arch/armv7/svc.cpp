@@ -45,6 +45,18 @@ void SeatExit(unsigned long status) __attribute__((noreturn));
 bool SeatWorldActive();
 }  // namespace cinux::armv7
 
+namespace cinux::armv7 {
+
+/// The EABI mmap2 door: the sixth argument counts 4 KiB pages, while
+/// the neutral face takes bytes. One shift bridges the two spellings.
+long long HandleMmap2(const cinux::syscall::SyscallFrame& frame) {
+    cinux::syscall::SyscallFrame scaled = frame;
+    scaled.r9 <<= 12U;
+    return cinux::syscall::HandleMmap(scaled);
+}
+
+}  // namespace cinux::armv7
+
 namespace {
 
 /// One neutral handler per number: the seated world's services run on
@@ -67,6 +79,10 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kGetPpid, &cinux::syscall::HandleGetppid},
     {cinux::armv7::syscall_nr::kBrk,    &cinux::syscall::HandleBrk},
     {cinux::armv7::syscall_nr::kMmap,   &cinux::syscall::HandleMmap},
+    // EABI spells mmap with a page-granular offset under its own number;
+    // the adapter scales it once and the neutral face sees bytes, as the
+    // first port describes them.
+    {cinux::armv7::syscall_nr::kMmap2, &cinux::armv7::HandleMmap2},
     {cinux::armv7::syscall_nr::kMunmap, &cinux::syscall::HandleMunmap},
     {cinux::armv7::syscall_nr::kIoctl, &cinux::syscall::HandleIoctl},
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},

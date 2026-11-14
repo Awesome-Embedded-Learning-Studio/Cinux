@@ -37,6 +37,7 @@ inline constexpr unsigned long kClose       = 6;
 inline constexpr unsigned long kSignal      = 67;
 inline constexpr unsigned long kGetTicks    = 78;
 inline constexpr unsigned long kMmap        = 90;
+inline constexpr unsigned long kMmap2       = 192;
 inline constexpr unsigned long kMunmap      = 91;
 inline constexpr unsigned long kIoctl       = 54;
 inline constexpr unsigned long kFstat       = 108;
