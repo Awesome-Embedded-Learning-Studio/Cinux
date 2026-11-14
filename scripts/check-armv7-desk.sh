@@ -15,6 +15,7 @@ build="${CINUX_ARM_BUILD:-${repo}/build-armv7}"
 image="${CINUX_ARM_DESK_IMG:-${build}/armv7-desk.img}"
 shot="${CINUX_ARM_DESK_SHOT:-${build}/armv7-desk.ppm}"
 shot2="${CINUX_ARM_DESK_PAIR_SHOT:-${build}/armv7-desk-pair.ppm}"
+shot3="${CINUX_ARM_DESK_CLOSED_SHOT:-${build}/armv7-desk-closed.ppm}"
 icon_x="${CINUX_ARM_ICON_X:-40}"
 icon_y="${CINUX_ARM_ICON_Y:-110}"
 settle="${CINUX_ARM_DESK_DELAY:-16}"
@@ -42,7 +43,7 @@ rm -f "${image}"
 log="$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)"
 qmp="$(mktemp -u /tmp/cinux-desk-qmp.XXXXXX.sock)"
 trap 'rm -f "${log}" "${qmp}"' EXIT
-rm -f "${shot}" "${shot2}"
+rm -f "${shot}" "${shot2}" "${shot3}"
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.
 ( sleep 8; cat "${repo}/assets/armv7_stdin.txt"; sleep "${settle}"; printf '%s\r' "${command_text}"; sleep 12 ) |
@@ -100,6 +101,16 @@ sleep 1
     sleep 3
     printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot2}\"}}"
     sleep 1
+    # Close the About window with its title bar's X: the gold bar has to
+    # leave the screen, and the terminal has to stay.
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":21605}},{"type":"abs","data":{"axis":"y","value":3891}}]}}'
+    sleep 1
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
+    sleep 0.2
+    printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+    sleep 3
+    printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot3}\"}}"
+    sleep 1
 ) | socat - "UNIX-CONNECT:${qmp}" >/dev/null 2>&1 || true
 wait "${qemu_pid}" 2>/dev/null || true
 
@@ -152,6 +163,23 @@ if [ -f "${shot}" ]; then
     else
         printf '%s\n' "${bar}" | sed 's/^/  /'
         printf '  a second window beside the terminal: MISSING\n' >&2
+        failed=1
+    fi
+    # And the close button has to take it away again, leaving the terminal
+    # behind: the same gold box now empty, the dark box still carrying text.
+    if gone="$(python3 "${here}/count-terminal-ink.py" "${shot3}" \
+               --box 162,52,428,64 --color 201,138,45)"; then
+        printf '%s\n' "${gone}" | sed 's/^/  /'
+        printf '  the closed window is gone: MISSING (its bar is still there)\n' >&2
+        failed=1
+    else
+        printf '%s\n' "${gone}" | sed 's/^/  /'
+        printf '  the closed window is gone: present\n'
+    fi
+    if python3 "${here}/count-terminal-ink.py" "${shot3}" >/dev/null 2>&1; then
+        printf '  the terminal survived the close: present\n'
+    else
+        printf '  the terminal survived the close: MISSING\n' >&2
         failed=1
     fi
 else
