@@ -27,6 +27,17 @@ class EventStream;
 
 namespace cinux::armv7 {
 
+/**
+ * @brief         Drains the serial line into both keyboard consumers.
+ * @note          One byte source, two consumers: the console queue and
+ *                the evdev stream event0 reads. Called from the tick so
+ *                a running desktop hears keys even when no console
+ *                reader is asking.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void PollSerialKeyboard();
+
 /// The stream this port's keyboard publishes into, event0's source.
 [[nodiscard]] cinux::driver::EventStream& UartKeyboardEvents();
 

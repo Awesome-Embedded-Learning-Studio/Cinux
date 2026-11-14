@@ -99,6 +99,17 @@ public:
      */
     char take();
 
+    /// Takes the next decoded key when one waits: the same byte the
+    /// console asks for, offered to a second caller without a sentinel.
+    bool take(char* out) {
+        const char kCode = take();
+        if (kCode == 0) {
+            return false;
+        }
+        *out = kCode;
+        return true;
+    }
+
 private:
     UsbKeyboard() = default;
 

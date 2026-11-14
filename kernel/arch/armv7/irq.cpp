@@ -18,7 +18,9 @@
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/timer.hpp"
+#include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/uart.hpp"
+#include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/syscall/sys_clock.hpp"
@@ -47,6 +49,7 @@ void serve_tick() {
     const unsigned long interrupt = cinux::armv7::GicAcknowledge();
     cinux::armv7::GicEnd(interrupt);
     ++g_ticks;
+    cinux::armv7::PollSerialKeyboard();
     if ((g_ticks % 2) == 1) {
         cinux::armv7::UartWrite("[armv7] tick ");
         print_unsigned(g_ticks);
