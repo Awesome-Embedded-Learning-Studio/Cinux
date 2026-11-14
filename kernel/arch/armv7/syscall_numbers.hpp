@@ -52,6 +52,9 @@ inline constexpr unsigned long kOpenAt        = 322;
 inline constexpr unsigned long kStatx         = 397;
 inline constexpr unsigned long kFstatat64     = 327;
 inline constexpr unsigned long kFcntl64       = 221;
+/// EABI spells process creation with clone; a libc's fork() is
+/// clone(SIGCHLD, no stack), which is the plain fork this port seats.
+inline constexpr unsigned long kClone         = 120;
 inline constexpr unsigned long kSetTidAddress = 256;
 inline constexpr unsigned long kSetRobustList = 338;
 inline constexpr unsigned long kRseq          = 398;

@@ -168,6 +168,29 @@ QEMU 的 LCDIF 每帧重读内存，不需要任何重新触发，所以内核�
 
 ![vesper desk frame](assets/2026-11-15-armv7-vesper-desk.png)
 
+## 桌面完整跑起来了
+
+挡在终端子进程前面的是 `clone`（EABI 120）：glibc 的 `fork()` 不是老的 fork
+系统调用，而是 `clone(SIGCHLD|CLONE_CHILD_SETTID|CLONE_CHILD_CLEARTID, 0, 0, 0, tls)`。
+这道门现在接住了“fork 形状”的 clone：低字节有信号位、没有 `CLONE_VM`、没有栈；
+共享地址空间的线程形状明确拒绝，不半服务。
+
+接上之后桌面进入自己的循环：
+
+```
+vesper-fbdev: fb 640x480 (frame 640x480), kbd /dev/event0, pointer /dev/event1
+vesper-fbdev: running; /init's timeout or Ctrl-C ends the run
+```
+
+屏幕上于是有了一整个桌面——奶白底、两个图标（WELCOME 与 TERMINAL）、底部面板栏
+左边写着 VESPER 右边写着 MONO 1，左上角是鼠标指针：
+
+![vesper desk running](assets/2026-11-15-armv7-vesper-running.png)
+
+复跑：`scripts/check-armv7-desk.sh`。它单独铸一张桌面镜像、跑一次、按串口日志判
+三条字面量（面板开了、键盘坐上了、进循环了）。默认的 `check-armv7.sh` 仍走可判定
+的 busybox 链，两者互不影响。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
@@ -175,5 +198,5 @@ QEMU 的 LCDIF 每帧重读内存，不需要任何重新触发，所以内核�
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
 - busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
-- 桌面的终端子进程要 `posix_openpt` / `posix_spawn` 一族调用
+- 终端子进程起来后还没验证它的输入输出闭环（键盘事件进窗口、pty 回显）
 - 设备帧的多重映射与拆卸计数仍需更完整的账本

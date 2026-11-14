@@ -17,8 +17,8 @@
  */
 
 #include "kernel/arch/armv7/syscall_numbers.hpp"
-#include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_fork.hpp"
 #include "kernel/syscall/sys_wait.hpp"
@@ -52,6 +52,26 @@ bool SeatWorldActive();
 }  // namespace cinux::armv7
 
 namespace cinux::armv7 {
+
+/// The EABI clone door: a libc's fork() asks for a child sharing
+/// nothing but a SIGCHLD notice, with no stack and no tid words. That
+/// shape is the plain fork the seat already serves; a clone that wants
+/// a thread (shared vm/files/sighand, a stack, a tid word) is refused
+/// as unimplemented rather than half-served.
+long long HandleClone(const cinux::syscall::SyscallFrame& frame) {
+    // SIGCHLD in the low byte is the "my child signals me" half; the
+    // tid-word flags ride along without a stack, and the TLS word only
+    // matters with CLONE_SETTLS, which a fork never sets. A clone that
+    // shares the address space is a thread, and threads have no seat on
+    // this port yet: that shape is refused, not half-served.
+    constexpr unsigned long long kCloneVm    = 0x100;
+    constexpr unsigned long long kSignalMask = 0xFF;
+    if ((frame.rdi & kCloneVm) != 0 || frame.rsi != 0 ||
+        (frame.rdi & kSignalMask) == 0) {
+        return -38;  // ENOSYS
+    }
+    return cinux::syscall::HandleFork(frame);
+}
 
 /// The EABI openat door: the caller names a directory seat first and
 /// only then the path. The bring-up root is the one directory that
@@ -131,6 +151,7 @@ const NeutralService kNeutralServices[] = {
     // frame into the child before this service returns, so the port
     // entry reads the real frame, not the neutral picture.
     {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
+    {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleClone},
     // The exec face: the neutral builder stages the disk's program,
     // swaps the address space, and rewrites the frame; the bridge
     // below carries the new entry into the trap.
