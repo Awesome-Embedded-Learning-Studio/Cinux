@@ -38,8 +38,9 @@ void PutField(unsigned char* sink, unsigned long offset, unsigned long long valu
 
 }  // namespace
 
-void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed) {
-    constexpr arch::abi::StatLayout kLayout = arch::abi::kStatLayout;
+void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed,
+                     arch::abi::StatLayout layout) {
+    const arch::abi::StatLayout& kLayout = layout;
     for (unsigned long index = 0; index < kLayout.bytes; ++index) {
         sink[index] = 0;
     }
@@ -59,8 +60,9 @@ void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed) {
     PutField(sink, kLayout.ctime_off, probed.mtime, kLayout.time_size);
 }
 
-long long StatDescriptor(unsigned long long descriptor, unsigned long long destination) {
-    if (!UserRangeWritable(destination, arch::abi::kStatLayout.bytes)) {
+long long StatDescriptor(unsigned long long descriptor, unsigned long long destination,
+                         arch::abi::StatLayout layout) {
+    if (!UserRangeWritable(destination, layout.bytes)) {
         return -kEfault;
     }
     const base::Result<base::Shared<fs::OpenFile>> kSlot = LiveSlot(descriptor);
@@ -76,8 +78,8 @@ long long StatDescriptor(unsigned long long descriptor, unsigned long long desti
     if (!kProbed.ok()) {
         return -ErrnoFrom(kProbed.error());
     }
-    unsigned char record[arch::abi::kStatLayout.bytes] = {};
-    WriteStatRecord(record, probed);
+    unsigned char record[arch::abi::kStat64Layout.bytes] = {};
+    WriteStatRecord(record, probed, layout);
     if (!uaccess::CopyToUser(destination, record, sizeof(record))) {
         return -kEfault;
     }

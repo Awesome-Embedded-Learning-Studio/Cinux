@@ -211,4 +211,45 @@ inline constexpr TimePairLayout kTimespecLayout = {
 
 /// A timeval's second word is microseconds: same width, same offsets.
 inline constexpr TimePairLayout kTimevalLayout = kTimespecLayout;
+
+/**
+ * @brief The EABI stat64 record, the shape _FILE_OFFSET_BITS=64 callers
+ *        read: 104 bytes, size at 48, ino at 96.
+ * @note  A caller that asks for stat64 while the kernel writes the
+ *        32-bit stat record reads its size from inside the block count
+ *        and its inode from past the end -- which is how a tool like
+ *        cat ends up writing through a null pointer.
+ */
+inline constexpr StatLayout kStat64Layout = {
+    .bytes           = 104,
+    .dev_off         = 0,
+    .dev_size        = 8,
+    .ino_off         = 96,
+    .ino_size        = 8,
+    .ino_low_off     = 12,
+    .ino_low_size    = 4,
+    .mode_off        = 16,
+    .mode_size       = 4,
+    .links_off       = 20,
+    .links_size      = 4,
+    .uid_off         = 24,
+    .uid_size        = 4,
+    .gid_off         = 28,
+    .gid_size        = 4,
+    .rdev_off        = 32,
+    .rdev_size       = 8,
+    .size_off        = 48,
+    .size_size       = 8,
+    .blksize_off     = 56,
+    .blksize_size    = 4,
+    .blocks_off      = 64,
+    .blocks_size     = 8,
+    .atime_off       = 72,
+    .atime_nsec_off  = 76,
+    .mtime_off       = 80,
+    .mtime_nsec_off  = 84,
+    .ctime_off       = 88,
+    .ctime_nsec_off  = 92,
+    .time_size       = 4,
+};
 }  // namespace cinux::arch::abi

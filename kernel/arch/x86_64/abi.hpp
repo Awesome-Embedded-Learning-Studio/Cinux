@@ -211,4 +211,12 @@ inline constexpr TimePairLayout kTimespecLayout = {
 
 /// A timeval's second word is microseconds: same width, same offsets.
 inline constexpr TimePairLayout kTimevalLayout = kTimespecLayout;
+
+/**
+ * @brief The 64-bit stat record: the shape EABI's stat64 spells.
+ * @note  A 64-bit port has one stat record, so this names the same
+ *        layout there. EABI's stat64 is not its stat: every field is
+ *        wider, so size and ino sit four and eight bytes later.
+ */
+inline constexpr StatLayout kStat64Layout = kStatLayout;
 }  // namespace cinux::arch::abi

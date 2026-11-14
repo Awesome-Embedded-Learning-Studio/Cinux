@@ -532,9 +532,18 @@ shell。已经把串口抽取挂到了三个地方（每拍、系统调用入口
 下一轮的正解是打开 UART 的接收中断，让每个字节都在到达时被取走。
 
 **`cat` 会崩**。`cat /motd` 与 `/bb cat /motd` 都是
-`user fault caught at 0 code 7 pc 401266C6`——busybox 里对空地址写。`ls` 与 `head`
-在同样的 fork/exec 路径下是好的，所以不是通用路径，而是 cat 自己的某个状态
-（它读文件，会走 fstat 与读写循环）。下一轮从这条线查。
+`user fault caught at 0 code 7 pc 401266C6`。
+
+这一轮把 pc 在未剥离的 busybox 里查了符号：落点是 glibc 的
+`__futex_abstimed_wait_common`——也就是 cat 在某个 libc 锁上等 futex，而那个锁的
+字地址是 0（一个空指针）。`ls` 与 `head` 走同样的 fork/exec 路径却是好的，所以要么
+是 cat 触发的某个 libc 状态在 fork 之后是空的，要么是我们的 futex/COW 在这条路上
+漏了一页。下一轮从这两头查。
+
+顺带修掉一个真的 ABI 缺口：EABI 的 `stat64`（104 字节，size 在 48、ino 在 96）与
+`stat`（96 字节，size 在 44、ino 在 88）不是一个形状，而 `fstat64`(197) 原来写的是
+后者。现在 `arch::abi::kStat64Layout` 描述它，`HandleFstat64` 按它落盘。这个不是
+cat 崩溃的原因（改完仍崩），但它本来就会让所有按 64 位偏移读的工具读到错位字段。
 
 ## 还缺什么
 

@@ -156,7 +156,7 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kFstat, &cinux::syscall::HandleFstat},
     // EABI spells the 64-bit stat pair with their own numbers; the
     // neutral face serves both spellings.
-    {cinux::armv7::syscall_nr::kFstat64, &cinux::syscall::HandleFstat},
+    {cinux::armv7::syscall_nr::kFstat64, &cinux::syscall::HandleFstat64},
     {cinux::armv7::syscall_nr::kGetdents, &cinux::syscall::HandleGetdents},
     // The fork face: the neutral builder copies the parent's episode
     // frame into the child before this service returns, so the port

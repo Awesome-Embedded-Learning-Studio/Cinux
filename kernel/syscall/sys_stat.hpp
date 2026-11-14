@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "kernel/arch/abi.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
 
@@ -59,7 +60,8 @@ long long StatPathAt(unsigned long long descriptor, const char* relative,
  * @since         0.3.0
  * @ingroup       kernel_syscall
  */
-void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed);
+void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed,
+                     arch::abi::StatLayout layout = arch::abi::kStatLayout);
 
 /**
  * @brief         Stats the node one descriptor already holds open.
@@ -72,6 +74,7 @@ void WriteStatRecord(unsigned char* sink, const fs::FsStat& probed);
  * @since         0.3.0
  * @ingroup       kernel_syscall
  */
-long long StatDescriptor(unsigned long long descriptor, unsigned long long destination);
+long long StatDescriptor(unsigned long long descriptor, unsigned long long destination,
+                         arch::abi::StatLayout layout = arch::abi::kStatLayout);
 
 }  // namespace cinux::syscall

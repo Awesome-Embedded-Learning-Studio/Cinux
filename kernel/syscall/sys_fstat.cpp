@@ -1,4 +1,3 @@
-#include "kernel/boot/print.hpp"
 #include "kernel/syscall/sys_fstat.hpp"
 #include "kernel/syscall/sys_stat.hpp"
 
@@ -16,7 +15,12 @@
 
 namespace cinux::syscall {
 
-long long HandleFstat(const SyscallFrame& frame) {
+namespace {
+
+/// One descriptor's record in the caller's shape: fstat asks for the
+/// 32-bit stat, fstat64 for the wider one, and a caller reads whichever
+/// it asked for.
+long long fstat_into(const SyscallFrame& frame, cinux::arch::abi::StatLayout layout) {
     const arch::IrqGuard                           kGuard;
     const base::Result<base::Shared<fs::OpenFile>> kSlot = LiveSlot(frame.rdi);
     if (!kSlot.ok()) {
@@ -34,13 +38,22 @@ long long HandleFstat(const SyscallFrame& frame) {
     if (!kProbed.ok()) {
         return -ErrnoFrom(kProbed.error());
     }
-#include "kernel/boot/print.hpp"
-    unsigned char record[arch::abi::kStatLayout.bytes] = {};
-    WriteStatRecord(record, probed);
+    unsigned char record[cinux::arch::abi::kStat64Layout.bytes] = {};
+    WriteStatRecord(record, probed, layout);
     if (!uaccess::CopyToUser(frame.rsi, record, sizeof(record))) {
         return -kEfault;
     }
     return 0;
+}
+
+}  // namespace
+
+long long HandleFstat(const SyscallFrame& frame) {
+    return fstat_into(frame, cinux::arch::abi::kStatLayout);
+}
+
+long long HandleFstat64(const SyscallFrame& frame) {
+    return fstat_into(frame, cinux::arch::abi::kStat64Layout);
 }
 
 }  // namespace cinux::syscall
