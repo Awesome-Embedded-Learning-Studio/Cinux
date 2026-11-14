@@ -150,6 +150,24 @@ vesper-fbdev: cannot spawn /bin/sh under a pty: Function not implemented
 演示模式：`CINUX_ARM_PROBE_DESK=1 ./scripts/build-armv7-glibc-prog.sh` 让盘上的
 glibc 程序最后 exec 桌面而不是 busybox；默认构建仍走可判定的那条链。
 
+## 画面确实画上去了
+
+先前几次 `screendump` 只看到内核测试卡，一度怀疑用户态的写入没落到面板。真相在串口
+重定向：`-serial file:` 时输入不再是 UART 的通道，客人卡在读一行上，根本没画到那
+一步。改回 `-serial stdio` 并把输出 tee 到文件，画面就出来了——整屏 0x102030 加两
+个证明像素：
+
+![painted frame](assets/2026-11-15-armv7-fb-painted.png)
+
+QEMU 的 LCDIF 每帧重读内存，不需要任何重新触发，所以内核侧不用加刷新钩子。
+
+## 桌面画出来的第一帧
+
+演示模式起 vesper，它开出 640x480 的面板、键盘、指针，然后画出自己的面板栏（底部
+那条黑条纹），随即因为“起不了终端”退出：
+
+![vesper desk frame](assets/2026-11-15-armv7-vesper-desk.png)
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
