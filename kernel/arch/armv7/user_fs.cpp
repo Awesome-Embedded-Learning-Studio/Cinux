@@ -186,6 +186,22 @@ void init() {
                                       ? "[armv7] dev mmcblk0 %llu sectors mbr 55AA"
                                       : "[armv7] dev mmcblk0 read FAILED",
                                   port.block_count());
+            // The partition table rides in the same MBR the signature
+            // guards: the first entry names one Linux partition, and
+            // its first sector answers through the very same port.
+            if (kRead && kProbe[510] == 0x55 && kProbe[511] == 0xAA) {
+                const std::uint32_t kStart = static_cast<std::uint32_t>(kProbe[454]) |
+                                             (static_cast<std::uint32_t>(kProbe[455]) << 8U) |
+                                             (static_cast<std::uint32_t>(kProbe[456]) << 16U) |
+                                             (static_cast<std::uint32_t>(kProbe[457]) << 24U);
+                static unsigned char kFirst[512] = {};
+                const bool kEntry = kProbe[450] == 0x83 && kStart != 0 &&
+                                    port.read_blocks(driver::Lba{kStart},
+                                                     driver::BlockSpan{1}, kFirst);
+                cinux::print::Println(kEntry ? "[armv7] mmcblk0 p1 at %lu"
+                                             : "[armv7] mmcblk0 p1 missing",
+                                      static_cast<unsigned long>(kStart));
+            }
         }
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
         base::safety::Check(kDevMount.ok(), "devfs mount failed");

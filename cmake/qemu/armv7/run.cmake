@@ -9,14 +9,15 @@ set(CINUX_ARM_RUN_SECONDS 30 CACHE STRING "How long the arm_boot check lets QEMU
 
 set(CINUX_ARM_DTB_ADDR 0x81000000)
 
-# The bring-up SD card: an eight-megabyte raw image whose MBR carries the
-# boot signature and whose second sector a marker string. Deterministic
-# bytes, so the block street's reads have something to recognize.
+# The bring-up SD card: an eight-megabyte raw image whose MBR carries
+# the boot signature, one Linux partition starting at sector 2048, and
+# a marker string in the second sector. Deterministic bytes, so the
+# block street's reads have something to recognize.
 set(CINUX_ARM_SD_IMG ${CMAKE_BINARY_DIR}/armv7-sd.img)
 add_custom_command(
     OUTPUT ${CINUX_ARM_SD_IMG}
     COMMAND /bin/sh -c
-            "dd if=/dev/zero of='${CINUX_ARM_SD_IMG}' bs=1M count=8 status=none && printf '\\x55\\xAA' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=510 conv=notrunc status=none && printf CINUXSDMK | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=512 conv=notrunc status=none"
+            "dd if=/dev/zero of='${CINUX_ARM_SD_IMG}' bs=1M count=8 status=none && printf '\\x55\\xAA' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=510 conv=notrunc status=none && printf CINUXSDMK | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=512 conv=notrunc status=none && printf '\\x83' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=450 conv=notrunc status=none && printf '\\x00\\x08\\x00\\x00' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=454 conv=notrunc status=none && printf '\\x00\\x38\\x00\\x00' | dd of='${CINUX_ARM_SD_IMG}' bs=1 seek=458 conv=notrunc status=none"
     VERBATIM
     COMMENT "Molding the armv7 SD bring-up image")
 
@@ -75,6 +76,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_USDHC=usdhc card 16384 sectors mbr 55AA"
             "-DEXPECTED_USDHC_WRITE=usdhc write readback ok"
             "-DEXPECTED_MMCBLK0=dev mmcblk0 16384 sectors mbr 55AA"
+            "-DEXPECTED_MMCBLK1=mmcblk0 p1 at 2048"
             "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
             "-DEXPECTED_EHCI_SEATED=ehci device 0627:0001 seated"
     "-DEXPECTED_EHCI_KEYBOARD=ehci keyboard street ok"
