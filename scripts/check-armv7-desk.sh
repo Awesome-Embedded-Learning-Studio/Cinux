@@ -16,7 +16,11 @@ seconds="${CINUX_ARM_RUN_SECONDS:-30}"
 
 echo '== armv7 desk lane =='
 cmake -S "${repo}" -B "${build}" >/dev/null
+# The probe is one artifact shared with the default lane: build the desk
+# variant, and put the check variant back on the way out so a later boot
+# mints the judged card again.
 CINUX_ARM_PROBE_DESK=1 "${here}/build-armv7-glibc-prog.sh" >/dev/null
+trap '"${here}/build-armv7-glibc-prog.sh" >/dev/null 2>&1 || true' EXIT
 "${here}/build-armv7-vesper-desk.sh" >/dev/null
 # The image bakes whatever the artifacts currently hold: mold a desk
 # image of its own so the default lane's card stays untouched.
