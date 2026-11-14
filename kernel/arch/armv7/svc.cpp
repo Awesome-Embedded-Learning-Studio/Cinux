@@ -71,6 +71,9 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kIoctl, &cinux::syscall::HandleIoctl},
     {cinux::armv7::syscall_nr::kFcntl, &cinux::syscall::HandleFcntl},
     {cinux::armv7::syscall_nr::kFstat, &cinux::syscall::HandleFstat},
+    // EABI spells the 64-bit stat pair with their own numbers; the
+    // neutral face serves both spellings.
+    {cinux::armv7::syscall_nr::kFstat64, &cinux::syscall::HandleFstat},
     {cinux::armv7::syscall_nr::kGetdents, &cinux::syscall::HandleGetdents},
     // The fork face: the neutral builder copies the parent's episode
     // frame into the child before this service returns, so the port
@@ -115,6 +118,11 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     const unsigned long kNumber = trap->r7;
     if (cinux::armv7::SeatWorldActive()) {
         if (kNumber == cinux::armv7::syscall_nr::kExit) {
+            cinux::armv7::SeatExit(trap->r0);
+        }
+        // The glibc station leaves through exit_group; the bring-up
+        // world is one task, so both doors lead to the same seat.
+        if (kNumber == cinux::armv7::syscall_nr::kExitGroup) {
             cinux::armv7::SeatExit(trap->r0);
         }
         if (cinux::arch::UserTrap* const kServed = serve_seated_neutral(trap, kNumber)) {

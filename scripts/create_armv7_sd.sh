@@ -23,6 +23,16 @@ debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
 disk_prog="${CINUX_DISK_PROG:-${script_dir}/../assets/armv7_diskprog.elf}"
 debugfs -w -R "write ${disk_prog} /prog" "${volume}" >/dev/null 2>&1
 
+# The glibc station's program rides along only when its image exists:
+# building it needs the arm-none-linux-gnueabihf toolchain, which is a
+# host-side concern, not a lane requirement. The check stays green with
+# or without the artifact.
+glibc_prog="${CINUX_GLIBC_PROG:-${script_dir}/../assets/armv7_glibc_hello.elf}"
+if [[ -f "${glibc_prog}" ]]; then
+    debugfs -w -R "write ${glibc_prog} /glibc" "${volume}" >/dev/null 2>&1
+    echo "[armv7-sd] glibc program seeded at /glibc"
+fi
+
 # The disk: zeros, the volume at its offset, then the MBR on top.
 truncate -s 8M "${image}"
 dd if="${volume}" of="${image}" bs=512 seek="${partition_start}" conv=notrunc status=none

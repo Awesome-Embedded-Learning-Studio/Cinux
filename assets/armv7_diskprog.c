@@ -36,6 +36,16 @@ static unsigned long slen(const char* text) {
 
 void disk_start(void) {
     static const char kLine[] = "[disk] hello from ext2, exec replaced me\n";
+    static const char kNext[] = "/disk/glibc";
     sys3(4UL, 1UL, (unsigned long)kLine, slen(kLine));  // write
+    // The hand-off: when the glibc station's image rides on the disk,
+    // exec chains into it - one program replacing another replacing a
+    // third. When it does not (no host toolchain built it), this
+    // program simply keeps the seat and exits.
+    const long kNext_fd = sys3(5UL, (unsigned long)kNext, 0UL, 0UL);  // open
+    if (kNext_fd >= 0) {
+        sys3(6UL, (unsigned long)kNext_fd, 0UL, 0UL);                 // close
+        sys3(11UL, (unsigned long)kNext, 0UL, 0UL);                   // execve
+    }
     sys3(1UL, 0UL, 0UL, 0UL);                           // exit 0
 }
