@@ -17,6 +17,7 @@
 #pragma once
 
 #include "kernel/arch/armv7/uart.hpp"
+#include "kernel/arch/armv7/uart_input.hpp"
 
 namespace cinux::platform {
 
@@ -41,6 +42,7 @@ inline bool SerialTryGetChar(char* out) {
         return false;
     }
     *out = cinux::armv7::UartReadChar();
+    cinux::armv7::NoteSerialByte(*out);
     return true;
 }
 

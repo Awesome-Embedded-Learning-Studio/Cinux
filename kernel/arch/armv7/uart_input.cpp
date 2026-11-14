@@ -64,6 +64,16 @@ uint16_t evdev_code_for(char character) {
 
 }  // namespace
 
+void NoteSerialByte(char character) {
+    const uint16_t kCode = evdev_code_for(character);
+    if (kCode == 0) {
+        return;
+    }
+    g_keyboard_stream.publish(driver::kEvKey, kCode, 1);
+    g_keyboard_stream.publish(driver::kEvKey, kCode, 0);
+    g_keyboard_stream.publish_report();
+}
+
 void PollSerialKeyboard() {
     for (unsigned long budget = 0; budget < 8; ++budget) {
         char character = 0;
@@ -74,14 +84,8 @@ void PollSerialKeyboard() {
         // The console queue still gets the byte: whichever consumer
         // asked first cannot starve the other, because both are fed
         // here, at the source.
+        NoteSerialByte(character);
         static_cast<void>(cinux::driver::ConsoleTty().feed(character));
-        const uint16_t kCode = evdev_code_for(character);
-        if (kCode == 0) {
-            continue;
-        }
-        g_keyboard_stream.publish(driver::kEvKey, kCode, 1);
-        g_keyboard_stream.publish(driver::kEvKey, kCode, 0);
-        g_keyboard_stream.publish_report();
     }
 }
 

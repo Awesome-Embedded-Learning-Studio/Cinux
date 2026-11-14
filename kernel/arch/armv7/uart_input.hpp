@@ -38,6 +38,17 @@ namespace cinux::armv7 {
  */
 void PollSerialKeyboard();
 
+/**
+ * @brief         Publishes one character as a key event.
+ * @param[in]     character   The byte the serial line just handed out.
+ * @note          Called at the byte source, so the console's reader and
+ *                the tick's pump both land their keys in event0 without
+ *                either one owning the line.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void NoteSerialByte(char character);
+
 /// The stream this port's keyboard publishes into, event0's source.
 [[nodiscard]] cinux::driver::EventStream& UartKeyboardEvents();
 
