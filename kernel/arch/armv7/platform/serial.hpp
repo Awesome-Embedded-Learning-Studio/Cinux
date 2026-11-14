@@ -51,4 +51,16 @@ inline bool SerialHasKey() {
     return cinux::armv7::UartReceiveReady();
 }
 
+/**
+ * @brief         Drains the line into the console queue and event0.
+ * @note          A parked task is not making syscalls, and the tick is
+ *                far slower than a paste: without this the receive FIFO
+ *                overflows and the tail of a long line never arrives.
+ * @since         0.1.0
+ * @ingroup       kernel_platform
+ */
+inline void PumpInput() {
+    cinux::armv7::PollSerialKeyboard();
+}
+
 }  // namespace cinux::platform

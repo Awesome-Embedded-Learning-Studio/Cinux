@@ -17,6 +17,7 @@
  */
 
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
@@ -224,6 +225,10 @@ cinux::arch::UserTrap* serve_seated_neutral(cinux::arch::UserTrap* trap, unsigne
 }  // namespace
 
 extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
+    // The line is drained here as well as on the tick: a pasted command
+    // longer than the receive FIFO would otherwise lose its tail before
+    // the next tick came round.
+    cinux::armv7::PollSerialKeyboard();
     const unsigned long kNumber = trap->r7;
     if (cinux::armv7::SeatWorldActive()) {
         if (kNumber == cinux::armv7::syscall_nr::kExit) {

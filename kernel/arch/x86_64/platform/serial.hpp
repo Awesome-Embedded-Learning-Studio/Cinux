@@ -91,4 +91,15 @@ inline bool SerialHasKey() {
     return (driver::InB(serial_detail::kCom1Base + serial_detail::kRegLsr) & serial_detail::kLsrDr) != 0;
 }
 
+/**
+ * @brief         Drains whatever input the port has waiting.
+ * @note          The neutral wait loops call this while they park, so a
+ *                line pasted while a task sleeps is not lost. This port
+ *                has the console's own reader pump the line, so there is
+ *                nothing extra to do here.
+ * @since         0.1.0
+ * @ingroup       kernel_platform
+ */
+inline void PumpInput() {}
+
 }  // namespace cinux::platform

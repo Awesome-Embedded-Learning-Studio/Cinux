@@ -1,4 +1,5 @@
 #include "kernel/arch/irq_guard.hpp"
+#include "cinux/platform/input.hpp"
 #include "kernel/syscall/sys_ppoll.hpp"
 
 #include "cinux/memory.hpp"
@@ -168,7 +169,10 @@ long long HandlePpoll(const SyscallFrame& frame) {
             return 0;
         }
         // The wait lets the tick in: a parked task whose clock cannot
-        // advance waits forever.
+        // advance waits forever. The port also gets a chance to drain
+        // its input here, or a paste longer than the FIFO loses its tail
+        // while the desk sleeps.
+        platform::PumpInput();
         const unsigned long long kIrq = arch::SaveAndEnableIrq();
         proc::Scheduler::self().yield();
         arch::RestoreIrq(kIrq);
@@ -210,7 +214,10 @@ long long HandlePoll(const SyscallFrame& frame) {
             return 0;
         }
         // The wait lets the tick in: a parked task whose clock cannot
-        // advance waits forever.
+        // advance waits forever. The port also gets a chance to drain
+        // its input here, or a paste longer than the FIFO loses its tail
+        // while the desk sleeps.
+        platform::PumpInput();
         const unsigned long long kIrq = arch::SaveAndEnableIrq();
         proc::Scheduler::self().yield();
         arch::RestoreIrq(kIrq);
