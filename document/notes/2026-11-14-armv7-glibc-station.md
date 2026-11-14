@@ -210,11 +210,19 @@ vesper-fbdev: running; /init's timeout or Ctrl-C ends the run
 另外，客人根里没有 `/bin`，而桌面按 POSIX 习惯起 `/bin/sh`：盘上的 busybox 现在
 在挂载后抄一份到内存根的 `/bin/sh`（1.5MB），于是一个程序期望的位置上真的有 shell。
 
-现在的状态：shell 子进程起来了，桌面进入循环；但它还会报 `rt_sigaction`（174）与
-`rt_sigprocmask`（175）没有中立处理器——这两个的记录布局也是按 ABI 变的
-（arm 的 `struct sigaction` 20 字节，x86-64 的是 32 字节），要像 stat 那样按
-`arch::abi` 描述再写一遍。子进程跑起来之后还会在一次写保护页上撞
-`user fault caught ... code 6`，这条要单独查。
+信号记录也按 ABI 描述了：`arch::abi::kSigActionLayout` 说清 handler、flags、
+restorer、mask 各在哪个偏移、多宽。EABI 的 `struct sigaction` 是 20 字节、mask 在
+第 12 字节；x86-64 的是 32 字节、mask 在第 24 字节。中立面按这份描述逐字段读写，
+`rt_sigaction`(174)、`rt_sigprocmask`(175)、`rt_sigreturn`(173) 一起接上。
+
+同一批还接了 shell 首屏要的 `uname`(122)、`getcwd`(183) 与四个 32 位身份号
+（199/200/213/214）。
+
+现在的状态：shell 子进程起来了，桌面进入循环。剩一个问题：它在
+`0x40182548` 上撞一次写保护页故障，而这个地址**不在任何 VMA 里**（诊断打印显示
+`covered 0`，任务堆止于 0x40159000）——桌面在 fork 之后写到了自己堆尾之外。下一
+轮从这条线查：先看 fork 之后父任务的 VMA 表还全不全，再看 glibc 的 arena 地址是
+从哪次 brk 拿到的。
 
 ## 还缺什么
 
@@ -223,5 +231,5 @@ vesper-fbdev: running; /init's timeout or Ctrl-C ends the run
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
 - busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
-- `rt_sigaction` / `rt_sigprocmask` 的按 ABI 记录还没写
+- 桌面在 fork 之后往堆尾之外写（0x40182548 无 VMA），待查
 - 设备帧的多重映射与拆卸计数仍需更完整的账本

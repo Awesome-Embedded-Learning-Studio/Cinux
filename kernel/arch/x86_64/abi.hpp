@@ -132,4 +132,31 @@ inline constexpr FbFixLayout kFbFixLayout = {
     .mmio_len_off     = 64,
     .capabilities_off = 72,
 };
+
+/**
+ * @brief One struct sigaction as this ABI lays it out.
+ * @note  The handler, the flags and the restorer are pointer-width, so
+ *        the record's size and the mask's offset follow the ABI rather
+ *        than one machine's furniture.
+ */
+struct SigActionLayout {
+    unsigned long bytes;
+    unsigned long handler_off, handler_size;
+    unsigned long flags_off, flags_size;
+    unsigned long restorer_off, restorer_size;
+    unsigned long mask_off, mask_size;
+};
+
+/// x86-64: four eight-byte words, 32 bytes.
+inline constexpr SigActionLayout kSigActionLayout = {
+    .bytes        = 32,
+    .handler_off  = 0,
+    .handler_size = 8,
+    .flags_off    = 8,
+    .flags_size   = 8,
+    .restorer_off = 16,
+    .restorer_size = 8,
+    .mask_off     = 24,
+    .mask_size    = 8,
+};
 }  // namespace cinux::arch::abi

@@ -1,5 +1,6 @@
 #include "kernel/syscall/sys_signal.hpp"
 
+#include "kernel/arch/abi.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -19,8 +20,48 @@ constexpr Word kSigBlock   = 0;
 constexpr Word kSigUnblock = 1;
 constexpr Word kSigSetmask = 2;
 
-/// One action record crosses the boundary whole.
-constexpr Word kActionBytes = sizeof(SigAction);
+/// One action record crosses the boundary in this ABI's shape.
+constexpr Word kActionBytes = arch::abi::kSigActionLayout.bytes;
+
+/// Reads one action record out of the caller's memory, field by field,
+/// so a 20-byte EABI record and a 32-byte x86-64 record both land in
+/// the neutral structure.
+bool read_action(Word at, SigAction& action) {
+    constexpr arch::abi::SigActionLayout kLayout = arch::abi::kSigActionLayout;
+    unsigned char raw[kLayout.bytes] = {};
+    if (!uaccess::CopyFromUser(raw, at, sizeof(raw))) {
+        return false;
+    }
+    const auto take = [&raw](unsigned long offset, unsigned long width) {
+        unsigned long long value = 0;
+        for (unsigned long index = 0; index < width; ++index) {
+            value |= static_cast<unsigned long long>(raw[offset + index]) << (index * 8U);
+        }
+        return value;
+    };
+    action.handler  = take(kLayout.handler_off, kLayout.handler_size);
+    action.flags    = take(kLayout.flags_off, kLayout.flags_size);
+    action.restorer = take(kLayout.restorer_off, kLayout.restorer_size);
+    action.mask     = SigSet{take(kLayout.mask_off, kLayout.mask_size)};
+    return true;
+}
+
+/// Writes one action record back in the same shape.
+bool write_action(Word at, const SigAction& action) {
+    constexpr arch::abi::SigActionLayout kLayout = arch::abi::kSigActionLayout;
+    unsigned char raw[kLayout.bytes] = {};
+    const auto put = [&raw](unsigned long offset, unsigned long width,
+                            unsigned long long value) {
+        for (unsigned long index = 0; index < width; ++index) {
+            raw[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+        }
+    };
+    put(kLayout.handler_off, kLayout.handler_size, action.handler);
+    put(kLayout.flags_off, kLayout.flags_size, action.flags);
+    put(kLayout.restorer_off, kLayout.restorer_size, action.restorer);
+    put(kLayout.mask_off, kLayout.mask_size, action.mask.raw);
+    return uaccess::CopyToUser(at, raw, sizeof(raw));
+}
 
 /// One sigset word crosses the boundary whole.
 constexpr Word kSetBytes = sizeof(SigSet);
@@ -82,7 +123,7 @@ long long HandleRtSigaction(const SyscallFrame& frame) {
     SigAction wanted{};
     bool      install = false;
     if (frame.rsi != 0) {
-        if (!uaccess::CopyFromUser(&wanted, frame.rsi, kActionBytes)) {
+        if (!read_action(frame.rsi, wanted)) {
             return -kEfault;
         }
         if (!handler_word_ok(wanted.handler)) {
@@ -98,7 +139,7 @@ long long HandleRtSigaction(const SyscallFrame& frame) {
         const auto           kGate = self.signals->gate.guard();
         before                     = self.signals->actions[kNumber - 1];
     }
-    if (frame.rdx != 0 && !uaccess::CopyToUser(frame.rdx, &before, kActionBytes)) {
+    if (frame.rdx != 0 && !write_action(frame.rdx, before)) {
         return -kEfault;
     }
     if (install) {

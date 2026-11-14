@@ -74,6 +74,10 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_pgrp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_pipe.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_kill.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_signal.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_id.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_uname.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getcwd.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/pipe.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_eventfd.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_openat.cpp

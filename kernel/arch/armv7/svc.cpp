@@ -21,7 +21,11 @@
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/sys_getcwd.hpp"
+#include "kernel/syscall/sys_id.hpp"
 #include "kernel/syscall/sys_kill.hpp"
+#include "kernel/syscall/sys_uname.hpp"
+#include "kernel/syscall/sys_signal.hpp"
 #include "kernel/syscall/sys_pgrp.hpp"
 #include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_fork.hpp"
@@ -187,6 +191,15 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kGetpgrp,        &cinux::syscall::HandleGetpgrp},
     {cinux::armv7::syscall_nr::kDup2,           &cinux::syscall::HandleDup2},
     {cinux::armv7::syscall_nr::kKill,           &cinux::syscall::HandleKill},
+    {cinux::armv7::syscall_nr::kRtSigaction,    &cinux::syscall::HandleRtSigaction},
+    {cinux::armv7::syscall_nr::kRtSigprocmask,  &cinux::syscall::HandleRtSigprocmask},
+    {cinux::armv7::syscall_nr::kRtSigreturn,    &cinux::syscall::HandleRtSigreturn},
+    {cinux::armv7::syscall_nr::kUname,          &cinux::syscall::HandleUname},
+    {cinux::armv7::syscall_nr::kGetcwd,         &cinux::syscall::HandleGetcwd},
+    {cinux::armv7::syscall_nr::kGetuid32,       &cinux::syscall::HandleGetuid},
+    {cinux::armv7::syscall_nr::kGetgid32,       &cinux::syscall::HandleGetgid},
+    {cinux::armv7::syscall_nr::kGeteuid32,      &cinux::syscall::HandleGeteuid},
+    {cinux::armv7::syscall_nr::kGetegid32,      &cinux::syscall::HandleGetegid},
     // The exec face: the neutral builder stages the disk's program,
     // swaps the address space, and rewrites the frame; the bridge
     // below carries the new entry into the trap.

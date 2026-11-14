@@ -69,6 +69,19 @@ inline constexpr unsigned long kGetpgid        = 132;
 inline constexpr unsigned long kGetsid         = 147;
 inline constexpr unsigned long kSetsid         = 66;
 inline constexpr unsigned long kGetpgrp        = 65;
+/// The signal pair a shell installs before it reads: action records and
+/// the mask word, both in this ABI's shape.
+inline constexpr unsigned long kRtSigaction    = 174;
+inline constexpr unsigned long kRtSigprocmask  = 175;
+inline constexpr unsigned long kRtSigreturn    = 173;
+/// The identity words and the names a shell reads before its first
+/// prompt: the 32-bit id spellings EABI keeps beside uname and getcwd.
+inline constexpr unsigned long kUname         = 122;
+inline constexpr unsigned long kGetcwd        = 183;
+inline constexpr unsigned long kGetuid32      = 199;
+inline constexpr unsigned long kGetgid32      = 200;
+inline constexpr unsigned long kGeteuid32     = 213;
+inline constexpr unsigned long kGetegid32     = 214;
 inline constexpr unsigned long kDup2          = 63;
 inline constexpr unsigned long kKill          = 37;
 inline constexpr unsigned long kSetTidAddress = 256;
