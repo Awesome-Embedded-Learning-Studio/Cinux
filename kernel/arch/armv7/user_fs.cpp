@@ -246,6 +246,28 @@ void init() {
                             kRead ? "[armv7] ext2 mounted, motd is %lu bytes"
                                   : "[armv7] ext2 mounted, motd read FAILED",
                             kMotdSize);
+                        // The desk's terminal spawns /bin/sh by its own
+                        // convention, and the bring-up root has no bin
+                        // tree: the disk's busybox is laid into the ram
+                        // root under that name, so a POSIX shell exists
+                        // where a program expects one.
+                        const auto kBinDir = g_ram->make_dir("/bin");
+                        base::safety::Check(kBinDir.ok(), "bin dir refused");
+                        const auto kBusy = g_vfs->resolve("/disk/bb");
+                        base::Own<unsigned char[]> kShellBytes;
+                        unsigned long              kShellSize = 0;
+                        if (kBusy.ok() &&
+                            fs::ReadWholeFile(kBusy.value(), kShellBytes, kShellSize).ok() &&
+                            kShellSize != 0) {
+                            const auto kShell = g_ram->make_file("/bin/sh");
+                            base::safety::Check(kShell.ok(), "bin/sh refused");
+                            const auto kLaid =
+                                g_ram->write(kShell.value(), 0, kShellBytes.get(), kShellSize);
+                            base::safety::Check(kLaid.ok(), "bin/sh write refused");
+                            cinux::print::Println("[armv7] bin/sh seated, %lu bytes", kShellSize);
+                        } else {
+                            cinux::print::Println("[armv7] bin/sh skipped, no busybox on disk");
+                        }
                     } else {
                         cinux::print::Println("[armv7] ext2 mount FAILED");
                     }

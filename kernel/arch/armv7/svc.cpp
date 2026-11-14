@@ -20,7 +20,13 @@
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
+#include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/sys_kill.hpp"
+#include "kernel/syscall/sys_pgrp.hpp"
+#include "kernel/syscall/sys_pipe.hpp"
 #include "kernel/syscall/sys_fork.hpp"
+#include "kernel/syscall/sys_ppoll.hpp"
+#include "kernel/syscall/uaccess.hpp"
 #include "kernel/syscall/sys_wait.hpp"
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_close.hpp"
@@ -52,6 +58,24 @@ bool SeatWorldActive();
 }  // namespace cinux::armv7
 
 namespace cinux::armv7 {
+
+/// The old 32-bit clock door: EABI's timespec is two four-byte words,
+/// while the neutral face writes the 64-bit pair. The adapter asks the
+/// neutral clock and lays its answer down in the caller's shape.
+long long HandleClockGettime32(const cinux::syscall::SyscallFrame& frame) {
+    unsigned long long pair[2] = {0, 0};
+    cinux::syscall::SyscallFrame ask = frame;
+    ask.rsi                          = reinterpret_cast<unsigned long long>(pair);
+    if (const long long kBad = cinux::syscall::HandleClockGettime(ask); kBad < 0) {
+        return kBad;
+    }
+    const unsigned int words[2] = {static_cast<unsigned int>(pair[0]),
+                                   static_cast<unsigned int>(pair[1])};
+    if (!cinux::syscall::uaccess::CopyToUser(frame.rsi, words, sizeof(words))) {
+        return -14;  // EFAULT
+    }
+    return 0;
+}
 
 /// The EABI clone door: a libc's fork() asks for a child sharing
 /// nothing but a SIGCHLD notice, with no stack and no tid words. That
@@ -152,6 +176,17 @@ const NeutralService kNeutralServices[] = {
     // entry reads the real frame, not the neutral picture.
     {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
     {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleClone},
+    {cinux::armv7::syscall_nr::kPoll,           &cinux::syscall::HandlePoll},
+    {cinux::armv7::syscall_nr::kPpoll,          &cinux::syscall::HandlePpoll},
+    {cinux::armv7::syscall_nr::kClockGettime,   &cinux::armv7::HandleClockGettime32},
+    {cinux::armv7::syscall_nr::kClockGettime64, &cinux::syscall::HandleClockGettime},
+    {cinux::armv7::syscall_nr::kSetsid,         &cinux::syscall::HandleSetsid},
+    {cinux::armv7::syscall_nr::kSetpgid,        &cinux::syscall::HandleSetpgid},
+    {cinux::armv7::syscall_nr::kGetpgid,        &cinux::syscall::HandleGetpgid},
+    {cinux::armv7::syscall_nr::kGetsid,         &cinux::syscall::HandleGetsid},
+    {cinux::armv7::syscall_nr::kGetpgrp,        &cinux::syscall::HandleGetpgrp},
+    {cinux::armv7::syscall_nr::kDup2,           &cinux::syscall::HandleDup2},
+    {cinux::armv7::syscall_nr::kKill,           &cinux::syscall::HandleKill},
     // The exec face: the neutral builder stages the disk's program,
     // swaps the address space, and rewrites the frame; the bridge
     // below carries the new entry into the trap.
@@ -218,7 +253,8 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
     }
     // A number the neutral table does not own is refused, never routed
     // into a private dialect: one contract per number.
-    cinux::print::Println("[armv7] svc %X refused, no neutral service", kNumber);
+    cinux::print::Println("[armv7] svc %X (%u) refused, no neutral service", kNumber,
+                          (unsigned)kNumber);
     trap->r0 = static_cast<unsigned long>(-38);  // ENOSYS
     return trap;
 }

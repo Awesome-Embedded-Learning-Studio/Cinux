@@ -55,6 +55,22 @@ inline constexpr unsigned long kFcntl64       = 221;
 /// EABI spells process creation with clone; a libc's fork() is
 /// clone(SIGCHLD, no stack), which is the plain fork this port seats.
 inline constexpr unsigned long kClone         = 120;
+/// Readiness and time: a desktop polls its input and asks the clock
+/// every frame. EABI keeps the old syscall name for poll, and the
+/// time64 spelling for the clock, beside the 32-bit one glibc still
+/// probes.
+inline constexpr unsigned long kPoll          = 168;
+inline constexpr unsigned long kPpoll         = 336;
+inline constexpr unsigned long kClockGettime   = 263;
+inline constexpr unsigned long kClockGettime64 = 403;
+/// The session and group words a shell's child sets up before exec.
+inline constexpr unsigned long kSetpgid        = 57;
+inline constexpr unsigned long kGetpgid        = 132;
+inline constexpr unsigned long kGetsid         = 147;
+inline constexpr unsigned long kSetsid         = 66;
+inline constexpr unsigned long kGetpgrp        = 65;
+inline constexpr unsigned long kDup2          = 63;
+inline constexpr unsigned long kKill          = 37;
 inline constexpr unsigned long kSetTidAddress = 256;
 inline constexpr unsigned long kSetRobustList = 338;
 inline constexpr unsigned long kRseq          = 398;

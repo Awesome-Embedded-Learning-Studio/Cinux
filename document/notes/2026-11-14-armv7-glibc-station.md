@@ -191,6 +191,31 @@ vesper-fbdev: running; /init's timeout or Ctrl-C ends the run
 三条字面量（面板开了、键盘坐上了、进循环了）。默认的 `check-armv7.sh` 仍走可判定
 的 busybox 链，两者互不影响。
 
+## 终端子进程走到哪一步
+
+桌面起 shell 的路是这样：`forkpty` → `clone` → `setsid` → `dup2` → `execve`。
+这一串补齐了下面这些号，子进程才真的起来：
+
+| 号 | 名字 | 接法 |
+| --- | --- | --- |
+| 37 | kill | 中立 kill 面 |
+| 63 | dup2 | 中立 dup2 面 |
+| 65 | getpgrp | 中立进程组面 |
+| 66 | setsid | 中立进程组面 |
+| 120 | clone | 只接 fork 形状（无 CLONE_VM、无栈） |
+| 168 / 336 | poll / ppoll | 中立 poll 面，带 pipe 与 eventfd 后端 |
+| 263 / 403 | clock_gettime / clock_gettime64 | 32 位 timespec 的适配器与 64 位中立面 |
+| 57 / 132 / 147 | setpgid / getpgid / getsid | 中立进程组面 |
+
+另外，客人根里没有 `/bin`，而桌面按 POSIX 习惯起 `/bin/sh`：盘上的 busybox 现在
+在挂载后抄一份到内存根的 `/bin/sh`（1.5MB），于是一个程序期望的位置上真的有 shell。
+
+现在的状态：shell 子进程起来了，桌面进入循环；但它还会报 `rt_sigaction`（174）与
+`rt_sigprocmask`（175）没有中立处理器——这两个的记录布局也是按 ABI 变的
+（arm 的 `struct sigaction` 20 字节，x86-64 的是 32 字节），要像 stat 那样按
+`arch::abi` 描述再写一遍。子进程跑起来之后还会在一次写保护页上撞
+`user fault caught ... code 6`，这条要单独查。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
@@ -198,5 +223,5 @@ vesper-fbdev: running; /init's timeout or Ctrl-C ends the run
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
 - busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
-- 终端子进程起来后还没验证它的输入输出闭环（键盘事件进窗口、pty 回显）
+- `rt_sigaction` / `rt_sigprocmask` 的按 ABI 记录还没写
 - 设备帧的多重映射与拆卸计数仍需更完整的账本
