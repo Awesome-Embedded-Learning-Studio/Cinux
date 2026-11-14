@@ -36,11 +36,18 @@ namespace {
 /// Unshifted letters and digits plus the editing keys are enough for a
 /// shell; anything else is swallowed rather than guessed.
 uint16_t evdev_code_for(char character) {
+    // Linux's evdev letter codes are not sequential: the top row, the
+    // home row and the bottom row each walk their own run, so a table is
+    // the honest form. A sequential guess turns "echo" into "gdkz".
+    static constexpr uint16_t kLetterCodes[26] = {
+        30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50,  // a..m
+        49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,  // n..z
+    };
     if (character >= 'a' && character <= 'z') {
-        return static_cast<uint16_t>(30 + (character - 'a'));
+        return kLetterCodes[static_cast<unsigned long>(character - 'a')];
     }
     if (character >= 'A' && character <= 'Z') {
-        return static_cast<uint16_t>(30 + (character - 'A'));
+        return kLetterCodes[static_cast<unsigned long>(character - 'A')];
     }
     if (character >= '1' && character <= '9') {
         return static_cast<uint16_t>(2 + (character - '1'));
@@ -84,7 +91,8 @@ void PollSerialKeyboard() {
         // The console queue still gets the byte: whichever consumer
         // asked first cannot starve the other, because both are fed
         // here, at the source.
-        NoteSerialByte(character);
+        // The byte source already published it; the pump only keeps the
+        // console's queue in step, or one key would reach the desk twice.
         static_cast<void>(cinux::driver::ConsoleTty().feed(character));
     }
 }
