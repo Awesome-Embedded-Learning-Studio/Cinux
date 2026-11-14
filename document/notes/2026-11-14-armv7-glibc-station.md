@@ -393,6 +393,20 @@ click delivered 与 shell answered。
 的 403）另走一个门，那个形状在两边都是两个八字节词——于是 ARM 上原先那个 32 位
 适配器撤掉，只剩一套机制。
 
+## GUI 车道进了 ctest
+
+`build/armv7-vesper/desk` 在的时候，`cmake/qemu/armv7/run.cmake` 会多注册一个
+`arm_desk` 测试：它跑 `scripts/check-armv7-desk.sh`，也就是把桌面点开、打字、
+看屏幕那一整条。于是 ARM 的测试面是两条：
+
+```
+1/2 Test #1: arm_boot ... Passed  30.03 sec
+2/2 Test #2: arm_desk ... Passed  50.17 sec
+```
+
+两条互不干扰：桌面车道用的是自己的镜像，跑完会把默认车道的探针与镜像一起还原，
+所以先跑哪条都行（两种顺序都验过）。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补

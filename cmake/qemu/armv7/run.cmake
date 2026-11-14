@@ -182,3 +182,21 @@ add_test(NAME arm_boot
             "-DEXPECTED_FAULT=data abort at 51000000 status 805 code 2"
             "-DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log"
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
+
+# The GUI lane is a test too, when the desktop artifact is there: it
+# boots the desktop, clicks the terminal icon, types, and judges the
+# screen's pixels. The desk never exits, so the script owns its own run.
+set(_arm_desk_test_bin "")
+foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk"
+        "${CMAKE_BINARY_DIR}/armv7-vesper/desk")
+    if(EXISTS "${_arm_candidate}" AND NOT _arm_desk_test_bin)
+        set(_arm_desk_test_bin "${_arm_candidate}")
+    endif()
+endforeach()
+if(_arm_desk_test_bin AND EXISTS "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
+    add_test(NAME arm_desk
+        COMMAND ${CMAKE_COMMAND} -E env
+                "CINUX_ARM_BUILD=${CMAKE_BINARY_DIR}"
+                bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
+    set_tests_properties(arm_desk PROPERTIES TIMEOUT 900)
+endif()
