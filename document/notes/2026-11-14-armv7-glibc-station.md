@@ -1,7 +1,8 @@
-# armv7 的 glibc 车站
+# armv7 的 glibc 与 busybox 车站
 
 状态：盘上程序能接力 exec 到静态链接的 glibc 程序，程序用 malloc、printf、
-open/read 跑完并退出 0（2026-11-14 夜）。这份记这一站怎么搭起来的、路上修掉
+open/read 跑完，再 exec 到静态链接的 busybox，busybox 的 echo 打出
+`armv7 busybox ok` 后退出 0（2026-11-14 夜）。这份记这一站怎么搭起来的、路上修掉
 的几个真问题、以及现在还缺什么。
 
 ## 现在的样子
@@ -73,10 +74,23 @@ arm 的项是 8 字节，第一次 writev 吐出来的是二进制里的字符�
 上，用户名址在根下没有意义。用户内存门现在在拷贝前借出任务自己的页表，拷
 完换回来（记录进来时的根，不要硬编码根）。
 
+## busybox 这一站
+
+`scripts/build-armv7-busybox.sh` 用同一份 busybox 源码与配置交叉编译，
+在 `.config` 里把 `CONFIG_EXTRA_LDFLAGS` 定成
+`-no-pie -Wl,-Ttext-segment=0x40010000`：默认的 0x10000 落在内核恒等映射
+里，装载器没地方放它。strip 要用交叉工具链那一份，宿主的 strip 读不懂 ARM
+对象。
+
+产物在 `build/armv7-busybox/busybox`，镜像脚本发现它就铸成 `/bb`；判定字面
+量 `armv7 busybox ok` 只在产物存在时加入。调用约定按 busybox 的规矩：
+`argv[0]` 得是 `busybox`，applet 名放 `argv[1]`。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补
 - `clock_gettime` 一类计时号仍未接，glibc 目前容忍失败
 - `getrandom`、`rseq` 走不支持探针，够用但不完整
 - exec 的 argv[0] 是空串（客人传了空 argv），真实程序会想看到自己的路径
-- 真正的用户生态（busybox 级）与 GUI 桌面还没上车
+- busybox 的部分 applet 还会撞上没接的号（getuid32、statx 一类），按需补
+- GUI 桌面还没上车

@@ -29,6 +29,10 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
     set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
         OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
 endif()
+if(_arm_busybox_bin)
+    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
+        OBJECT_DEPENDS "${_arm_busybox_bin}")
+endif()
 
 add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
 
@@ -57,6 +61,20 @@ foreach(_arm_def IN LISTS _arm_defs)
     endif()
     list(APPEND _arm_names "${_arm_name}")
 endforeach()
+
+# The busybox station rides the same optional-artifact rule: built by
+# scripts/build-armv7-busybox.sh on a host with the cross toolchain.
+set(_arm_busybox_arg "")
+set(_arm_busybox_bin "")
+foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-busybox/busybox"
+        "${CMAKE_BINARY_DIR}/armv7-busybox/busybox")
+    if(EXISTS "${_arm_candidate}" AND NOT _arm_busybox_bin)
+        set(_arm_busybox_bin "${_arm_candidate}")
+    endif()
+endforeach()
+if(_arm_busybox_bin)
+    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=armv7 busybox ok")
+endif()
 
 # The glibc station rides an optional artifact: only a host with the
 # cross toolchain built it, so its judgement joins only there.
@@ -104,6 +122,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUEST_DISK_MOTD=[guest] disk motd: Cinux says hello from a real disk."
             "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
             ${_arm_glibc_arg}
+            ${_arm_busybox_arg}
 
             "-DEXPECTED_FB0=dev fb0 320x240"
             "-DEXPECTED_EVENT0=dev event0 72 bytes"

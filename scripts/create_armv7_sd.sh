@@ -23,6 +23,23 @@ debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
 disk_prog="${CINUX_DISK_PROG:-${script_dir}/../assets/armv7_diskprog.elf}"
 debugfs -w -R "write ${disk_prog} /prog" "${volume}" >/dev/null 2>&1
 
+# The busybox station's binary rides along the same way: it is a build
+# artifact, not tree content, so the volume takes it only when present.
+busybox_bin="${CINUX_ARM_BUSYBOX:-}"
+if [[ -z "${busybox_bin}" ]]; then
+    for candidate in "${script_dir}/../build/armv7-busybox/busybox" \
+                     "${script_dir}/../build-armv7/armv7-busybox/busybox"; do
+        if [[ -f "${candidate}" ]]; then
+            busybox_bin="${candidate}"
+            break
+        fi
+    done
+fi
+if [[ -n "${busybox_bin}" && -f "${busybox_bin}" ]]; then
+    debugfs -w -R "write ${busybox_bin} /bb" "${volume}" >/dev/null 2>&1
+    echo "[armv7-sd] busybox seeded at /bb"
+fi
+
 # The glibc station's program rides along only when its image exists:
 # building it needs the arm-none-linux-gnueabihf toolchain, which is a
 # host-side concern, not a lane requirement. The check stays green with
