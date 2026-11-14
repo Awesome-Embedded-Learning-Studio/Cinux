@@ -56,12 +56,14 @@ sleep 2
     sleep 1
     # The icon opens on a double click: two press/release pairs inside
     # the desk's click window.
+    # The desk's clock is real now, so a double click has to land inside
+    # its window: two press/release pairs a couple of hundred ms apart.
     printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
-    sleep 1
+    sleep 0.2
     printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
-    sleep 1
+    sleep 0.2
     printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
-    sleep 1
+    sleep 0.2
     printf '%s\n' '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
     sleep 4
     printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot}\"}}"

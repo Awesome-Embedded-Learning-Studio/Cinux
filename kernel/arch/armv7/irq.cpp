@@ -18,6 +18,7 @@
 #include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/timer.hpp"
+#include "kernel/time/tick.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
@@ -49,12 +50,22 @@ void serve_tick() {
     const unsigned long interrupt = cinux::armv7::GicAcknowledge();
     cinux::armv7::GicEnd(interrupt);
     ++g_ticks;
+    // The neutral heartbeat counts too: the clock every timeout is
+    // measured against lives in Tick, and this port used never to feed
+    // it, so a 15 ms poll waited forever. This timer runs slower than
+    // the neutral rate, so one interrupt credits the ticks it covers.
+    constexpr unsigned long kTicksPerInterrupt = cinux::time::kTickHz.value / 10UL;
+    for (unsigned long credit = 0; credit < kTicksPerInterrupt; ++credit) {
+        cinux::time::Tick::self().on_interrupt();
+    }
     cinux::armv7::PollSerialKeyboard();
     if ((g_ticks % 2) == 1) {
         cinux::armv7::UartWrite("[armv7] tick ");
         print_unsigned(g_ticks);
         cinux::armv7::UartWrite("\n");
     }
+    // One interrupt per neutral tick: the same rate x86's PIT keeps, so
+    // a second is a second on both lanes.
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
 }
 
