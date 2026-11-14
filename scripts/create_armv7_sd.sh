@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Bakes the armv7 bring-up SD card: an eight-megabyte raw image with an
+# MBR (boot signature plus one Linux partition at sector 2048) and a
+# minimal ext2 volume inside that partition, seeded with one motd the
+# guest can read back through the whole block street. Deterministic in
+# shape: same partition table, same file names, every build.
+set -euo pipefail
+
+image=$1
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+seed_dir="${script_dir}/ext2_seed"
+
+partition_start=2048
+partition_sectors=14336
+
+# The volume bakes alone first, then lands at its partition's offset.
+volume="$(mktemp)"
+trap 'rm -f "${volume}"' EXIT
+truncate -s $((partition_sectors * 512)) "${volume}"
+mkfs.ext2 -q -F -b 1024 -O none -N 64 "${volume}"
+debugfs -w -R 'mkdir /etc' "${volume}" >/dev/null 2>&1
+debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
+
+# The disk: zeros, the volume at its offset, then the MBR on top.
+truncate -s 8M "${image}"
+dd if="${volume}" of="${image}" bs=512 seek="${partition_start}" conv=notrunc status=none
+printf '\x55\xAA' | dd of="${image}" bs=1 seek=510 conv=notrunc status=none
+printf 'CINUXSDMK' | dd of="${image}" bs=1 seek=512 conv=notrunc status=none
+printf '\x83' | dd of="${image}" bs=1 seek=450 conv=notrunc status=none
+# The table counts little-endian: emit the four bytes of each word
+# from its least significant end.
+printf "$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' \
+    $((partition_start & 0xff)) $(((partition_start >> 8) & 0xff)) \
+    $(((partition_start >> 16) & 0xff)) $(((partition_start >> 24) & 0xff)))" \
+    | dd of="${image}" bs=1 seek=454 conv=notrunc status=none
+printf "$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' \
+    $((partition_sectors & 0xff)) $(((partition_sectors >> 8) & 0xff)) \
+    $(((partition_sectors >> 16) & 0xff)) $(((partition_sectors >> 24) & 0xff)))" \
+    | dd of="${image}" bs=1 seek=458 conv=notrunc status=none
+
+echo "[armv7-sd] molded ${image}: ext2 volume at sector ${partition_start}, motd seeded"

@@ -86,6 +86,12 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_device.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_keyboard.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usdhc/usdhc.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_queue.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/block/block_cache.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_layout.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_mutation.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_write.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci_layout.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/console.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp

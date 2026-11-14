@@ -209,4 +209,67 @@ private:
     void*           self_ = nullptr;
 };
 
+/**
+ * @brief   One partition's window onto a whole-disk device.
+ * @note    The only partition mechanism in the tree: it satisfies the
+ *          BlockDevice contract by shifting every call's first block
+ *          past the partition's base, so a queue, a cache, or a volume
+ *          built over it never learns the disk is sliced. The base
+ *          comes from the table the reader parsed; this class never
+ *          parses tables itself.
+ * @since   0.1.0
+ * @ingroup kernel_driver
+ */
+class BlockWindow {
+public:
+    BlockWindow() = default;
+
+    /**
+     * @brief         Seats one whole-disk device and names the window.
+     *
+     * @param[in,out] device  The whole-disk device instance.
+     * @param[in]     base    The partition's first block on the disk.
+     * @since         0.1.0
+     * @ingroup       kernel_driver
+     */
+    template <BlockDevice Dev>
+    void adopt(Dev& device, std::uint64_t base) {
+        port_.adopt(device);
+        base_ = base;
+    }
+
+    /// Reads span blocks at partition-relative first into sink.
+    [[nodiscard]] bool read_blocks(Lba first, BlockSpan span, std::uint8_t* sink) const {
+        return port_.read_blocks(Lba{base_ + first.value}, span, sink);
+    }
+
+    /// Writes span blocks at partition-relative first from source.
+    [[nodiscard]] bool write_blocks(Lba first, BlockSpan span, const std::uint8_t* source) const {
+        return port_.write_blocks(Lba{base_ + first.value}, span, source);
+    }
+
+    /// Blocks the partition addresses, not the disk.
+    [[nodiscard]] std::uint64_t block_count() const {
+        const std::uint64_t kWhole = port_.block_count();
+        return base_ < kWhole ? kWhole - base_ : 0;
+    }
+
+    /// The disk's transfer unit, which the partition shares.
+    [[nodiscard]] unsigned long block_size() const {
+        return port_.block_size();
+    }
+
+    /// Orders the disk's writes behind this call.
+    [[nodiscard]] bool flush() const {
+        return port_.flush();
+    }
+
+private:
+    BlockPort      port_;
+    std::uint64_t  base_ = 0;
+};
+
+static_assert(BlockDevice<BlockWindow>);
+
+
 }  // namespace cinux::driver

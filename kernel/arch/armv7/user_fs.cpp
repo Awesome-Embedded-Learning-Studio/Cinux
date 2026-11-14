@@ -41,9 +41,13 @@
 #include "kernel/fs/devfs/input_node.hpp"
 #include "kernel/drivers/input/event_stream.hpp"
 #include "kernel/drivers/input/input_config.hpp"
+#include "kernel/drivers/block/block_cache.hpp"
+#include "kernel/drivers/block/block_config.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_queue.hpp"
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/drivers/usdhc/usdhc.hpp"
+#include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/loader/loader.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -63,6 +67,10 @@ namespace {
 fs::RamFs* g_ram  = nullptr;
 fs::Vfs*   g_vfs  = nullptr;
 fs::ProcFs* g_proc = nullptr;
+driver::BlockQueue*  g_disk_queue  = nullptr;
+driver::BlockCache*  g_disk_cache  = nullptr;
+driver::BlockWindow* g_disk_window = nullptr;
+fs::ext2::Ext2*          g_disk_volume = nullptr;
 mm::AddressSpace* g_guest_space = nullptr;
 mm::VmaStore*     g_guest_ranges = nullptr;
 unsigned long     g_guest_entry  = 0;
@@ -201,6 +209,47 @@ void init() {
                 cinux::print::Println(kEntry ? "[armv7] mmcblk0 p1 at %lu"
                                              : "[armv7] mmcblk0 p1 missing",
                                       static_cast<unsigned long>(kStart));
+                // The volume street, the same ladder the x86 lane
+                // climbs: one window over the partition, one queue,
+                // one cache, one ext2. The first reader through the
+                // queue drives it synchronously, so mounting works
+                // before the scheduler ever runs.
+                if (kEntry) {
+                    g_disk_window = new driver::BlockWindow();
+                    g_disk_window->adopt(driver::UsdhcHost::self(), kStart);
+                    g_disk_queue = new driver::BlockQueue(*g_disk_window);
+                    const auto kAvailable =
+                        mm::Pmm::self().free_page_count() * arch::page::kSize;
+                    const auto kBudget = base::math::Min(
+                        kAvailable / driver::kBlockCacheMemoryDivisor,
+                        driver::kBlockCacheMaxBytes);
+                    const auto kSlotBytes =
+                        driver::kCachePageSectors * driver::kSectorBytes;
+                    g_disk_cache = new driver::BlockCache(*g_disk_queue,
+                                                          kBudget / kSlotBytes);
+                    g_disk_volume = new fs::ext2::Ext2(*g_disk_cache);
+                    if (g_disk_volume->mount().ok()) {
+                        const auto kDiskDir = g_ram->make_dir("/disk");
+                        base::safety::Check(kDiskDir.ok(), "disk dir refused");
+                        const auto kMounted =
+                            g_vfs->mount("/disk", *g_disk_volume, "ext2");
+                        base::safety::Check(kMounted.ok(), "ext2 mount failed");
+                        const auto kMotd = g_vfs->resolve("/disk/etc/motd");
+                        base::Own<unsigned char[]> kMotdBytes;
+                        unsigned long              kMotdSize = 0;
+                        const bool kRead = kMotd.ok() &&
+                                           fs::ReadWholeFile(kMotd.value(), kMotdBytes,
+                                                             kMotdSize)
+                                               .ok() &&
+                                           kMotdSize != 0;
+                        cinux::print::Println(
+                            kRead ? "[armv7] ext2 mounted, motd is %lu bytes"
+                                  : "[armv7] ext2 mounted, motd read FAILED",
+                            kMotdSize);
+                    } else {
+                        cinux::print::Println("[armv7] ext2 mount FAILED");
+                    }
+                }
             }
         }
         const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
