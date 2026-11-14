@@ -56,6 +56,12 @@ constexpr unsigned long kRegUsbStatus = 0x04;
 /// @brief Operational register: the asynchronous list's first QH.
 constexpr unsigned long kRegAsyncList = 0x18;
 
+/// @brief Operational register: the interrupt-enable mask.
+constexpr unsigned long kRegIntrEnable = 0x08;
+
+/// @brief Operational register: the periodic frame list's page.
+constexpr unsigned long kRegPeriodicList = 0x14;
+
 /// @brief Operational register: the routed-ports claim, all at once.
 constexpr unsigned long kRegConfigFlag = 0x40;
 
@@ -71,6 +77,9 @@ constexpr uint32_t kHostReset = 1U << 1U;
 /// @brief USBCMD bit: run the asynchronous schedule.
 constexpr uint32_t kAsyncEnable = 1U << 5U;
 
+/// @brief USBCMD bit: run the periodic schedule.
+constexpr uint32_t kPeriodicEnable = 1U << 4U;
+
 /// @brief USBCMD bit: the doorbell that ends an asynchronous round.
 constexpr uint32_t kAsyncDoorbell = 1U << 6U;
 
@@ -82,6 +91,9 @@ constexpr uint32_t kAsyncAdvance = 1U << 5U;
 
 /// @brief USBSTS bit: the asynchronous schedule is running.
 constexpr uint32_t kAsyncStatus = 1U << 15U;
+
+/// @brief USBSTS bit: the periodic schedule is running.
+constexpr uint32_t kPeriodicStatus = 1U << 14U;
 
 /// @brief PORTSC bit: a device answers on this port right now.
 constexpr uint32_t kCurrentConnect = 1U;
@@ -107,6 +119,9 @@ constexpr unsigned long kQtdSetup        = 0x40;
 constexpr unsigned long kQtdData         = 0x60;
 constexpr unsigned long kQtdStatus       = 0x80;
 constexpr unsigned long kControlBuffer   = 0x800;
+constexpr unsigned long kQhIntr          = 0x100;
+constexpr unsigned long kQtdIntr         = 0x140;
+constexpr unsigned long kFrameEntries    = 1024;
 constexpr unsigned long kControlCapacity = arch::page::kSize - kControlBuffer;
 
 /// @brief qTD token: the transfer's life story in one word.
@@ -279,20 +294,129 @@ bool EhciHost::set_configuration(void* seat_handle, uint8_t config_value) {
                          static_cast<uint16_t>(config_value), 0, nullptr, 0);
 }
 
-bool EhciHost::configure_interrupt_in(void* /*seat*/, uint16_t /*max_packet*/,
-                                       uint8_t /*interval*/) {
+bool EhciHost::configure_interrupt_in(void* seat_handle, uint16_t max_packet,
+                                       uint8_t interval) {
+    auto* const kSeat = static_cast<Seat*>(seat_handle);
+    if (kSeat == nullptr || !kSeat->used || interval == 0 || max_packet == 0) {
+        return false;
+    }
+    if (pfl_phys_ == 0) {
+        const base::PhysAddr kPage = mm::Pmm::self().allocate_page();
+        if (kPage == base::PhysAddr{}) {
+            return false;
+        }
+        pfl_phys_ = kPage.raw;
+    }
+    // One interrupt QH for endpoint one: device address, high speed, the
+    // descriptor's max packet, data toggle from the qTD. No head-of-list
+    // flag here, this QH lives in the periodic schedule, not the reclaim
+    // loop. The emulator walks it every frame the list points at it.
+    const unsigned long kVirt  = cinux::arch::space::DirectMapVirt(kSeat->page_phys);
+    auto* const         kWords = reinterpret_cast<volatile uint32_t*>(kVirt + kQhIntr);
+    base::SetBytes(reinterpret_cast<void*>(kVirt + kQhIntr), 0, 0x80);
+    kWords[1] = max_packet << kQhMpsShift | kQhDataToggleControl | kQhSpeedHigh |
+                (1U << kQhEndpointShift) | kSeat->address;
+    kSeat->intr_linked = true;
+    kSeat->intr_toggle = false;
+    relink_periodic();
+    // The status bit lags the enable until the next frame boundary, and
+    // that boundary only ticks while the machine's other workers get a
+    // turn: park the core each round so the frame timer can run.
+    for (unsigned long spin = 0; spin < kSpinLimit; ++spin) {
+        if ((read32(op_base_ + kRegUsbStatus) & kPeriodicStatus) != 0) {
+            return true;
+        }
+        arch::CpuIdle();
+    }
+    last_fail_ = 11;
     return false;
 }
 
-void EhciHost::arm_interrupt_in(void* /*seat*/, uint64_t /*buffer_physical*/,
-                                unsigned long /*length*/,
-                                void (*/*done*/)(void*, const TransferDone&),
-                                void* /*owner*/) {}
+void EhciHost::arm_interrupt_in(void* seat_handle, uint64_t buffer_physical,
+                                unsigned long length,
+                                void (*done)(void*, const TransferDone&),
+                                void* owner) {
+    auto* const kSeat = static_cast<Seat*>(seat_handle);
+    if (kSeat == nullptr || !kSeat->used || done == nullptr || length == 0 ||
+        length > 0x1000 || (buffer_physical & 0xFFFU) + length > 0x1000) {
+        return;
+    }
+    const unsigned long kVirt    = cinux::arch::space::DirectMapVirt(kSeat->page_phys);
+    auto* const         kQh      = reinterpret_cast<volatile uint32_t*>(kVirt + kQhIntr);
+    auto* const         kQtd     = reinterpret_cast<volatile uint32_t*>(kVirt + kQtdIntr);
+    const unsigned long kQtdPhys = kSeat->page_phys + kQtdIntr;
+    kQtd[0] = kLinkTerminated;
+    kQtd[1] = kLinkTerminated;
+    // The toggle bit rides the token: DATA0 first, DATA1 after.
+    kQtd[2] = kTokenActive | kOnComplete | (kTokenPidIn << kPidShift) |
+              (static_cast<uint32_t>(length) << kBytesShift) |
+              (kSeat->intr_toggle ? kDataToggleOne : 0U);
+    kQtd[3] = static_cast<uint32_t>(buffer_physical);
+    kQh[3] = static_cast<uint32_t>(kQtdPhys);
+    kQh[4] = static_cast<uint32_t>(kQtdPhys);
+    kSeat->intr_toggle = !kSeat->intr_toggle;
+    kSeat->report_target = static_cast<unsigned long>(buffer_physical);
+    kSeat->report_bytes  = length;
+    kSeat->done          = done;
+    kSeat->owner         = owner;
+    arch::MemoryBarrier();
+    kSeat->intr_live = true;
+}
+
+void EhciHost::relink_periodic() {
+    unsigned long head = 0;
+    unsigned long prev = 0;
+    for (Seat& seat : seats_) {
+        if (!seat.used || !seat.intr_linked) {
+            continue;
+        }
+        const unsigned long kQhPhys = seat.page_phys + kQhIntr;
+        if (head == 0) {
+            head = kQhPhys;
+        } else {
+            auto* const kPrevWords = reinterpret_cast<volatile uint32_t*>(
+                cinux::arch::space::DirectMapVirt(prev));
+            kPrevWords[0] = static_cast<uint32_t>(kQhPhys) | kLinkQueueHead;
+        }
+        prev = kQhPhys;
+    }
+    if (prev != 0) {
+        auto* const kTailWords =
+            reinterpret_cast<volatile uint32_t*>(cinux::arch::space::DirectMapVirt(prev));
+        kTailWords[0] = kLinkTerminated;
+    }
+    const uint32_t kEntry =
+        head != 0 ? static_cast<uint32_t>(head) | kLinkQueueHead : kLinkTerminated;
+    auto* const kList =
+        reinterpret_cast<volatile uint32_t*>(cinux::arch::space::DirectMapVirt(pfl_phys_));
+    for (unsigned long index = 0; index < kFrameEntries; ++index) {
+        kList[index] = kEntry;
+    }
+    arch::MemoryBarrier();
+    write32(op_base_ + kRegPeriodicList, static_cast<uint32_t>(pfl_phys_));
+    if (head != 0) {
+        // The emulator's frame timer only re-arms itself while some
+        // interrupt cause is enabled: claim the frame-list-rollover one
+        // so enabling the schedule wakes the timer on the next boundary.
+        write32(op_base_ + kRegIntrEnable, 1U << 2U);
+        write32(op_base_ + kRegUsbCommand,
+                read32(op_base_ + kRegUsbCommand) | kPeriodicEnable);
+    } else {
+        write32(op_base_ + kRegUsbCommand,
+                read32(op_base_ + kRegUsbCommand) & ~kPeriodicEnable);
+        static_cast<void>(wait_clear(op_base_ + kRegUsbStatus, kPeriodicStatus));
+    }
+}
 
 void EhciHost::detach(void* seat_handle) {
     auto* const kSeat = static_cast<Seat*>(seat_handle);
     if (kSeat == nullptr || !kSeat->used) {
         return;
+    }
+    // Leave the periodic chain before anything else forgets this QH.
+    if (kSeat->intr_linked) {
+        kSeat->intr_linked = false;
+        relink_periodic();
     }
     // Never return a page to the PMM while the controller can still fetch it.
     if (!stop_async()) {
@@ -304,7 +428,33 @@ void EhciHost::detach(void* seat_handle) {
     *kSeat = Seat{};
 }
 
-void EhciHost::pump() {}
+void EhciHost::pump() {
+    for (Seat& seat : seats_) {
+        if (!seat.used || !seat.intr_live) {
+            continue;
+        }
+        const unsigned long kVirt = cinux::arch::space::DirectMapVirt(seat.page_phys);
+        auto* const kQtd = reinterpret_cast<volatile uint32_t*>(kVirt + kQtdIntr);
+        if ((kQtd[2] & kTokenActive) != 0) {
+            continue;
+        }
+        seat.intr_live = false;
+        const uint32_t kBad = kTokenHalted | kTokenDataBuf | kTokenBabble | kTokenXactErr |
+                              kTokenMissed | kTokenSplit;
+        const uint32_t kToken = kQtd[2];
+        // The token's byte count reads as what REMAINED; what arrived is
+        // the difference against what was armed.
+        const unsigned long kRemained = (kToken >> kBytesShift) & 0x3FFFU;
+        if (seat.done != nullptr) {
+            seat.done(seat.owner,
+                      TransferDone{.ok = (kToken & kBad) == 0,
+                                   .length =
+                                       kRemained < seat.report_bytes
+                                           ? seat.report_bytes - kRemained
+                                           : 0});
+        }
+    }
+}
 
 bool EhciHost::unhealthy() {
     return unhealthy_;
@@ -387,7 +537,7 @@ bool EhciHost::queue_control(Seat& seat, bool in, uint8_t request, uint16_t valu
     auto* const         kBuffer   = reinterpret_cast<unsigned char*>(kVirt + kControlBuffer);
     const unsigned long kDataPhys = seat.page_phys + kControlBuffer;
 
-    base::SetBytes(reinterpret_cast<void*>(kVirt), 0, 0x200);
+    base::SetBytes(reinterpret_cast<void*>(kVirt), 0, kQhIntr);
 
     // The setup packet's eight bytes live at the data buffer's head; the
     // data stage, when present, borrows the same page.

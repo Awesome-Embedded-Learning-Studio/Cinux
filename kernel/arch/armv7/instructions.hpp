@@ -24,6 +24,11 @@ inline void MemoryBarrier() {
     asm volatile("dsb" ::: "memory");
 }
 
+/// Parks the core until an event: lets the machine's other workers run.
+inline void CpuIdle() {
+    asm volatile("wfi");
+}
+
 /// Instruction synchronization barrier.
 inline void InstructionBarrier() {
     asm volatile("isb" ::: "memory");

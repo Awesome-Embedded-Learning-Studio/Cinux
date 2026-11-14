@@ -78,6 +78,16 @@ private:
         unsigned int  address   = 0;
         unsigned long page_phys = 0;
         bool          used      = false;
+
+        // The interrupt-in street: one QH and qTD live later in the same
+        // page, one armed report at a time.
+        bool          intr_live   = false;
+        bool          intr_toggle = false;
+        bool          intr_linked = false;
+        void        (*done)(void* owner, const TransferDone& finished) = nullptr;
+        void*         owner         = nullptr;
+        unsigned long report_target = 0;
+        unsigned long report_bytes  = 0;
     };
 
     [[nodiscard]] uint32_t read32(unsigned long offset) const;
@@ -99,12 +109,17 @@ private:
 
     static constexpr unsigned int kSeats = 4;
 
+    /// Rebuilds the periodic chain across every linked seat and points
+    /// the frame list at its head, enabling or disabling the schedule.
+    void relink_periodic();
+
     volatile unsigned char* window_    = nullptr;
     unsigned long           op_base_   = 0;
     unsigned int            ports_     = 0;
     uint16_t                revision_  = 0;
     bool                    unhealthy_ = false;
     Seat                    seats_[kSeats] = {};
+    unsigned long           pfl_phys_ = 0;
     unsigned int            next_address_ = 1;
     unsigned int            last_fail_ = 0;
 };
