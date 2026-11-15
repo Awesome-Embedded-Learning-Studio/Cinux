@@ -2,10 +2,10 @@
  * @file    cow_release.cpp
  * @brief   Frame release and the share ledger for the armv7 lane.
  *
- * Exclusive frames go straight back to the allocator. Shared frames are
- * counted in a small table: the last owner frees, everyone else just
- * drops a count. No copy happens yet; that is the fault path's job and
- * it does not exist on this port.
+ * The page-table half of copy-on-write lives here: marking a leaf
+ * shared, and the release walk's bookkeeping. The share counting itself
+ * is the allocator's, one mechanism for every port, and it sits in the
+ * neutral layer beside the clone walk that uses it.
  *
  * @author  Charliechen114514
  * @date    2026-11-12
@@ -28,27 +28,6 @@
 
 namespace cinux::mm::cow {
 
-void RetainFrame(unsigned long long frame) {
-    // One mechanism, the allocator's own: a frame's share count lives
-    // beside its bitmap bit, so a process with a thousand shared pages
-    // is no different from one with two. The arm lane used to keep a
-    // 128-entry table of its own, and a fork past that silently forgot
-    // its shares -- the teardown then freed a frame the parent still
-    // walked, which is the double free this replaces.
-    // A frame that was private until now enters the count as the owner
-    // it already had, then the new mapping joins it: two walkers, not
-    // one. Without the owner's own share the first teardown would free a
-    // frame the other world still walks.
-    auto& allocator = cinux::mm::Pmm::self();
-    if (allocator.frame_shares(cinux::base::PhysAddr{static_cast<unsigned long>(frame)}) == 0) {
-        allocator.retain_frame(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
-    }
-    allocator.retain_frame(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
-}
-
-unsigned long FrameShares(unsigned long long frame) {
-    return cinux::mm::Pmm::self().frame_shares(cinux::base::PhysAddr{static_cast<unsigned long>(frame)});
-}
 
 bool MarkPageShared(unsigned long root, unsigned long virtual_address) {
     using cinux::arch::page::Entry;

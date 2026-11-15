@@ -121,4 +121,27 @@ AddressSpace* CloneSharedSpace(const AddressSpace& parent, const VmaStore* range
     return kChild;
 }
 
+
+/// One frame, one more walker.
+///
+/// The count lives in the allocator beside the frame's own bitmap bit,
+/// so a process with a thousand shared pages is no different from one
+/// with two; an arch-local table would only be a second place to forget
+/// a share. A frame that was private until now enters the count as the
+/// owner it already had, then the new mapping joins it: two walkers,
+/// not one. Without the owner's own share the first teardown would free
+/// a frame the other world still walks.
+void RetainFrame(unsigned long long frame) {
+    auto& allocator = Pmm::self();
+    if (allocator.frame_shares(base::PhysAddr{static_cast<unsigned long>(frame)}) == 0) {
+        allocator.retain_frame(base::PhysAddr{static_cast<unsigned long>(frame)});
+    }
+    allocator.retain_frame(base::PhysAddr{static_cast<unsigned long>(frame)});
+}
+
+/// How many spaces still translate this frame.
+unsigned long FrameShares(unsigned long long frame) {
+    return Pmm::self().frame_shares(base::PhysAddr{static_cast<unsigned long>(frame)});
+}
+
 }  // namespace cinux::mm::cow
