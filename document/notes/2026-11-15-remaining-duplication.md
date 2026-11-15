@@ -104,6 +104,11 @@ arm 那段手写的设备节点摆放换成调用它。这是能立刻缩小重�
 命令：`arm-none-eabi-gcc -ffreestanding -nostdlib -fno-pic -fno-builtin
 -O2 -march=armv7-a -marm -T <单段链接脚本,基址0x40000000> -e disk_start`。
 
+翻转后的清理（2026-11-15 第四轮）：ramfs 的过渡遗产全删——四个种子文件
+（hello/motd/readme/scratch，内核侧无读者，盘上有同名文件）、种子助手、
+死掉的 /disk 目录门。ramfs 现在 starts empty：占住 `/` 等盘来接，长期职责
+是 `/tmp` 暂存区。两条车道全绿。
+
 原清单备份（已执行）：
 
 1. `user_fs.cpp`：挂 ext2 到 `/`，ramfs 只留 `/proc`、`/dev` 两个挂载点；

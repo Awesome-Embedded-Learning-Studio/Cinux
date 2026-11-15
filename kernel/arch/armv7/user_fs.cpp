@@ -84,18 +84,6 @@ mm::AddressSpace* g_guest_space = nullptr;
 mm::VmaStore*     g_guest_ranges = nullptr;
 unsigned long     g_guest_entry  = 0;
 
-/// One seeded regular file: create it, then lay its bytes in. The plain
-/// make_file hands back a borrowed handle, so nothing is released here.
-void seed_file(const char* name, const char* text, unsigned long bytes) {
-    const base::Result<fs::FsNode> kMade = g_ram->make_file(name);
-    base::safety::Check(kMade.ok(), "seed file refused");
-    if (bytes != 0) {
-        const base::Result<unsigned long> kLaid =
-            g_ram->write(kMade.value(), 0, text, bytes);
-        base::safety::Check(kLaid.ok(), "seed write refused");
-    }
-}
-
 /// Resolves the current task's program through this port's own VFS.
 /// The /proc/self/exe seat answers from here, so a busybox applet that
 /// re-execs itself finds the image the shell was seated from; without
@@ -174,13 +162,9 @@ void init() {
     seeded = true;
     g_ram = new fs::RamFs();
     g_vfs = new fs::Vfs();
-    const char kHello[]  = "hello\n";
-    const char kMotd[]   = "hi there\n";
-    const char kReadme[] = "readme!\n";
-    seed_file("hello", kHello, sizeof(kHello) - 1);
-    seed_file("motd", kMotd, sizeof(kMotd) - 1);
-    seed_file("readme", kReadme, sizeof(kReadme) - 1);
-    seed_file("scratch", "", 0);
+    // The ramfs holds the "/" seat only until the card is ready to take
+    // it; the card carries the bring-up files now, so the ramfs starts
+    // empty. Its long-term job is the /tmp staging mount further down.
     const base::Result<void> kRoot = g_vfs->mount("/", *g_ram, "ramfs");
     base::safety::Check(kRoot.ok(), "root mount failed");
     // The facts instance answers from the port's own identity decode,
@@ -311,8 +295,6 @@ void init() {
                     // the queue points back at it.
                     g_disk_port = new driver::BlockPort();
                     g_disk_port->adopt(*g_disk_window);
-                    const auto kDiskDir = g_ram->make_dir("/disk");
-                    base::safety::Check(kDiskDir.ok(), "disk dir refused");
                     // The disk is this port's root now, the way it has
                     // always been the x86 lane's. The ramfs root was the
                     // bridge for a card that carried only flat files; the
