@@ -148,20 +148,6 @@ private:
 
 }  // namespace
 
-Entry* KernelTables::table(unsigned long physical) {
-    return cinux::base::PtrAt<Entry>(DirectMapVirt(physical));
-}
-
-unsigned long KernelTables::take_page() {
-    base::PhysAddr const kFresh = Pmm::self().allocate_page();
-    if (kFresh == base::PhysAddr{}) {
-        return 0;
-    }
-    cinux::base::SetBytes(cinux::base::PtrAt<void>(DirectMapVirt(kFresh.raw)), 0,
-                          sizeof(Entry) * kEntriesPerTable);
-    return kFresh.raw;
-}
-
 unsigned long KernelTables::take_root() {
     return take_page();
 }

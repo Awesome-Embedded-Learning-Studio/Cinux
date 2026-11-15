@@ -46,8 +46,18 @@ busybox 铺到 ram 根的 `/bin/sh`。x86 这边的对应物分散在 `kernel/in
 
 `entropy`、`fork_resume`、`vmm_bringup` 三个文件两边同名。前两个是架构语义
 （随机源、上下文恢复方式），同名但内容必然是各自的实现，符合预期。
-`vmm_bringup` 值得再查一次：如果它做的只是"把页表建到能开分页"，两边的形状
-应该接近，可考虑把其中与页表形状无关的步骤提出来。
+
+`vmm_bringup` 查完了：映射本身两边差得远（x86 走四级表、按 2 MiB 页填
+huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并的形状。可合并的
+是 `KernelTables::table` 与 `take_page` 两步——它们只依赖直接映射、页管理器和
+表宽，与表形无关，已提到 `kernel/mm/kernel_tables.cpp`。`take_root` 与
+`release_root` 留在各端口，因为 x86 只要一张 4 KiB 的 PML4，arm 要十六个
+连续 KiB 且 16 KiB 对齐。
+
+顺带清掉一个错误实现：arm 的 `MapDeviceWindow` 原来是死代码，语义也不对（把物理
+地址当虚拟地址，再塞新分配的空帧），现在改成显式返回 false 并写清理由——这块板
+的设备窗口在建页表时已按段恒等映射，驱动直接访问，不需要 ioremap 门。只有 x86
+的驱动（nvme、xhci、ahci、e1000）会问这个门。
 
 ## 四、已经中立、不用动的
 

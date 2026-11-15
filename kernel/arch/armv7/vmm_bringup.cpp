@@ -59,23 +59,6 @@ void InvalidateTlb() {
 
 }  // namespace
 
-Entry* KernelTables::table(unsigned long physical) {
-    return cinux::base::PtrAt<Entry>(cinux::arch::space::DirectMapVirt(physical));
-}
-
-unsigned long KernelTables::take_page() {
-    cinux::base::PhysAddr const kFresh = Pmm::self().allocate_page();
-    if (kFresh == cinux::base::PhysAddr{}) {
-        return 0;
-    }
-    auto* const kPage = cinux::base::PtrAt<unsigned char>(
-        cinux::arch::space::DirectMapVirt(kFresh.raw));
-    for (unsigned long offset = 0; offset < cinux::arch::page::kSize; ++offset) {
-        kPage[offset] = 0;
-    }
-    return kFresh.raw;
-}
-
 unsigned long KernelTables::take_root() {
     // The first-level table is sixteen contiguous KiB on a 16 KiB
     // boundary. Take eight contiguous pages and use the aligned window;
@@ -117,21 +100,14 @@ void MapFramebufferDoor(const cinux::boot::BootInfo& info) {
 }
 
 bool MapDeviceWindow(std::uint64_t physical, unsigned long bytes) {
-    KernelTables        tables;
-    const unsigned long kRoot  = KernelPageRoot();
-    const unsigned long kPages = cinux::base::math::Ceil(bytes, cinux::arch::page::kSize);
-    for (unsigned long page = 0; page < kPages; ++page) {
-        base::PhysAddr const kFrame = Pmm::self().allocate_page();
-        if (kFrame == base::PhysAddr{}) {
-            return false;
-        }
-        if (!walk::MapPage(tables, kRoot,
-                           static_cast<unsigned long>(physical) + (page * cinux::arch::page::kSize),
-                           kFrame.raw)) {
-            return false;
-        }
-    }
-    return true;
+    // This port needs no ioremap door: the board's device windows are
+    // section-mapped identity at bring-up, so the drivers that ask for one
+    // on x86 reach these addresses directly here. The refusal is honest --
+    // the old body mapped the physical address as a virtual one against
+    // freshly drawn frames, a window nothing could have wanted.
+    static_cast<void>(physical);
+    static_cast<void>(bytes);
+    return false;
 }
 
 const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& handoff) {
