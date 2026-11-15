@@ -576,8 +576,15 @@ static size_t load_string(const char *src) { safe_strncpy(command_ps, src, S.max
 static void save_string(char *dst, unsigned maxsize) { safe_strncpy(dst, command_ps, maxsize); }
 ```
 
-也就是 `command_ps`（行编辑的缓冲）在 fork 出来的子进程里是 NULL。下一轮就查这个：
-它在 shell 里什么时候分配、fork 之后为什么在子进程里成了空。
+往回找调用者：把用户栈上的字按代码段过滤后符号化，得到两个返回地址——
+`evalcommand`（shell 在求值命令）与 `__libc_free`。也就是说子进程是在求值
+`cat /motd` 这条命令的过程中走到了这一步，而不是在画提示符。
+
+这一轮也给下次调试铺了路：busybox 现在按 `-fno-pie -fno-omit-frame-pointer` 编译
+（原来只关 PIE），帧指针在，回溯才有可能。不过这次现场 r11 指向的是数据段
+（`frame 0 at 4018B128 return 1`），说明崩的时候那一帧不是标准帧——所以还是没
+拿到调用栈。下一轮换手段：给 `safe_strncpy` 的调用点逐个打桩，或者在 QEMU 里用
+交互式 gdb 单步。
 
 顺带修掉一个真的 ABI 缺口：EABI 的 `stat64`（104 字节，size 在 48、ino 在 96）与
 `stat`（96 字节，size 在 44、ino 在 88）不是一个形状，而 `fstat64`(197) 原来写的是

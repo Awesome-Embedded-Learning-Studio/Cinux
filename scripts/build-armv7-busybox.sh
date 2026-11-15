@@ -83,7 +83,9 @@ with open(path) as handle:
 with open(path, "w") as handle:
     for line in lines:
         if line.startswith("CONFIG_EXTRA_CFLAGS="):
-            handle.write('CONFIG_EXTRA_CFLAGS="-fno-pie"\n')
+            # The frame pointer is what a backtrace walks: without it a
+            # crash report names a pc and nothing above it.
+            handle.write('CONFIG_EXTRA_CFLAGS="-fno-pie -fno-omit-frame-pointer"\n')
         elif line.startswith("CONFIG_EXTRA_LDFLAGS="):
             # The armv7 user window starts at 0x40000000: a program linked
             # at the default 0x10000 lands under the kernel's identity map

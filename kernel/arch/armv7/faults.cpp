@@ -19,6 +19,7 @@
 #include "kernel/arch/isr.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
 
 extern "C" [[noreturn]] void c_user_faulted();
@@ -97,5 +98,27 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
                           (unsigned long)trap->lr, (unsigned long)trap->r0,
                           (unsigned long)trap->r1, (unsigned long)trap->r2,
                           (unsigned long)trap->r3);
+    {
+        // The frame chain names the callers: an ARM frame holds the
+        // previous frame pointer then the return address. The chain stops
+        // when a link points back up the stack or leaves the user window,
+        // instead of chasing a stale word into the kernel's maps.
+        unsigned long frame = static_cast<unsigned long>(trap->r11) & ~3UL;
+        for (unsigned long depth = 0; depth < 6; ++depth) {
+            if (frame < cinux::mm::kUserNullTop || frame >= cinux::mm::kUserMmapTop) {
+                break;
+            }
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            const auto* const kSlot = reinterpret_cast<const unsigned long*>(frame);
+            const unsigned long kNext = kSlot[0];
+            const unsigned long kReturn = kSlot[1];
+            cinux::print::Println("[armv7] frame %u at %X return %X", (unsigned)depth, frame,
+                                  kReturn);
+            if (kNext <= frame) {
+                break;
+            }
+            frame = kNext & ~3UL;
+        }
+    }
     cinux::armv7::SeatFaultDeath();
 }
