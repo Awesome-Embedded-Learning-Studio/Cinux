@@ -53,6 +53,7 @@
 #include "kernel/drivers/device/device.hpp"
 #include "kernel/drivers/usdhc/usdhc.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
+#include "kernel/fs/block_volume.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/loader/loader.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -74,6 +75,9 @@ fs::Vfs*   g_vfs  = nullptr;
 fs::ProcFs* g_proc = nullptr;
 driver::BlockQueue*  g_disk_queue  = nullptr;
 driver::BlockCache*  g_disk_cache  = nullptr;
+/// The erased seat under the disk queue; heap-born so it outlives this
+/// function, since BlockQueue keeps a reference to it.
+driver::BlockPort*   g_disk_port   = nullptr;
 driver::BlockWindow* g_disk_window = nullptr;
 fs::ext2::Ext2*          g_disk_volume = nullptr;
 mm::AddressSpace* g_guest_space = nullptr;
@@ -300,23 +304,21 @@ void init() {
                 if (kEntry) {
                     g_disk_window = new driver::BlockWindow();
                     g_disk_window->adopt(driver::UsdhcHost::self(), kStart);
-                    g_disk_queue = new driver::BlockQueue(*g_disk_window);
-                    const auto kAvailable =
-                        mm::Pmm::self().free_page_count() * arch::page::kSize;
-                    const auto kBudget = base::math::Min(
-                        kAvailable / driver::kBlockCacheMemoryDivisor,
-                        driver::kBlockCacheMaxBytes);
-                    const auto kSlotBytes =
-                        driver::kCachePageSectors * driver::kSectorBytes;
-                    g_disk_cache = new driver::BlockCache(*g_disk_queue,
-                                                          kBudget / kSlotBytes);
-                    g_disk_volume = new fs::ext2::Ext2(*g_disk_cache);
-                    if (g_disk_volume->mount().ok()) {
-                        const auto kDiskDir = g_ram->make_dir("/disk");
-                        base::safety::Check(kDiskDir.ok(), "disk dir refused");
-                        const auto kMounted =
-                            g_vfs->mount("/disk", *g_disk_volume, "ext2");
-                        base::safety::Check(kMounted.ok(), "ext2 mount failed");
+                    // The neutral ladder: the card is reached through the
+                    // erased port, so the seat never learns the driver's
+                    // type, and queue, cache and volume come from the share
+                    // both ports climb. The port lives on the heap because
+                    // the queue points back at it.
+                    g_disk_port = new driver::BlockPort();
+                    g_disk_port->adopt(*g_disk_window);
+                    const auto kDiskDir = g_ram->make_dir("/disk");
+                    base::safety::Check(kDiskDir.ok(), "disk dir refused");
+                    const fs::BlockVolume kVolume =
+                        fs::MountBlockVolume(*g_vfs, "/disk", *g_disk_port);
+                    g_disk_queue  = kVolume.queue;
+                    g_disk_cache  = kVolume.cache;
+                    g_disk_volume = kVolume.volume;
+                    if (kVolume.mounted) {
                         const auto kMotd = g_vfs->resolve("/disk/etc/motd");
                         base::Own<unsigned char[]> kMotdBytes;
                         unsigned long              kMotdSize = 0;

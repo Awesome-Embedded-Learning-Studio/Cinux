@@ -34,6 +34,7 @@
 
 namespace cinux::driver {
 class BlockCache;
+class BlockPort;
 class BlockQueue;
 }  // namespace cinux::driver
 
@@ -161,6 +162,9 @@ private:
     driver::BlockQueue* queue_  = nullptr;
     driver::BlockCache* cache_  = nullptr;
     ext2::Ext2*         volume_ = nullptr;
+    /// The erased seat the queue points at; it must outlive the queue, so
+    /// it lives here rather than on init()'s stack.
+    driver::BlockPort* block_port_ = nullptr;
 };
 
 /**

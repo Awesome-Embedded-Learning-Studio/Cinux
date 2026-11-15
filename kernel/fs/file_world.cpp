@@ -11,6 +11,8 @@
  */
 
 #include "kernel/fs/file_world.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/fs/block_volume.hpp"
 #include "kernel/fs/kernel_vfs.hpp"
 
 #include <string_view>
@@ -62,18 +64,15 @@ unsigned long long wall_clock() {
 }  // namespace
 
 void FileWorld::init() {
-    queue_                = new driver::BlockQueue(driver::Ahci::self());
-    const auto kAvailable = mm::Pmm::self().free_page_count() * arch::page::kSize;
-    const auto kBudget =
-        base::math::Min(kAvailable / driver::kBlockCacheMemoryDivisor, driver::kBlockCacheMaxBytes);
-    const auto kSlotBytes = driver::kCachePageSectors * driver::kSectorBytes;
-    cache_                = new driver::BlockCache(*queue_, kBudget / kSlotBytes);
-    volume_               = new ext2::Ext2(*cache_, wall_clock);
-
-    const base::Result<void> kMounted = volume_->mount();
-    base::safety::Check(kMounted.ok(), "ext2 volume refused to mount");
-    const base::Result<void> kRoot = vfs_.mount("/", *volume_, "ext2");
-    base::safety::Check(kRoot.ok(), "ext2 root mount failed");
+    // The neutral ladder: erased port, queue, cache, volume, mount. Only
+    // the device and the mount point are this port's words.
+    block_port_ = new driver::BlockPort();
+    block_port_->adopt(driver::Ahci::self());
+    const fs::BlockVolume kVolume = fs::MountBlockVolume(vfs_, "/", *block_port_, wall_clock);
+    queue_                        = kVolume.queue;
+    cache_                        = kVolume.cache;
+    volume_                       = kVolume.volume;
+    base::safety::Check(kVolume.mounted, "ext2 root mount failed");
 
     // The tree grows through the neutral face; only the two input
     // sources and the console key tap are this port's words.
