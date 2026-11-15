@@ -5,7 +5,7 @@ if(NOT CINUX_ARM_QEMU)
     message(FATAL_ERROR "armv7 lane: qemu-system-arm not found in PATH")
 endif()
 
-set(CINUX_ARM_RUN_SECONDS 30 CACHE STRING "How long the arm_boot check lets QEMU run")
+set(CINUX_ARM_RUN_SECONDS 55 CACHE STRING "How long the arm_boot check lets QEMU run")
 
 set(CINUX_ARM_DTB_ADDR 0x81000000)
 
@@ -95,6 +95,7 @@ if(_arm_busybox_bin)
     set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
     set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
     set(_arm_shell_typed_arg "-DEXPECTED_ARM_SHELL_TYPED=typed:interactive ok")
+    set(_arm_interactive_arg "-DEXPECTED_ARM_INTERACTIVE=interactive run ok")
 endif()
 
 # The glibc station rides an optional artifact: only a host with the
@@ -157,6 +158,7 @@ add_test(NAME arm_boot
             ${_arm_shell_arg}
             ${_arm_shell_cat_arg}
             ${_arm_shell_typed_arg}
+            ${_arm_interactive_arg}
 
             "-DEXPECTED_FB0=dev fb0 640x480"
             "-DEXPECTED_EVENT0=dev event0 48 bytes"
@@ -168,6 +170,7 @@ add_test(NAME arm_boot
             "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
             "-DSTDIN_DELAY=6"
             "-DSTDIN_DELAY2=15"
+            "-DSTDIN_DELAY3=20"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
             "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
             "-DEXPECTED_GUESTEXIT=guest exited with status 0"

@@ -160,11 +160,16 @@ int main(int argc, char** argv) {
     execve("/bin/sh", kArgs, NULL);
 #else
     // The shell itself: one command line proving the parser, a child
-    // applet through fork-and-exec, a builtin echo, and a file read
-    // through the card's own /bin/sh symlink.
+    // applet through fork-and-exec, a builtin echo, a file read, and
+    // then the same process becomes a bare interactive shell -- the
+    // typed line answers the read, the next two land in the bare
+    // shell's command loop. The ctty claim is the login's door: the
+    // interactive half spins without it.
+    setsid();
+    ioctl(0, TIOCSCTTY, 0);
     char* const kArgs[] = {(char*)"sh", (char*)"-c",
                            (char*)"stat /prog; echo shell ok; cat /readme; "
-                                   "read line; echo typed:$line", NULL};
+                                   "read line; echo typed:$line; exec sh", NULL};
     execve("/bin/sh", kArgs, NULL);
 #endif
     static const char kNoBb[] = "[glibc] sh exec refused\n";

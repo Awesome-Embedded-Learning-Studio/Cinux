@@ -95,6 +95,12 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+交互判词进车道（2026-11-15 第十一轮）：-c 链尾接 exec sh，同一进程变裸交互 shell，
+stdin 第三行喂 echo 命令、第四行 exit，判词 interactive run ok 与 0 退出都进 boot 车道。
+ctty 认领挪进默认交接（setsid + TIOCSCTTY），-c 与交互共用一扇门。坑：CINUX_ARM_RUN_SECONDS
+是 CACHE 变量，改默认值撼不动已有 build 目录里的旧缓存 30——车道 30 秒收摊，41 秒的喂食
+永远缺席；把缓存值升到 55 才见真章。
+
 裸交互 shell 起来了（2026-11-15 第十轮）：CINUX_ARM_PROBE_INTERACTIVE=1 的构建把交接
 换成裸 sh（不带 -c）。第一版卡死：ash 无限自旋 getpgrp/alarm/ioctl(TIOCGPGRP)，等自己成
 为前台。用临时 svc 探针（已撤）追出真相——从没人替 shell 认领控制终端。交接前加
