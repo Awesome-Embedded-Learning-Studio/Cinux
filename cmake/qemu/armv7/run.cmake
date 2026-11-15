@@ -102,6 +102,9 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
     # The frame-buffer landing: the kernel stamps a marker before the
     # program starts, the program reads it through its own mapping.
     list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")
+    # The stdio face: fopen/fgets on the disk's motd, the one path a
+    # tool like cat takes before it does anything else.
+    list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_STDIO=[glibc] stdio read: hi there")
 endif()
 
 add_test(NAME arm_boot

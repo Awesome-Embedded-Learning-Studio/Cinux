@@ -545,8 +545,20 @@ r0 是那个 futex 字——就是 0。而且内核里一次 `[futex]` 调用都
 过），所以崩溃发生在 glibc 自己做的原子比较交换上，不是系统调用失败。
 
 范围也缩小了：不是 cat 专属——`head /motd` 一样崩，同样的 pc 与寄存器。而
-`ls /` 与管道里的 `head` 是好的。差别在于**按路径打开并读一个文件**。下一轮用
-gdb 接上子进程取调用栈，看是哪个 FILE/锁指针是空的。
+`ls /` 与管道里的 `head` 是好的。差别在于**按路径打开并读一个文件**。
+
+再排除一层：给 glibc 探针加了 `fopen("/motd") + fgets`，它是好的——
+
+```
+[glibc] stdio read: hi there
+```
+
+所以不是 glibc 的 stdio 或我们的打开路径，而是 busybox 自己在那条路上的某个
+状态。这条也进了判定（glibc 产物在时 `EXPECTED_GLIBC_STDIO` 会查它）。
+
+gdb 这条路这一轮没走通：QEMU 11 的调试端口在批量模式下拒绝 `continue`
+（"Cannot execute this command while the target is running"），加 `-S` 也一样。
+下一轮换法子：要么用 QMP 的 `gdbserver` 交互式接，要么在 busybox 里插桩。
 
 顺带修掉一个真的 ABI 缺口：EABI 的 `stat64`（104 字节，size 在 48、ino 在 96）与
 `stat`（96 字节，size 在 44、ino 在 88）不是一个形状，而 `fstat64`(197) 原来写的是

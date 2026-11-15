@@ -20,6 +20,26 @@
 #include <unistd.h>
 
 int main(int argc, char** argv) {
+    // The stdio face, first: a lock or buffer that only exists there
+    // would show up before anything else the station does.
+    {
+        FILE* const kFile = fopen("/motd", "r");
+        char        buffer[64] = {};
+        if (kFile == NULL) {
+            static const char kNoFile[] = "[glibc] fopen refused\n";
+            (void)!write(STDOUT_FILENO, kNoFile, sizeof(kNoFile) - 1U);
+        } else {
+            if (fgets(buffer, sizeof(buffer), kFile) == NULL) {
+                buffer[0] = 0;
+            }
+            fclose(kFile);
+            char line[96] = {};
+            const int kLen = snprintf(line, sizeof(line), "[glibc] stdio read: %s", buffer);
+            if (kLen > 0) {
+                (void)!write(STDOUT_FILENO, line, (unsigned long)kLen);
+            }
+        }
+    }
     static const char kLine[] = "[glibc] hello from ext2, real libc ran\n";
     if (write(STDOUT_FILENO, kLine, sizeof(kLine) - 1U) !=
         (ssize_t)(sizeof(kLine) - 1U)) {
