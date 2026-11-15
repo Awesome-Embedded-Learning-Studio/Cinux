@@ -61,7 +61,8 @@ esac
 
 fingerprint="$({ sha256sum "${source_file}" "${BASH_SOURCE[0]}";
                  "${cross}" --version; "${cross}" -dumpmachine;
-                 printf 'desk=%s\n' "${CINUX_ARM_PROBE_DESK:-}"; } | sha256sum | cut -d ' ' -f 1)"
+                 printf 'desk=%s\n' "${CINUX_ARM_PROBE_DESK:-}";
+                 printf 'interactive=%s\n' "${CINUX_ARM_PROBE_INTERACTIVE:-}"; } | sha256sum | cut -d ' ' -f 1)"
 if [ -f "${out}" ] && [ -f "${out}.inputs" ] && \
    [ "$(cat "${out}.inputs")" = "${fingerprint}" ]; then
     echo "[build-armv7-glibc-prog] cache hit, keeping ${out}"
@@ -73,6 +74,7 @@ mkdir -p "$(dirname "${out}")"
     -mcpu=cortex-a7 -marm -mfpu=neon-vfpv4 -mfloat-abi=hard \
     -static -no-pie -fno-pie -O2 \
     ${CINUX_ARM_PROBE_DESK:+-DCINUX_ARM_PROBE_DESK=1} \
+    ${CINUX_ARM_PROBE_INTERACTIVE:+-DCINUX_ARM_PROBE_INTERACTIVE=1} \
     -Wl,-Ttext-segment=0x40010000 \
     -o "${out}.part" "${source_file}"
 mv "${out}.part" "${out}"

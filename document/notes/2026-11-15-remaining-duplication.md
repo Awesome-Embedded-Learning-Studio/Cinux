@@ -95,6 +95,13 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+裸交互 shell 起来了（2026-11-15 第十轮）：CINUX_ARM_PROBE_INTERACTIVE=1 的构建把交接
+换成裸 sh（不带 -c）。第一版卡死：ash 无限自旋 getpgrp/alarm/ioctl(TIOCGPGRP)，等自己成
+为前台。用临时 svc 探针（已撤）追出真相——从没人替 shell 认领控制终端。交接前加
+setsid + ioctl(0, TIOCSCTTY)（getty 的门），console 的 answer_ctty 把前台 pgrp 收养，
+循环即散。手喂 echo/cat/exit 全答，guest 以 0 退出。交互车道仍属手工探针，判词未进
+check（-c 链仍是车道的判据）。
+
 交互读面通了（2026-11-15 第九轮）：stdin 文件加第二行，boot 车道改成两段喂
 （第一行 t=6 给 guest 的 stdin 测试，第二行 t=21 给 shell 的 read 内建），sh 的
 变量展开与 echo 把 typed:interactive ok 打回串口。中途两个坑都记着：管道串 tail

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 int main(int argc, char** argv) {
     // The stdio face, first: a lock or buffer that only exists there
@@ -148,8 +149,13 @@ int main(int argc, char** argv) {
     execve("/desk", kArgs, kEnv);
 #elif defined(CINUX_ARM_PROBE_INTERACTIVE)
     // The interactive probe: sh with no command line reads from the
-    // console itself. This mode exists for a hand-fed QEMU, not the
-    // check lane.
+    // console itself. A real login hands the shell a controlling
+    // terminal first -- own session, ctty claimed, foreground pgrp
+    // adopted -- or interactive ash spins waiting to become the
+    // foreground group. That hand-off is done here, the same door
+    // getty uses, before the shell takes the seat.
+    setsid();
+    ioctl(0, TIOCSCTTY, 0);
     char* const kArgs[] = {(char*)"sh", NULL};
     execve("/bin/sh", kArgs, NULL);
 #else
