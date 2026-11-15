@@ -78,7 +78,9 @@ inline constexpr unsigned long kDfsrWrite = 1UL << 11U;
  */
 constexpr unsigned long long FaultCodeFromStatus(unsigned long dfsr, unsigned long spsr) {
     unsigned long long code = 0;
-    const unsigned long status = dfsr & 0x3FUL;
+    // Short-descriptor fault status: bits [3:0] plus bit [10] as the
+    // status's fifth bit, so the permission pair stays recognizable.
+    const unsigned long status = (dfsr & 0xFUL) | ((dfsr >> 6) & 0x10UL);
     if (status == 0x0DUL || status == 0x0FUL) {
         code |= kFaultProtection;
     }

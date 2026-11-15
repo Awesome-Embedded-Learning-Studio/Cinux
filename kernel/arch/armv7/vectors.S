@@ -68,11 +68,11 @@ _vec6: sub  lr, lr, #4
        ldmia sp!, {r3}
        b    _irq_trap_save
 _irq_plain:
-       add  sp, sp, #4
-       push {r0-r3, lr}            @ the kernel's own registers survive
+       ldmia sp!, {r3}             @ hand the interrupted world its r3 back
+       push {r0-r3, r12, lr}       @ the kernel's own registers survive
        mov  r0, #6
        bl   c_exception_dispatch
-       pop  {r0-r3, lr}
+       pop  {r0-r3, r12, lr}
        movs pc, lr
 
 @ Trapping svc: lr is already the user's return address.
