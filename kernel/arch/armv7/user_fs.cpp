@@ -38,6 +38,7 @@
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
+#include "kernel/arch/console_world.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -223,41 +224,23 @@ void init() {
         base::safety::Check(driver::Framebuffer::self().init(kInfo),
                             "framebuffer refused the LCDIF geometry");
         fs::DevFs* const kDev = new fs::DevFs();
-        // The same tree both ports grow: console, fb0, ptmx and the
-        // two input seats. event0 speaks the UART's keys, event1 sits
-        // quiet: the pointer has no source on this board.
-        // The pointer is the USB tablet when the controller finds one:
-        // the board's own pointer stream has no source behind it, and a
-        // desktop needs a cursor that moves. The board stream stays the
-        // fallback for a machine without a tablet.
-        const bool kTablet = driver::UsbTablet::self().init();
-        fs::SeatDeviceTree(*kDev, armv7::UartKeyboardEvents(),
-                           kTablet ? driver::UsbTablet::self().events()
-                                   : armv7::BoardPointerEvents());
-        // The USB keyboard walked its street at bring-up; the neutral
-        // hand-over lands it in this tree as the usbkbd character node.
+        // The device tree grows through the same arch door the x86
+        // lane's FileWorld opens: key taps, the input seats, the usbkbd
+        // node and the card's model row all seat in one call. The
+        // key tap sits in front of the serial stream, so the UART's
+        // own keys still answer when no USB keyboard is attached.
+        arch::SeatConsoleWorld(*kDev);
         if (driver::SeatUsbKeyboard()) {
             cinux::print::Println("[armv7] dev usbkbd seated");
         }
-        // The block street joins the model the same way the x86 drives
-        // do: facts only, no devfs leaf. The card is reached through
-        // the erased BlockPort, so this seat never learns the driver's
-        // type — exactly the face BlockQueue will adopt later.
+        // The card's own facts -- the sector count and the partition
+        // table -- are read through the erased port, facts only.
         if (driver::UsdhcHost::self().block_count() != 0) {
             driver::BlockPort port;
             port.adopt(driver::UsdhcHost::self());
             static unsigned char kProbe[512] = {};
             const bool kRead = port.read_blocks(driver::Lba{0},
                                                 driver::BlockSpan{1}, kProbe);
-            const base::Result<void> kMmc = driver::DeviceModel::self().seat({
-                .klass       = driver::DeviceClass::kBlock,
-                .name        = "mmcblk0",
-                .number      = fs::MakeDeviceId(179, 0),
-                .ops         = nullptr,
-                .bus         = "usdhc",
-                .driver_name = "usdhc",
-            });
-            base::safety::Check(kMmc.ok(), "device model refused the mmcblk0 seat");
             cinux::print::Println(kRead && kProbe[510] == 0x55 && kProbe[511] == 0xAA
                                       ? "[armv7] dev mmcblk0 %llu sectors mbr 55AA"
                                       : "[armv7] dev mmcblk0 read FAILED",

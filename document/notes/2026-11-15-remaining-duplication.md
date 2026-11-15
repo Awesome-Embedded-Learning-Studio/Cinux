@@ -281,3 +281,23 @@ usb-kbd 上命令行（打字探针走 UART，不受影响）。
 至此 ARMv7A 从卡上启动完整版 Cinux：busybox init 落座、console
 shell 回答命令、vesper 桌面在同一个 init 手里常驻。两条站点车道
 both lanes green，host ctest 127/127，arm_init 两次稳定。
+
+## 第十八轮：设备摆放归一到 arch 门
+
+user_fs 里那段手写的设备摆放（tablet 探测、SeatDeviceTree、usbkbd
+移交、mmcblk0 模型行）与 console_world.cpp 的 SeatConsoleWorld 是同一
+件事的两份。换成一次 arch::SeatConsoleWorld(kDev) 调用——x86 车道的
+FileWorld::init 走的正是这扇门， mmcblk0 的模型行随之只在这扇门里seat，
+user_fs 留下的是卡片自己的事实读数（扇区数与分区表）。
+
+换的过程中踩出 console_world.cpp 自己的坑：usbkbd 的移交排在
+SeatDeviceTree 之前，而字符设备的模型行要求 devfs 已 bind——这个顺序
+在 arm 上从未真正执行过（没人调用过它），x86 也不踩（x86 测试里没有
+USB 键盘）。SeatDeviceTree 先 bind 再移交，修好。
+
+设备摆放归一后，user_fs 与 FileWorld::init 的剩余差距清楚收敛为三件：
+ramfs 根与 /tmp 暂存（guest blob 的停车位）、/proc 挂载、还有自检梯子
+对 g_vfs/g_ram 局部名的依赖。下一步把这三件递进 FileWorld 的门，
+arm 递 usdhc 端口，user_fs 的挂卡梯子退役。
+
+车道判据：arm_boot 与 arm_init 均 Passed，host ctest 127/127。

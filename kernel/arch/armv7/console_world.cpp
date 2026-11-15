@@ -40,11 +40,16 @@ void SeatConsoleWorld(fs::DevFs& devices) {
         },
         .has = +[] { return driver::UsbKeyboard::self().poll(); },
     });
-    [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
-    const bool                  kTablet      = driver::UsbTablet::self().init();
+    // The tree comes first: SeatDeviceTree binds the devfs to the
+    // device model, and the keyboard hand-over below seats a character
+    // row, which the model refuses before a devfs is bound.
+    const bool kTablet = driver::UsbTablet::self().init();
     fs::SeatDeviceTree(devices, armv7::UartKeyboardEvents(),
                        kTablet ? driver::UsbTablet::self().events()
                                : armv7::BoardPointerEvents());
+    // The USB keyboard walked its street at bring-up; the neutral
+    // hand-over lands it in this tree as the usbkbd character node.
+    [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
     if (driver::UsdhcHost::self().block_count() != 0) {
         const base::Result<void> kMmc = driver::DeviceModel::self().seat({
             .klass       = driver::DeviceClass::kBlock,
