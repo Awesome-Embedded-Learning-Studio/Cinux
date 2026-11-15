@@ -56,6 +56,7 @@
 #include "kernel/syscall/sys_ioctl.hpp"
 #include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_open.hpp"
+#include "kernel/syscall/sys_clone.hpp"
 #include "kernel/syscall/sys_openat.hpp"
 #include "kernel/syscall/sys_read.hpp"
 #include "kernel/syscall/sys_exec.hpp"
@@ -72,43 +73,22 @@ bool SeatWorldActive();
 
 namespace cinux::armv7 {
 
-/// The EABI clone door: a libc's fork() asks for a child sharing
-/// nothing but a SIGCHLD notice, with no stack and no tid words. That
-/// shape is the plain fork the seat already serves; a clone that wants
-/// a thread (shared vm/files/sighand, a stack, a tid word) is refused
-/// as unimplemented rather than half-served.
-long long HandleClone(const cinux::syscall::SyscallFrame& frame) {
-    // SIGCHLD in the low byte is the "my child signals me" half; the
-    // tid-word flags ride along without a stack, and the TLS word only
-    // matters with CLONE_SETTLS, which a fork never sets. A clone that
-    // shares the address space is a thread, and threads have no seat on
-    // this port yet: that shape is refused, not half-served.
-    constexpr unsigned long long kCloneVm    = 0x100;
-    constexpr unsigned long long kSignalMask = 0xFF;
-    if ((frame.rdi & kCloneVm) != 0 || frame.rsi != 0 ||
-        (frame.rdi & kSignalMask) == 0) {
-        return -38;  // ENOSYS
+/// The EABI clone spelling: clone(flags, newsp, parent_tid, tls,
+/// child_tid) puts the tls in the fourth register and carries the
+/// child tid word as the first word of the user stack, while the
+/// neutral frame keeps the x86 order -- tls in the fifth slot, the
+/// child tid in the fourth. One reshape bridges the spellings; the
+/// body served is the one neutral clone.
+long long HandleArmClone(const cinux::syscall::SyscallFrame& frame) {
+    cinux::syscall::SyscallFrame shaped = frame;
+    unsigned int                      child_tid = 0;
+    if (!cinux::syscall::uaccess::CopyFromUser(&child_tid, frame.user_rsp,
+                                               sizeof(child_tid))) {
+        return -14;  // EFAULT: the tid word's stack seat is unreadable
     }
-    return cinux::syscall::HandleFork(frame);
-}
-
-/// The EABI openat door: the caller names a directory seat first and
-/// only then the path. The bring-up root is the one directory that
-/// exists, and AT_FDCWD names it, so the door folds to the plain open
-/// face whenever the seat is that sentinel; any other seat is a
-/// relative lookup the root does not have yet and is refused as such.
-long long HandleOpenAt(const cinux::syscall::SyscallFrame& frame) {
-    // The sentinel arrives as a 32-bit word: whichever way the caller
-    // sign-extended it, the low word is the one that names AT_FDCWD.
-    constexpr unsigned long kAtFdCwd = 0xFFFFFF9CUL;  // -100 in a word
-    if ((frame.rdi & 0xFFFFFFFFULL) != kAtFdCwd) {
-        return -9;  // EBADF: no directory seat but the current one
-    }
-    cinux::syscall::SyscallFrame flat = frame;
-    flat.rdi                          = frame.rsi;  // path
-    flat.rsi                          = frame.rdx;  // flags
-    flat.rdx                          = frame.r10;  // mode
-    return cinux::syscall::HandleOpen(flat);
+    shaped.r8  = frame.r10;  // the tls word from the fourth register
+    shaped.r10 = child_tid;  // the tid word from the user stack
+    return cinux::syscall::HandleClone(shaped);
 }
 
 /// The EABI mmap2 door: the sixth argument counts 4 KiB pages, while
@@ -168,7 +148,9 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kRead,   &cinux::syscall::HandleRead},
     {cinux::armv7::syscall_nr::kWrite,  &cinux::syscall::HandleWrite},
     {cinux::armv7::syscall_nr::kOpen,   &cinux::syscall::HandleOpen},
-    {cinux::armv7::syscall_nr::kOpenAt, &cinux::armv7::HandleOpenAt},
+    // The openat face: the neutral body serves relative seats too; the
+    // old port shim only folded AT_FDCWD and refused the rest.
+    {cinux::armv7::syscall_nr::kOpenAt, &cinux::syscall::HandleOpenat},
     {cinux::armv7::syscall_nr::kStatx,  &cinux::syscall::HandleStatx},
     {cinux::armv7::syscall_nr::kFstatat64, &cinux::syscall::HandleNewfstatat},
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
@@ -204,7 +186,10 @@ const NeutralService kNeutralServices[] = {
     // frame into the child before this service returns, so the port
     // entry reads the real frame, not the neutral picture.
     {cinux::armv7::syscall_nr::kFork, &cinux::syscall::HandleFork},
-    {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleClone},
+    // The clone face: the neutral body gates its own shapes and serves
+    // the tid words, the stack and the thread mix; the port keeps no
+    // thinner fork-only spelling of its own.
+    {cinux::armv7::syscall_nr::kClone, &cinux::armv7::HandleArmClone},
     {cinux::armv7::syscall_nr::kVfork, &cinux::syscall::HandleFork},
     {cinux::armv7::syscall_nr::kPoll,           &cinux::syscall::HandlePoll},
     {cinux::armv7::syscall_nr::kPpoll,          &cinux::syscall::HandlePpoll},

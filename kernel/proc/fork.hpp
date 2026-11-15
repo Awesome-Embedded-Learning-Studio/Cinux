@@ -63,5 +63,18 @@ namespace cinux::proc {
 void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame_address,
                        unsigned long long stack_top);
 
+/**
+ * @brief         Points a forked child's resume frame at a chosen user
+ *                stack, the clone half a fork never needs.
+ * @param[in,out] child       The born task, its frame already staged by
+ *                            PrepareForkResume.
+ * @param[in]     user_stack  The stack the child leaves to user mode on.
+ * @note          Where the frame lives is the port's own fact; this is
+ *                the one door shared code has to it.
+ * @since         0.2.0
+ * @ingroup       kernel_proc
+ */
+void SetForkChildUserStack(Task& child, unsigned long long user_stack);
+
 
 }  // namespace cinux::proc

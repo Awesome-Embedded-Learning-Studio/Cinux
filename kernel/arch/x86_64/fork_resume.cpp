@@ -55,4 +55,8 @@ void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame
                            sizeof(syscall::SyscallFrame));
 }
 
+void SetForkChildUserStack(Task& child, unsigned long long user_stack) {
+    cinux::base::PtrAt<syscall::SyscallFrame>(child.ctx.rsp)->user_rsp = user_stack;
+}
+
 }  // namespace cinux::proc

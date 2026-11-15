@@ -38,8 +38,7 @@ Task* BuildCloneChild(unsigned long long frame_address, const ClonePlan& plan) {
     if ((plan.flags & syscall::kCloneSetTls) != 0) {
         kBorn->ctx.fs_base = plan.tls;
     }
-    auto& child_frame    = *cinux::base::PtrAt<syscall::SyscallFrame>(kBorn->ctx.rsp);
-    child_frame.user_rsp = plan.user_stack;
+    SetForkChildUserStack(*kBorn, plan.user_stack);
     return kBorn;
 }
 

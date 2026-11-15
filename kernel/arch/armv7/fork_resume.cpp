@@ -60,4 +60,8 @@ void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame
     asm volatile("mrc p15, 0, %0, c13, c0, 3" : "=r"(child.ctx.tpidruro));
 }
 
+void SetForkChildUserStack(Task& child, unsigned long long user_stack) {
+    cinux::base::PtrAt<cinux::arch::UserTrap>(child.ctx.sp)->sp = user_stack;
+}
+
 }  // namespace cinux::proc

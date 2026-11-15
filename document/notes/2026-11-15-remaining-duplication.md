@@ -95,6 +95,16 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+clone 与 openat 直折中立体（2026-11-15 第十二轮）：arm 折叠表里 clone 与 openat 原本各
+垫一张本地皮——clone 只肯 fork 形（线程形 ENOSYS），openat 只认 AT_FDCWD（相对座位
+EBADF）——而中立体早就是全功能（线程、TLS、tid 字、vfork、dirfd 相对打开）。删皮直折。
+两件善后：共享 clone.cpp 里的 ctx.rsp 是 x86 名，为此给 fork 缝加了中立件
+SetForkChildUserStack，两边各写半页（arm 改 UserTrap 的 sp，x86 改 SyscallFrame 的
+user_rsp）；EABI 的 clone 拼写与中立帧（x86 序）在 tls 与 child_tid 上换位，child_tid
+还在用户栈上，留一张纯拼写垫片（照 mmap2 的例）换位后仍走中立 clone。desk 车道首跑
+挂 Bad address 正是换位坑：glibc 的 fork 带 CHILD_SETTID，中立 handler 在 tls 槽读到
+NULL 判 EFAULT。
+
 交互判词进车道（2026-11-15 第十一轮）：-c 链尾接 exec sh，同一进程变裸交互 shell，
 stdin 第三行喂 echo 命令、第四行 exit，判词 interactive run ok 与 0 退出都进 boot 车道。
 ctty 认领挪进默认交接（setsid + TIOCSCTTY），-c 与交互共用一扇门。坑：CINUX_ARM_RUN_SECONDS
