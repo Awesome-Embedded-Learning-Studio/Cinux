@@ -37,6 +37,20 @@ void GicInit() {
     asm volatile("isb");
 }
 
+void GicEnableInterrupt(std::uint32_t interrupt_id) {
+    // One byte of priority per interrupt, at the timer's own 0xA0 so a
+    // device line never outranks the heartbeat.
+    const std::uint32_t kWord = interrupt_id & ~3U;
+    const std::uint32_t kByte = (interrupt_id & 3U) * 8U;
+    const std::uint32_t kPriorities =
+        Read(kGicDistributorBase, kGicdIpriority + kWord) & ~(0xFFU << kByte);
+    Write(kGicDistributorBase, kGicdIpriority + kWord,
+          kPriorities | (0xA0U << kByte));
+    // One set-enable word per thirty-two interrupts.
+    Write(kGicDistributorBase, kGicdIsenabler + (interrupt_id / 32U) * 4U,
+          1U << (interrupt_id % 32U));
+}
+
 std::uint32_t GicAcknowledge() {
     return Read(kGicCpuInterfaceBase, kGiccIar) & 0x3FFU;
 }

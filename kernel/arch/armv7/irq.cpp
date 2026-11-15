@@ -46,9 +46,7 @@ void print_unsigned(unsigned long value) {
     }
 }
 
-void serve_tick() {
-    const unsigned long interrupt = cinux::armv7::GicAcknowledge();
-    cinux::armv7::GicEnd(interrupt);
+void serve_timer() {
     ++g_ticks;
     // The neutral heartbeat counts too: the clock every timeout is
     // measured against lives in Tick, and this port used never to feed
@@ -58,7 +56,6 @@ void serve_tick() {
     for (unsigned long credit = 0; credit < kTicksPerInterrupt; ++credit) {
         cinux::time::Tick::self().on_interrupt();
     }
-    cinux::armv7::PollSerialKeyboard();
     if ((g_ticks % 2) == 1) {
         cinux::armv7::UartWrite("[armv7] tick ");
         print_unsigned(g_ticks);
@@ -69,11 +66,39 @@ void serve_tick() {
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
 }
 
+
+/// One interrupt entry: acknowledges whatever the GIC hands over and
+/// serves it. The timer is no longer the only source — UART1's receive
+/// line rides the same door — so the id decides the service, and the
+/// loop runs until the GIC answers "spurious". The bound keeps a
+/// steady paste from parking the CPU in one entry forever: the line is
+/// level-triggered, so whatever is left re-raises it at once.
+void serve_interrupt() {
+    constexpr unsigned long kSpurious = 1023;
+    for (unsigned round = 0; round < 8; ++round) {
+        const unsigned long interrupt = cinux::armv7::GicAcknowledge();
+        if (interrupt == kSpurious) {
+            return;
+        }
+        cinux::armv7::GicEnd(interrupt);
+        const bool kTimer = interrupt == cinux::armv7::kTimerInterruptIdSecure ||
+                            interrupt == cinux::armv7::kTimerInterruptIdNonSecure;
+        if (kTimer) {
+            serve_timer();
+        } else if (interrupt == cinux::armv7::kUart1InterruptId) {
+            // A paste cannot outwait the poll any more: every byte that
+            // lands raises this line, so the drain runs as the bytes
+            // arrive instead of once per heartbeat.
+            cinux::armv7::PollSerialKeyboard();
+        }
+    }
+}
+
 }  // namespace
 
 /// An interrupt taken in the kernel: tick and return through the stub.
 void HandleIrq() {
-    serve_tick();
+    serve_interrupt();
 }
 
 /// The seated door the vector stub reads before any C runs. The user
@@ -87,7 +112,7 @@ extern "C" unsigned long c_seat_irq_door = 0;
 /// mid-frame and the switch saves a stack the task owns. The neutral
 /// scheduler gets the same tick the x86 timer hands it.
 extern "C" cinux::arch::UserTrap* c_irq_trap_seated(cinux::arch::UserTrap* trap) {
-    serve_tick();
+    serve_interrupt();
     cinux::proc::Scheduler::self().on_timer_tick(cinux::syscall::MonotonicNanoseconds());
     cinux::proc::Scheduler::self().maybe_preempt();
     return trap;
@@ -97,6 +122,6 @@ extern "C" cinux::arch::UserTrap* c_irq_trap_seated(cinux::arch::UserTrap* trap)
 /// bring-up task world gone, every user episode is seated and takes
 /// the homing door, so this only answers the tick and resumes.
 extern "C" cinux::arch::UserTrap* c_irq_trap(cinux::arch::UserTrap* trap) {
-    serve_tick();
+    serve_interrupt();
     return trap;
 }

@@ -99,6 +99,12 @@ extern "C" [[noreturn]] void kmain() {
     asm volatile("mcr p15, 0, %0, c12, c0, 0" : : "r"(_vectors));  // VBAR
     asm volatile("isb");
     cinux::armv7::GicInit();
+    // The receive line goes live here, not after the guest: a desk run
+    // never returns from its guest, so anything past it would leave the
+    // keyboard on the heartbeat's poll. IRQs stay masked until a user
+    // world raises them, so an early byte waits in the FIFO as before.
+    cinux::armv7::UartEnableRxInterrupt();
+    cinux::armv7::GicEnableInterrupt(cinux::armv7::kUart1InterruptId);
     cinux::armv7::TimerArmAfter(cinux::armv7::TimerFrequency() / 10U);
     cinux::armv7::TimerEnable();
     {

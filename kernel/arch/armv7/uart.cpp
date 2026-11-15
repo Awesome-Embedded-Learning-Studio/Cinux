@@ -14,6 +14,12 @@ constexpr std::uint32_t kUcr3Dsr    = 1U << 10;  // Data set ready, as U-Boot se
 constexpr std::uint32_t kUcr3RxdMuxSel = 1U << 2;  // The manual says always set.
 constexpr std::uint32_t kUsr2Txdc      = 1U << 3;
 constexpr std::uint32_t kUfcrRfdivDiv2 = 4U << 7;
+// UFCR bits [5:0] are the receive threshold: the receive-ready flag is
+// measured against it, and with one byte the line drops as the FIFO
+// empties, on QEMU's model and on silicon both.
+constexpr std::uint32_t kUfcrRxtlOne = 1;
+// UCR1 bit 9: receive-ready interrupt enable.
+constexpr std::uint32_t kUcr1Rrdyen  = 1U << 9U;
 constexpr std::uint32_t kUbirValue     = 15;
 constexpr std::uint32_t kUbmrValue     = 346;
 
@@ -43,7 +49,7 @@ void UartInit() {
 
     WriteRegister(uart_reg::kUcr3, kUcr3Dsr | kUcr3RxdMuxSel);
     WriteRegister(uart_reg::kUcr4, 0);
-    WriteRegister(uart_reg::kUfcr, kUfcrRfdivDiv2);
+    WriteRegister(uart_reg::kUfcr, kUfcrRfdivDiv2 | kUfcrRxtlOne);
     WriteRegister(uart_reg::kUbir, kUbirValue);
     WriteRegister(uart_reg::kUbmr, kUbmrValue);
 
@@ -72,6 +78,13 @@ bool UartReceiveReady() {
     // caller peeks; UTS1 stays honest until the byte is taken.
     auto* const base = reinterpret_cast<volatile std::uint32_t*>(kUart1Base);
     return (base[uart_reg::kUts1 / 4U] & uart_reg::kUts1RxEmpty) == 0;
+}
+
+void UartEnableRxInterrupt() {
+    // A read-modify-write, not a fresh program: the enable bit rides
+    // beside UARTEN in UCR1, and the console is already speaking.
+    const std::uint32_t kImage = ReadRegister(uart_reg::kUcr1);
+    WriteRegister(uart_reg::kUcr1, kImage | kUcr1Rrdyen);
 }
 
 char UartReadChar() {

@@ -34,6 +34,11 @@ inline constexpr std::uint32_t kTimerInterruptIdNonSecure = 30;
 /// Turns the distributor and this CPU's interface on and lets the timer through.
 void GicInit();
 
+/// Lets one shared peripheral interrupt through at the timer's priority.
+/// A device that grows an interrupt line calls this with its GIC id; the
+/// dispatch in irq.cpp is the other half of wiring a device in.
+void GicEnableInterrupt(std::uint32_t interrupt_id);
+
 /// Reads and acknowledges the highest-priority pending interrupt.
 [[nodiscard]] std::uint32_t GicAcknowledge();
 

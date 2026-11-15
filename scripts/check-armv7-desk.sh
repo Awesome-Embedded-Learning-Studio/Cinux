@@ -60,7 +60,19 @@ trap finish EXIT
 rm -f "${shot}" "${shot2}" "${shot3}"
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.
-( sleep 8; cat "${repo}/assets/armv7_stdin.txt"; sleep "${settle}"; printf '%s\r' "${command_text}"; sleep 12 ) |
+# The UART's receive FIFO is thirty-two bytes deep and QEMU hands a
+# chardev write to it in one piece, so a burst longer than the FIFO
+# loses its tail before any interrupt can run. A real line delivers the
+# same text a character at a time; the ten-millisecond gaps reproduce
+# that and let the receive interrupt drain each byte as it lands.
+type_text() {
+    printf '%s' "$1" | sed 's/./&\n/g' | while IFS= read -r kChar; do
+        printf '%s' "${kChar}"
+        sleep 0.01
+    done
+    printf '\r'
+}
+( sleep 8; cat "${repo}/assets/armv7_stdin.txt"; sleep "${settle}"; type_text "${command_text}"; sleep 12 ) |
     timeout "$((settle + seconds))" "$(command -v qemu-system-arm)" \
         -M mcimx6ul-evk \
         -kernel "${build}/kernel/arch/armv7/arm.elf" \

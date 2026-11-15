@@ -26,6 +26,11 @@ namespace cinux::armv7 {
 /// UART1's MMIO base on the i.MX6ULL.
 inline constexpr std::uintptr_t kUart1Base = 0x02020000U;
 
+/// UART1's line at the GIC: SPI 26, so GIC id 58. The device tree names
+/// the raw SPI number; the GIC counts sixteen software interrupts and
+/// sixteen per-processor ones ahead of the shared bank.
+inline constexpr std::uint32_t kUart1InterruptId = 58;
+
 namespace uart_reg {
 inline constexpr std::uint32_t kUrxd = 0x00;
 inline constexpr std::uint32_t kUtxd = 0x40;
@@ -64,5 +69,9 @@ void UartWrite(const char* text);
 
 /// Takes the waiting byte; only call after UartReceiveReady.
 [[nodiscard]] char UartReadChar();
+
+/// Raises UART1's receive line at the GIC. From here every byte that
+/// lands raises the interrupt, so a paste cannot outwait the poll.
+void UartEnableRxInterrupt();
 
 }  // namespace cinux::armv7
