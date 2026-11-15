@@ -20,12 +20,20 @@ ContextSwitch:
     stmia   r0, {r4-r11, sp, lr}
     mrs     r2, spsr
     str     r2, [r0, #40]
+    mrs     r2, cpsr                @ the gate rides the image, the way
+    str     r2, [r0, #68]           @ IF rides a saved RFLAGS on x86
     cps     #0x1F                   @ System: sp/lr are the user bank's
     mov     r2, lr
     cps     #0x13
     str     r2, [r0, #44]
     mrc     p15, 0, r2, c13, c0, 3
     str     r2, [r0, #64]
+    ldr     r2, [r1, #68]           @ reopen the incoming world's gate
+    and     r2, r2, #0xC0
+    mrs     r3, cpsr
+    bic     r3, r3, #0xC0
+    orr     r3, r3, r2
+    msr     cpsr_c, r3
     ldr     r2, [r1, #40]
     msr     spsr_cxsf, r2
     ldr     r3, [r1, #64]

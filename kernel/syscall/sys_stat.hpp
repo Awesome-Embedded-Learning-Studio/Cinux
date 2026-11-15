@@ -36,6 +36,13 @@ long long HandleStat(const SyscallFrame& frame);
  * @ingroup       kernel_syscall
  */
 long long StatPath(const char* path, unsigned long long destination);
+
+/**
+ * @brief         stat64(path, out): the same walk, the 64-bit record.
+ * @since         0.9.0
+ * @ingroup kernel_syscall
+ */
+long long HandleStat64(const SyscallFrame& frame);
 /**
  * @brief         Stats one relative name through a held directory's backend.
  * @param[in]     descriptor  The held directory's open descriptor.

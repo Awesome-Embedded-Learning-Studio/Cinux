@@ -24,6 +24,9 @@ EnterUserModeWithReturn:
     cps     #0x13
     str     r3, [r2, #44]           @ the kernel half keeps the user lr
     mov     r3, #0x10               @ user mode CPSR
+    tst     r0, #1                  @ a Thumb entry carries its mark in
+    orrne   r3, r3, #0x20           @ bit 0: the T bit must follow it
+    bic     r0, r0, #1              @ the pc itself is even
     cps     #0x1F                   @ system mode: the user bank's sp
     mov     sp, r1
     cps     #0x13                   @ back to supervisor

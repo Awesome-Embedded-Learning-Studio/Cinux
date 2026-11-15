@@ -27,8 +27,8 @@ long long HandleStat(const SyscallFrame& frame) {
     return StatPath(storage, frame.rsi);
 }
 
-long long StatPath(const char* path, Word destination) {
-    if (!UserRangeWritable(destination, arch::abi::kStatLayout.bytes)) {
+long long StatPathInto(const char* path, Word destination, arch::abi::StatLayout layout) {
+    if (!UserRangeWritable(destination, layout.bytes)) {
         return -kEfault;
     }
     const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(path);
@@ -47,11 +47,34 @@ long long StatPath(const char* path, Word destination) {
         return -ErrnoFrom(kProbed.error());
     }
     unsigned char record[arch::abi::kStatLayout.bytes] = {};
-    WriteStatRecord(record, probed);
+    if (layout.bytes > sizeof(record)) {
+        unsigned char wide[arch::abi::kStat64Layout.bytes] = {};
+        WriteStatRecord(wide, probed, layout);
+        if (!uaccess::CopyToUser(destination, wide, layout.bytes)) {
+            return -kEfault;
+        }
+        return 0;
+    }
+    WriteStatRecord(record, probed, layout);
     if (!uaccess::CopyToUser(destination, record, sizeof(record))) {
         return -kEfault;
     }
     return 0;
+}
+
+long long StatPath(const char* path, unsigned long long destination) {
+    return StatPathInto(path, destination, arch::abi::kStatLayout);
+}
+
+long long HandleStat64(const SyscallFrame& frame) {
+    if (!UserRangeWritable(frame.rsi, arch::abi::kStat64Layout.bytes)) {
+        return -kEfault;
+    }
+    char storage[fs::kFsPathMax] = {};
+    if (const long long kBad = FoldUserPath(frame.rdi, storage, fs::kFsPathMax); kBad < 0) {
+        return kBad;
+    }
+    return StatPathInto(storage, frame.rsi, arch::abi::kStat64Layout);
 }
 
 long long StatPathAt(Word descriptor, const char* relative, Word destination) {

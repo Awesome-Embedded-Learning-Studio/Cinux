@@ -61,12 +61,19 @@ struct CpuContext {
     /// CPU into the next process, and an errno write would land in a
     /// stranger's heap.
     unsigned long tpidruro = 0;
+    /// The interrupt bits (CPSR I and F) a cooperative switch carries:
+    /// x86 rides IF in the saved RFLAGS; this port parks the bits here
+    /// so a task switched out with the gate shut reopens its own gate
+    /// on resume, and a fresh task starts with the gate open.
+    unsigned long irq_bits = 0;
 };
 
 static_assert(offsetof(CpuContext, spsr) == 10 * sizeof(unsigned long),
               "the switch moves eleven words");
 static_assert(offsetof(CpuContext, user_lr) == 44,
               "the user link register sits where the switch reads it");
+static_assert(offsetof(CpuContext, irq_bits) == 68,
+              "the cooperative switch reads the irq bits at 68");
 static_assert(offsetof(CpuContext, tpidruro) == 64,
               "the thread pointer sits where the switch reads it");
 static_assert(sizeof(CpuContext) == 72,

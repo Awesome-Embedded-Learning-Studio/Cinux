@@ -220,3 +220,38 @@ proc 挂 `/proc`、dev 挂 `/dev`。剩下的差异只有两样，都是应该�
 
 中立化层面，文件世界构建器要表达的就是"根候选"：一个端口给 ramfs 根加若干卷
 挂载，另一个端口给盘根加设备与事实挂载，两种都是同一组步骤的组合。
+
+## 第十六轮：init 车道开门，完整用户世界在 armv7 卡上活了
+
+x86 对照（kernel.cpp 的 boot 任务）：装调度类、装内核切换槽、开抢占、
+StartInitThread、循环 run_until_done + halt。arm 的 run_init_lane 照抄这份
+次序，缺一不可：第一版少了 InstallKernelSwitchSink，调度器没有切任务的
+机构，run_until_done 一进就冻住。
+
+这轮修的三处结构性缝：
+
+1. 协作切换不带走中断位。x86 的 IF 骑在保存的 RFLAGS 里；arm 的
+   ContextSwitch 只存取 SPSR，CPSR 的 I/F 位丢在切换路上，任务全部带
+   着关闸跑，tick 永远不再来。CpuContext 加 irq_bits 槽（offset 68），
+   切换存取 CPSR 的 I/F：闸随任务走，新任务从清零的镜像开门。
+2. 入口门不认 Thumb。EnterUserModeWithReturn 写死 SPSR=0x10，busybox
+   （Thumb 入口，bit0=1）被按 ARM 态解码，第一条指令就 undefined。
+   现在从入口地址 bit0 推 T 位，pc 取偶。
+3. 中立服务表只在 seat 世界开门。svc 分发的 serve_seated_neutral 原本
+   关在 SeatWorldActive 里，真实进程全吃 ENOSYS。表挪出来两个世界共用，
+   exit/exit_group 在非 seat 侧走调度器的 exit_current。补的中立面：
+   HandleStat64（StatPath 参数化布局）、chdir、rt_sigtimedwait（busybox
+   init 的主循环靠它扫挂起信号，缺了就自旋）。
+
+卡侧：create_armv7_sd.sh 播 /etc/inittab（console::respawn:/bin/sh），
+与 x86 卷同形。
+
+init 车道验证行：`[armv7] init lane: kernel_init takes over` →
+`irqs on, init thread starts` → `[kern] kernel_init: ping 10.0.2.2
+answered 0 of 4, launching shell` → `Cinux up` → 键入
+`echo armv7-shell-alive` 得答 `armv7-shell-alive`。两次运行稳定。
+站点两车道 both lanes green，host ctest 127/127。
+
+下一步：init 车道进 scripts 检查（带打字探针）；svc 88(reboot)、
+281、33(access) 逐个补齐或显式拒答；之后 GUI（vesper 桌面）从
+inittab 落座，替代手工 askfirst。

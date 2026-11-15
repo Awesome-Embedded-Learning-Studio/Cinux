@@ -24,6 +24,7 @@
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
 #include "kernel/arch/firmware.hpp"
+#include "kernel/arch/root_port.hpp"
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
@@ -39,7 +40,6 @@
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/loader.hpp"
 #include "kernel/drivers/ahci/ahci.hpp"
-#include "kernel/drivers/rtc/rtc.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -101,11 +101,6 @@ struct ShellWorld {
     base::Shared<mm::VmaStore>     vmas;
     unsigned long long             entry_rsp;  ///< Where the shell's stack picture landed.
 };
-
-/// The wall clock the volume's stamps read: this lane's RTC.
-unsigned long long rtc_wall_clock() {
-    return driver::Rtc::self().now_seconds();
-}
 
 /// Loads the volume's shell ELF into a fresh world with a stack page and a
 /// full range register on top; an empty ShellWorld when any step refuses.
@@ -257,9 +252,14 @@ void StartInitThread() {
         // The root volume's door: one port adopted over the SATA host
         // this lane owns. A lane with another block device hands its
         // own port; the mount ladder above it is shared.
-        static driver::BlockPort sata_port;
-        sata_port.adopt(driver::Ahci::self());
-        fs::FileWorld::self().init(sata_port, rtc_wall_clock);
+        // A lane that already adopted its own tree (the arm bring-up
+        // mounted its card into the very world) needs no second mount:
+        // the seats below then answer over that tree.
+        if (!fs::FileWorld::self().adopted()) {
+            unsigned long long (*wall_clock)() = nullptr;
+            driver::BlockPort* const kRootPort = arch::MakeRootPort(&wall_clock);
+            fs::FileWorld::self().init(*kRootPort, wall_clock);
+        }
         fs::StartConsoleInputPump();
         base::safety::Check(net::NetWorld::self().start_pump(), "net pump refused its seat");
         {

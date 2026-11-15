@@ -30,6 +30,12 @@
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/pmm.hpp"
+#include "kernel/arch/armv7/uart.hpp"
+#include "kernel/arch/armv7/user_fs.hpp"
+#include "kernel/init/init_thread.hpp"
+#include "kernel/proc/fault_resolve.hpp"
+#include "kernel/proc/sched_class.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/armv7/gic.hpp"
 #include "kernel/arch/armv7/mmu.hpp"
@@ -74,6 +80,28 @@ void PrintHex(unsigned long long value) {
 
 }  // namespace
 
+/// The full-boot lane: the card's world is adopted by the file world,
+/// the fault resolver is the shared one, and the kernel_init ladder --
+/// console pump, net pump, /sbin/init with respawn -- runs exactly the
+/// way it runs on x86. This frame becomes the scheduler's idle loop.
+void run_init_lane() {
+    // The very same ladder kernel.cpp runs on x86: classes, the
+    // kernel switch sink, preemption, then the init thread.
+    cinux::proc::Scheduler::self().install_class(cinux::proc::DefaultFifoClass());
+    cinux::proc::Scheduler::self().install_class(cinux::proc::PriorityClass());
+    cinux::proc::InstallKernelSwitchSink();
+    cinux::proc::Scheduler::self().set_preemption(true);
+    cinux::armv7::userfs::init();
+    cinux::proc::InstallFaultResolver();
+    asm volatile("cpsie if" ::: "memory");
+    cinux::armv7::UartWrite("[armv7] init lane: irqs on, init thread starts\n");
+    cinux::init::StartInitThread();
+    for (;;) {
+        cinux::proc::Scheduler::self().run_until_done();
+        cinux::arch::CpuIdle();
+    }
+}
+
 extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartInit();
     cinux::boot::BootInfo console_seat{};
@@ -109,7 +137,7 @@ extern "C" [[noreturn]] void kmain() {
     cinux::armv7::TimerEnable();
     {
         constexpr unsigned long kDtbAddress = 0x81000000UL;
-        cinux::armv7::firmware::SetDtb(kDtbAddress);
+        cinux::arch::firmware::SetDtb(kDtbAddress);
         cinux::armv7::MemoryRange range{};
         if (!cinux::armv7::ReadMemoryRange(kDtbAddress, range)) {
             cinux::armv7::UartWrite("[armv7] dtb missing or unreadable\n");
@@ -123,7 +151,7 @@ extern "C" [[noreturn]] void kmain() {
             // The firmware face: the same name the x86 lane reads from
             // fw_cfg answers from the tree this port booted with.
             char environment[64];
-            if (cinux::armv7::firmware::ReadString("opt/cinux/init-env", environment)) {
+            if (cinux::arch::firmware::ReadString("opt/cinux/init-env", environment)) {
                 cinux::armv7::UartWrite("[armv7] firmware init-env ");
                 cinux::armv7::UartWrite(environment);
                 cinux::armv7::UartWrite("\n");
@@ -312,6 +340,19 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");
+                    // The full-boot door: when the firmware words say
+                    // so, the station is skipped and the very same
+                    // kernel_init ladder x86 runs takes over -- pid 1
+                    // from /sbin/init on the card, respawn and all.
+                    {
+                        char init_lane[8]{};
+                        if (cinux::arch::firmware::ReadString("opt/cinux/init-lane",
+                                                               init_lane)) {
+                            cinux::print::Println(
+                                "[armv7] init lane: kernel_init takes over");
+                            run_init_lane();
+                        }
+                    }
                     // The bring-up task world is gone: the seated
                     // scheduler world is the one user-mode round trip.
                     const bool kSeatOk = cinux::armv7::RunSchedulerUserSelfCheck();

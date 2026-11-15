@@ -49,7 +49,9 @@ inline constexpr unsigned long kSetTls      = 0x0F0005UL;
 inline constexpr unsigned long kWritev        = 146;
 inline constexpr unsigned long kMprotect      = 125;
 inline constexpr unsigned long kOpenAt        = 322;
-inline constexpr unsigned long kStatx         = 397;
+inline constexpr unsigned long kChdir        = 12;
+inline constexpr unsigned long kStat64       = 265;
+inline constexpr unsigned long kStatx        = 397;
 inline constexpr unsigned long kFstatat64     = 327;
 inline constexpr unsigned long kFcntl64       = 221;
 /// EABI spells process creation with clone; a libc's fork() is
@@ -81,6 +83,7 @@ inline constexpr unsigned long kGetpgrp        = 65;
 inline constexpr unsigned long kRtSigaction    = 174;
 inline constexpr unsigned long kRtSigprocmask  = 175;
 inline constexpr unsigned long kRtSigreturn    = 173;
+inline constexpr unsigned long kRtSigtimedwait = 177;
 /// The identity words and the names a shell reads before its first
 /// prompt: the 32-bit id spellings EABI keeps beside uname and getcwd.
 inline constexpr unsigned long kUname         = 122;

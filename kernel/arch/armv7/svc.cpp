@@ -17,6 +17,10 @@
  */
 
 #include "kernel/arch/armv7/syscall_numbers.hpp"
+#include "kernel/syscall/sys_exit.hpp"
+#include "kernel/syscall/sys_chdir.hpp"
+#include "kernel/syscall/sys_sigtimedwait.hpp"
+#include "kernel/syscall/sys_stat.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -152,6 +156,13 @@ const NeutralService kNeutralServices[] = {
     // old port shim only folded AT_FDCWD and refused the rest.
     {cinux::armv7::syscall_nr::kOpenAt, &cinux::syscall::HandleOpenat},
     {cinux::armv7::syscall_nr::kStatx,  &cinux::syscall::HandleStatx},
+    // The path-stat pair: 265 is the EABI 64-bit spelling glibc and
+    // busybox ask for by name; the plain face answers the 32-bit one.
+    {cinux::armv7::syscall_nr::kStat64, &cinux::syscall::HandleStat64},
+    {cinux::armv7::syscall_nr::kChdir,  &cinux::syscall::HandleChdir},
+    // The signal poll: busybox init sweeps its pending set with a
+    // zero-timeout rt_sigtimedwait each lap of the respawn loop.
+    {cinux::armv7::syscall_nr::kRtSigtimedwait, &cinux::syscall::HandleRtSigtimedwait},
     {cinux::armv7::syscall_nr::kFstatat64, &cinux::syscall::HandleNewfstatat},
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
     {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},
@@ -285,9 +296,23 @@ extern "C" cinux::arch::UserTrap* c_svc_dispatch(cinux::arch::UserTrap* trap) {
         if (kNumber == cinux::armv7::syscall_nr::kExitGroup) {
             cinux::armv7::SeatExit(trap->r0);
         }
-        if (cinux::arch::UserTrap* const kServed = serve_seated_neutral(trap, kNumber)) {
-            return kServed;
+    } else if (kNumber == cinux::armv7::syscall_nr::kExit ||
+               kNumber == cinux::armv7::syscall_nr::kExitGroup) {
+        // A real process leaves through the scheduler's exit, the same
+        // neutral face the x86 lane serves; the frame's rdi already
+        // carries r0, the exit word.
+        cinux::syscall::SyscallFrame frame{};
+        cinux::arch::frame::Load(*trap, frame);
+        if (kNumber == cinux::armv7::syscall_nr::kExit) {
+            cinux::syscall::HandleExit(frame);
+        } else {
+            cinux::syscall::HandleExitGroup(frame);
         }
+    }
+    // The neutral table serves both worlds: a seated station episode
+    // and a full-boot process ask through the same numbers.
+    if (cinux::arch::UserTrap* const kServed = serve_seated_neutral(trap, kNumber)) {
+        return kServed;
     }
     if (kNumber == cinux::armv7::syscall_nr::kSetTls) {
         // ARM's own door behind the user TLS register: TPIDRURO is

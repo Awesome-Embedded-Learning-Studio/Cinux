@@ -32,6 +32,7 @@ add_custom_command(
 add_executable(arm_image
     start.S
     console_world.cpp
+    root_port.cpp
     kmain.cpp
     uart.cpp
     timer.cpp
@@ -169,6 +170,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/net/udp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_world.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/init/init_thread.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp
@@ -183,6 +185,9 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/task_runtime.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sched_class.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_chdir.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_sigtimedwait.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_exit.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_nanosleep.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
@@ -243,4 +248,16 @@ add_custom_command(
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu.dts
     COMMENT "Compiling the bring-up device tree")
 add_custom_target(arm_dtb DEPENDS ${CINUX_ARM_DTB})
+
+# The full-boot door: the same image, but the firmware words say
+# kernel_init takes over and pid 1 climbs the card's /sbin/init.
+set(CINUX_ARM_INIT_DTB ${CMAKE_BINARY_DIR}/armv7-init.dtb)
+add_custom_command(
+    OUTPUT ${CINUX_ARM_INIT_DTB}
+    COMMAND ${CINUX_DTC} -I dts -O dtb -o ${CINUX_ARM_INIT_DTB}
+            ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init.dts
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init.dts
+    COMMENT "Compiling the full-boot device tree")
+add_custom_target(arm_init_dtb DEPENDS ${CINUX_ARM_INIT_DTB})
+add_dependencies(arm_image arm_init_dtb)
 add_dependencies(arm_image arm_dtb)

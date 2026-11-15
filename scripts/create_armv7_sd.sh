@@ -91,7 +91,10 @@ if [[ -n "${busybox_bin}" && -f "${busybox_bin}" ]]; then
         debugfs -w -R "symlink /bin/${applet} busybox" "${volume}" >/dev/null 2>&1
     done
     debugfs -w -R 'symlink /sbin/init ../bin/busybox' "${volume}" >/dev/null 2>&1
-    echo "[armv7-sd] root layout seeded: /bin/busybox with applet links"
+    # The init lane's order: one sysinit line, then a respawning shell
+    # on the console -- the shared seed's inittab already spells it.
+    debugfs -w -R "write ${seed_dir}/inittab /etc/inittab" "${volume}" >/dev/null 2>&1
+    echo "[armv7-sd] root layout seeded: /bin/busybox with applet links and inittab"
 fi
 if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then
     debugfs -w -R 'symlink /bin/vesper ../../desk' "${volume}" >/dev/null 2>&1

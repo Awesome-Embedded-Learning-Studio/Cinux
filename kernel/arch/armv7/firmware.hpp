@@ -20,7 +20,7 @@
 #include <span>
 #include <string_view>
 
-namespace cinux::armv7::firmware {
+namespace cinux::arch::firmware {
 
 /// Seats the blob the boot loader placed; called once from kmain
 /// before the first ReadString.
@@ -30,4 +30,4 @@ void SetDtb(unsigned long address);
 /// out[0] = '\\0'.
 [[nodiscard]] bool ReadString(std::string_view name, std::span<char> out);
 
-}  // namespace cinux::armv7::firmware
+}  // namespace cinux::arch::firmware

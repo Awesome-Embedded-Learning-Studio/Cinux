@@ -248,13 +248,15 @@ unsigned long NetWorld::ping_sweep(uint32_t destination, unsigned long attempts)
     unsigned char       request[kEchoMessageBytes] = {};
     for (unsigned long attempt = 0; attempt < attempts; ++attempt) {
         BuildEchoRequest(request, sizeof(request), 0x1234, static_cast<uint16_t>(attempt + 1));
-        const bool kSent = ipv4_.send({
+        // A lane whose stack has no egress for this destination refuses
+        // the send; that is an answer -- zero of four -- not a fault,
+        // so the sweep reports and the caller's words stay honest.
+        static_cast<void>(ipv4_.send({
             .destination = destination,
             .protocol    = kIpv4ProtocolIcmp,
             .payload     = request,
             .length      = sizeof(request),
-        });
-        base::safety::Check(kSent, "the stack refused an echo request");
+        }));
         wait_for_answers(seen);
         if (icmp_.stats().replies_seen != seen) {
             print::Println("[net] echo answered: id=0x%x seq=%u", icmp_.stats().last_identifier,

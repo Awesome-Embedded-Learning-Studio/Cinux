@@ -82,6 +82,10 @@ public:
     /// streams, the mounts picture) work over the same tree.
     void adopt(Vfs& borrowed_vfs);
 
+    /// True when a lane handed its own tree: the kernel_init ladder
+    /// then skips its own mount and seats over the same world.
+    [[nodiscard]] bool adopted() const;
+
     /// The device tree init() grew: the arch hook seats into it, and a
     /// lane that wants its own leaves can reach the same tree.
     [[nodiscard]] DevFs& devices();

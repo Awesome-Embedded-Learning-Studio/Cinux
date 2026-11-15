@@ -39,4 +39,21 @@ namespace cinux::arch {
 extern "C" void EnterUserModeWithReturn(unsigned long entry, unsigned long stack,
                                         CpuContext* kernel_ctx);
 
+/**
+ * @brief         The neutral door: enter user mode, resume here on exit.
+ * @param[in]     entry   User-mode entry address.
+ * @param[in]     stack   User stack top, 8-byte aligned.
+ * @note          The x86 spelling leaves ring 0 through an IRETQ frame
+ *                and never returns; this port has no such frame, so the
+ *                caller's context parks in this very frame and the
+ *                svc-exit path resumes it -- the task then returns the
+ *                way a kernel task always does. Same contract at the
+ *                call site: behind this call the caller's frame is the
+ *                parked kernel half.
+ */
+inline void EnterUserMode(unsigned long entry, unsigned long stack) {
+    CpuContext parked{};
+    EnterUserModeWithReturn(entry, stack, &parked);
+}
+
 }  // namespace cinux::arch

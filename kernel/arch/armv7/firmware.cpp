@@ -14,7 +14,7 @@
 
 #include "kernel/arch/armv7/fdt.hpp"
 
-namespace cinux::armv7::firmware {
+namespace cinux::arch::firmware {
 
 namespace {
 
@@ -61,8 +61,8 @@ bool ReadString(std::string_view name, std::span<char> out) {
     }
     property[kProperty.size()] = '\0';
 
-    PropertyBytes found{};
-    if (!ReadProperty(g_dtb, node, property, found) || found.len == 0 ||
+    cinux::armv7::PropertyBytes found{};
+    if (!cinux::armv7::ReadProperty(g_dtb, node, property, found) || found.len == 0 ||
         found.len >= out.size()) {
         return false;
     }
@@ -73,4 +73,4 @@ bool ReadString(std::string_view name, std::span<char> out) {
     return true;
 }
 
-}  // namespace cinux::armv7::firmware
+}  // namespace cinux::arch::firmware

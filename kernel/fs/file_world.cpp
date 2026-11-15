@@ -56,6 +56,10 @@
 
 namespace cinux::fs {
 
+bool FileWorld::adopted() const {
+    return borrowed_ != nullptr;
+}
+
 fs::DevFs& FileWorld::devices() {
     return devfs_;
 }
