@@ -32,6 +32,8 @@
 #include "kernel/mm/pmm.hpp"
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/user_fs.hpp"
+#include "kernel/arch/armv7/timer.hpp"
+#include "kernel/arch/armv7/cow_repair.hpp"
 #include "kernel/init/init_thread.hpp"
 #include "kernel/proc/fault_resolve.hpp"
 #include "kernel/proc/sched_class.hpp"
@@ -85,6 +87,11 @@ void PrintHex(unsigned long long value) {
 /// console pump, net pump, /sbin/init with respawn -- runs exactly the
 /// way it runs on x86. This frame becomes the scheduler's idle loop.
 void run_init_lane() {
+    // The station ladder's verdict ears -- per-repair pages and the
+    // tick heartbeat -- close here: a real boot forks hundreds of
+    // repairs every second and would drown its own console.
+    cinux::mm::cow::SetTraceRepairs(false);
+    cinux::armv7::SetTickTrace(false);
     // The very same ladder kernel.cpp runs on x86: classes, the
     // kernel switch sink, preemption, then the init thread.
     cinux::proc::Scheduler::self().install_class(cinux::proc::DefaultFifoClass());

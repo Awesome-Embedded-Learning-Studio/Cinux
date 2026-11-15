@@ -57,6 +57,17 @@ bool TryResolvePageFault(unsigned long long address, unsigned long long error_co
     return RepairWriteFault(kTask->space->root(), static_cast<unsigned long>(address));
 }
 
+/// Repair tracing is the station ladder's probe ear, open from boot
+/// so its verdict words print. The init lane closes it at its door: a
+/// real boot forks hundreds of repairs and would drown its console.
+namespace {
+bool g_trace_repairs = true;
+}  // namespace
+
+void SetTraceRepairs(bool on) {
+    g_trace_repairs = on;
+}
+
 bool RepairWriteFault(unsigned long root, unsigned long address) {
     const unsigned long  kPage = address & ~(cinux::arch::page::kSize - 1UL);
     if (!cinux::arch::space::IsUserSlot(kPage >> 20U)) {
@@ -91,10 +102,12 @@ bool RepairWriteFault(unsigned long root, unsigned long address) {
                                          cinux::arch::page::kUser | cinux::arch::page::kWritable);
     cinux::arch::space::InvalidatePage(kPage);
     ReleaseFrame(kFrame);
-    if (kShared) {
-        cinux::print::Println("[armv7] cow copy at %X", kPage);
-    } else {
-        cinux::print::Println("[armv7] ro copy at %X", kPage);
+    if (g_trace_repairs) {
+        if (kShared) {
+            cinux::print::Println("[armv7] cow copy at %X", kPage);
+        } else {
+            cinux::print::Println("[armv7] ro copy at %X", kPage);
+        }
     }
     return true;
 }

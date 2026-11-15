@@ -38,13 +38,23 @@ void print_unsigned(unsigned long value) {
         return;
     }
     while (value != 0) {
-        digits[count++] = static_cast<char>('0' + (value % 10));
+        digits[count] = static_cast<char>('0' + (value % 10));
         value /= 10;
+        ++count;
     }
     while (count != 0) {
-        cinux::armv7::UartPutChar(digits[--count]);
+        --count;
+        cinux::armv7::UartPutChar(digits[count]);
     }
 }
+
+
+namespace {
+/// The tick ear is the station ladder's: open from boot so "tick N"
+/// prints, closed by the init lane so a real boot's console stays
+/// readable. Raw UART writes because this runs at IRQ depth.
+bool g_trace_ticks = true;
+}  // namespace
 
 void serve_timer() {
     ++g_ticks;
@@ -56,7 +66,7 @@ void serve_timer() {
     for (unsigned long credit = 0; credit < kTicksPerInterrupt; ++credit) {
         cinux::time::Tick::self().on_interrupt();
     }
-    if ((g_ticks % 2) == 1) {
+    if (g_trace_ticks && (g_ticks % 2) == 1) {
         cinux::armv7::UartWrite("[armv7] tick ");
         print_unsigned(g_ticks);
         cinux::armv7::UartWrite("\n");
@@ -95,6 +105,15 @@ void serve_interrupt() {
 }
 
 }  // namespace
+
+namespace cinux::armv7 {
+
+/// The tick ear's switch; declared in timer.hpp beside the timer words.
+void SetTickTrace(bool on) {
+    g_trace_ticks = on;
+}
+
+}  // namespace cinux::armv7
 
 /// An interrupt taken in the kernel: tick and return through the stub.
 void HandleIrq() {

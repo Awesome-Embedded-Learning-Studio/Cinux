@@ -30,6 +30,10 @@ namespace cinux::armv7 {
 /// Arms the physical timer to fire after the given ticks.
 void TimerArmAfter(std::uint32_t ticks);
 
+/// Opens or closes the tick heartbeat trace; the station world
+/// listens from boot, the init lane closes it at its door.
+void SetTickTrace(bool on);
+
 /// Enables the physical timer's compare and interrupt generation.
 void TimerEnable();
 

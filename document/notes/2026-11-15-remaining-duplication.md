@@ -340,3 +340,14 @@ arm_boot 车道里。
 
 两条命令均实跑验证：run 出 "Cinux up" 与 "vesper-fbdev: running"，
 run_gui 组合参数同样起动到桌。车道判据：ctest 3/3 Passed。
+
+## 第二十一轮：控制台静音，判词耳朵归自检世界独有
+
+run 门开放后暴露最后一处异味：init 世界里 fork 的几百次 COW 修复逐页
+打 "cow/ro copy at"、定时器每秒打 "tick N"，控制台被刷到 shell 提示符
+都认不出。这些印染本是站点自检的判词耳朵（arm_boot 听 "ro copy at
+40010000" 与 "tick 1"），不该跟着真实启动走。归一方式：两只耳朵
+（cow_repair 的 SetTraceRepairs、irq 的 SetTickTrace）默认开——站点世界
+从靴起就在听，判词一字不改；run_init_lane 进门第一件事把它们关上，
+真实启动的控制台从此只说系统自己的话。验证：init 车道实跑零刷屏、
+"Cinux up" 与 "/ #" 提示符清晰可见，ctest 3/3 Passed。

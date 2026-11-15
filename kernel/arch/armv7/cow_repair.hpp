@@ -34,4 +34,14 @@ namespace cinux::mm::cow {
  */
 [[nodiscard]] bool RepairWriteFault(unsigned long root, unsigned long address);
 
+/**
+ * @brief         Opens or closes the repair trace.
+ * @param[in]     on  True prints each repair's page; false stays
+ *                    silent. The station self check is the only
+ *                    caller: its verdicts listen for the words.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void SetTraceRepairs(bool on);
+
 }  // namespace cinux::mm::cow
