@@ -253,7 +253,6 @@ add_custom_target(arm_dtb DEPENDS ${CINUX_ARM_DTB})
 
 # The full-boot door: the same image, but the firmware words say
 # kernel_init takes over and pid 1 climbs the card's /sbin/init.
-set(CINUX_ARM_INIT_DTB ${CMAKE_BINARY_DIR}/armv7-init.dtb)
 add_custom_command(
     OUTPUT ${CINUX_ARM_INIT_DTB}
     COMMAND ${CINUX_DTC} -I dts -O dtb -o ${CINUX_ARM_INIT_DTB}

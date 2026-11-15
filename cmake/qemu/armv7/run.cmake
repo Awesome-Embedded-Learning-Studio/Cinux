@@ -231,7 +231,7 @@ endif()
 add_custom_target(run
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -sd ${CINUX_ARM_SD_IMG}
+            -drive if=sd,format=raw,file=${CINUX_ARM_SD_IMG}
             -nographic -monitor none
     DEPENDS arm_image arm_init_dtb arm_sd_image
     USES_TERMINAL
@@ -247,7 +247,7 @@ add_custom_target(run_gui
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/check_desk.cmake
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -sd ${CINUX_ARM_SD_IMG}
+            -drive if=sd,format=raw,file=${CINUX_ARM_SD_IMG}
             -display gtk,gl=off -serial stdio -monitor none
             -device usb-tablet
     DEPENDS arm_image arm_init_dtb arm_sd_image
