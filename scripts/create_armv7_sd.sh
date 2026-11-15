@@ -94,6 +94,15 @@ if [[ -n "${busybox_bin}" && -f "${busybox_bin}" ]]; then
     # The init lane's order: one sysinit line, then a respawning shell
     # on the console -- the shared seed's inittab already spells it.
     debugfs -w -R "write ${seed_dir}/inittab /etc/inittab" "${volume}" >/dev/null 2>&1
+    # The GUI door on the full-boot card: when the desk artifact is
+    # there, init respawns it beside the console shell, exactly like
+    # the x86 volume's inittab does.
+    if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then
+        printf '%s\n' '::sysinit:/bin/echo Cinux up' 'console::respawn:/bin/sh' \
+            '::respawn:/desk /dev/fb0 /dev/event0 /dev/event1' > "/tmp/armv7-init-inittab"
+        debugfs -w -R "rm /etc/inittab" "${volume}" >/dev/null 2>&1
+        debugfs -w -R "write /tmp/armv7-init-inittab /etc/inittab" "${volume}" >/dev/null 2>&1
+    fi
     echo "[armv7-sd] root layout seeded: /bin/busybox with applet links and inittab"
 fi
 if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then

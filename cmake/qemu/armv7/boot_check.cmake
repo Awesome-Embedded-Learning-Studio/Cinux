@@ -1,3 +1,14 @@
+# The USB device list is a knob: the station lanes keep the default
+# keyboard, the desktop lanes trade it for the tablet on the board's
+# single port.
+math(EXPR _grace "${RUN_SECONDS} + 20")
+if(NOT DEFINED USB_DEVICES)
+    set(USB_DEVICES "-device usb-kbd")
+endif()
+# A -D value with spaces arrives as a semicolon list; the shell below
+# wants the plain string back.
+string(REPLACE ";" " " USB_DEVICES "${USB_DEVICES}")
+
 # Runs the bring-up image for a fixed window and checks the serial banner.
 # With STDIN_FILE set, the file's bytes drip into the guest's UART after
 # a delay: bytes that arrive before the kernel's UART bring-up are
@@ -5,8 +16,8 @@
 # swallow them right after, so the wait skips both windows.
 if(STDIN_FILE)
     execute_process(
-        COMMAND /bin/sh -c "{ sleep ${STDIN_DELAY}; head -n 1 '${STDIN_FILE}'; sleep ${STDIN_DELAY2}; sed -n 2p '${STDIN_FILE}'; sleep ${STDIN_DELAY3}; tail -n +3 '${STDIN_FILE}'; } | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none -device usb-kbd"
-        TIMEOUT ${RUN_SECONDS}
+        COMMAND /bin/sh -c "{ sleep ${STDIN_DELAY}; head -n 1 '${STDIN_FILE}'; sleep ${STDIN_DELAY2}; sed -n 2p '${STDIN_FILE}'; sleep ${STDIN_DELAY3}; tail -n +3 '${STDIN_FILE}'; } | 'timeout' '${RUN_SECONDS}' '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none ${USB_DEVICES}"
+        TIMEOUT ${_grace}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
         RESULT_VARIABLE run_result)
@@ -15,7 +26,7 @@ else()
         COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
                 -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
                 -sd ${SD_FILE}
-                -nographic -monitor none -device usb-kbd
+                -nographic -monitor none ${USB_DEVICES}
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
@@ -29,7 +40,7 @@ if(NOT EXISTS ${SERIAL_LOG})
 endif()
 file(READ ${SERIAL_LOG} serial_out)
 if(serial_out STREQUAL "")
-    message(FATAL_ERROR "arm_boot: the runner produced an empty log.")
+    message(FATAL_ERROR "arm_boot: the runner produced an empty log (err: ${serial_err}).")
 endif()
 
 file(WRITE "${SERIAL_LOG}" "${serial_out}")

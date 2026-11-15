@@ -202,6 +202,17 @@ add_test(NAME arm_boot
             "-DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log"
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)
 
+# The full-boot lane: the same image behind the init dtb, so kernel_init
+# -- not the station chain -- owns the boot. One typed probe asks the
+# card's shell to speak, and the judgement listens for its answer. The
+# runner lives in its own script so the -D names here stay single.
+add_test(NAME arm_init
+    COMMAND ${CMAKE_COMMAND} -E env
+            "CINUX_ARM_BUILD=${CMAKE_BINARY_DIR}"
+            "CINUX_ARM_RUN_SECONDS=${CINUX_ARM_RUN_SECONDS}"
+            bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-init.sh")
+set_tests_properties(arm_init PROPERTIES TIMEOUT 300)
+
 # The GUI lane is a test too, when the desktop artifact is there: it
 # boots the desktop, clicks the terminal icon, types, and judges the
 # screen's pixels. The desk never exits, so the script owns its own run.

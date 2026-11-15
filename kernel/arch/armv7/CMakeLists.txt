@@ -187,6 +187,8 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_chdir.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_sigtimedwait.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_access.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_socket.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_exit.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_nanosleep.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp

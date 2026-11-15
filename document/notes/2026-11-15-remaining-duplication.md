@@ -255,3 +255,29 @@ answered 0 of 4, launching shell` → `Cinux up` → 键入
 下一步：init 车道进 scripts 检查（带打字探针）；svc 88(reboot)、
 281、33(access) 逐个补齐或显式拒答；之后 GUI（vesper 桌面）从
 inittab 落座，替代手工 askfirst。
+
+## 第十七轮：GUI 门开进完整启动车道
+
+上一轮的拒绝名单逐个对表（arm64 源码树里的 unistd32.h 是权威）：
+281=socket、283=connect、33=access、201=geteuid 的 16 位拼法。
+全部接到中立面：HandleSocket/HandleConnect（net 世界本来就在）、
+HandleAccess、HandleGeteuid（同一个词）。88=reboot 留给将来，init
+只在停机时问它。
+
+init 车道进了 ctest：arm_init 测试跑同一个镜像但用 armv7-init.dtb，
+滴入一行打字探针（echo armv7-shell-alive），判词听 init 链自己的话
+（takes over、irqs on、ping 判词、Cinux up、shell 回答、world adopted）。
+跑判脚本的 runner 修了两处：sh 包一层后 cmake 的 TIMEOUT 杀得到 sh
+杀不到孙进程 qemu，捕获全丢——把 timeout 挪进 sh 内部，外面留余量；
+带空格的 -D 值在 bash 数组与 cmake 列表两道关都会被拆散，runner 里
+先把分号还原成空格。
+
+GUI 门：卡上的 /etc/inittab 在桌工件存在时多一行 respawn，带显式
+设备参数（/desk /dev/fb0 /dev/event0 /dev/event1）——桌面不再猜
+/dev/input 路径，直接用 vfs 座位的真名。arm_init 的判词随之加两条：
+vesper-fbdev 开面板与 running。板上 USB 口只有一个，tablet 顶替
+usb-kbd 上命令行（打字探针走 UART，不受影响）。
+
+至此 ARMv7A 从卡上启动完整版 Cinux：busybox init 落座、console
+shell 回答命令、vesper 桌面在同一个 init 手里常驻。两条站点车道
+both lanes green，host ctest 127/127，arm_init 两次稳定。

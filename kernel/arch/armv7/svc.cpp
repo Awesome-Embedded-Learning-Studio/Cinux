@@ -20,6 +20,8 @@
 #include "kernel/syscall/sys_exit.hpp"
 #include "kernel/syscall/sys_chdir.hpp"
 #include "kernel/syscall/sys_sigtimedwait.hpp"
+#include "kernel/syscall/sys_access.hpp"
+#include "kernel/syscall/sys_socket.hpp"
 #include "kernel/syscall/sys_stat.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/boot/print.hpp"
@@ -163,6 +165,14 @@ const NeutralService kNeutralServices[] = {
     // The signal poll: busybox init sweeps its pending set with a
     // zero-timeout rt_sigtimedwait each lap of the respawn loop.
     {cinux::armv7::syscall_nr::kRtSigtimedwait, &cinux::syscall::HandleRtSigtimedwait},
+    // The probe pair: init tests paths with access and asks the net
+    // world for a socket with the EABI spelling.
+    {cinux::armv7::syscall_nr::kAccess, &cinux::syscall::HandleAccess},
+    {cinux::armv7::syscall_nr::kSocket, &cinux::syscall::HandleSocket},
+    {cinux::armv7::syscall_nr::kConnect, &cinux::syscall::HandleConnect},
+    // The 16-bit id spellings beside their 32-bit kin: the answer is
+    // the same word.
+    {cinux::armv7::syscall_nr::kGeteuid16, &cinux::syscall::HandleGeteuid},
     {cinux::armv7::syscall_nr::kFstatat64, &cinux::syscall::HandleNewfstatat},
     {cinux::armv7::syscall_nr::kClose,  &cinux::syscall::HandleClose},
     {cinux::armv7::syscall_nr::kLseek,  &cinux::syscall::HandleLseek},
