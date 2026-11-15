@@ -325,6 +325,32 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
         }
         sys3(6UL, (unsigned long)kMotd, 0UL, 0UL);
     }
+    // Sleep: a shell's sleep and every paced loop come through nanosleep.
+    // The clock read on both sides proves the call waited instead of merely
+    // returning zero, which is the failure a scheduler bug makes.
+    {
+        static const char kNapA[] = "[guest] nanosleep refused\n";
+        static const char kNapB[] = "[guest] nanosleep ok, the clock advanced\n";
+        struct arm7_timespec { long int_seconds; long int_nanoseconds; };
+        struct arm7_timespec t0;
+        struct arm7_timespec t1;
+        struct arm7_timespec asked;
+        const long kClock0 = sys3(263UL, 0UL, (unsigned long)&t0, 0UL);
+        asked.int_seconds = 0;
+        asked.int_nanoseconds = 20000000L;  // 20 ms, longer than one tick's wait
+        const long kSlept = sys3(162UL, (unsigned long)&asked, 0UL, 0UL);
+        const long kClock1 = sys3(263UL, 0UL, (unsigned long)&t1, 0UL);
+        const int kAdvanced = kClock0 == 0L && kClock1 == 0L &&
+                              (t1.int_seconds > t0.int_seconds ||
+                               (t1.int_seconds == t0.int_seconds &&
+                                t1.int_nanoseconds > t0.int_nanoseconds));
+        if (kSlept == 0L && kAdvanced) {
+            sys3(4UL, 1UL, (unsigned long)kNapB, slen(kNapB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kNapA, slen(kNapA));
+        }
+    }
+
     // Directory walk: the root's records list the seeded files back,
     // hello included now that the old world releases what it holds.
     {

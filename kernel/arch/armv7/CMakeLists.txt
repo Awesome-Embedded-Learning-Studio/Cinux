@@ -123,6 +123,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/font.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/screen.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/waiter.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/kernel_tables.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/block_volume.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/device_tree.cpp
@@ -174,6 +175,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/task_runtime.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sched_class.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_nanosleep.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/vma.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
     ${CMAKE_SOURCE_DIR}/base/src/path.cpp

@@ -143,6 +143,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_USBKBD=dev usbkbd seated"
             "-DEXPECTED_GUEST_USBKBD=usbkbd ok, empty answers EAGAIN or a glyph"
             "-DEXPECTED_GUEST_DISK_MOTD=[guest] disk motd: Cinux says hello from a real disk."
+            "-DEXPECTED_GUEST_NAP=[guest] nanosleep ok, the clock advanced"
             "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
             ${_arm_glibc_arg}
             ${_arm_busybox_arg}

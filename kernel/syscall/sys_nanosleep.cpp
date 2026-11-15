@@ -1,6 +1,7 @@
 #include "kernel/syscall/sys_nanosleep.hpp"
 
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/waiter.hpp"
 #include "kernel/proc/signals.hpp"
 #include "kernel/syscall/sys_clock.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -16,6 +17,9 @@ constexpr unsigned long long kNsPerSecond   = 1'000'000'000ULL;
 constexpr unsigned long      kTimespecBytes = sizeof(Timespec);
 
 long long wait_until(unsigned long long deadline, unsigned long long remainder, bool absolute) {
+    // The exception masked interrupts on entry; without this the clock this
+    // loop waits on would never move.
+    proc::AllowInterruptsWhileWaiting();
     for (;;) {
         const auto kNow = MonotonicNanoseconds();
         if (kNow >= deadline) {

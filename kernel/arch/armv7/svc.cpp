@@ -19,9 +19,11 @@
 #include "kernel/arch/armv7/syscall_numbers.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/boot/print.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/sys_nanosleep.hpp"
 #include "kernel/syscall/sys_getcwd.hpp"
 #include "kernel/syscall/sys_id.hpp"
 #include "kernel/syscall/sys_kill.hpp"
@@ -206,6 +208,11 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kPpoll,          &cinux::syscall::HandlePpoll},
     // 263 asks in the native shape the neutral writer now honours by
     // itself; 403 is the time64 spelling, two eight-byte words.
+    // The sleep pair: 162 is the native spelling, 407 the EABI one that
+    // carries the clock id and flags first. A shell's sleep, a paced loop
+    // and any backoff timer come through one of these.
+    {cinux::armv7::syscall_nr::kSleep,          &cinux::syscall::HandleNanosleep},
+    {cinux::armv7::syscall_nr::kClockNanosleep, &cinux::syscall::HandleClockNanosleep},
     {cinux::armv7::syscall_nr::kClockGettime,   &cinux::syscall::HandleClockGettime},
     {cinux::armv7::syscall_nr::kClockGettime64, &cinux::syscall::HandleClockGettime64},
     {cinux::armv7::syscall_nr::kSetsid,         &cinux::syscall::HandleSetsid},

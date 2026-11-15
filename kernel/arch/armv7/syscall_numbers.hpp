@@ -67,6 +67,7 @@ inline constexpr unsigned long kVfork         = 190;
 /// probes.
 inline constexpr unsigned long kPoll          = 168;
 inline constexpr unsigned long kPpoll         = 336;
+inline constexpr unsigned long kClockNanosleep = 407;
 inline constexpr unsigned long kClockGettime   = 263;
 inline constexpr unsigned long kClockGettime64 = 403;
 /// The session and group words a shell's child sets up before exec.
