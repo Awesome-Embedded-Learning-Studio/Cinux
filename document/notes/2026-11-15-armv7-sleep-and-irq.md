@@ -21,20 +21,28 @@ SVC 异常进内核时，CPU 自己把 I 位置起，这是体系结构规定，
 
 ## 修法
 
-新增中立声明 `proc::AllowInterruptsWhileWaiting()`（`kernel/proc/waiter.hpp`）：
+`poll` 的等待循环本来就有正确的写法：抽一次端口输入、`arch::SaveAndEnableIrq()`
+打开中断、让出、再 `arch::RestoreIrq()` 恢复。`nanosleep` 少了中间那半，所以
+它的钟不走。
 
-- armv7 的实现是 `cpsie i`，一行；
-- x86-64 的实现是空操作，因为那条车道的调用入口本来就开着中断，写成空操作比
-  再守一道门诚实。
+第一版修法是加一个 `proc::AllowInterruptsWhileWaiting()`，让等待的处理器请一次。
+后来发现那和 `poll` 里已经写着的东西是同一件事的第二种写法，于是收成一处：
+`proc::WaitForNextTurn()`（`kernel/proc/waiter.cpp`），做"抽输入、开中断、让出、
+恢复中断"这一拍。`nanosleep` 与 `ppoll` 的两个等待循环都改用它，每处三行变一行。
 
-只有真正要等的处理器请它一次（目前是 `nanosleep` 的等待循环），不是每个系统
-调用都开。试过"每个系统调用进内核就开 IRQ 并全程关抢占"的写法，桌面车道开始
-随机丢点击与关窗；收窄到等待处之后，boot 与 desk 两条车道连跑三轮全绿。
+试过"每个系统调用进内核就开 IRQ 并全程关抢占"的写法，桌面车道开始随机丢点击与
+关窗；收窄到等待处之后，boot 与 desk 两条车道连跑三轮全绿。
+
+## 判据
+
+探针里两条用例，都用时钟当证人：
+
+- `nanosleep` 20 毫秒，要求返回 0 且单调时钟前进；
+- `poll(NULL, 0, 20)` 纯超时，要求返回 0 且经过至少 10 毫秒。
 
 ## 遗留
 
-- `poll`、`wait4` 这些同样会在内核里等的处理器还没有请这一句。桌面车道的 pty
-  读走的是它们，目前靠显式 yield 推进，没有时钟也能活。要不要一并接上，等有
-  具体需求（比如带超时的 poll）再定。
+- `wait4` 走的是调度器的 `wait_child`，它自己的等待在别处；等有具体需求再看要
+  不要也换成这一拍。
 - 探针的 ELF 是 gitignore 的构建产物，改 `assets/armv7_userprog.c` 后要跑
   `scripts/build-armv7-probe.sh` 重链，镜像是把 ELF 当 blob 嵌进去的。

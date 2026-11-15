@@ -351,6 +351,28 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
         }
     }
 
+    // Poll with no descriptors, the pure-timeout shape: it must return
+    // zero after really waiting, and the clock is the witness. This is the
+    // same turn nanosleep takes, so a wait loop that forgets to let the
+    // timer in fails here too.
+    {
+        static const char kPollA[] = "[guest] poll timeout refused\n";
+        static const char kPollB[] = "[guest] poll timeout ok, waited\n";
+        struct arm7_poll_ts { long int_seconds; long int_nanoseconds; };
+        struct arm7_poll_ts p0;
+        struct arm7_poll_ts p1;
+        const long kClockA = sys3(263UL, 0UL, (unsigned long)&p0, 0UL);
+        const long kReady = sys3(168UL, 0UL, 0UL, 20UL);  // poll(NULL, 0, 20)
+        const long kClockB = sys3(263UL, 0UL, (unsigned long)&p1, 0UL);
+        const long kElapsed = ((p1.int_seconds - p0.int_seconds) * 1000000000L) +
+                              (p1.int_nanoseconds - p0.int_nanoseconds);
+        if (kReady == 0L && kClockA == 0L && kClockB == 0L && kElapsed >= 10000000L) {
+            sys3(4UL, 1UL, (unsigned long)kPollB, slen(kPollB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kPollA, slen(kPollA));
+        }
+    }
+
     // Directory walk: the root's records list the seeded files back,
     // hello included now that the old world releases what it holds.
     {

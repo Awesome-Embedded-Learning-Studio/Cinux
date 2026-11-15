@@ -123,7 +123,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/mm/hardware_frames.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/font.cpp
     ${CMAKE_SOURCE_DIR}/kernel/console/screen.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/arch/armv7/waiter.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/waiter.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/kernel_tables.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/block_volume.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/device_tree.cpp

@@ -164,6 +164,7 @@ add_cinux_test(syscall/syscall_face ${CMAKE_SOURCE_DIR}/kernel/net/ifaces.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_epoll.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_eventfd.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_ppoll.cpp
+                           ${CMAKE_SOURCE_DIR}/kernel/proc/waiter.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_read.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_write.cpp
                            ${CMAKE_SOURCE_DIR}/kernel/net/net_layout.cpp
