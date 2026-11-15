@@ -21,6 +21,7 @@ mkfs.ext2 -q -F -b 1024 -O none -N 64 "${volume}"
 debugfs -w -R 'mkdir /etc' "${volume}" >/dev/null 2>&1
 debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
 debugfs -w -R "write ${seed_dir}/zh.txt /etc/zh" "${volume}" >/dev/null 2>&1
+debugfs -w -R "write ${seed_dir}/zh_ascii.txt /etc/zh_ascii" "${volume}" >/dev/null 2>&1
 disk_prog="${CINUX_DISK_PROG:-${script_dir}/../assets/armv7_diskprog.elf}"
 debugfs -w -R "write ${disk_prog} /prog" "${volume}" >/dev/null 2>&1
 
