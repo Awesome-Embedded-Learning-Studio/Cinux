@@ -67,19 +67,6 @@ namespace cow {
  */
 [[nodiscard]] bool TryResolvePageFault(unsigned long long address, unsigned long long error_code);
 
-/**
- * @brief         Seat the engine at the exception reporter's fault door.
- *
- * @note          The resolver answers only faults it can repair;
- *          everything else falls through unchanged. Bring-up installs
- *          this once page tables exist; a machine without shared pages
- *          simply never hears back "true".
- * @warning       None
- * @throws        None
- * @since         0.1.0
- * @ingroup       kernel_mm
- */
-void InstallResolver();
 
 /**
  * @brief         Give one frame back, honoring whoever still shares it.

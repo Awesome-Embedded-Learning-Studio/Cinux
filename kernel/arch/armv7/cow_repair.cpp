@@ -20,7 +20,11 @@
 
 #include "kernel/arch/armv7/cow_repair.hpp"
 
+#include "kernel/mm/address_space.hpp"
 #include "kernel/mm/cow.hpp"
+#include "kernel/proc/task.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/arch/armv7/isr.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/arch/page_walk.hpp"
@@ -37,6 +41,21 @@ bool LeafIsShareMarked(const Entry& leaf) {
 }  // namespace cinux::arch::page
 
 namespace cinux::mm::cow {
+
+/// The neutral entry, in this port's terms: the write bit is the gate,
+/// and the frame's own share count is what tells a shared page from a
+/// private one. The leaf never carries an owner bit here, so the walk
+/// below asks the allocator instead of reading a marker.
+bool TryResolvePageFault(unsigned long long address, unsigned long long error_code) {
+    if ((error_code & cinux::arch::isr::kFaultWasWrite) == 0) {
+        return false;
+    }
+    proc::Task* const kTask = proc::Scheduler::self().current();
+    if (kTask == nullptr || !kTask->space.holds()) {
+        return false;
+    }
+    return RepairWriteFault(kTask->space->root(), static_cast<unsigned long>(address));
+}
 
 bool RepairWriteFault(unsigned long root, unsigned long address) {
     const unsigned long  kPage = address & ~(cinux::arch::page::kSize - 1UL);

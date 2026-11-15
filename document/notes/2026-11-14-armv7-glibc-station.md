@@ -643,6 +643,22 @@ x86 根本没有——哪天 x86 想用这两个函数，链接就会断。两�
 - arm 的 `cow_release.cpp` 只留页表那一半：标记共享叶子、释放遍历
 - 两条车道现在都从同一个目标文件拿到这两个符号，arm 的归档对象里只剩引用
 
+## 中立的故障门补齐，空门删掉
+
+对着中立头逐个查，找到两处不对称：
+
+- `mm::cow::TryResolvePageFault` 只有 x86 实现。arm 自己有一套 `RepairWriteFault`，
+  语义相同但名字不同，于是中立的 `proc::InstallFaultResolver()` 在 arm 上链不上。
+  现在 arm 补了同名实现：写位当闸门，共享与否问分配器的计数（这个 port 的叶子
+  上没有主人标记）
+- `mm::cow::InstallResolver` 声明在中立头里，只有 x86 定义，**没有任何调用者**。
+  真正在装的是 `proc::InstallFaultResolver()`（初始化序列调它）。这个空门删掉了，
+  省得以后有人照着它去装一个半套的解析器
+
+还留着的一处没动：arm 的席位仍然自己装 `InstallFaultRepair(&SeatRepairPage)`，
+和中性那条的区别在失败路径——中性的会 `exit_current(SIGSEGV)`，席位的期望是
+回到 `SeatFaultDeath` 收场。要换得先统一这条失败路径，下一轮再说。
+
 ## 还缺什么
 
 - `mprotect` 只处理 4KiB 叶子，大页跳过；将来设备映射要点到才需要补

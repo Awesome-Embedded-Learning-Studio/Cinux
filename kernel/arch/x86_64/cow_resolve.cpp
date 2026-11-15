@@ -126,10 +126,6 @@ bool TryResolvePageFault(unsigned long long address, unsigned long long error_co
     return true;
 }
 
-void InstallResolver() {
-    cinux::arch::isr::InstallPageFaultResolver(&TryResolvePageFault);
-}
-
 void ReleaseFrame(unsigned long long frame) {
     const arch::IrqGuard kIrq;
     const auto           kGate = g_fault_gate.guard();
