@@ -40,15 +40,6 @@ endif()
 
 add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
 
-add_custom_target(run
-    COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
-            -device loader,file=${CINUX_ARM_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -sd ${CINUX_ARM_SD_IMG}
-            -nographic -monitor none -device usb-kbd
-    DEPENDS arm_image arm_dtb arm_sd_image
-    USES_TERMINAL
-    COMMENT "Booting the armv7 bring-up image")
-
 # Every -D value that contains a space must be quoted: an unquoted one is
 # split into several arguments and the check only ever sees its first word.
 # A repeated -D name silently keeps only the last value, which quietly
@@ -230,3 +221,35 @@ if(_arm_desk_test_bin AND EXISTS "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.s
                 bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
     set_tests_properties(arm_desk PROPERTIES TIMEOUT 900)
 endif()
+
+# The interactive door the x86 lane has always had: `run` boots the
+# real system, not the self-check world. kernel_init takes over, pid 1
+# climbs the card's /sbin/init, and the console shell answers on the
+# serial terminal -- type at it once "Cinux up" and the respawn lines
+# have passed. GUI needs the desk on the card; the text lane stays
+# usable without it.
+add_custom_target(run
+    COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
+            -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
+            -sd ${CINUX_ARM_SD_IMG}
+            -nographic -monitor none
+    DEPENDS arm_image arm_init_dtb arm_sd_image
+    USES_TERMINAL
+    COMMENT "Booting full Cinux on armv7 (console shell on this terminal)")
+
+# The GUI face of the same boot: the board's LCD opens as a QEMU
+# window and the USB tablet -- the board's only USB port -- drives the
+# cursor the desk reads from /dev/event1. The check fails early and
+# says how to build the desk when the artifact is missing: without it
+# the card has no /desk seat and no desktop would ever appear.
+add_custom_target(run_gui
+    COMMAND ${CMAKE_COMMAND} -DDESK_BIN=${_arm_desk_bin}
+            -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/check_desk.cmake
+    COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
+            -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
+            -sd ${CINUX_ARM_SD_IMG}
+            -display gtk,gl=off -serial stdio -monitor none
+            -device usb-tablet
+    DEPENDS arm_image arm_init_dtb arm_sd_image
+    USES_TERMINAL
+    COMMENT "Booting full Cinux on armv7 with the GUI desk")

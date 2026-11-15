@@ -325,3 +325,18 @@ SeatConsoleWorld 里，是合法的 arch 词；队列/缓存/卷/"/"座、devfs�
 procfs、键源挂接全部只有一份，在 FileWorld::init。
 
 车道判据：arm_boot、arm_init、arm_desk 均 Passed，host ctest 127/127。
+
+## 第二十轮：交互门对齐，arm 不再豁免于 run 与 run_gui
+
+x86 一直有 `cmake --build build --target run / run_gui` 直接拉起真实系统，
+arm 侧的 `run` 却挂在自检 dtb 上拉起 station 世界——同名目标不同语义，
+也是一对该归一的件。归一结果：`run` 换到 init dtb，kernel_init 接管、
+pid 1 爬卡上的 /sbin/init、console shell 就在当前终端（"Cinux up" 后可敲
+命令）；`run_gui` 同一靴子加 `-display gtk` 与 usb-tablet（板子唯一的
+USB 口给指针，键盘走串口），vesper 桌画在板的 LCD 窗口上。桌工件缺失时
+`check_desk.cmake` 早失败并指路构建脚本，学 x86 的 check_rootfs 门。
+原自检世界的交互目标按主人决定整体拔除，station 世只活在 ctest 的
+arm_boot 车道里。
+
+两条命令均实跑验证：run 出 "Cinux up" 与 "vesper-fbdev: running"，
+run_gui 组合参数同样起动到桌。车道判据：ctest 3/3 Passed。
