@@ -95,6 +95,13 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+入场随机与栈顶滑动收进 loader（2026-11-15 第十三轮）：三个 SeatProgram 调用点审计后，
+梯子本身早已一体，剩的是入场装配的拼法两边各写一份——十六字节随机（init_thread 用裸
+Word 连写两拍，sys_exec 的 draw_entry_random 逐字带 TryWord 回退）与栈顶滑动（同一张
+0x7FF000 掩码抄两处）。收成 loader 的 DrawEntryRandom 与 DrawEntryStackTop，两个调用点
+改口，本地副本删除。exec 的栈跨度策略（RLIMIT 与画面字节数）与 init 的单页策略是各自
+的真话，不动。
+
 clone 与 openat 直折中立体（2026-11-15 第十二轮）：arm 折叠表里 clone 与 openat 原本各
 垫一张本地皮——clone 只肯 fork 形（线程形 ENOSYS），openat 只认 AT_FDCWD（相对座位
 EBADF）——而中立体早就是全功能（线程、TLS、tid 字、vfork、dirfd 相对打开）。删皮直折。

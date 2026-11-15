@@ -63,4 +63,16 @@ struct ProgramSeat {
     const fs::FsView& view, mm::AddressSpace& space, mm::VmaStore& vmas,
     std::uint64_t base = 0);
 
+/// Draws the sixteen random bytes every entry picture carries, one
+/// word at a time with a blocking retry after a failed fast draw.
+/// @param[out] bytes  The sixteen-byte destination.
+/// @since  0.2.0
+void DrawEntryRandom(unsigned char (&bytes)[16]);
+
+/// The stack top every seated program leaves on: the fixed user
+/// program top less one page-aligned slide, so stacked worlds do not
+/// share a rim.
+/// @since  0.2.0
+[[nodiscard]] unsigned long long DrawEntryStackTop();
+
 }  // namespace cinux::loader

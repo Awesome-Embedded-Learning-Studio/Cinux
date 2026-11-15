@@ -12,6 +12,9 @@
 
 #include "kernel/loader/program_seat.hpp"
 
+#include "kernel/arch/random.hpp"
+#include "kernel/proc/proc_config.hpp"
+
 namespace cinux::loader {
 
 base::Result<ProgramSeat> SeatProgram(const unsigned char* image,
@@ -74,6 +77,21 @@ base::Result<ProgramSeat> SeatProgram(const unsigned char* image,
         facts.program_entry = kInterpreter.value().program_entry;
     }
     return ProgramSeat{.facts = facts, .stack_executable = kStackExecutable};
+}
+
+void DrawEntryRandom(unsigned char (&bytes)[16]) {
+    for (unsigned long offset = 0; offset < sizeof(bytes); offset += sizeof(unsigned long long)) {
+        unsigned long long word = 0;
+        if (!arch::random::TryWord(word)) {
+            word = arch::random::Word();
+        }
+        base::CopyBytes(bytes + offset, &word, sizeof(word));
+    }
+}
+
+unsigned long long DrawEntryStackTop() {
+    constexpr unsigned long long kStackSlideMask = 0x7FF'000;
+    return proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);
 }
 
 }  // namespace cinux::loader

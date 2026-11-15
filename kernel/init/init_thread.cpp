@@ -130,15 +130,10 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     entry                    = facts.program_entry;
     const bool kStackExecutable = kSeat.value().stack_executable;
     unsigned char randomness[16]{};
-    const auto    kRandomLow  = arch::random::Word();
-    const auto    kRandomHigh = arch::random::Word();
-    base::CopyBytes(randomness, &kRandomLow, sizeof(kRandomLow));
-    base::CopyBytes(randomness + sizeof(kRandomLow), &kRandomHigh, sizeof(kRandomHigh));
-    facts.randomness                             = randomness;
-    facts.random_bytes                           = sizeof(randomness);
-    constexpr unsigned long long kStackSlideMask = 0x7FF'000;
-    const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);
+    loader::DrawEntryRandom(randomness);
+    facts.randomness   = randomness;
+    facts.random_bytes = sizeof(randomness);
+    const unsigned long long kStackTop = loader::DrawEntryStackTop();
     mm::VmaRegion stack_range{};
     stack_range.start      = kStackTop - mm::kUserStackBytes - cinux::arch::page::kSize;
     stack_range.end        = kStackTop;

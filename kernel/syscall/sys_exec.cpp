@@ -70,17 +70,6 @@ void note_program_identity(proc::Task& self, const char* path) {
 /// back to its seeded pool, because every libc builds its stack guard
 /// from these bytes and a picture without them hands the program a
 /// null random pointer to dereference.
-const std::uint8_t* draw_entry_random(unsigned char (&bytes)[16]) {
-    for (unsigned long offset = 0; offset < sizeof(bytes); offset += sizeof(unsigned long long)) {
-        unsigned long long word = 0;
-        if (!arch::random::TryWord(word)) {
-            word = arch::random::Word();
-        }
-        cinux::base::CopyBytes(bytes + offset, &word, sizeof(word));
-    }
-    return bytes;
-}
-
 /// One load bias for the seat the program image takes: zero serves the
 /// fixed-base shape whose link addresses already place it, the floor
 /// plus a page-aligned slide serves the relocatable shape whose link
@@ -288,17 +277,14 @@ long long HandleExecve(const SyscallFrame& frame) {
     loader::EntryFacts facts            = kSeat.value().facts;
     const bool         kStackExecutable = kSeat.value().stack_executable;
     const unsigned long long kFirstInstruction = facts.program_entry;
-    constexpr unsigned long long kStackSlideMask = 0x7FF'000;
-    const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);
+    const unsigned long long kStackTop = loader::DrawEntryStackTop();
     if (!proc::MapSignalTrampoline(*fresh, *ranges)) {
         return -kEnomem;
     }
     unsigned char entry_random[16] = {};
-    facts.randomness               = draw_entry_random(entry_random);
-    if (facts.randomness != nullptr) {
-        facts.random_bytes = sizeof(entry_random);
-    }
+    loader::DrawEntryRandom(entry_random);
+    facts.randomness     = entry_random;
+    facts.random_bytes   = sizeof(entry_random);
     facts.executable = staged.text.get();
     const loader::EntryRuns kRuns{
         .arguments   = staged.arguments.get(),
