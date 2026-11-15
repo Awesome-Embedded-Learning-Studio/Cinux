@@ -558,7 +558,26 @@ r0 是那个 futex 字——就是 0。而且内核里一次 `[futex]` 调用都
 
 gdb 这条路这一轮没走通：QEMU 11 的调试端口在批量模式下拒绝 `continue`
 （"Cannot execute this command while the target is running"），加 `-S` 也一样。
-下一轮换法子：要么用 QMP 的 `gdbserver` 交互式接，要么在 busybox 里插桩。
+
+于是换了另一条：把**与磁盘一致**的未剥离 busybox 留了下来
+（`build/armv7-busybox/busybox.debug`，构建脚本在 strip 之前多存一份）。有了符号，
+那个 pc 一下子就说清楚了：
+
+```
+401266c6 -> safe_strncpy
+   401266c6: strb r4, [r0, r2]     @ r0 = 0
+```
+
+不是 glibc 的 futex，是 busybox 自己的 `safe_strncpy` 在往地址 0 写——`r0` 是目标
+缓冲，它是空的。往上游找，这个函数在 `lineedit.c` 里只有两个调用点：
+
+```c
+static size_t load_string(const char *src) { safe_strncpy(command_ps, src, S.maxsize); ... }
+static void save_string(char *dst, unsigned maxsize) { safe_strncpy(dst, command_ps, maxsize); }
+```
+
+也就是 `command_ps`（行编辑的缓冲）在 fork 出来的子进程里是 NULL。下一轮就查这个：
+它在 shell 里什么时候分配、fork 之后为什么在子进程里成了空。
 
 顺带修掉一个真的 ABI 缺口：EABI 的 `stat64`（104 字节，size 在 48、ino 在 96）与
 `stat`（96 字节，size 在 44、ino 在 88）不是一个形状，而 `fstat64`(197) 原来写的是

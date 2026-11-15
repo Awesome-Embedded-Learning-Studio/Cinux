@@ -96,6 +96,9 @@ EOF
 # read an ARM object, so the cross one is named explicitly.
 make -C "$work" CC="$cross" HOSTCC=cc STRIP="$strip" -j"${CINUX_ROOTFS_JOBS:-4}" >/dev/null
 mkdir -p "$(dirname "$out")"
+# The symbol table is worth keeping beside the station: a crash report
+# names a pc, and only an unstripped copy can say which function it was.
+cp "$work/busybox_unstripped" "${out}.debug" 2>/dev/null || true
 "${strip}" "$work/busybox_unstripped" -o "${out}.part"
 mv "${out}.part" "$out"
 printf '%s\n' "$fingerprint" > "${out}.inputs"
