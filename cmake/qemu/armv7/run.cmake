@@ -98,7 +98,8 @@ set(_arm_glibc_arg "")
 if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
     set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
     list(APPEND _arm_glibc_arg
-         "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok")
+         "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok, argc 1, "
+        "self /disk/glibc")
     # The frame-buffer landing: the kernel stamps a marker before the
     # program starts, the program reads it through its own mapping.
     list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")

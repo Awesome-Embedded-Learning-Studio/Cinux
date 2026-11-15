@@ -202,11 +202,17 @@ long long stage_arguments(const SyscallFrame& frame, const char* path, EntryStag
         return result;
     }
     if (argc == 0) {
-        if (staged.used == staged.capacity) {
+        // A caller that passes no vector still leaves the program one
+        // name to recognise itself by. An empty word makes a shell that
+        // dispatches on argv[0] guess, and makes a diagnostic print a
+        // blank where the program's own path belongs; the path is the
+        // one name this layer is certain of.
+        if (staged.used + path_bytes + 1 > staged.capacity) {
             return -kE2big;
         }
-        staged.arguments[0]        = staged.text.get() + staged.used;
-        staged.text[staged.used++] = '\0';
+        staged.arguments[0] = staged.text.get() + staged.used;
+        base::CopyBytes(staged.text.get() + staged.used, path, path_bytes + 1);
+        staged.used += path_bytes + 1;
     }
     return stage_user_vector(frame.rdx, envc, staged, staged.environment.get());
 }
