@@ -80,6 +80,7 @@ endforeach()
 # scripts/build-armv7-busybox.sh on a host with the cross toolchain.
 set(_arm_busybox_arg "")
 set(_arm_shell_arg "")
+set(_arm_shell_typed_arg "")
 set(_arm_busybox_bin "")
 foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-busybox/busybox"
         "${CMAKE_BINARY_DIR}/armv7-busybox/busybox")
@@ -93,6 +94,7 @@ if(_arm_busybox_bin)
     set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
     set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
     set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
+    set(_arm_shell_typed_arg "-DEXPECTED_ARM_SHELL_TYPED=typed:interactive ok")
 endif()
 
 # The glibc station rides an optional artifact: only a host with the
@@ -154,6 +156,7 @@ add_test(NAME arm_boot
             ${_arm_busybox_arg}
             ${_arm_shell_arg}
             ${_arm_shell_cat_arg}
+            ${_arm_shell_typed_arg}
 
             "-DEXPECTED_FB0=dev fb0 640x480"
             "-DEXPECTED_EVENT0=dev event0 48 bytes"
@@ -164,6 +167,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_STDIN=stdin ok, line read back"
             "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
             "-DSTDIN_DELAY=6"
+            "-DSTDIN_DELAY2=15"
             "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
             "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
             "-DEXPECTED_GUESTEXIT=guest exited with status 0"

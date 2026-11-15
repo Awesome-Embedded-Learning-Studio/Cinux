@@ -5,7 +5,7 @@
 # swallow them right after, so the wait skips both windows.
 if(STDIN_FILE)
     execute_process(
-        COMMAND /bin/sh -c "(sleep ${STDIN_DELAY} && cat '${STDIN_FILE}') | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none -device usb-kbd"
+        COMMAND /bin/sh -c "{ sleep ${STDIN_DELAY}; head -n 1 '${STDIN_FILE}'; sleep ${STDIN_DELAY2}; tail -n +2 '${STDIN_FILE}'; } | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none -device usb-kbd"
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err
@@ -125,6 +125,9 @@ if(DEFINED EXPECTED_ARM_BUSYBOX AND NOT EXPECTED_ARM_BUSYBOX STREQUAL "")
 endif()
 if(DEFINED EXPECTED_ARM_SHELL AND NOT EXPECTED_ARM_SHELL STREQUAL "")
     expect_literal(EXPECTED_ARM_SHELL "the card's shell never ran its command line.")
+endif()
+if(DEFINED EXPECTED_ARM_SHELL_TYPED AND NOT EXPECTED_ARM_SHELL_TYPED STREQUAL "")
+    expect_literal(EXPECTED_ARM_SHELL_TYPED "the shell never read the console's typed line.")
 endif()
 if(DEFINED EXPECTED_ARM_SHELL_CAT AND NOT EXPECTED_ARM_SHELL_CAT STREQUAL "")
     expect_literal(EXPECTED_ARM_SHELL_CAT "the shell's cat never answered through sendfile.")

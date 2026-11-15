@@ -146,12 +146,19 @@ int main(int argc, char** argv) {
     // the desktop gets seen from the serial log.
     char* const kEnv[] = {(char*)"VESPER_FBDEV_TRACE=1", NULL};
     execve("/desk", kArgs, kEnv);
+#elif defined(CINUX_ARM_PROBE_INTERACTIVE)
+    // The interactive probe: sh with no command line reads from the
+    // console itself. This mode exists for a hand-fed QEMU, not the
+    // check lane.
+    char* const kArgs[] = {(char*)"sh", NULL};
+    execve("/bin/sh", kArgs, NULL);
 #else
     // The shell itself: one command line proving the parser, a child
     // applet through fork-and-exec, a builtin echo, and a file read
     // through the card's own /bin/sh symlink.
     char* const kArgs[] = {(char*)"sh", (char*)"-c",
-                           (char*)"stat /prog; echo shell ok; cat /readme", NULL};
+                           (char*)"stat /prog; echo shell ok; cat /readme; "
+                                   "read line; echo typed:$line", NULL};
     execve("/bin/sh", kArgs, NULL);
 #endif
     static const char kNoBb[] = "[glibc] sh exec refused\n";
