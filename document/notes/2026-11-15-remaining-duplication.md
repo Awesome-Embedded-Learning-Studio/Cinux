@@ -104,6 +104,13 @@ arm 那段手写的设备节点摆放换成调用它。这是能立刻缩小重�
 命令：`arm-none-eabi-gcc -ffreestanding -nostdlib -fno-pic -fno-builtin
 -O2 -march=armv7-a -marm -T <单段链接脚本,基址0x40000000> -e disk_start`。
 
+占位根也删了（2026-11-15 第五轮）：ramfs 先占 `/` 再让位的整段逻辑移除——
+`/proc` 与 `/tmp` 挂载都走前缀路由，不需要根先存在，盘就绪后直接挂 `/`。
+至此 arm 的挂载梯子与 x86 完全同构：一个块端口、一个卷、根挂 `/`、
+proc 挂 `/proc`、dev 挂 `/dev`。剩下的差异只有两样，都是应该保留的：
+端口类型（usdhc 对 ahci）和盘就绪的时机（探测晚于 init 开头对同步可用）。
+这就是文件世界构建器"根候选"的形状：两边说的已是同一句话。
+
 翻转后的清理（2026-11-15 第四轮）：ramfs 的过渡遗产全删——四个种子文件
 （hello/motd/readme/scratch，内核侧无读者，盘上有同名文件）、种子助手、
 死掉的 /disk 目录门。ramfs 现在 starts empty：占住 `/` 等盘来接，长期职责

@@ -162,11 +162,6 @@ void init() {
     seeded = true;
     g_ram = new fs::RamFs();
     g_vfs = new fs::Vfs();
-    // The ramfs holds the "/" seat only until the card is ready to take
-    // it; the card carries the bring-up files now, so the ramfs starts
-    // empty. Its long-term job is the /tmp staging mount further down.
-    const base::Result<void> kRoot = g_vfs->mount("/", *g_ram, "ramfs");
-    base::safety::Check(kRoot.ok(), "root mount failed");
     // The facts instance answers from the port's own identity decode,
     // the page manager, and the executable window; the seats this lane
     // cannot fill yet stay null and read as a quiet empty file.
@@ -295,18 +290,15 @@ void init() {
                     // the queue points back at it.
                     g_disk_port = new driver::BlockPort();
                     g_disk_port->adopt(*g_disk_window);
-                    // The disk is this port's root now, the way it has
-                    // always been the x86 lane's. The ramfs root was the
-                    // bridge for a card that carried only flat files; the
-                    // card carries a real layout (/bin with applet links,
-                    // /etc, /proc, /dev), so the bridge steps aside: the
-                    // table forgets "/" and the volume takes the seat.
-                    // The /proc row stays mounted -- it is another prefix.
-                    static_cast<void>(g_vfs->unmount("/"));
-                    // The ramfs is not gone, it has a new job: the kernel's
-                    // staging area at /tmp, where the loader lane parks the
-                    // guest image and anything else that lives only as long
-                    // as the boot.
+                    // The disk is the root, the same shape the x86 lane
+                    // has always mounted: one block port, one volume, the
+                    // "/" seat. The only way this port differs from its
+                    // sibling is when the card becomes reachable -- here
+                    // that is after the usdhc probe, not at init time.
+                    // The ramfs never held the seat: it is the kernel's
+                    // /tmp staging area, where the loader lane parks the
+                    // guest image and anything else that lives only as
+                    // long as the boot.
                     const base::Result<void> kStage =
                         g_vfs->mount("/tmp", *g_ram, "ramfs");
                     base::safety::Check(kStage.ok(), "tmp staging mount failed");
