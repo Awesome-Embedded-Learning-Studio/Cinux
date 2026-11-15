@@ -1,6 +1,5 @@
 # The USB device list is a knob: the station lanes keep the default
-# keyboard, the desktop lanes trade it for the tablet on the board's
-# single port.
+# keyboard; desktop lanes put keyboard and tablet on separate buses.
 math(EXPR _grace "${RUN_SECONDS} + 20")
 if(NOT DEFINED USB_DEVICES)
     set(USB_DEVICES "-device usb-kbd")

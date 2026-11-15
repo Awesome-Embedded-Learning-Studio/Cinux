@@ -23,6 +23,7 @@
 
 #include "cinux/container/ring_queue.hpp"
 #include "cinux/singleton.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
 #include "kernel/drivers/usb/usb_config.hpp"
 #include "kernel/drivers/usb/hcd.hpp"
 #include "kernel/drivers/usb/usb_device.hpp"
@@ -99,8 +100,14 @@ public:
      */
     char take();
 
-    /// Takes the next decoded key when one waits: the same byte the
-    /// console asks for, offered to a second caller without a sentinel.
+    /// @brief Raw key edges for evdev consumers; grabbing suppresses console glyphs.
+    [[nodiscard]] EventStream& events();
+
+    /**
+     * @brief Takes the next decoded key when one waits.
+     * @param[out] out Receives the console character.
+     * @return True when a character was available.
+     */
     bool take(char* out) {
         const char kCode = take();
         if (kCode == 0) {
@@ -114,8 +121,12 @@ private:
     UsbKeyboard() = default;
 
     static void report_arrived(UsbKeyboard& self, unsigned long status, unsigned long length);
+    static void grab_hook(void* context, bool grabbed);
 
     usb::UsbDevice<UsbKeyboard>                                 device_;
+    usb::HostDriver*                                            host_ = nullptr;
+    EventStream                                                 stream_;
+    bool                                                        glyphs_live_ = true;
     base::container::RingQueue<char, usb::kUsbKeyQueueCapacity> events_{};
     unsigned char                                               previous_[8] = {};
 };

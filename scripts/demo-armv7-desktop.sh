@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Runs the armv7 desktop for a human: the screen goes to a VNC display
-# (point with the mouse there) and the keyboard stays on this terminal
-# (the port's serial line is its keyboard stream). Ctrl-C ends the run.
+# (point and type there). Ctrl-C in this terminal ends the run.
 #
 # One boot, one image: the probe on the disk hands over to the desktop,
 # which opens the panel, spawns a shell on a pty, and waits for you.
@@ -31,12 +30,12 @@ rm -f "${image}"
 
 cat <<EOF
   VNC display: vncviewer 127.0.0.1:${display#:}  (port $((5900 + ${display#:})))
-  keyboard:    this terminal (the serial line is the port's keyboard)
+  keyboard:    the VNC window (USB keyboard on usb-bus.0)
   mouse:       the VNC window (the tablet reports absolute positions)
   Ctrl-C ends the run.
 EOF
 
-# The keyboard rides the serial line, so this run keeps stdio: type here.
+# Stdio carries the startup probe and logs; VNC carries interactive keys.
 ( sleep 2; cat "${repo}/assets/armv7_stdin.txt"; sleep "${seconds}" ) |
     timeout "$((seconds + 5))" "$(command -v qemu-system-arm)" \
         -M mcimx6ul-evk \
@@ -44,4 +43,4 @@ EOF
         -device "loader,file=${build}/armv7-qemu.dtb,addr=0x81000000,force-raw=on" \
         -drive "file=${image},if=sd,format=raw" \
         -serial stdio -monitor none -vnc "${display}" \
-        -device usb-tablet || true
+        -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1 || true

@@ -154,6 +154,59 @@ TEST("xhci: hid report edges translate through both table columns") {
     ASSERT_EQ(cinux::driver::usb::HidReportKey(kLowerA, kLowerA), 0);
 }
 
+TEST("usb: keyboard reports preserve held modifiers and key releases") {
+    const unsigned char kIdle[8]   = {};
+    const unsigned char kShiftA[8] = {2, 0, 4, 0, 0, 0, 0, 0};
+    const auto          kPressed   = cinux::driver::usb::DecodeKeyboardReport(kShiftA, kIdle);
+    ASSERT_TRUE(kPressed.valid);
+    ASSERT_EQ(kPressed.count, 2U);
+    ASSERT_EQ(kPressed.keys[0].code, 42U);
+    ASSERT_TRUE(kPressed.keys[0].down);
+    ASSERT_EQ(kPressed.keys[1].code, 30U);
+    ASSERT_TRUE(kPressed.keys[1].down);
+    ASSERT_EQ(cinux::driver::usb::DecodeKeyboardReport(kShiftA, kShiftA).count, 0U);
+
+    const auto kReleased = cinux::driver::usb::DecodeKeyboardReport(kIdle, kShiftA);
+    ASSERT_EQ(kReleased.count, 2U);
+    ASSERT_EQ(kReleased.keys[0].code, 42U);
+    ASSERT_FALSE(kReleased.keys[0].down);
+    ASSERT_EQ(kReleased.keys[1].code, 30U);
+    ASSERT_FALSE(kReleased.keys[1].down);
+}
+
+TEST("usb: keyboard navigation and simultaneous keys survive slot changes") {
+    const unsigned char kBefore[8] = {0, 0, 4, 0x50, 0, 0, 0, 0};
+    const unsigned char kAfter[8]  = {1, 0, 0x50, 5, 0x28, 0, 0, 0};
+    const auto          kChanges   = cinux::driver::usb::DecodeKeyboardReport(kAfter, kBefore);
+    ASSERT_EQ(kChanges.count, 4U);
+    ASSERT_EQ(kChanges.keys[0].code, 29U);
+    ASSERT_TRUE(kChanges.keys[0].down);
+    ASSERT_EQ(kChanges.keys[1].code, 30U);
+    ASSERT_FALSE(kChanges.keys[1].down);
+    ASSERT_EQ(kChanges.keys[2].code, 48U);
+    ASSERT_TRUE(kChanges.keys[2].down);
+    ASSERT_EQ(kChanges.keys[3].code, 28U);
+    ASSERT_TRUE(kChanges.keys[3].down);
+
+    const unsigned char kArrows[8]  = {0, 0, 0x4F, 0x50, 0x51, 0x52, 0x2A, 0};
+    const unsigned char kIdle[8]    = {};
+    const auto          kNavigation = cinux::driver::usb::DecodeKeyboardReport(kArrows, kIdle);
+    ASSERT_EQ(kNavigation.count, 5U);
+    ASSERT_EQ(kNavigation.keys[0].code, 106U);
+    ASSERT_EQ(kNavigation.keys[1].code, 105U);
+    ASSERT_EQ(kNavigation.keys[2].code, 108U);
+    ASSERT_EQ(kNavigation.keys[3].code, 103U);
+    ASSERT_EQ(kNavigation.keys[4].code, 14U);
+}
+
+TEST("usb: rollover reports preserve the previous keyboard state") {
+    const unsigned char kBefore[8]   = {2, 0, 4, 0, 0, 0, 0, 0};
+    const unsigned char kRollover[8] = {0, 0, 1, 1, 1, 1, 1, 1};
+    const auto          kChanges     = cinux::driver::usb::DecodeKeyboardReport(kRollover, kBefore);
+    ASSERT_FALSE(kChanges.valid);
+    ASSERT_EQ(kChanges.count, 0U);
+}
+
 TEST("xhci: slot entries share the route and speed word") {
     uint32_t slot[8] = {};
     cinux::driver::usb::BuildSlotContext(slot, 0, 2, 1, 1);

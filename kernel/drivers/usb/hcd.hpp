@@ -40,7 +40,8 @@ struct TransferDone {
 /**
  * @brief   The host controller face the USB stack speaks to.
  * @note    Pure contract. One implementation per controller; the
- *          first one that comes up seats itself as the primary host.
+ *          controllers register at bring-up so class drivers can walk
+ *          devices on each bus.
  *          A null return from address() promises nothing stayed
  *          seated on that port.
  * @since   0.9.0
@@ -98,7 +99,7 @@ public:
     /// Returns the seat and frees the controller's per-device pages.
     virtual void detach(void* seat) = 0;
 
-    /// Drains finished events and fires armed completions.
+    /// @brief Drains finished events and fires armed completions.
     virtual void pump() = 0;
 
     /// Whether the controller reported a host-level error.
@@ -111,17 +112,41 @@ protected:
     ~HostDriver() = default;
 };
 
-/// The seated host, one per boot; the controller's init writes it.
-inline HostDriver* g_primary_host = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+/// The most recently initialized host, retained for bring-up probes.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+inline HostDriver* g_primary_host = nullptr;
+
+/// Controllers registered this boot, in bring-up order.
+inline HostDriver* g_hosts[4] = {};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/**
+ * @brief Returns the registered controllers in bring-up order.
+ * @return Host pointers; unused entries are null.
+ */
+[[nodiscard]] inline auto& Hosts() {
+    return g_hosts;
+}
 
 /// The host this boot seated, null before any controller came up.
 [[nodiscard]] inline HostDriver* PrimaryHost() {
     return g_primary_host;
 }
 
-/// Seats the primary host; called by the controller's own init.
+/**
+ * @brief Registers a controller and retains it as the primary host.
+ * @param[in] host Controller that just completed initialization.
+ */
 inline void SeatPrimaryHost(HostDriver* host) {
     g_primary_host = host;
+    for (HostDriver*& seated : g_hosts) {
+        if (seated == host) {
+            return;
+        }
+        if (seated == nullptr) {
+            seated = host;
+            return;
+        }
+    }
 }
 
 }  // namespace cinux::driver::usb

@@ -246,41 +246,43 @@ extern "C" [[noreturn]] void kmain() {
                         cinux::print::Println("[armv7] lcdif 640x480 fb %X",
                                               kFrame != 0 ? kFrame : 0);
                     }
-                    for (const unsigned long kBase : {0x02184000UL, 0x02184200UL}) {
-                        if (cinux::driver::usb::EhciHost::self().init(kBase)) {
-                            for (unsigned int port = 1;
-                                 port <= cinux::driver::usb::EhciHost::self().max_ports() &&
-                                 port <= 15; ++port) {
+                    // Each chipidea block owns its schedules and seats. Reusing
+                    // one host here discarded the first bus when the second
+                    // block was initialized.
+                    static constinit cinux::driver::usb::EhciHost usb_hosts[2]{};
+                    constexpr unsigned long kUsbBases[] = {0x02184000UL, 0x02184200UL};
+                    for (unsigned int index = 0; index < 2; ++index) {
+                        auto&               host  = usb_hosts[index];
+                        const unsigned long kBase = kUsbBases[index];
+                        if (host.init(kBase)) {
+                            for (unsigned int port = 1; port <= host.max_ports() && port <= 15;
+                                 ++port) {
                                 cinux::print::Println(
                                     "[armv7] ehci %X rev %X ports %u, port %u %s", kBase,
-                                    cinux::driver::usb::EhciHost::self().revision(),
-                                    cinux::driver::usb::EhciHost::self().max_ports(), port,
-                                    cinux::driver::usb::EhciHost::self().port_connected(port)
-                                        ? "attached"
-                                        : "quiet");
+                                    host.revision(), host.max_ports(), port,
+                                    host.port_connected(port) ? "attached" : "quiet");
                             }
                         }
                     }
-                    cinux::print::Println(cinux::driver::usb::EhciHost::self().present()
+                    cinux::print::Println(cinux::driver::usb::PrimaryHost() != nullptr
                                               ? "[armv7] ehci host running"
                                               : "[armv7] ehci absent");
-                    if (cinux::driver::usb::EhciHost::self().present()) {
-                        for (unsigned int port = 1;
-                             port <= cinux::driver::usb::EhciHost::self().max_ports(); ++port) {
-                            if (cinux::driver::usb::EhciHost::self().port_taken(port) ||
-                                !cinux::driver::usb::EhciHost::self().port_connected(port)) {
+                    for (auto& host : usb_hosts) {
+                        if (!host.present()) {
+                            continue;
+                        }
+                        for (unsigned int port = 1; port <= host.max_ports(); ++port) {
+                            if (host.port_taken(port) || !host.port_connected(port)) {
                                 continue;
                             }
-                            void* seat = cinux::driver::usb::EhciHost::self().address(port);
+                            void* seat = host.address(port);
                             if (seat == nullptr) {
                                 cinux::print::Println("[armv7] ehci seat refused %u",
-                                                       cinux::driver::usb::EhciHost::self()
-                                                                   .last_fail());
+                                                      host.last_fail());
                                 break;
                             }
                             unsigned char descriptor[18] = {};
-                            if (cinux::driver::usb::EhciHost::self().control_read(
-                                    seat, 0x0100, descriptor, sizeof(descriptor))) {
+                            if (host.control_read(seat, 0x0100, descriptor, sizeof(descriptor))) {
                                 const unsigned int kVendor =
                                     descriptor[8] | (descriptor[9] << 8U);
                                 const unsigned int kProduct =
@@ -292,7 +294,7 @@ extern "C" [[noreturn]] void kmain() {
                             }
                             // The street below re-seats this port through
                             // the neutral walk, so hand the seat back.
-                            cinux::driver::usb::PrimaryHost()->detach(seat);
+                            host.detach(seat);
                         }
                     }
                     // The whole neutral walk — enumerate, configure,

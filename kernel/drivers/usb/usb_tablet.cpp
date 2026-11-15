@@ -16,34 +16,33 @@ constexpr uint16_t kBtnLeft   = 0x110;
 constexpr uint16_t kBtnRight  = 0x111;
 constexpr uint16_t kBtnMiddle = 0x112;
 
-void poll_tablet() {
-    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
-        kHost->pump();
-    }
-}
 }
 
 bool UsbTablet::init() {
     if (ready_) {
         return true;
     }
-    usb::HostDriver* host = usb::PrimaryHost();
-    if (host == nullptr) {
-        return false;
-    }
     usb::KeyboardEp endpoint{};
-    if (!device_.enumerate(*host, usb::kHidProtocolNone, endpoint)) {
+    for (usb::HostDriver* candidate : usb::Hosts()) {
+        if (candidate != nullptr &&
+            device_.enumerate(*candidate, usb::kHidProtocolNone, endpoint)) {
+            host_ = candidate;
+            break;
+        }
+    }
+    if (host_ == nullptr) {
         return false;
     }
     if (endpoint.address != 0x81 || endpoint.max_packet < 5 ||
-        !device_.set_configuration(*host, endpoint.config_value) ||
-        !device_.configure_interrupt_in(*host, endpoint.max_packet, endpoint.interval)) {
-        static_cast<void>(device_.detach(*host));
+        !device_.set_configuration(*host_, endpoint.config_value) ||
+        !device_.configure_interrupt_in(*host_, endpoint.max_packet, endpoint.interval)) {
+        static_cast<void>(device_.detach(*host_));
+        host_ = nullptr;
         return false;
     }
     stream_.configure_absolute(32767);
-    stream_.set_poll_hook(poll_tablet);
-    device_.interrupt_read(*host, &UsbTablet::report_arrived, this);
+    stream_.set_poll_hook(+[] { UsbTablet::self().host_->pump(); });
+    device_.interrupt_read(*host_, &UsbTablet::report_arrived, this);
     ready_ = true;
     print::Println("[kern] usb tablet seated, absolute axes 0..32767");
     return true;
@@ -66,8 +65,8 @@ void UsbTablet::report_arrived(UsbTablet& self, unsigned long status, unsigned l
         self.buttons_ = kReport.buttons;
         self.stream_.publish_report();
     }
-    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
-        self.device_.interrupt_read(*kHost, &UsbTablet::report_arrived, &self);
+    if (self.host_ != nullptr) {
+        self.device_.interrupt_read(*self.host_, &UsbTablet::report_arrived, &self);
     }
 }
 

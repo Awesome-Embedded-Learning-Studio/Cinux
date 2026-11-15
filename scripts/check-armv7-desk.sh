@@ -79,7 +79,7 @@ type_text() {
         -device "loader,file=${build}/armv7-qemu.dtb,addr=0x81000000,force-raw=on" \
         -drive "file=${image},if=sd,format=raw" \
         -display none -serial stdio -monitor none -qmp "unix:${qmp},server,nowait" \
-        -device usb-tablet \
+        -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1 \
         > "${log}" 2>/dev/null &
 qemu_pid=$!
 for _ in $(seq 1 $((settle + 12))); do

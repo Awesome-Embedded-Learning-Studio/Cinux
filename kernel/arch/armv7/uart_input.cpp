@@ -24,7 +24,6 @@ namespace cinux::armv7 {
 
 namespace {
 
-driver::EventStream g_keyboard_stream;
 driver::EventStream g_pointer_stream;
 
 
@@ -128,14 +127,14 @@ constexpr uint16_t kKeyLeftShift = 42;
 /// the modifier up.
 void emit_key(uint16_t code, bool shift = false) {
     if (shift) {
-        g_keyboard_stream.publish(driver::kEvKey, kKeyLeftShift, 1);
+        UartKeyboardEvents().publish(driver::kEvKey, kKeyLeftShift, 1);
     }
-    g_keyboard_stream.publish(driver::kEvKey, code, 1);
-    g_keyboard_stream.publish(driver::kEvKey, code, 0);
+    UartKeyboardEvents().publish(driver::kEvKey, code, 1);
+    UartKeyboardEvents().publish(driver::kEvKey, code, 0);
     if (shift) {
-        g_keyboard_stream.publish(driver::kEvKey, kKeyLeftShift, 0);
+        UartKeyboardEvents().publish(driver::kEvKey, kKeyLeftShift, 0);
     }
-    g_keyboard_stream.publish_report();
+    UartKeyboardEvents().publish_report();
 }
 
 /// Where a terminal's escape words put the decoder: a byte arrives, and
@@ -147,11 +146,11 @@ EscapeState g_escape = EscapeState::kGround;
 /// A control byte is Ctrl plus a letter: the modifier goes down first,
 /// the letter rides it, and the modifier lifts last.
 void emit_ctrl_key(uint16_t code) {
-    g_keyboard_stream.publish(driver::kEvKey, kKeyLeftCtrl, 1);
-    g_keyboard_stream.publish(driver::kEvKey, code, 1);
-    g_keyboard_stream.publish(driver::kEvKey, code, 0);
-    g_keyboard_stream.publish(driver::kEvKey, kKeyLeftCtrl, 0);
-    g_keyboard_stream.publish_report();
+    UartKeyboardEvents().publish(driver::kEvKey, kKeyLeftCtrl, 1);
+    UartKeyboardEvents().publish(driver::kEvKey, code, 1);
+    UartKeyboardEvents().publish(driver::kEvKey, code, 0);
+    UartKeyboardEvents().publish(driver::kEvKey, kKeyLeftCtrl, 0);
+    UartKeyboardEvents().publish_report();
 }
 
 /// The four arrows, in the words a terminal sends and the codes the
@@ -233,7 +232,9 @@ void PollSerialKeyboard() {
 }
 
 driver::EventStream& UartKeyboardEvents() {
-    return g_keyboard_stream;
+    // Serial and USB keys share event0; the USB stream's poll hook drains
+    // its owning controller even while the desktop waits for input.
+    return driver::UsbKeyboard::self().events();
 }
 
 driver::EventStream& BoardPointerEvents() {

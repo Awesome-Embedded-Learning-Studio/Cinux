@@ -90,6 +90,7 @@ private:
     static void report_arrived(UsbTablet& self, unsigned long status, unsigned long length);
 
     usb::UsbDevice<UsbTablet> device_;
+    usb::HostDriver*          host_ = nullptr;
     EventStream               stream_;
     uint8_t                   buttons_ = 0;
     bool                      ready_   = false;

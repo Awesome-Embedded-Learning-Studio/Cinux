@@ -71,23 +71,29 @@ bool UsbKeyboard::init() {
     if (device_.seated()) {
         return true;
     }
-    usb::HostDriver* host = usb::PrimaryHost();
-    if (host == nullptr) {
-        return false;
-    }
     usb::KeyboardEp keyboard{};
-    if (!device_.enumerate(*host, 1, keyboard)) {
+    for (usb::HostDriver* candidate : usb::Hosts()) {
+        if (candidate != nullptr && device_.enumerate(*candidate, 1, keyboard)) {
+            host_ = candidate;
+            break;
+        }
+    }
+    if (host_ == nullptr) {
         return false;
     }
-    if (keyboard.address != 0x81 || !device_.set_configuration(*host, keyboard.config_value)) {
-        static_cast<void>(device_.detach(*host));
+    if (keyboard.address != 0x81 || !device_.set_configuration(*host_, keyboard.config_value)) {
+        static_cast<void>(device_.detach(*host_));
+        host_ = nullptr;
         return false;
     }
-    if (!device_.configure_interrupt_in(*host, keyboard.max_packet, keyboard.interval)) {
-        static_cast<void>(device_.detach(*host));
+    if (!device_.configure_interrupt_in(*host_, keyboard.max_packet, keyboard.interval)) {
+        static_cast<void>(device_.detach(*host_));
+        host_ = nullptr;
         return false;
     }
-    device_.interrupt_read(*host, &UsbKeyboard::report_arrived, this);
+    stream_.set_poll_hook(+[] { static_cast<void>(UsbKeyboard::self().poll()); });
+    stream_.set_grab_hook(&UsbKeyboard::grab_hook, this);
+    device_.interrupt_read(*host_, &UsbKeyboard::report_arrived, this);
     print::Println("[kern] usb keyboard seated, config %u ep %X max %u interval %u",
                    keyboard.config_value, keyboard.address, keyboard.max_packet, keyboard.interval);
     return true;
@@ -100,20 +106,30 @@ bool UsbKeyboard::seated() const {
 void UsbKeyboard::report_arrived(UsbKeyboard& self, unsigned long status, unsigned long length) {
     if (status == 0 && length == sizeof(self.previous_)) {
         const unsigned char* report = self.device_.report();
-        const char           kGlyph = usb::HidReportKey(report, self.previous_);
-        base::CopyBytes(self.previous_, report, sizeof(self.previous_));
-        if (kGlyph != 0) {
-            self.events_.push(kGlyph);
+        const auto           kChanges = usb::DecodeKeyboardReport(report, self.previous_);
+        if (kChanges.valid) {
+            for (unsigned int index = 0; index < kChanges.count; ++index) {
+                const auto& key = kChanges.keys[index];
+                self.stream_.publish(kEvKey, key.code, key.down ? 1 : 0);
+            }
+            if (kChanges.count != 0) {
+                self.stream_.publish_report();
+            }
+            const char kGlyph = usb::HidReportKey(report, self.previous_);
+            base::CopyBytes(self.previous_, report, sizeof(self.previous_));
+            if (self.glyphs_live_ && kGlyph != 0) {
+                self.events_.push(kGlyph);
+            }
         }
     }
-    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
-        self.device_.interrupt_read(*kHost, &UsbKeyboard::report_arrived, &self);
+    if (self.host_ != nullptr) {
+        self.device_.interrupt_read(*self.host_, &UsbKeyboard::report_arrived, &self);
     }
 }
 
 bool UsbKeyboard::poll() {
-    if (usb::HostDriver* kHost = usb::PrimaryHost(); kHost != nullptr) {
-        kHost->pump();
+    if (host_ != nullptr) {
+        host_->pump();
     }
     return events_.count() != 0;
 }
@@ -123,6 +139,20 @@ char UsbKeyboard::take() {
     char code = 0;
     events_.pop(code);
     return code;
+}
+
+EventStream& UsbKeyboard::events() {
+    return stream_;
+}
+
+void UsbKeyboard::grab_hook(void* context, bool grabbed) {
+    auto& self        = *static_cast<UsbKeyboard*>(context);
+    self.glyphs_live_ = !grabbed;
+    if (grabbed) {
+        char ignored = 0;
+        while (self.events_.pop(ignored)) {
+        }
+    }
 }
 
 namespace {

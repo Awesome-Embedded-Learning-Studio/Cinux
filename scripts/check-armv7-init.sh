@@ -15,8 +15,8 @@ cmake --build "$build" --target arm_image arm_sd_image >/dev/null || exit 1
 
 # The GUI door joins when the desk artifact is there: init respawns it
 # from the card's inittab, and the judgement listens for its own words.
-# The board has one USB port, so the tablet replaces the keyboard on the
-# command line and the typed probe rides the UART instead.
+# Keyboard and tablet use the board's two chipidea buses. The console
+# probe still rides the UART; arm_gui_keyboard exercises the window keys.
 desk_bin=""
 for candidate in "$root/build/armv7-vesper/desk" "$build/armv7-vesper/desk"; do
     if [ -f "$candidate" ]; then desk_bin="$candidate"; break; fi
@@ -24,7 +24,7 @@ done
 extra=()
 expect=()
 if [ -n "$desk_bin" ]; then
-    extra=("-DUSB_DEVICES=-device usb-tablet")
+    extra=("-DUSB_DEVICES=-device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1")
     expect=(-DEXPECTED_DESK_OPEN='vesper-fbdev: fb 640x480 (frame 640x480), kbd /dev/event0, pointer /dev/event1'
             -DEXPECTED_DESK_RUN='vesper-fbdev: running')
 fi

@@ -1,13 +1,9 @@
 /**
  * @file    uart_input.hpp
- * @brief   The serial line as this port's keyboard, feeding event0.
+ * @brief   Serial and USB keyboard input, sharing event0.
  *
- * QEMU's mcimx6ul-evk speaks input only through what the board really
- * has, and the bring-up lane's honest source is the console UART: every
- * byte the other end types becomes one key event on the neutral
- * EventStream, the same stream the x86 keyboard publishes into. The
- * pointer has no source on this board yet; its seat stays quiet rather
- * than inventing motion.
+ * UART bytes become key events on the USB keyboard's EventStream, so
+ * both the serial terminal and the QEMU display can type into the desk.
  *
  * @author  Charliechen114514
  * @date    2026-11-13
@@ -49,7 +45,7 @@ void PollSerialKeyboard();
  */
 void NoteSerialByte(char character);
 
-/// The stream this port's keyboard publishes into, event0's source.
+/// The shared serial/USB keyboard stream, event0's source.
 [[nodiscard]] cinux::driver::EventStream& UartKeyboardEvents();
 
 /// The pointer's seat: real but quiet, no source on this board.

@@ -20,7 +20,6 @@
 
 #include <stdint.h>
 
-#include "cinux/singleton.hpp"
 #include "kernel/drivers/usb/hcd.hpp"
 
 namespace cinux::driver::usb {
@@ -28,15 +27,17 @@ namespace cinux::driver::usb {
 /**
  * @brief   The EHCI controller this lane carries.
  * @note    Register state only: the capability window's shape and the
- *          operational words. None of it changes shape after init, so
- *          the zero-construction rule holds.
+ *          operational words. Each controller has its own instance,
+ *          initialized before execution and kept for the whole boot.
  * @since   0.9.0
  * @ingroup kernel_driver
  */
-class EhciHost : public HostDriver, public base::Singleton<EhciHost> {
-    friend class base::Singleton<EhciHost>;
-
+class EhciHost : public HostDriver {
 public:
+    EhciHost()                           = default;
+    EhciHost(const EhciHost&)            = delete;
+    EhciHost& operator=(const EhciHost&) = delete;
+
     /**
      * @brief         Walks the capability window and starts the controller.
      *
@@ -65,13 +66,16 @@ public:
     void arm_interrupt_in(void* seat, uint64_t buffer_physical, unsigned long length,
                           void (*done)(void* owner, const TransferDone&),
                           void* owner) override;
+    /**
+     * @brief Frees the controller state for one device.
+     * @param[in] seat Device handle returned by address().
+     */
     void detach(void* seat) override;
+    /// @brief Drains completed interrupt transfers and invokes their callbacks.
     void pump() override;
     [[nodiscard]] bool unhealthy() override;
 
 private:
-    EhciHost() = default;
-
     /// @brief One seated device's state, one page of hardware words each.
     struct Seat {
         unsigned int  port      = 0;

@@ -360,6 +360,28 @@ inline constexpr uint8_t kHidProtocolBootKeyboard = 1;
  */
 [[nodiscard]] char HidReportKey(const unsigned char* now, const unsigned char* before);
 
+/// @brief One evdev key edge decoded from a HID boot report.
+struct HidKeyChange {
+    uint16_t code = 0;      ///< Linux evdev key code.
+    bool     down = false;  ///< True for press, false for release.
+};
+
+/// @brief At most eight modifier edges plus six releases and six presses.
+struct HidKeyChanges {
+    HidKeyChange keys[20]{};
+    unsigned int count = 0;     ///< Number of populated key edges.
+    bool         valid = true;  ///< False for rollover/error reports.
+};
+
+/**
+ * @brief Decodes modifiers, releases and presses into evdev key edges.
+ * @param[in] now Current eight-byte boot report.
+ * @param[in] before Last valid eight-byte boot report.
+ * @return Changed keys; invalid reports must not replace the previous report.
+ */
+[[nodiscard]] HidKeyChanges DecodeKeyboardReport(const unsigned char* now,
+                                                 const unsigned char* before);
+
 /**
  * @brief         Builds the slot context one addressed device carries.
  *

@@ -220,6 +220,10 @@ if(_arm_desk_test_bin AND EXISTS "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.s
                 "CINUX_ARM_BUILD=${CMAKE_BINARY_DIR}"
                 bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
     set_tests_properties(arm_desk PROPERTIES TIMEOUT 900)
+    add_test(NAME arm_gui_keyboard
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/scripts/test_armv7_gui_keyboard.py"
+                --build "${CMAKE_BINARY_DIR}" --qemu "${CINUX_ARM_QEMU}")
+    set_tests_properties(arm_gui_keyboard PROPERTIES TIMEOUT 90)
 endif()
 
 # The interactive door the x86 lane has always had: `run` boots the
@@ -238,8 +242,8 @@ add_custom_target(run
     COMMENT "Booting full Cinux on armv7 (console shell on this terminal)")
 
 # The GUI face of the same boot: the board's LCD opens as a QEMU
-# window and the USB tablet -- the board's only USB port -- drives the
-# cursor the desk reads from /dev/event1. The check fails early and
+# window. Keyboard and tablet use separate chipidea buses, feeding
+# /dev/event0 and /dev/event1. The check fails early and
 # says how to build the desk when the artifact is missing: without it
 # the card has no /desk seat and no desktop would ever appear.
 add_custom_target(run_gui
@@ -249,7 +253,7 @@ add_custom_target(run_gui
             -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
             -drive if=sd,format=raw,file=${CINUX_ARM_SD_IMG}
             -display gtk,gl=off -serial stdio -monitor none
-            -device usb-tablet
+            -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1
     DEPENDS arm_image arm_init_dtb arm_sd_image
     USES_TERMINAL
     COMMENT "Booting full Cinux on armv7 with the GUI desk")
