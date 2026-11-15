@@ -23,6 +23,7 @@
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/sys_sendfile.hpp"
 #include "kernel/syscall/sys_nanosleep.hpp"
 #include "kernel/syscall/sys_getcwd.hpp"
 #include "kernel/syscall/sys_id.hpp"
@@ -250,6 +251,9 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kGetrandom,  &cinux::syscall::HandleGetrandom},
     {cinux::armv7::syscall_nr::kPrctl,      &cinux::syscall::HandlePrctl},
     {cinux::armv7::syscall_nr::kReadlinkat, &cinux::syscall::HandleReadlinkat},
+    // The transfer face: cat and cp's fast path moves card bytes to the
+    // console without a user buffer.
+    {cinux::armv7::syscall_nr::kSendfile64, &cinux::syscall::HandleSendfile},
     // The pre-time64 ceilings call, in this ABI's two-word record shape.
     {cinux::armv7::syscall_nr::kGetrlimit, &HandleArmGetrlimit},
     {cinux::armv7::syscall_nr::kLlseek,     &HandleArmLlseek},

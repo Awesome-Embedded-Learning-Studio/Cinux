@@ -79,6 +79,7 @@ endforeach()
 # The busybox station rides the same optional-artifact rule: built by
 # scripts/build-armv7-busybox.sh on a host with the cross toolchain.
 set(_arm_busybox_arg "")
+set(_arm_shell_arg "")
 set(_arm_busybox_bin "")
 foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-busybox/busybox"
         "${CMAKE_BINARY_DIR}/armv7-busybox/busybox")
@@ -90,6 +91,8 @@ if(_arm_busybox_bin)
     # busybox runs one applet: `stat` proves the binary started, the
     # metadata street answered, and the record reached its own libc.
     set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
+    set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
+    set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
 endif()
 
 # The glibc station rides an optional artifact: only a host with the
@@ -149,6 +152,8 @@ add_test(NAME arm_boot
             "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
             ${_arm_glibc_arg}
             ${_arm_busybox_arg}
+            ${_arm_shell_arg}
+            ${_arm_shell_cat_arg}
 
             "-DEXPECTED_FB0=dev fb0 640x480"
             "-DEXPECTED_EVENT0=dev event0 48 bytes"

@@ -111,6 +111,9 @@ inline constexpr unsigned long kGetdents    = 217;
 inline constexpr unsigned long kGetrandom   = 384;
 inline constexpr unsigned long kPrctl       = 172;
 inline constexpr unsigned long kReadlinkat  = 332;
+// 239 is sendfile64, the EABI spelling; busybox's cat and cp take this
+// fast path before ever staging a buffer of their own.
+inline constexpr unsigned long kSendfile64 = 239;
 /// The pre-time64 ceilings call glibc's startup asks for directly, and
 /// the split-offset seek beside it.
 inline constexpr unsigned long kGetrlimit    = 191;

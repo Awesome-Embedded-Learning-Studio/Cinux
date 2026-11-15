@@ -147,10 +147,14 @@ int main(int argc, char** argv) {
     char* const kEnv[] = {(char*)"VESPER_FBDEV_TRACE=1", NULL};
     execve("/desk", kArgs, kEnv);
 #else
-    char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/prog", NULL};
-    execve("/bb", kArgs, NULL);
+    // The shell itself: one command line proving the parser, a child
+    // applet through fork-and-exec, a builtin echo, and a file read
+    // through the card's own /bin/sh symlink.
+    char* const kArgs[] = {(char*)"sh", (char*)"-c",
+                           (char*)"stat /prog; echo shell ok; cat /readme", NULL};
+    execve("/bin/sh", kArgs, NULL);
 #endif
-    static const char kNoBb[] = "[glibc] busybox exec refused\n";
+    static const char kNoBb[] = "[glibc] sh exec refused\n";
     write(STDOUT_FILENO, kNoBb, sizeof(kNoBb) - 1U);
     return 0;
 }

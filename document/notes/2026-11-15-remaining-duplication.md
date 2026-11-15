@@ -3,7 +3,16 @@
 状态：审计完成（2026-11-15）。问的是"还有哪些机制是两条车道各写一份"，答案按
 可疑度从高到低排。只列已经查代码确认的，没确认的不写。
 
-## 一、文件世界：两套接线，概念相同
+## 一、文件世界：接线已同构，此顶收档（2026-11-15 第三至五轮）
+
+盘根统一后重看这顶：两边重复的机械步骤其实只剩三行挂载调用，内容（端口、
+ProcSource、设备树）全是端口特有的词，当初要抽"文件世界构建器表达根候选"
+的想法随 ramfs 根桥一起消失了——根候选只剩盘一种，梯子两边同构：块端口
+→ MountBlockVolume → 挂 /、proc、dev。差异只剩端口类型（usdhc 对 ahci）
+与盘就绪时机（探测晚于 init 开头对同步可用），都是设备本身的差异，该留。
+此顶收档，不再抽构建器。
+
+原始记录：
 
 `kernel/fs/file_world.cpp`（150 行）给 x86 装：AHCI 或 NVMe 块设备 → 块队列 →
 块缓存 → ext2 → 挂在 `/`，再挂 devfs 到 `/dev`、procfs 到 `/proc`，最后
@@ -35,6 +44,14 @@ ext2 → 挂载）抽成了 `kernel/fs/block_volume.{hpp,cpp}` 的
 写死。
 
 ## 二、客人程序的装载与 exec：梯子已收成一件（2026-11-15 第六轮）
+
+第七轮续：boot 链尾从单个 stat 小程序换成真正的 sh -c——一行命令测了
+shell 解析器、stat 子进程（fork+exec）、echo 内建、cat 文件读。cat 上来
+就撞见 arm 折叠表缺 sendfile64（239）：busybox 的 cat/cp 优先走 sendfile
+快速路径。中立 sendfile 早就在（x86 在用），补的只是 arm 号码表与折叠表
+各一行。现在卡上的 /bin/sh 作为进程跑命令行，判词 "shell ok" 与 "readme!"
+进了车道。arm 侧串口还剩一个拒答：svc 90 (144) msync，与 x86 同缺，是
+全项目缺口不是端口缺口。
 
 四处 `LoadElfIntoSpace` 调用点里的三处（init 线程的首壳、exec 换核、arm 的
 guest 装载）各自手拼同一副梯子：LoadWorld 组装、entry facts 补齐、GNU 栈
