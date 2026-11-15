@@ -1,6 +1,6 @@
 # CJK 字体路径审计：桌面与内核控制台各缺什么
 
-状态：审计完成，未动代码（2026-11-15）。按"先审计、再提中立层"的原则，这份先
+状态：审计完成，接入也已完成（2026-11-15）。按"先审计、再提中立层"的原则，这份先
 把 x86 与 armv7 共用的两条文字渲染路径查清楚，回答"CJK 为什么显示不出来、缺的
 是哪一层"，下一轮再据此动手。
 
@@ -53,3 +53,25 @@ CJK 缺字的唯一原因是字体源：`third_party/vesper/scripts/fonts/` 下�
    由 rootfs 打包决定，不进。
 
 下一轮动手：找 BDF 源、用 fontgen 生成、决定 shell_desk 的缺字回退、接入。
+
+## 接入结果
+
+- 字体源：GNU Unifont 17.0.03 的 BDF（SIL OFL 1.1 / GPLv2+ with font
+  embedding exception），用 `scripts/fonts/make_han16.py` 抽出通用规范汉字表
+  一级 3500 字加 22 个全角标点，生成 `scripts/fonts/han16.bdf`（3522 字形、
+  599 KB），再用现成的 fontgen 生成 `assets/fonts/han16.hpp`（16 像素行高、
+  112 KB 位图）。
+- 终端网格：格子从存一个字节改成存一个码位；`receive()` 里补了 UTF-8 逐字节
+  累积，收满一段就落一个格子；基准字体没有的字形落回 han16，宽字占两列，尾格
+  记一个私有标记 `kWideCont`（超出 Unicode 上限的值，不会与真实码位相撞）。
+- 网格度量保持基准 ASCII 字体的、没有动：`kCellW`、`kCellH`、行列数都和原来
+  一样，所以桌面的布局判断不受影响。han16 的 16 像素字形在两行之间会轻微压
+  边，视觉上可接受，要改的话是把格高抬到 16、代价是行数从 40 降到 30。
+- 缺字（繁体、半角片假名等不在常用字表里的字）按原规则静默跳过，不画占位框。
+- 覆盖到的入口：桌面例子 `examples/fbdev_desktop.cpp` 和终端程序
+  `apps/terminal/app/terminal_app.cpp` 都把 han16 作为第二字体传进 Terminal。
+- 验证：`cat /disk/etc/zh` 在桌面终端里画出"你好，Cinux！"和"字体：桌面终端
+  能画汉字了"；宿主 ctest 127/127；arm 车道 2/2；vesper 自带测试零失败。
+
+注意 `scripts/create_armv7_sd.sh` 把 zh.txt 种在盘上的 `/etc/zh`，盘在客人的
+根下挂在 `/disk`，所以客人看到的是 `/disk/etc/zh`。
