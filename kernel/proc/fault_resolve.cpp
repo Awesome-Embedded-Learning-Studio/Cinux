@@ -13,6 +13,7 @@
 #include "kernel/proc/fault_resolve.hpp"
 
 #include "kernel/arch/isr.hpp"
+#include "kernel/boot/print.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"
@@ -27,7 +28,7 @@ namespace {
 bool resolve_current_fault(unsigned long long address, unsigned long long error_code) {
     const Task* const kSelf = Scheduler::self().current();
     if (kSelf == nullptr || !kSelf->space.holds() || !kSelf->vmas.holds()) {
-        return false;
+            return false;
     }
     // Work on a copy: the region could be unregistered and freed by a
     // sibling thread the moment find() returns, so the terms are read
@@ -37,19 +38,27 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     const mm::VmaRegion* const kRegion      = kCovered ? &region : nullptr;
     const bool                 kWrite       = (error_code & arch::isr::kFaultWasWrite) != 0;
     const bool                 kInstruction = (error_code & arch::isr::kFaultInstruction) != 0;
-    const bool kAllowed = kRegion != nullptr && (error_code & arch::isr::kFaultReserved) == 0 &&
-                          (!kWrite || kRegion->writable) &&
+    if ((error_code & arch::isr::kFaultReserved) != 0) {
+        return false;
+    }
+    // Copy-on-write runs ahead of the register's terms: a leaf the
+    // kernel itself made read-only — a shared frame, or a page the seat
+    // mapped protected — may become private on a write even when the
+    // range promised read-only execution. The range's terms judge what
+    // the kernel has not touched; repair judges what it has.
+    if (mm::cow::TryResolvePageFault(address, error_code)) {
+        return true;
+    }
+    const bool kAllowed = kRegion != nullptr && (!kWrite || kRegion->writable) &&
                           (!kInstruction || kRegion->executable) &&
                           (kWrite || kInstruction || kRegion->readable) &&
                           (kRegion->kind != mm::VmaKind::kStack || address >= kRegion->stack_floor);
     if (!kAllowed) {
-        if ((error_code & arch::isr::kFaultFromUser) != 0) {
-            Scheduler::self().exit_current(cinux::syscall::kSigSegv);
-        }
+        // Whether a fatal fault ends the task or unwinds a seated
+        // episode is the port's business: this resolver answers the
+        // repair question only, and the arch door that called it owns
+        // the death (x86 exits the task, arm retires the episode).
         return false;
-    }
-    if (mm::cow::TryResolvePageFault(address, error_code)) {
-        return true;
     }
     // kRetry counts as resolved: the page already stands mapped and the
     // fault was the CPU's spurious one, so the instruction just runs
@@ -59,9 +68,6 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
         mm::demand::FillPage(*kSelf->space, *kSelf->vmas, address, error_code);
     if (kFill == mm::demand::FillOutcome::kFilled || kFill == mm::demand::FillOutcome::kRetry) {
         return true;
-    }
-    if ((error_code & arch::isr::kFaultFromUser) != 0) {
-        Scheduler::self().exit_current(cinux::syscall::kSigSegv);
     }
     return false;
 }

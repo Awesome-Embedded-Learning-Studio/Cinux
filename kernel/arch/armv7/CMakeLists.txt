@@ -71,6 +71,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_statx.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_ppoll.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/wait_time.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/proc/fault_resolve.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_pgrp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_pipe.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_kill.cpp

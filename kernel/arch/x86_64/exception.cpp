@@ -10,6 +10,8 @@
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/proc/fpu_gate.hpp"
+#include "kernel/proc/scheduler.hpp"
+#include "kernel/syscall/signal.hpp"
 
 namespace cinux::arch::isr {
 
@@ -179,6 +181,15 @@ void ReportFault(unsigned long long vector, InterruptFrame& frame, unsigned long
     }
     if (vector == kPageFaultVector && seats.diagnoser != nullptr) {
         seats.diagnoser(ReadCr2(), error_code);
+    }
+    // A user fault the resolver could not repair ends its task here: the
+    // neutral resolver answers the repair question only, so the death a
+    // page fault from ring three means belongs to this door.
+    if (vector == kPageFaultVector && (error_code & kFaultFromUser) != 0) {
+        cinux::proc::Scheduler::self().exit_current(cinux::syscall::kSigSegv);
+        ExitFpuGate();
+        RestoreFpu(interrupted_fpu);
+        return;
     }
     if (try_recover(vector, frame)) {
         ExitFpuGate();

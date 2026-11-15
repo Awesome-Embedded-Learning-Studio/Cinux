@@ -41,6 +41,7 @@
 #include "kernel/arch/armv7/isr.hpp"
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"
+#include "kernel/proc/fault_resolve.hpp"
 #include "kernel/proc/scheduler.hpp"
 
 /// The vector stub's seated door: raised while seated episodes run, so
@@ -51,9 +52,6 @@ extern "C" unsigned long c_seat_irq_door;
 /// The trap frame the seat is servicing; born in user_mode.cpp with
 /// the bring-up world, now the seat's own word.
 extern "C" cinux::arch::UserTrap* g_current_trap = nullptr;
-
-using FaultRepair = bool (*)(unsigned long address, unsigned long status);
-void InstallFaultRepair(FaultRepair hook);
 
 extern "C" char SeatProgStart[];
 extern "C" char SeatProgEnd[];
@@ -215,34 +213,39 @@ bool run_probe_world() {
         delete kSpace;
         return false;
     }
-    return run_seated_world(kSpace, 0x40000000UL, 0x40011000UL, true, false, 0, "seatprog");
-}
-
-/// The abort repair door: the seated world's not-present pages are the
-/// neutral demand pager's business, and its write faults against shared
-/// or read-only leaves go through the one armv7 copy seam - the same
-/// RepairWriteFault the legacy task world serves. One fill or one
-/// private copy, and the instruction that faulted runs again.
-bool SeatRepairPage(unsigned long address, unsigned long status) {
-    // The seat's cached worlds go stale the moment an exec replaces
-    // them, so the live task's own holds are the only truth here: read
-    // them fresh on every fault instead of trusting the launch-time
-    // pointers the run was born with.
-    proc::Task* const kTask = proc::Scheduler::self().current();
-    if (current_seat() == nullptr || kTask == nullptr || !kTask->space.holds() ||
-        !kTask->vmas.holds()) {
+    // The probe gets a real promise register like any process: the
+    // neutral resolver reads the faulting address against it, so a
+    // page mapped with no region behind it is a fault nobody can
+    // repair — which is exactly what the seat used to paper over with
+    // a private repair hook.
+    auto* const kRanges = new mm::VmaStore{};
+    if (kRanges == nullptr) {
+        kSpace->teardown();
+        delete kSpace;
         return false;
     }
-    if ((status & arch::isr::kDfsrWrite) != 0 &&
-        mm::cow::RepairWriteFault(kTask->space->root(), address)) {
-        return true;
+    mm::VmaRegion code_range{};
+    code_range.start      = 0x40000000UL;
+    code_range.end        = 0x40001000UL;
+    code_range.kind       = mm::VmaKind::kAnonymous;
+    code_range.readable   = true;
+    code_range.executable = true;
+    mm::VmaRegion stack_range{};
+    stack_range.start       = 0x40010000UL;
+    stack_range.end         = 0x40011000UL;
+    stack_range.kind        = mm::VmaKind::kStack;
+    stack_range.readable    = true;
+    stack_range.writable    = true;
+    stack_range.stack_floor = 0x40010000UL;
+    if (!kRanges->register_range(code_range).ok() ||
+        !kRanges->register_range(stack_range).ok()) {
+        delete kRanges;
+        kSpace->teardown();
+        delete kSpace;
+        return false;
     }
-    unsigned long spsr = 0;
-    asm volatile("mrs %0, spsr" : "=r"(spsr));
-    const unsigned long long kCode = arch::isr::FaultCodeFromStatus(status, spsr);
-    const mm::demand::FillOutcome kFilled =
-        mm::demand::FillPage(*kTask->space, *kTask->vmas, address, kCode);
-    return kFilled != mm::demand::FillOutcome::kUnhandled;
+    return run_seated_world_with_ranges(kSpace, 0x40000000UL, 0x40011000UL, true, false, 0,
+                                         "seatprog", kRanges);
 }
 
 }  // namespace
@@ -318,7 +321,11 @@ bool RunSchedulerUserSelfCheck() {
     // The seated world owns the user file system now: ram files, the
     // devfs tree and the guest ELF all come up with it.
     userfs::init();
-    InstallFaultRepair(&SeatRepairPage);
+    // The neutral resolver: CoW first, then the register's promises. It
+    // is the same door the x86 lane seats, and the death a fatal fault
+    // means stays here — SeatFaultDeath retires the episode, which is
+    // what this world's protocol expects.
+    proc::InstallFaultResolver();
     if (!run_probe_world()) {
         return false;
     }

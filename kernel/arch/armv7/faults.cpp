@@ -29,16 +29,14 @@ namespace cinux::armv7 {
 [[noreturn]] void SeatFaultDeath();
 }  // namespace cinux::armv7
 
-using RepairHook = bool (*)(unsigned long address, unsigned long status);
-
 namespace {
 
-RepairHook g_repair = nullptr;
+cinux::arch::isr::PageFaultResolver g_repair = nullptr;
 
 }  // namespace
 
-void InstallFaultRepair(RepairHook hook) {
-    g_repair = hook;
+void cinux::arch::isr::InstallPageFaultResolver(PageFaultResolver resolver) {
+    g_repair = resolver;
 }
 
 void HandleDataAbort() {
@@ -70,7 +68,11 @@ extern "C" cinux::arch::UserTrap* c_prefetch_trap(cinux::arch::UserTrap* trap) {
     // the image is perfectly entitled to execute from.
     const unsigned long kStatus = fault_status & ~cinux::arch::isr::kDfsrWrite;
     const unsigned long long code = cinux::arch::isr::FaultCodeFromStatus(kStatus, trap->spsr);
-    if (g_repair != nullptr && g_repair(fault_address, kStatus)) {
+    // The resolver speaks the kernel's synthetic code, not the IFSR's
+    // own status word: handing it the raw nibble makes bit 1 read as
+    // "this was a write" and bit 2 as "from user" whatever the status
+    // really says.
+    if (g_repair != nullptr && g_repair(fault_address, code)) {
         return trap;  // the fetch runs again on the new mapping
     }
     cinux::print::Println("[armv7] user fetch fault caught at %X code %X", fault_address, code);
@@ -89,7 +91,9 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
                               fault_status, code);
         cinux::arch::Halt();
     }
-    if (g_repair != nullptr && g_repair(fault_address, fault_status)) {
+    // Same translation as the fetch door: the synthetic code, not the
+    // DFSR's status nibble.
+    if (g_repair != nullptr && g_repair(fault_address, code)) {
         return trap;  // the same instruction runs again on the new mapping
     }
     cinux::print::Println("[armv7] user fault at %X code %X pid %u pc %X r0 %X r1 %X r2 %X r3 %X",

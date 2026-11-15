@@ -20,6 +20,13 @@
 
 namespace cinux::arch::isr {
 
+/// The one door a memory world installs to hear page faults: the same
+/// name and signature the neutral resolver is written against. On this
+/// port the abort handler asks it first and the seat retires the
+/// episode when the answer is no.
+using PageFaultResolver = bool (*)(unsigned long long address, unsigned long long error_code);
+void InstallPageFaultResolver(PageFaultResolver resolver);
+
 /// The vector slot a data abort occupies in the table.
 inline constexpr unsigned long long kPageFaultVector = 4;
 
