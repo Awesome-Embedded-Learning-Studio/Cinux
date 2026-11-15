@@ -38,6 +38,7 @@
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -117,45 +118,17 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     if (!kNode.ok()) {
         return {};
     }
-    fs::FsStat probed{};
-    if (view.ops->stat == nullptr || !view.ops->stat(view.self, kNode.value(), probed).ok()) {
+    // The one ladder every image climbs: world assembly, entry facts,
+    // the GNU stack flag, the process layout, the interpreter. The
+    // first shell is seated exactly the way exec seats a replacement.
+    const auto kSeat = loader::SeatProgram(program.get(), program_bytes, kNode.value(), view,
+                                           *space, *vmas);
+    if (!kSeat.ok()) {
         return {};
     }
-    const loader::LoadWorld kWorld{
-        .space         = *space,
-        .vmas          = *vmas,
-        .file          = kNode.value(),
-        .file_bytes    = probed.size,
-        .file_ops      = view.ops,
-        .file_self     = view.self,
-        .file_lifetime = view.lifetime,
-    };
-    loader::EntryFacts facts{};
-    if (!loader::LoadElfIntoSpace(program.get(), program_bytes, kWorld, facts)) {
-        return {};
-    }
-    entry                        = facts.program_entry;
-    facts.page_bytes             = cinux::arch::page::kSize;
-    facts.platform               = loader::kPlatformName;
-    unsigned int gnu_stack_flags = 0;
-    const bool   kStackExecutable =
-        loader::ReadGnuStackFlags(program.get(), program_bytes, gnu_stack_flags) &&
-        (gnu_stack_flags & loader::kSegmentExec) != 0;
-    loader::SeedProcessLayout(*vmas);
-    char        interpreter_path[fs::kFsPathMax]{};
-    const char* interpreter = nullptr;
-    if (loader::ReadInterpreterPath(program.get(), program_bytes, interpreter_path,
-                                    sizeof(interpreter_path))) {
-        interpreter = interpreter_path;
-    }
-    const auto kInterpreter = loader::LoadInterpreter(interpreter, *space, *vmas);
-    if (!kInterpreter.ok()) {
-        return {};
-    }
-    facts.interpreter_base = kInterpreter.value().interpreter_base;
-    if (kInterpreter.value().program_entry != 0) {
-        entry = kInterpreter.value().program_entry;
-    }
+    loader::EntryFacts facts = kSeat.value().facts;
+    entry                    = facts.program_entry;
+    const bool kStackExecutable = kSeat.value().stack_executable;
     unsigned char randomness[16]{};
     const auto    kRandomLow  = arch::random::Word();
     const auto    kRandomHigh = arch::random::Word();

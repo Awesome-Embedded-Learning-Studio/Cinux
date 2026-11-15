@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "cinux/port/platform_name.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -127,8 +128,8 @@ inline constexpr std::uint64_t kAuxPlatform = 15;
 /** @brief Hardware capability bits, zero when none are advertised. */
 inline constexpr std::uint64_t kAuxHwcap    = 16;
 
-/** @brief The string an AT_PLATFORM consumer reads: the one machine served. */
-inline constexpr char kPlatformName[] = "x86_64";
+/** @brief The string an AT_PLATFORM consumer reads: the selected port's word. */
+inline constexpr const char* kPlatformName = arch::kPlatformName;
 
 /**
  * @brief    The argument and environment runs a hosted runtime wakes

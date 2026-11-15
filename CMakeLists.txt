@@ -44,7 +44,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # so a port coexists instead of editing shared files.
 set(CINUX_PORT_HEADERS
     abi context cpuid debug_frame firmware halt init instructions irq_guard isr
-    kernel_stack msr page page_entry page_walk_shape per_cpu per_cpu_config random
+    kernel_stack msr page page_entry page_walk_shape per_cpu per_cpu_config
+    platform_name random
     smp_control space_control space_layout syscall_abi task_context task_switch user_access user_entry)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated/cinux/port)
 foreach(port_header IN LISTS CINUX_PORT_HEADERS)

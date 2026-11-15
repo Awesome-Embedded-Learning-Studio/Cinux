@@ -24,6 +24,7 @@
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/exec_arguments.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -275,44 +276,18 @@ long long HandleExecve(const SyscallFrame& frame) {
     if (kStaged < 0) {
         return kStaged;
     }
+    // The one ladder every image climbs: world assembly, entry facts,
+    // the GNU stack flag, the process layout, the interpreter. Only the
+    // bias policy is this face's own word.
     const unsigned long long kImageBias = image_load_bias(program.get(), program_size);
-    const loader::LoadWorld  kWorld{
-        .space         = *fresh,
-        .vmas          = *ranges,
-        .file          = kNode.value(),
-        .file_bytes    = probed.size,
-        .file_ops      = kView.value().ops,
-        .file_self     = kView.value().self,
-        .file_lifetime = kView.value().lifetime,
-        .base          = kImageBias,
-    };
-    loader::EntryFacts facts{};
-    if (!loader::LoadElfIntoSpace(program.get(), program_size, kWorld, facts)) {
-        return -kEnomem;
+    const auto kSeat = loader::SeatProgram(program.get(), program_size, kNode.value(),
+                                           kView.value(), *fresh, *ranges, kImageBias);
+    if (!kSeat.ok()) {
+        return -ErrnoFrom(kSeat.error());
     }
-    facts.page_bytes             = cinux::arch::page::kSize;
-    facts.platform               = loader::kPlatformName;
-    std::uint32_t gnu_stack_flags = 0;
-    const bool   kStackExecutable =
-        loader::ReadGnuStackFlags(program.get(), program_size, gnu_stack_flags) &&
-        (gnu_stack_flags & loader::kSegmentExec) != 0;
-    loader::SeedProcessLayout(*ranges);
-    char        interpreter_path[fs::kFsPathMax] = {};
-    const char* interpreter                      = nullptr;
-    if (loader::ReadInterpreterPath(program.get(), program_size, interpreter_path,
-                                    sizeof(interpreter_path))) {
-        if (facts.program_headers == 0) {
-            return -kEnoexec;
-        }
-        interpreter = interpreter_path;
-    }
-    const auto kDyn = loader::LoadInterpreter(interpreter, *fresh, *ranges);
-    if (!kDyn.ok()) {
-        return -ErrnoFrom(kDyn.error());
-    }
-    facts.interpreter_base = kDyn.value().interpreter_base;
-    const unsigned long long kFirstInstruction =
-        kDyn.value().program_entry != 0 ? kDyn.value().program_entry : facts.program_entry;
+    loader::EntryFacts facts            = kSeat.value().facts;
+    const bool         kStackExecutable = kSeat.value().stack_executable;
+    const unsigned long long kFirstInstruction = facts.program_entry;
     constexpr unsigned long long kStackSlideMask = 0x7FF'000;
     const unsigned long long     kStackTop =
         proc::kUserProgramStackTop - (arch::random::Word() & kStackSlideMask);

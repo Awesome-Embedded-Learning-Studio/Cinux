@@ -51,6 +51,8 @@ int ErrnoFrom(base::KernelError error) {
         return kEintr;
     case base::KernelError::kBrokenPipe:
         return kEpipe;
+    case base::KernelError::kNotExecutable:
+        return kEnoexec;
     default:
         return kEinval;
     }

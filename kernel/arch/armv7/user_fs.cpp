@@ -56,6 +56,7 @@
 #include "kernel/fs/block_volume.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -393,19 +394,14 @@ void init() {
         base::safety::Check(g_guest_space != nullptr && g_guest_space->init(),
                             "guest elf address space refused to init");
         g_guest_ranges = new mm::VmaStore{};
-        const loader::LoadWorld kLoadWorld{
-            .space         = *g_guest_space,
-            .vmas          = *g_guest_ranges,
-            .file          = kGuestNode.value(),
-            .file_bytes    = kImageBytes,
-            .file_ops      = kGuestView.value().ops,
-            .file_self     = kGuestView.value().self,
-            .file_lifetime = kGuestView.value().lifetime,
-        };
-        loader::EntryFacts facts{};
-        base::safety::Check(loader::LoadElfIntoSpace(image, taken, kLoadWorld, facts),
-                            "guest elf refused the neutral loader");
-        loader::SeedProcessLayout(*g_guest_ranges);
+        // The one ladder every image climbs, the same one exec seats a
+        // replacement through; the static probe takes the interpreter
+        // half as a no-op.
+        const auto kSeat = loader::SeatProgram(image, taken, kGuestNode.value(),
+                                               kGuestView.value(), *g_guest_space,
+                                               *g_guest_ranges);
+        base::safety::Check(kSeat.ok(), "guest elf refused the neutral loader");
+        const loader::EntryFacts& facts = kSeat.value().facts;
         base::safety::Check(facts.program_entry >= 0x40000000U &&
                                 facts.program_entry < 0x40100000UL,
                             "guest elf entry did not land where it was linked");

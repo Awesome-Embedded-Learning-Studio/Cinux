@@ -101,6 +101,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/loader/entry_picture.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/exec_arguments.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/interpreter.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/loader/program_seat.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
     ${CMAKE_CURRENT_BINARY_DIR}/userprog_blob.o
     ${CMAKE_SOURCE_DIR}/kernel/drivers/framebuffer/framebuffer.cpp

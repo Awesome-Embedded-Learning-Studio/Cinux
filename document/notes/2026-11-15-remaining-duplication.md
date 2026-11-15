@@ -34,7 +34,24 @@ ext2 → 挂载）抽成了 `kernel/fs/block_volume.{hpp,cpp}` 的
 临时的（等到盘上根文件系统齐全就改成盘挂 `/`），构建器要能表达"根候选"而不是
 写死。
 
-## 二、客人程序的装载与 exec：arm 独有一大段
+## 二、客人程序的装载与 exec：梯子已收成一件（2026-11-15 第六轮）
+
+四处 `LoadElfIntoSpace` 调用点里的三处（init 线程的首壳、exec 换核、arm 的
+guest 装载）各自手拼同一副梯子：LoadWorld 组装、entry facts 补齐、GNU 栈
+标志、进程布局种子、解释器。现在收成 `kernel/loader/program_seat.cpp` 的
+`SeatProgram` 一件，三处都改走它。留给调用者的只有真正属于自己的话：镜像
+从哪来、bias 策略（bring-up 要定基址、exec 要随机滑动）、参数块。
+
+顺带抓出中立面里藏的端口词：`loader::kPlatformName` 写死 "x86_64"，共用源
+的 exec 在 arm 上一直在报错的平台名。改成 `cinux/port/platform_name.hpp`
+端口缝（照 page_walk_shape 的样子），arm 报 "armv7"。还有一处真语义差：
+动态镜像缺程序头表时 exec 该答 ENOEXEC，`KernelError` 加了 `kNotExecutable`
+承载这个词，ErrnoFrom 映射补齐。
+
+glibc 车站在 arm 上跑动态链接程序，正是这条梯子的活体验证：两车道三轮
+全绿，宿主 127/127。
+
+原始记录：
 
 `user_fs.cpp` 里同时有：读盘上的 ELF、走中立 loader、登记 VMA、种栈页、把
 busybox 铺到 ram 根的 `/bin/sh`。x86 这边的对应物分散在 `kernel/init/init_thread.cpp`
