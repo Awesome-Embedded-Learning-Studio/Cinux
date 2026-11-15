@@ -48,6 +48,8 @@
 #include "kernel/drivers/usb/usb_keyboard.hpp"
 #include "kernel/drivers/usdhc/usdhc.hpp"
 
+extern "C" unsigned long c_seat_irq_door;
+
 namespace {
 
 void PrintUnsigned(unsigned long long value) {
@@ -101,6 +103,11 @@ void run_init_lane() {
     cinux::armv7::userfs::init();
     cinux::proc::InstallFaultResolver();
     asm volatile("cpsie if" ::: "memory");
+    // The seated world's IRQ door: from here on user tasks run and park
+    // mid-frame, so their interrupt frames need the task-owned path the
+    // station episodes raise around themselves. This world never
+    // lowers it again - it stays seated for good.
+    c_seat_irq_door = 1;
     cinux::armv7::UartWrite("[armv7] init lane: irqs on, init thread starts\n");
     cinux::init::StartInitThread();
     for (;;) {
