@@ -92,3 +92,19 @@ ASCII 残留的 `zh_ascii.txt` 让终端区出墨 2774 像素，带汉字时为 
 
 这套测试属于 `vesper` 自己的测试集，跑法是构建 `vesper.tests` 后直接执行，宿主
 `ctest`（127 项）不含它。
+
+## 回落机制收拢到文字层
+
+终端先做的那套"基准字体查不到就查第二字体"是每个部件各写一遍的写法，接到标题
+栏和图标标签上就会变成三份。改成在 `visor::draw::MonoFont` 里放一个可选的
+`fallback` 指针：
+
+- `resolve(codepoint, &owner)` 沿链找出字形，并把拥有它的字体写回 owner；
+- `TextLayout::Placement` 带上 owner，`draw_text` 取位图时用 owner 而不是基准
+  字体，所以布局和绘制看到的是同一个来源；
+- 终端把同伴字体挂成 `font_.fallback`，宽字判断也走 `resolve()`，自己那份双
+  字体查找删掉；
+- 桌面例子的标题、图标标签、面板文字用同一个 `with_han` 包装，一行一个。
+
+判据：`tests/ui/window_frame_tests.cpp` 加了标题带的差分测试，同一个"终"
+标题，带同伴字体时标题带内的暗像素必须多于不带时。
