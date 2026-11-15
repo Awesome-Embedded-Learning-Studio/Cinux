@@ -95,6 +95,12 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+msync 收进中立面（2026-11-15 第八轮）：glibc 车站的 fb 路径每次 msync 都撞
+ENOSYS，arm 与 x86 一起缺。实现取诚实的最小语义：这个内核的映射写下即一致
+（设备帧是设备自己的，私有副本在 CPU 看得见的页帧里），逐页查 VMA 覆盖，
+未映射答 ENOMEM，其余答零——写回承诺本就成立，没有欠的冲刷。arm 串口的
+svc 拒答从此清零。
+
 故障修复（`kernel/proc/fault_resolve.cpp` 一套，死亡策略归各架构异常入口）、
 写时复制（`kernel/mm/cow.cpp` 一套，架构只实现 `RepairWriteFault` 等原语）、
 系统调用处理（`kernel/syscall` 一套，架构只提供 ABI 折叠）、控制台

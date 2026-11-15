@@ -114,6 +114,9 @@ inline constexpr unsigned long kReadlinkat  = 332;
 // 239 is sendfile64, the EABI spelling; busybox's cat and cp take this
 // fast path before ever staging a buffer of their own.
 inline constexpr unsigned long kSendfile64 = 239;
+// 144 is the EABI spelling of msync; the glibc station asks the
+// write-back promise on its frame-buffer path.
+inline constexpr unsigned long kMsync = 144;
 /// The pre-time64 ceilings call glibc's startup asks for directly, and
 /// the split-offset seek beside it.
 inline constexpr unsigned long kGetrlimit    = 191;

@@ -24,6 +24,7 @@
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_clock.hpp"
 #include "kernel/syscall/sys_sendfile.hpp"
+#include "kernel/syscall/sys_msync.hpp"
 #include "kernel/syscall/sys_nanosleep.hpp"
 #include "kernel/syscall/sys_getcwd.hpp"
 #include "kernel/syscall/sys_id.hpp"
@@ -254,6 +255,7 @@ const NeutralService kNeutralServices[] = {
     // The transfer face: cat and cp's fast path moves card bytes to the
     // console without a user buffer.
     {cinux::armv7::syscall_nr::kSendfile64, &cinux::syscall::HandleSendfile},
+    {cinux::armv7::syscall_nr::kMsync, &cinux::syscall::HandleMsync},
     // The pre-time64 ceilings call, in this ABI's two-word record shape.
     {cinux::armv7::syscall_nr::kGetrlimit, &HandleArmGetrlimit},
     {cinux::armv7::syscall_nr::kLlseek,     &HandleArmLlseek},

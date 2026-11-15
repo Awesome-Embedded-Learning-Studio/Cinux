@@ -49,6 +49,7 @@
 #include "kernel/syscall/sys_mmap.hpp"
 #include "kernel/syscall/sys_mount.hpp"
 #include "kernel/syscall/sys_mprotect.hpp"
+#include "kernel/syscall/sys_msync.hpp"
 #include "kernel/syscall/sys_munmap.hpp"
 #include "kernel/syscall/sys_nanosleep.hpp"
 #include "kernel/syscall/sys_open.hpp"
@@ -153,6 +154,10 @@ constexpr Row kRows[] = {
     {.number = cinux::syscall::SyscallNr::kMmap, .handler = cinux::syscall::HandleMmap},
     {.number = cinux::syscall::SyscallNr::kMunmap, .handler = cinux::syscall::HandleMunmap},
     {.number = cinux::syscall::SyscallNr::kMprotect, .handler = cinux::syscall::HandleMprotect},
+    {
+        .number  = cinux::syscall::SyscallNr::kMsync,
+        .handler = cinux::syscall::HandleMsync,
+    },
     {.number = cinux::syscall::SyscallNr::kBrk, .handler = cinux::syscall::HandleBrk},
     {
         .number  = cinux::syscall::SyscallNr::kRtSigaction,
