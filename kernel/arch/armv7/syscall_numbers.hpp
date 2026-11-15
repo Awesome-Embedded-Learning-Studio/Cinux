@@ -104,5 +104,15 @@ inline constexpr unsigned long kIoctl       = 54;
 inline constexpr unsigned long kFstat       = 108;
 inline constexpr unsigned long kFcntl       = 55;
 inline constexpr unsigned long kGetdents    = 217;
+/// The three a libc's startup and path walk reach for on their own:
+/// entropy for its canaries, the process word for its thread names, and
+/// the symlink reader behind every "follow the link" open.
+inline constexpr unsigned long kGetrandom   = 384;
+inline constexpr unsigned long kPrctl       = 172;
+inline constexpr unsigned long kReadlinkat  = 332;
+/// The pre-time64 ceilings call glibc's startup asks for directly, and
+/// the split-offset seek beside it.
+inline constexpr unsigned long kGetrlimit    = 191;
+inline constexpr unsigned long kLlseek       = 140;
 
 }  // namespace cinux::armv7::syscall_nr

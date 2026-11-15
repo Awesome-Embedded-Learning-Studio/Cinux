@@ -33,6 +33,10 @@
 #include "kernel/syscall/sys_ppoll.hpp"
 #include "kernel/syscall/uaccess.hpp"
 #include "kernel/syscall/sys_wait.hpp"
+#include "kernel/syscall/sys_getrandom.hpp"
+#include "kernel/syscall/sys_prlimit.hpp"
+#include "kernel/syscall/sys_readlink.hpp"
+
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_close.hpp"
 #include "kernel/syscall/sys_getpid.hpp"
@@ -117,10 +121,44 @@ namespace {
 
 /// One neutral handler per number: the seated world's services run on
 /// the same bodies the x86 lane built.
+/// This ABI's old limit record: two four-byte words.
+constexpr cinux::syscall::RlimitLayout kArmRlimitLayout{4};
+
 struct NeutralService {
     unsigned long number;
     long long (*handler)(const cinux::syscall::SyscallFrame&);
 };
+
+long long HandleArmGetrlimit(const cinux::syscall::SyscallFrame& frame) {
+    return cinux::syscall::HandleGetrlimit(frame, kArmRlimitLayout);
+}
+
+/// _llseek(fd, high, low, result, whence): this ABI's pre-time64 shape
+/// splits the offset across two arguments and hands the new offset back
+/// through a pointer. The seek itself is the neutral one; only the
+/// spelling is this port's.
+long long HandleArmLlseek(const cinux::syscall::SyscallFrame& frame) {
+    cinux::syscall::SyscallFrame sought{};
+    sought.rdi = frame.rdi;
+    sought.rsi = ((frame.rsi & 0xFFFFFFFFULL) << 32U) | (frame.rdx & 0xFFFFFFFFULL);
+    sought.rdx = frame.r8;  // the fifth argument slot holds trap r4, the whence
+    const long long kMoved = cinux::syscall::HandleLseek(sought);
+    if (kMoved < 0) {
+        return kMoved;
+    }
+    if (frame.r10 == 0) {  // the result pointer rides in trap r3
+        return -cinux::syscall::kEfault;
+    }
+    unsigned char record[8] = {};
+    for (unsigned byte = 0; byte < 8; ++byte) {
+        record[byte] = static_cast<unsigned char>((static_cast<unsigned long long>(kMoved) >>
+                                                  (byte * 8U)) & 0xFFU);
+    }
+    if (!cinux::syscall::uaccess::CopyToUser(frame.r10, record, 8)) {
+        return -cinux::syscall::kEfault;
+    }
+    return 0;
+}
 
 const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kRead,   &cinux::syscall::HandleRead},
@@ -198,6 +236,16 @@ const NeutralService kNeutralServices[] = {
     // A seated yield must reach the real scheduler: the tick-driven
     // preemption and the voluntary rotation share one table.
     {cinux::armv7::syscall_nr::kSchedYield, &cinux::syscall::HandleYield},
+    // The startup and path trio: glibc seeds its canaries from entropy,
+    // names its threads through prctl, and follows a link through
+    // readlinkat. Refusing any of them makes a real program either give
+    // up on a feature or fall back to a probe this port never needed.
+    {cinux::armv7::syscall_nr::kGetrandom,  &cinux::syscall::HandleGetrandom},
+    {cinux::armv7::syscall_nr::kPrctl,      &cinux::syscall::HandlePrctl},
+    {cinux::armv7::syscall_nr::kReadlinkat, &cinux::syscall::HandleReadlinkat},
+    // The pre-time64 ceilings call, in this ABI's two-word record shape.
+    {cinux::armv7::syscall_nr::kGetrlimit, &HandleArmGetrlimit},
+    {cinux::armv7::syscall_nr::kLlseek,     &HandleArmLlseek},
 };
 
 const NeutralService* find_neutral_service(unsigned long number) {

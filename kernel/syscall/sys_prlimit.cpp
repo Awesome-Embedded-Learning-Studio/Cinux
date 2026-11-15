@@ -61,6 +61,31 @@ long long HandlePrlimit64(const SyscallFrame& frame) {
     return 0;
 }
 
+long long HandleGetrlimit(const SyscallFrame& frame, const RlimitLayout& layout) {
+    if (frame.rdi >= proc::kResourceLimitCount) {
+        return -kEinval;
+    }
+    if (frame.rsi == 0) {
+        return -kEfault;
+    }
+    const proc::Task* const kSelf = CurrentTask();
+    // One record per width: the narrow one carries two four-byte words,
+    // the wide one the same pair at eight bytes. Written field by field
+    // so the caller's layout is the only thing that decides the shape.
+    unsigned char record[2 * sizeof(unsigned long long)] = {};
+    for (unsigned field = 0; field < 2; ++field) {
+        unsigned long long value = kSelf->limits[frame.rdi][field];
+        for (unsigned long long byte = 0; byte < layout.field_bytes; ++byte) {
+            record[field * layout.field_bytes + byte] =
+                static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
+        }
+    }
+    if (!uaccess::CopyToUser(frame.rsi, record, 2 * layout.field_bytes)) {
+        return -kEfault;
+    }
+    return 0;
+}
+
 long long HandlePrctl(const SyscallFrame& frame) {
     proc::Task* const kSelf = CurrentTask();
     if (frame.rdi == 7) {  // PR_GET_KEEPCAPS
