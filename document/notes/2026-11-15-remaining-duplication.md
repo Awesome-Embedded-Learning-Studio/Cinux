@@ -70,3 +70,31 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 按上面的顺序，先做一里面的第 1 件：查 `SeatDeviceTree` 是否中立，若是就把
 arm 那段手写的设备节点摆放换成调用它。这是能立刻缩小重复面的一步，且风险小。
+
+## 根形状的答案：ramfs 根是过渡
+
+查了代码，两条车道的根不同不是因为取舍不同，而是因为卡片不同：
+
+- x86 的根就是盘。`FileWorld::init` 把 ext2 挂在 `/`，`init_thread` 从盘上的
+  `/sbin/init` 装 shell，`scripts/create_ext2_disk.sh` 把这张盘做成真正的根
+  文件系统：`/bin` 下 busybox 加一串 applet 链接、`/sbin/init`、`/etc/inittab`、
+  `/bin/vesper` 指向桌面。
+- arm 的根是内核里的 ramfs（`hello`、`motd`、`readme`、`scratch` 四个种子文件
+  加 `/disk` 门），盘挂在 `/disk`，壳是把盘上的 `/disk/bb` 拷进 ramfs 的
+  `/bin/sh`。原因是卡片只有几个平铺文件，还没有根文件系统的布局。
+
+所以 ramfs 根是**过渡形状**，目标与 x86 一样是盘做根。这一轮先做半步：卡片里
+已经种出 `/bin/busybox` 加 applet 符号链接、`/sbin/init`、`/usr/bin` 和
+`/bin/vesper`，探针加了用例证明客人侧的 ext2 驱动能把这些快符号链接解析成真
+文件——`/disk/bin/sh` 打开后读到的是 ELF 魔数。
+
+挂载还没翻。翻的时候要一起改的清单（下一轮按这个做）：
+
+1. `user_fs.cpp`：挂 ext2 到 `/`，ramfs 只留 `/proc`、`/dev` 两个挂载点；
+2. 探针路径 `/disk/etc/motd` → `/etc/motd`，`/disk/bin/sh` → `/bin/sh`；
+3. 根的 getdents 计数：ramfs 的四个种子文件消失，换磁盘根的条目数；
+4. 桌面车道的 `cat /disk/etc/zh` → `cat /etc/zh`；
+5. 壳的落点：不再拷 `/disk/bb` 到 ramfs，直接用盘上的 `/bin/sh`。
+
+中立化层面，文件世界构建器要表达的就是"根候选"：一个端口给 ramfs 根加若干卷
+挂载，另一个端口给盘根加设备与事实挂载，两种都是同一组步骤的组合。

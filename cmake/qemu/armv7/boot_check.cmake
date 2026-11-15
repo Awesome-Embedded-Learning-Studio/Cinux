@@ -112,6 +112,7 @@ expect_literal(EXPECTED_EXT2 "the ext2 volume never mounted or its motd never an
 expect_literal(EXPECTED_GUEST_DISK_MOTD "the guest never read the ext2 motd through its own syscalls.")
 expect_literal(EXPECTED_GUEST_NAP "the guest's nanosleep never waited: the clock did not advance.")
 expect_literal(EXPECTED_GUEST_POLL "the guest's poll timeout never waited: the clock did not advance.")
+expect_literal(EXPECTED_GUEST_LINK "the card's /bin/sh link never resolved: the root layout is missing.")
 expect_literal(EXPECTED_DISK_EXEC "the exec never brought the disk program into the seat.")
 if(DEFINED EXPECTED_GLIBC_EXEC AND NOT EXPECTED_GLIBC_EXEC STREQUAL "")
     expect_literal(EXPECTED_GLIBC_EXEC "the glibc station never printed: a real libc did not run.")

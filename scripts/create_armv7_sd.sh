@@ -59,6 +59,27 @@ if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then
     echo "[armv7-sd] vesper desk seeded at /desk"
 fi
 
+# The root layout the card is growing into: the same shape the x86 volume
+# has (a bin tree of applet links over one busybox, an init, an inittab),
+# laid beside the flat bring-up paths. Nothing mounts it as root yet --
+# the armv7 root is still the kernel's ramfs -- but a card that already
+# carries the layout is what the mount flip will be verified against.
+if [[ -n "${busybox_bin}" && -f "${busybox_bin}" ]]; then
+    debugfs -w -R 'mkdir /bin' "${volume}" >/dev/null 2>&1
+    debugfs -w -R 'mkdir /sbin' "${volume}" >/dev/null 2>&1
+    debugfs -w -R 'mkdir /usr' "${volume}" >/dev/null 2>&1
+    debugfs -w -R 'mkdir /usr/bin' "${volume}" >/dev/null 2>&1
+    debugfs -w -R "write ${busybox_bin} /bin/busybox" "${volume}" >/dev/null 2>&1
+    for applet in sh cat ls echo mkdir rm mount umount; do
+        debugfs -w -R "symlink /bin/${applet} busybox" "${volume}" >/dev/null 2>&1
+    done
+    debugfs -w -R 'symlink /sbin/init ../bin/busybox' "${volume}" >/dev/null 2>&1
+    echo "[armv7-sd] root layout seeded: /bin/busybox with applet links"
+fi
+if [[ -n "${desk_bin}" && -f "${desk_bin}" ]]; then
+    debugfs -w -R 'symlink /bin/vesper ../../desk' "${volume}" >/dev/null 2>&1
+fi
+
 # The glibc station's program rides along only when its image exists:
 # building it needs the arm-none-linux-gnueabihf toolchain, which is a
 # host-side concern, not a lane requirement. The check stays green with

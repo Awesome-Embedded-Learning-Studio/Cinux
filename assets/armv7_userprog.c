@@ -288,6 +288,28 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(6UL, kFd, 0UL, 0UL);  // close
         }
     }
+    // The root layout's links: /disk/bin/sh is a fast symlink to busybox,
+    // so opening it proves the walk expanded a relative target and landed
+    // on the volume's real ELF. The card grows the same bin/etc/sbin shape
+    // the x86 volume has; this is the read that says the walk can find it.
+    {
+        static const char kLnA[] = "[guest] root layout link refused\n";
+        static const char kLnB[] = "[guest] symlink ok, bin/sh opens as an ELF\n";
+        static const char kLinkPath[] = "/disk/bin/sh";
+        const long kFd = sys3(5UL, (unsigned long)kLinkPath, 0UL, 0UL);  // open
+        unsigned char magic[4] = {0, 0, 0, 0};
+        const long kRead = kFd >= 0 ? sys3(3UL, kFd, (unsigned long)magic, sizeof(magic)) : -1L;
+        const int kIsElf = kRead == 4L && magic[0] == 0x7F && magic[1] == 'E' &&
+                           magic[2] == 'L' && magic[3] == 'F';
+        if (kFd >= 0 && kIsElf) {
+            sys3(4UL, 1UL, (unsigned long)kLnB, slen(kLnB));
+        } else {
+            sys3(4UL, 1UL, (unsigned long)kLnA, slen(kLnA));
+        }
+        if (kFd >= 0) {
+            sys3(6UL, kFd, 0UL, 0UL);  // close
+        }
+    }
     // fstat: the motd's shape, regular file with its byte count.
     {
         static const char kStA[] = "[guest] fstat refused\n";

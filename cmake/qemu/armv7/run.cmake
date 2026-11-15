@@ -145,6 +145,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_GUEST_DISK_MOTD=[guest] disk motd: Cinux says hello from a real disk."
             "-DEXPECTED_GUEST_NAP=[guest] nanosleep ok, the clock advanced"
             "-DEXPECTED_GUEST_POLL=[guest] poll timeout ok, waited"
+            "-DEXPECTED_GUEST_LINK=[guest] symlink ok, bin/sh opens as an ELF"
             "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
             ${_arm_glibc_arg}
             ${_arm_busybox_arg}
