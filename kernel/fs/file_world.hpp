@@ -82,6 +82,16 @@ public:
     /// streams, the mounts picture) work over the same tree.
     void adopt(Vfs& borrowed_vfs);
 
+    /**
+     * @brief         True once a lane grew or adopted this world's tree.
+     * @note          The init thread asks before mounting its own root:
+     * a bring-up lane that already seated the card needs no second
+     * mount through the door.
+     * @since         0.8.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] bool seated() const { return seated_; }
+
     /// True when a lane handed its own tree: the kernel_init ladder
     /// then skips its own mount and seats over the same world.
     [[nodiscard]] bool adopted() const;
@@ -175,6 +185,9 @@ private:
     /// growing one here; every read face goes through world() so both
     /// lanes share the same doors.
     Vfs*   borrowed_ = nullptr;
+    /// Set by init() and adopt(): the one flag the init thread's
+    /// second-mount guard reads.
+    bool seated_ = false;
 
     /// The tree every read face answers through: the lane's own when
     /// adopted, the one init() grew otherwise.

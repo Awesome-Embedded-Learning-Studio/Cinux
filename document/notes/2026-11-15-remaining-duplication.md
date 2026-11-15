@@ -301,3 +301,26 @@ ramfs 根与 /tmp 暂存（guest blob 的停车位）、/proc 挂载、还有自
 arm 递 usdhc 端口，user_fs 的挂卡梯子退役。
 
 车道判据：arm_boot 与 arm_init 均 Passed，host ctest 127/127。
+
+## 第十九轮：挂卡梯子退役，两条车道走同一扇门
+
+上一轮把设备摆放归一到 arch 门后，剩余差距三件全数收进这一轮：user_fs
+自己的 Vfs、手写的 ProcSource、手摇的 window/port/MountBlockVolume 梯子
+全部删除，换成一次 arch::MakeRootPort(&wall) + FileWorld::self().init(port,
+wall)。ramfs 只保留它独有的职责——/tmp 暂存挂载（卡上新增 /tmp 目录），
+guest blob 停车位不变。arm 的 proc 三件助手（exe_path/exe_bytes/exe_size）
+也退了：中立 WireKernelProcSource 是它的超集，/proc/cpuinfo 探针原判词
+照打。
+
+配套三件：MakeRootPort 分区感知（MBR 解析一次，静态 BlockWindow 盖在
+Linux 分区上，之前它递的是裸卡端口，ext2 会在 MBR 上挂失败）；
+FileWorld 长出 seated() 标志，init 幂等，StartInitThread 的二挂守卫从
+adopted() 换成 seated()，init 车道不再二挂；判词 file world adopted 换成
+file world seated from the card（语义终于名实相符），check 脚本同词。
+
+至此第十七轮清单上的两件未结项（FileWorld::init 的 x86 词、arm 自有挂载
+梯子）全部清零：键源与 sata/nvme 座位都在各arch 的 MakeRootPort/
+SeatConsoleWorld 里，是合法的 arch 词；队列/缓存/卷/"/"座、devfs、
+procfs、键源挂接全部只有一份，在 FileWorld::init。
+
+车道判据：arm_boot、arm_init、arm_desk 均 Passed，host ctest 127/127。

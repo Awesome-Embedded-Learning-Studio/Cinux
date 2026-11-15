@@ -255,7 +255,7 @@ void StartInitThread() {
         // A lane that already adopted its own tree (the arm bring-up
         // mounted its card into the very world) needs no second mount:
         // the seats below then answer over that tree.
-        if (!fs::FileWorld::self().adopted()) {
+        if (!fs::FileWorld::self().seated()) {
             unsigned long long (*wall_clock)() = nullptr;
             driver::BlockPort* const kRootPort = arch::MakeRootPort(&wall_clock);
             fs::FileWorld::self().init(*kRootPort, wall_clock);

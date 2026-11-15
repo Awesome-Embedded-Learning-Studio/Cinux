@@ -22,6 +22,8 @@ debugfs -w -R 'mkdir /etc' "${volume}" >/dev/null 2>&1
 # The two mount points a root has to offer: procfs and devfs land here.
 debugfs -w -R 'mkdir /proc' "${volume}" >/dev/null 2>&1
 debugfs -w -R 'mkdir /dev' "${volume}" >/dev/null 2>&1
+# The staging seat: the loader lane parks its guest here.
+debugfs -w -R 'mkdir /tmp' "${volume}" >/dev/null 2>&1
 # The bring-up files the kernel's ramfs used to seed, now on the card so
 # the same paths answer whichever filesystem owns the root.
 printf 'hi there\n' > "${seed_dir}/.root-motd.tmp"

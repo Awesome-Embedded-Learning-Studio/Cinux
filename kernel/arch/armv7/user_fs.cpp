@@ -39,6 +39,7 @@
 #include "kernel/fs/open_file.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/arch/console_world.hpp"
+#include "kernel/arch/root_port.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -74,86 +75,9 @@ namespace {
 /// Heap-owned on purpose: a static would construct before the kernel
 /// heap exists, and the RamFs root is heap-born.
 fs::RamFs* g_ram  = nullptr;
-fs::Vfs*   g_vfs  = nullptr;
-fs::ProcFs* g_proc = nullptr;
-driver::BlockQueue*  g_disk_queue  = nullptr;
-driver::BlockCache*  g_disk_cache  = nullptr;
-/// The erased seat under the disk queue; heap-born so it outlives this
-/// function, since BlockQueue keeps a reference to it.
-driver::BlockPort*   g_disk_port   = nullptr;
-driver::BlockWindow* g_disk_window = nullptr;
-fs::ext2::Ext2*          g_disk_volume = nullptr;
 mm::AddressSpace* g_guest_space = nullptr;
 mm::VmaStore*     g_guest_ranges = nullptr;
 unsigned long     g_guest_entry  = 0;
-
-/// Resolves the current task's program through this port's own VFS.
-/// The /proc/self/exe seat answers from here, so a busybox applet that
-/// re-execs itself finds the image the shell was seated from; without
-/// it the node reads as an empty file and every non-NOEXEC applet
-/// reports "not found".
-bool proc_exe_view(fs::FsView& view, fs::FsNode& node) {
-    const proc::Task* const kSelf = proc::Scheduler::self().current();
-    if (kSelf == nullptr || kSelf->exe[0] != '/') {
-        return false;
-    }
-    // A task whose own record is the magic path can only be asking the
-    // window about itself: answer nothing rather than recurse.
-    if (std::string_view{kSelf->exe} == "/proc/self/exe") {
-        return false;
-    }
-    const base::Result<fs::FsView> kView = g_vfs->resolve(kSelf->exe);
-    if (!kView.ok()) {
-        return false;
-    }
-    view                                 = kView.value();
-    const base::Result<fs::FsNode> kNode = view.ops->lookup(view.self, view.rest);
-    if (!kNode.ok()) {
-        return false;
-    }
-    node = kNode.value();
-    return true;
-}
-
-unsigned long proc_exe_path(void* /*context*/, char* out, unsigned long cap) {
-    const proc::Task* const kSelf = proc::Scheduler::self().current();
-    if (kSelf == nullptr || cap == 0) {
-        return 0;
-    }
-    unsigned long used = 0;
-    while (used + 1 < cap && kSelf->exe[used] != '\0') {
-        out[used] = kSelf->exe[used];
-        ++used;
-    }
-    out[used] = '\0';
-    return used;
-}
-
-bool proc_exe_bytes(void* /*context*/, unsigned long offset, void* sink, unsigned long count,
-                    unsigned long& gave) {
-    fs::FsView view{};
-    fs::FsNode node{};
-    if (!proc_exe_view(view, node)) {
-        return false;
-    }
-    const base::Result<unsigned long> kGot = view.ops->read(view.self, node, offset, sink, count);
-    if (!kGot.ok()) {
-        return false;
-    }
-    gave = kGot.value();
-    return true;
-}
-
-unsigned long proc_exe_size(void* /*context*/) {
-    fs::FsView view{};
-    fs::FsNode node{};
-    if (!proc_exe_view(view, node)) {
-        return 0;
-    }
-    fs::FsStat               probed{};
-    const base::Result<void> kProbed = view.ops->stat(view.self, node, probed);
-    return kProbed.ok() ? probed.size : 0;
-}
 
 }  // namespace
 
@@ -164,45 +88,6 @@ void init() {
     }
     seeded = true;
     g_ram = new fs::RamFs();
-    g_vfs = new fs::Vfs();
-    // The facts instance answers from the port's own identity decode,
-    // the page manager, and the executable window; the seats this lane
-    // cannot fill yet stay null and read as a quiet empty file.
-    g_proc = new fs::ProcFs();
-    g_proc->set_source(fs::ProcSource{
-        .exe_path  = proc_exe_path,
-        .exe_bytes = proc_exe_bytes,
-        .exe_size  = proc_exe_size,
-        .memory =
-            [](void*, unsigned long& free_pages, unsigned long& total_pages) {
-                free_pages  = mm::Pmm::self().free_page_count();
-                total_pages = mm::Pmm::self().managed_page_count();
-            },
-        .memory_page_bytes = arch::page::kSize,
-        .nth_cpu           = fs::NthCpuFromIdentity,
-    });
-    const base::Result<void> kProc = g_vfs->mount("/proc", *g_proc, "proc");
-    base::safety::Check(kProc.ok(), "proc mount failed");
-    // Read-back probe: /proc/cpuinfo must answer through the very vfs
-    // the syscalls use, and the first record carries the port's vendor.
-    const auto kView = g_vfs->resolve("/proc/cpuinfo");
-    base::safety::Check(kView.ok(), "proc cpuinfo resolve failed");
-    const auto kNode = kView.value().ops->lookup(kView.value().self, kView.value().rest);
-    base::safety::Check(kNode.ok(), "proc cpuinfo lookup failed");
-    char              record[96]{};
-    const auto        kRead =
-        kView.value().ops->read(kView.value().self, kNode.value(), 0, record, sizeof(record));
-    base::safety::Check(kRead.ok() && kRead.value() != 0, "proc cpuinfo read failed");
-    const unsigned long kBytes = kRead.value();
-    bool                saw_vendor = false;
-    for (unsigned long index = 0; index + 4 < kBytes; ++index) {
-        if (record[index] == 'A' && record[index + 1] == 'R' && record[index + 2] == 'M') {
-            saw_vendor = true;
-            break;
-        }
-    }
-    base::safety::Check(saw_vendor, "proc cpuinfo lacks the vendor line");
-    cinux::print::Println("[armv7] proc cpuinfo %u bytes", kBytes);
 
     // The screen joins the fs: the LCDIF's frame, adopted by the
     // neutral Framebuffer singleton, seats fb0 inside a real devfs.
@@ -223,16 +108,6 @@ void init() {
         };
         base::safety::Check(driver::Framebuffer::self().init(kInfo),
                             "framebuffer refused the LCDIF geometry");
-        fs::DevFs* const kDev = new fs::DevFs();
-        // The device tree grows through the same arch door the x86
-        // lane's FileWorld opens: key taps, the input seats, the usbkbd
-        // node and the card's model row all seat in one call. The
-        // key tap sits in front of the serial stream, so the UART's
-        // own keys still answer when no USB keyboard is attached.
-        arch::SeatConsoleWorld(*kDev);
-        if (driver::SeatUsbKeyboard()) {
-            cinux::print::Println("[armv7] dev usbkbd seated");
-        }
         // The card's own facts -- the sector count and the partition
         // table -- are read through the erased port, facts only.
         if (driver::UsdhcHost::self().block_count() != 0) {
@@ -260,83 +135,86 @@ void init() {
                 cinux::print::Println(kEntry ? "[armv7] mmcblk0 p1 at %lu"
                                              : "[armv7] mmcblk0 p1 missing",
                                       static_cast<unsigned long>(kStart));
-                // The volume street, the same ladder the x86 lane
-                // climbs: one window over the partition, one queue,
-                // one cache, one ext2. The first reader through the
-                // queue drives it synchronously, so mounting works
-                // before the scheduler ever runs.
                 if (kEntry) {
-                    g_disk_window = new driver::BlockWindow();
-                    g_disk_window->adopt(driver::UsdhcHost::self(), kStart);
-                    // The neutral ladder: the card is reached through the
-                    // erased port, so the seat never learns the driver's
-                    // type, and queue, cache and volume come from the share
-                    // both ports climb. The port lives on the heap because
-                    // the queue points back at it.
-                    g_disk_port = new driver::BlockPort();
-                    g_disk_port->adopt(*g_disk_window);
-                    // The disk is the root, the same shape the x86 lane
-                    // has always mounted: one block port, one volume, the
-                    // "/" seat. The only way this port differs from its
-                    // sibling is when the card becomes reachable -- here
-                    // that is after the usdhc probe, not at init time.
-                    // The ramfs never held the seat: it is the kernel's
-                    // /tmp staging area, where the loader lane parks the
-                    // guest image and anything else that lives only as
-                    // long as the boot.
+                    // The one door every lane mounts through: the port
+                    // names this card's own partition, and the neutral
+                    // ladder behind it -- queue, cache, volume, the "/"
+                    // seat, the console world, devfs and procfs -- is
+                    // the very one the x86 lane climbs. The first
+                    // reader through the queue drives it synchronously,
+                    // so mounting works before the scheduler runs.
+                    unsigned long long (*wall_clock)() = nullptr;
+                    driver::BlockPort* const kRootPort = arch::MakeRootPort(&wall_clock);
+                    fs::FileWorld::self().init(*kRootPort, wall_clock);
+                    fs::Vfs& kWorld = fs::FileWorld::self().vfs();
+                    fs::DevFs& kDev = fs::FileWorld::self().devices();
+                    if (driver::SeatUsbKeyboard()) {
+                        cinux::print::Println("[armv7] dev usbkbd seated");
+                    }
+                    // The ramfs is the kernel's /tmp staging area, where
+                    // the loader lane parks the guest image and anything
+                    // else that lives only as long as the boot.
                     const base::Result<void> kStage =
-                        g_vfs->mount("/tmp", *g_ram, "ramfs");
+                        kWorld.mount("/tmp", *g_ram, "ramfs");
                     base::safety::Check(kStage.ok(), "tmp staging mount failed");
-                    const fs::BlockVolume kVolume =
-                        fs::MountBlockVolume(*g_vfs, "/", *g_disk_port);
-                    g_disk_queue  = kVolume.queue;
-                    g_disk_cache  = kVolume.cache;
-                    g_disk_volume = kVolume.volume;
-                    if (kVolume.mounted) {
-                        const auto kMotd = g_vfs->resolve("/etc/motd");
-                        base::Own<unsigned char[]> kMotdBytes;
-                        unsigned long              kMotdSize = 0;
-                        const bool kRead = kMotd.ok() &&
+                    const auto kMotd = kWorld.resolve("/etc/motd");
+                    base::Own<unsigned char[]> kMotdBytes;
+                    unsigned long              kMotdSize = 0;
+                    const bool kMotdRead = kMotd.ok() &&
                                            fs::ReadWholeFile(kMotd.value(), kMotdBytes,
                                                              kMotdSize)
                                                .ok() &&
                                            kMotdSize != 0;
-                        cinux::print::Println(
-                            kRead ? "[armv7] ext2 mounted, motd is %lu bytes"
+                    cinux::print::Println(
+                        kMotdRead ? "[armv7] ext2 mounted, motd is %lu bytes"
                                   : "[armv7] ext2 mounted, motd read FAILED",
-                            kMotdSize);
-                        // The shell needs no copy any more: /bin/sh on the
-                        // card is a fast symlink over busybox, and the
-                        // guest's ext2 walk expands it.
-                        const auto kShellView = g_vfs->resolve("/bin/sh");
-                        cinux::print::Println(kShellView.ok() ? "[armv7] bin/sh seated from the card"
-                                                              : "[armv7] bin/sh missing on the card");
-                        // The file world adopts this very tree: the
-                        // init lane's doors -- resolve, console streams,
-                        // the mounts picture -- answer over the card
-                        // the same way the x86 lane's answer over its
-                        // own volume, with no second mount anywhere.
-                        fs::FileWorld::self().adopt(*g_vfs);
-                        const auto kWorldShell = fs::FileWorld::self().resolve("/bin/sh");
-                        cinux::print::Println(
-                            kWorldShell.ok()
-                                ? "[armv7] file world adopted, sh answers through it"
-                                : "[armv7] file world adopted FAILED");
-                    } else {
-                        cinux::print::Println("[armv7] ext2 mount FAILED");
+                        kMotdSize);
+                    // The shell needs no copy any more: /bin/sh on the
+                    // card is a fast symlink over busybox, and the
+                    // guest's ext2 walk expands it.
+                    const auto kShellView = kWorld.resolve("/bin/sh");
+                    cinux::print::Println(kShellView.ok() ? "[armv7] bin/sh seated from the card"
+                                                          : "[armv7] bin/sh missing on the card");
+                    // Read-back probe: /proc/cpuinfo must answer through
+                    // the very vfs the syscalls use, and the first record
+                    // carries the port's vendor.
+                    const auto kView = kWorld.resolve("/proc/cpuinfo");
+                    base::safety::Check(kView.ok(), "proc cpuinfo resolve failed");
+                    const auto kNode =
+                        kView.value().ops->lookup(kView.value().self, kView.value().rest);
+                    base::safety::Check(kNode.ok(), "proc cpuinfo lookup failed");
+                    char         record[96]{};
+                    const auto   kProcRead = kView.value().ops->read(kView.value().self,
+                                                                     kNode.value(), 0, record,
+                                                                     sizeof(record));
+                    base::safety::Check(kProcRead.ok() && kProcRead.value() != 0,
+                                        "proc cpuinfo read failed");
+                    const unsigned long kBytes    = kProcRead.value();
+                    bool                saw_vendor = false;
+                    for (unsigned long index = 0; index + 4 < kBytes; ++index) {
+                        if (record[index] == 'A' && record[index + 1] == 'R' &&
+                            record[index + 2] == 'M') {
+                            saw_vendor = true;
+                            break;
+                        }
                     }
-                }
-            }
-        }
-        const base::Result<void> kDevMount = g_vfs->mount("/dev", *kDev, "devtmpfs");
-        base::safety::Check(kDevMount.ok(), "devfs mount failed");
-        const auto kFbView = g_vfs->resolve("/dev/fb0");
+                    base::safety::Check(saw_vendor, "proc cpuinfo lacks the vendor line");
+                    cinux::print::Println("[armv7] proc cpuinfo %u bytes", kBytes);
+                    // The world door answers over the card the same way
+                    // it answers over the x86 lane's own volume, with no
+                    // second mount anywhere.
+                    const auto kWorldShell = fs::FileWorld::self().resolve("/bin/sh");
+                    cinux::print::Println(
+                        kWorldShell.ok()
+                            ? "[armv7] file world seated from the card, sh answers through it"
+                            : "[armv7] file world seating FAILED");
+                    const auto kFbView = kWorld.resolve("/dev/fb0");
         base::safety::Check(kFbView.ok(), "dev fb0 resolve failed");
         cinux::print::Println("[armv7] dev fb0 %ux%u",
                               driver::Framebuffer::self().width(),
                               driver::Framebuffer::self().height());
         // ptmx answers through the very vfs the syscalls use.
-        const auto kPtmxView = g_vfs->resolve("/dev/ptmx");
+        const auto kPtmxView = kWorld.resolve("/dev/ptmx");
         base::safety::Check(kPtmxView.ok(), "dev ptmx resolve failed");
         cinux::print::Println("[armv7] dev ptmx seated");
 
@@ -345,15 +223,15 @@ void init() {
         armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 1);
         armv7::UartKeyboardEvents().publish(driver::kEvKey, 30U, 0);
         armv7::UartKeyboardEvents().publish_report();
-        const auto kEventNode = kDev->lookup("event0");
+        const auto kEventNode = kDev.lookup("event0");
         base::safety::Check(kEventNode.ok(), "dev event0 lookup failed");
-        const auto kOpened = kDev->adopt_open(kEventNode.value(), "event0");
+        const auto kOpened = kDev.adopt_open(kEventNode.value(), "event0");
         base::safety::Check(kOpened.ok(), "dev event0 open failed");
         // Three records in this ABI's shape: the key press, the
         // release, and the report word that closes the frame.
         constexpr arch::abi::InputEventLayout kEventLayout = arch::abi::kInputEventLayout;
         unsigned char raw[3 * kEventLayout.bytes] = {};
-        const auto             kChunk = kDev->read(kOpened.value(), 0, raw, sizeof(raw));
+        const auto             kChunk = kDev.read(kOpened.value(), 0, raw, sizeof(raw));
         base::safety::Check(kChunk.ok() && kChunk.value() == sizeof(raw),
                             "dev event0 read failed");
         cinux::print::Println("[armv7] dev event0 %u bytes",
@@ -371,7 +249,7 @@ void init() {
                                           kImageBytes);
         base::safety::Check(kSeated.ok() && kSeated.value() == kImageBytes,
                             "guest elf staging short");
-        const auto kGuestView = g_vfs->resolve("/tmp/guest.elf");
+        const auto kGuestView = kWorld.resolve("/tmp/guest.elf");
         base::safety::Check(kGuestView.ok(), "guest elf resolve failed");
         const auto kGuestNode =
             kGuestView.value().ops->lookup(kGuestView.value().self, kGuestView.value().rest);
@@ -408,6 +286,9 @@ void init() {
         g_guest_entry = static_cast<unsigned long>(facts.program_entry);
         cinux::print::Println("[armv7] load guest entry %X phnum %u", g_guest_entry,
                               facts.header_count);
+                }
+            }
+        }
     }
 }
 
@@ -434,7 +315,10 @@ unsigned long guest_entry() {
 
 
 fs::Vfs& vfs() {
-    return *g_vfs;
+    // The lane no longer owns a tree: the file world grew this boot's
+    // world itself, so the one neutral door names the card on this
+    // port exactly as it names the volume on x86.
+    return fs::FileWorld::self().vfs();
 }
 
 fs::RamFs& ram() {

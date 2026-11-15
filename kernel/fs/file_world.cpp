@@ -66,6 +66,7 @@ fs::DevFs& FileWorld::devices() {
 
 void FileWorld::adopt(Vfs& borrowed_vfs) {
     borrowed_ = &borrowed_vfs;
+    seated_  = true;
 }
 
 Vfs& FileWorld::world() const {
@@ -83,6 +84,10 @@ void FileWorld::init(driver::BlockPort& root_port, unsigned long long (*wall_clo
     // hand the very card a bring-up lane mounted. The ladder from the
     // port up -- queue, cache, volume, the "/" seat -- is the shared
     // one either way.
+    if (seated_) {
+        return;
+    }
+    seated_      = true;
     block_port_ = &root_port;
     const fs::BlockVolume kVolume = fs::MountBlockVolume(vfs_, "/", *block_port_, wall_clock);
     queue_                        = kVolume.queue;
