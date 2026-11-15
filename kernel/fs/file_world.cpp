@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026
  */
 
+#include "kernel/arch/console_world.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/fs/block_volume.hpp"
@@ -55,15 +56,22 @@
 
 namespace cinux::fs {
 
-namespace {
-
-unsigned long long wall_clock() {
-    return driver::Rtc::self().now_seconds();
+fs::DevFs& FileWorld::devices() {
+    return devfs_;
 }
 
-}  // namespace
+void FileWorld::adopt(Vfs& borrowed_vfs) {
+    borrowed_ = &borrowed_vfs;
+}
 
-void FileWorld::init(driver::BlockPort& root_port) {
+Vfs& FileWorld::world() const {
+    if (borrowed_ != nullptr) {
+        return *borrowed_;
+    }
+    return const_cast<FileWorld*>(this)->vfs_;
+}
+
+void FileWorld::init(driver::BlockPort& root_port, unsigned long long (*wall_clock)()) {
     // The neutral ladder: erased port, queue, cache, volume, mount. Only
     // the device and the mount point are this port's words.
     // The port naming the root volume is the caller's word: the x86
@@ -78,50 +86,10 @@ void FileWorld::init(driver::BlockPort& root_port) {
     volume_                       = kVolume.volume;
     base::safety::Check(kVolume.mounted, "ext2 root mount failed");
 
-    // The tree grows through the neutral face; only the two input
-    // sources and the console key tap are this port's words.
-    driver::SetConsoleKeyTap(driver::ConsoleKeyTap{
-        .take = +[](char* out) {
-            const char kMaybe = driver::Keyboard::self().take(false);
-            if (kMaybe != 0) {
-                *out = kMaybe;
-                return true;
-            }
-            if (driver::UsbKeyboard::self().poll()) {
-                *out = driver::UsbKeyboard::self().take();
-                return true;
-            }
-            return false;
-        },
-        .has = +[] {
-            return driver::Keyboard::self().poll() || driver::UsbKeyboard::self().poll();
-        },
-    });
-    [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
-    const bool                  kTablet      = driver::UsbTablet::self().init();
-    SeatDeviceTree(devfs_, driver::Keyboard::self().events(),
-                   kTablet ? driver::UsbTablet::self().events()
-                           : driver::Ps2Mouse::self().events());
-    const base::Result<void> kSata = driver::DeviceModel::self().seat({
-        .klass       = driver::DeviceClass::kBlock,
-        .name        = "sata0",
-        .number      = MakeDeviceId(8, 0),
-        .ops         = nullptr,
-        .bus         = "pci",
-        .driver_name = "ahci",
-    });
-    base::safety::Check(kSata.ok(), "device model refused the sata0 seat");
-    if (driver::Nvme::self().ready()) {
-        const auto kNvme = driver::DeviceModel::self().seat({
-            .klass       = driver::DeviceClass::kBlock,
-            .name        = "nvme0",
-            .number      = MakeDeviceId(259, 0),
-            .ops         = nullptr,
-            .bus         = "pci",
-            .driver_name = "nvme",
-        });
-        base::safety::Check(kNvme.ok(), "device model refused the nvme0 seat");
-    }
+    // The console world -- key taps, input event seats, the disk model
+    // rows -- is the port's own word and grows through the arch hook
+    // right after the mounts; the tree itself is shared.
+    arch::SeatConsoleWorld(devfs_);
     const base::Result<void> kDevices = vfs_.mount("/dev", devfs_, "devtmpfs");
     base::safety::Check(kDevices.ok(), "devfs mount failed");
 
@@ -131,11 +99,11 @@ void FileWorld::init(driver::BlockPort& root_port) {
 }
 
 base::Result<FsView> FileWorld::resolve(std::string_view path) {
-    return vfs_.resolve(path);
+    return world().resolve(path);
 }
 
 Vfs& FileWorld::vfs() {
-    return vfs_;
+    return world();
 }
 
 Vfs& kernel_vfs() {
@@ -143,11 +111,11 @@ Vfs& kernel_vfs() {
 }
 
 base::Result<void> FileWorld::seat_console_streams(FileTable& table) {
-    return SeatConsoleStreams(vfs_, table);
+    return SeatConsoleStreams(world(), table);
 }
 
 unsigned long FileWorld::mounts_text(char* out, unsigned long capacity) const {
-    return vfs_.mounts_text(out, capacity);
+    return world().mounts_text(out, capacity);
 }
 
 }  // namespace cinux::fs

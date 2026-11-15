@@ -26,6 +26,7 @@
 #include "kernel/arch/armv7/errno.hpp"
 #include "kernel/arch/armv7/user_access.hpp"
 #include "kernel/arch/armv7/uart.hpp"
+#include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/ramfs/ramfs.hpp"
 #include "kernel/fs/vfs.hpp"
@@ -327,6 +328,17 @@ void init() {
                         const auto kShellView = g_vfs->resolve("/bin/sh");
                         cinux::print::Println(kShellView.ok() ? "[armv7] bin/sh seated from the card"
                                                               : "[armv7] bin/sh missing on the card");
+                        // The file world adopts this very tree: the
+                        // init lane's doors -- resolve, console streams,
+                        // the mounts picture -- answer over the card
+                        // the same way the x86 lane's answer over its
+                        // own volume, with no second mount anywhere.
+                        fs::FileWorld::self().adopt(*g_vfs);
+                        const auto kWorldShell = fs::FileWorld::self().resolve("/bin/sh");
+                        cinux::print::Println(
+                            kWorldShell.ok()
+                                ? "[armv7] file world adopted, sh answers through it"
+                                : "[armv7] file world adopted FAILED");
                     } else {
                         cinux::print::Println("[armv7] ext2 mount FAILED");
                     }
@@ -448,8 +460,6 @@ fs::RamFs& ram() {
 
 }  // namespace cinux::armv7::userfs
 
-namespace cinux::fs {
-Vfs& kernel_vfs() {
-    return cinux::armv7::userfs::vfs();
-}
-}  // namespace cinux::fs
+// kernel_vfs() answers through the file world alone: this lane adopts
+// its own tree into it, so the one neutral door -- FileWorld::vfs() --
+// names the card on this port exactly as it names the volume on x86.

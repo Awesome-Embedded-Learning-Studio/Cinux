@@ -73,7 +73,18 @@ public:
      * @since   0.1.0
      * @ingroup kernel_fs
      */
-    void init(driver::BlockPort& root_port);
+    void init(driver::BlockPort& root_port, unsigned long long (*wall_clock)() = nullptr);
+
+    /// Adopts a lane's own already-mounted tree: no fresh mount, no
+    /// device seats, no input taps -- the file faces simply answer
+    /// through the borrowed world. A bring-up lane that grew its own
+    /// vfs hands it here so the init lane's doors (resolve, console
+    /// streams, the mounts picture) work over the same tree.
+    void adopt(Vfs& borrowed_vfs);
+
+    /// The device tree init() grew: the arch hook seats into it, and a
+    /// lane that wants its own leaves can reach the same tree.
+    [[nodiscard]] DevFs& devices();
 
     /**
      * @brief Flushes the persistent root cache and waits for the device.
@@ -156,6 +167,14 @@ private:
     FileWorld() = default;
 
     Vfs    vfs_;
+    /// Set when a lane hands its own already-mounted tree instead of
+    /// growing one here; every read face goes through world() so both
+    /// lanes share the same doors.
+    Vfs*   borrowed_ = nullptr;
+
+    /// The tree every read face answers through: the lane's own when
+    /// adopted, the one init() grew otherwise.
+    Vfs& world() const;
     DevFs  devfs_;
     ProcFs procfs_;
 

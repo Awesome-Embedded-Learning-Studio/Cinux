@@ -31,6 +31,7 @@ add_custom_command(
 
 add_executable(arm_image
     start.S
+    console_world.cpp
     kmain.cpp
     uart.cpp
     timer.cpp
@@ -167,10 +168,12 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/net/raw.cpp
     ${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
     ${CMAKE_SOURCE_DIR}/kernel/net/udp.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/file_world.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/vfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/file_lock.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/procfs/procfs.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/fs/procfs/procfs_init.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/task.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/scheduler.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp

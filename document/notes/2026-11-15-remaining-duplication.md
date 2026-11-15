@@ -95,6 +95,14 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+FileWorld 瘦身与 kernel_vfs 归一（2026-11-15 第十五轮）：init() 的外设尾巴（键源拍子、
+USB 键盘座位、tablet/ps2 事件树、sata/nvme 设备行）拆成 arch 钩子 SeatConsoleWorld——
+x86 半页在 kernel/arch/x86_64/console_world.cpp，arm 半页在 kernel/arch/armv7/，
+init() 只留挂载（根端口与墙上钟都成参数，钟由车道递）。arm 侧 user_fs 把自己的树 adopt
+进 FileWorld（borrowed 指针，读门全走 world()），新判词 file world adopted 证明
+resolve 在 arm 上答卡根。顺带 kernel_vfs 从两处定义归一成 file_world.cpp 一处——
+arm 的 user_fs 覆盖版删除，两边同走 FileWorld::vfs()。
+
 完整启动的差距盘点与第一缝（2026-11-15 第十四轮）：对齐 x86 与 arm 的第一用户世界后差距
 清楚了——x86 是 KernelEntry 起调度循环再 StartInitThread（kernel_init 任务读 /sbin/init、
 座位循环带重生），arm 是 kmain 自检后手摇 run_seated_world。GUI 不缺（desk 车道绿），
