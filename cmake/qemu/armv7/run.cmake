@@ -89,7 +89,7 @@ endforeach()
 if(_arm_busybox_bin)
     # busybox runs one applet: `stat` proves the binary started, the
     # metadata street answered, and the record reached its own libc.
-    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /disk/prog")
+    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
 endif()
 
 # The glibc station rides an optional artifact: only a host with the
@@ -99,7 +99,7 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
     set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
     list(APPEND _arm_glibc_arg
          "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok, argc 1, "
-        "self /disk/glibc")
+        "self /glibc")
     # The frame-buffer landing: the kernel stamps a marker before the
     # program starts, the program reads it through its own mapping.
     list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")
@@ -155,7 +155,7 @@ add_test(NAME arm_boot
             "-DEXPECTED_PTY=pty ok, master and slave echo"
             "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
             "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"
-            "-DEXPECTED_GETDENTS=getdents ok, root holds six entries with hello"
+            "-DEXPECTED_GETDENTS=getdents ok, root holds a bin tree with hello"
             "-DEXPECTED_STDIN=stdin ok, line read back"
             "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
             "-DSTDIN_DELAY=6"

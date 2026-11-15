@@ -19,6 +19,23 @@ trap 'rm -f "${volume}"' EXIT
 truncate -s $((partition_sectors * 512)) "${volume}"
 mkfs.ext2 -q -F -b 1024 -O none -N 64 "${volume}"
 debugfs -w -R 'mkdir /etc' "${volume}" >/dev/null 2>&1
+# The two mount points a root has to offer: procfs and devfs land here.
+debugfs -w -R 'mkdir /proc' "${volume}" >/dev/null 2>&1
+debugfs -w -R 'mkdir /dev' "${volume}" >/dev/null 2>&1
+# The bring-up files the kernel's ramfs used to seed, now on the card so
+# the same paths answer whichever filesystem owns the root.
+printf 'hi there\n' > "${seed_dir}/.root-motd.tmp"
+debugfs -w -R "write ${seed_dir}/.root-motd.tmp /motd" "${volume}" >/dev/null 2>&1
+rm -f "${seed_dir}/.root-motd.tmp"
+printf 'hello\n' > "${seed_dir}/.root-hello.tmp"
+debugfs -w -R "write ${seed_dir}/.root-hello.tmp /hello" "${volume}" >/dev/null 2>&1
+rm -f "${seed_dir}/.root-hello.tmp"
+printf 'readme!\n' > "${seed_dir}/.root-readme.tmp"
+debugfs -w -R "write ${seed_dir}/.root-readme.tmp /readme" "${volume}" >/dev/null 2>&1
+rm -f "${seed_dir}/.root-readme.tmp"
+printf '' > "${seed_dir}/.root-scratch.tmp"
+debugfs -w -R "write ${seed_dir}/.root-scratch.tmp /scratch" "${volume}" >/dev/null 2>&1
+rm -f "${seed_dir}/.root-scratch.tmp"
 debugfs -w -R "write ${seed_dir}/motd.txt /etc/motd" "${volume}" >/dev/null 2>&1
 debugfs -w -R "write ${seed_dir}/zh.txt /etc/zh" "${volume}" >/dev/null 2>&1
 debugfs -w -R "write ${seed_dir}/zh_ascii.txt /etc/zh_ascii" "${volume}" >/dev/null 2>&1

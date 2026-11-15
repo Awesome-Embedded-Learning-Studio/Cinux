@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     }
 
     // The disk through libc: the motd the image was molded with.
-    const int kFd = open("/disk/etc/motd", O_RDONLY);
+    const int kFd = open("/etc/motd", O_RDONLY);
     if (kFd < 0) {
         char why[64] = {};
         const int kLen = snprintf(why, sizeof(why), "[glibc] open failed errno %d\n", errno);
@@ -145,10 +145,10 @@ int main(int argc, char** argv) {
     // every word it decodes is printed, which is how a key that reached
     // the desktop gets seen from the serial log.
     char* const kEnv[] = {(char*)"VESPER_FBDEV_TRACE=1", NULL};
-    execve("/disk/desk", kArgs, kEnv);
+    execve("/desk", kArgs, kEnv);
 #else
-    char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/disk/prog", NULL};
-    execve("/disk/bb", kArgs, NULL);
+    char* const kArgs[] = {(char*)"busybox", (char*)"stat", (char*)"/prog", NULL};
+    execve("/bb", kArgs, NULL);
 #endif
     static const char kNoBb[] = "[glibc] busybox exec refused\n";
     write(STDOUT_FILENO, kNoBb, sizeof(kNoBb) - 1U);

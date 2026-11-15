@@ -88,7 +88,23 @@ arm 那段手写的设备节点摆放换成调用它。这是能立刻缩小重�
 `/bin/vesper`，探针加了用例证明客人侧的 ext2 驱动能把这些快符号链接解析成真
 文件——`/disk/bin/sh` 打开后读到的是 ELF 魔数。
 
-挂载还没翻。翻的时候要一起改的清单（下一轮按这个做）：
+挂载翻了（2026-11-15 第三轮）。清单里五件事的实际落点：
+
+1. `user_fs.cpp`：盘挂载前先 `unmount("/")`，ramfs 转任 `/tmp` 暂存区，
+   guest ELF 的 blob 停在 `/tmp/guest.elf`（ramfs 内部名仍是 `guest.elf`，
+   `/tmp` 这半是 VFS 路由的事，不进 ramfs 路径空间）；
+2. 探针路径全部翻成根视角：`/etc/motd`、`/bin/sh`、`/prog`；
+3. getdents 计数从"六项"改成"至少八项且含 hello"——盘根的条目会随布局生长；
+4. 桌面车道不用改 `cat`，它的输入走 USB tablet，不走路径；
+5. 壳不再拷贝：`/bin/sh` 是卡上的快符号链接，ext2 的走查自己展开。
+
+清单之外翻出来两处旧路径，是清单没照到的：`armv7_diskprog.c` 的接力
+`/disk/glibc` 改 `/glibc`（这处卡了两条车道：glibc 车站与桌面都从这条
+接力进来），`armv7_glibc_hello.c` 的三处 `/disk/...`。diskprog.elf 的重编
+命令：`arm-none-eabi-gcc -ffreestanding -nostdlib -fno-pic -fno-builtin
+-O2 -march=armv7-a -marm -T <单段链接脚本,基址0x40000000> -e disk_start`。
+
+原清单备份（已执行）：
 
 1. `user_fs.cpp`：挂 ext2 到 `/`，ramfs 只留 `/proc`、`/dev` 两个挂载点；
 2. 探针路径 `/disk/etc/motd` → `/etc/motd`，`/disk/bin/sh` → `/bin/sh`；

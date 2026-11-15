@@ -266,7 +266,7 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     {
         static const char kDmA[] = "[guest] disk motd refused\n";
         static const char kDmB[] = "[guest] disk motd: Cinux says hello from a real disk.\n";
-        static const char kPath[] = "/disk/etc/motd";
+        static const char kPath[] = "/etc/motd";
         const long kFd = sys3(5UL, (unsigned long)kPath, 0UL, 0UL);  // open
         char back[48];
         unsigned long line = 0;
@@ -288,14 +288,14 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(6UL, kFd, 0UL, 0UL);  // close
         }
     }
-    // The root layout's links: /disk/bin/sh is a fast symlink to busybox,
+    // The root layout's links: /bin/sh is a fast symlink to busybox,
     // so opening it proves the walk expanded a relative target and landed
     // on the volume's real ELF. The card grows the same bin/etc/sbin shape
     // the x86 volume has; this is the read that says the walk can find it.
     {
         static const char kLnA[] = "[guest] root layout link refused\n";
         static const char kLnB[] = "[guest] symlink ok, bin/sh opens as an ELF\n";
-        static const char kLinkPath[] = "/disk/bin/sh";
+        static const char kLinkPath[] = "/bin/sh";
         const long kFd = sys3(5UL, (unsigned long)kLinkPath, 0UL, 0UL);  // open
         unsigned char magic[4] = {0, 0, 0, 0};
         const long kRead = kFd >= 0 ? sys3(3UL, kFd, (unsigned long)magic, sizeof(magic)) : -1L;
@@ -399,7 +399,7 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     // hello included now that the old world releases what it holds.
     {
         static const char kDlA[] = "[guest] getdents refused\n";
-        static const char kDlB[] = "[guest] getdents ok, root holds six entries with hello\n";
+        static const char kDlB[] = "[guest] getdents ok, root holds a bin tree with hello\n";
         const long kRoot = sys3(5UL, (unsigned long)"/", 0UL, 0UL);
         unsigned char records[512];
         unsigned long names = 0;
@@ -419,9 +419,10 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
                 walk += kLen;
             }
         }
-        // Six now: the five seeded files plus the /disk doorway the
-        // ext2 mount added to the root.
-        if (got > 0 && names == 6 && saw_hello) {
+        // The card's root now: a bin tree, the bring-up files, the
+        // station binaries. The count is a shape check -- eight at least,
+        // hello among them -- because the layout will keep growing.
+        if (got > 0 && names >= 8 && saw_hello) {
             sys3(4UL, 1UL, (unsigned long)kDlB, slen(kDlB));
         } else {
             sys3(4UL, 1UL, (unsigned long)kDlA, slen(kDlA));
@@ -591,7 +592,7 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
     // seat and speaks its own line.
     {
         static const char kExA[] = "[guest] exec from disk refused\n";
-        static const char kPath[] = "/disk/prog";
+        static const char kPath[] = "/prog";
         const long kVerdict = sys3(11UL, (unsigned long)kPath, 0UL, 0UL);  // execve
         if (kVerdict != 0) {
             sys3(4UL, 1UL, (unsigned long)kExA, slen(kExA));
