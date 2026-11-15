@@ -43,6 +43,13 @@ struct CpuContext {
     unsigned long lr;
     unsigned long spsr;
 
+    /// The user-mode link register, r14_usr. r14 is banked per mode, so
+    /// the supervisor's `lr` above never carries the user's; a task that
+    /// is switched out inside a service call would otherwise hand the
+    /// next world's r14_usr to its caller. The word fills the padding
+    /// between spsr and the 64-bit segment bases.
+    unsigned long user_lr = 0;
+
     /// No segment bases exist on this port; the fields keep the shared
     /// switch code compilable and stay zero.
     unsigned long long fs_base = 0;
@@ -58,6 +65,8 @@ struct CpuContext {
 
 static_assert(offsetof(CpuContext, spsr) == 10 * sizeof(unsigned long),
               "the switch moves eleven words");
+static_assert(offsetof(CpuContext, user_lr) == 44,
+              "the user link register sits where the switch reads it");
 static_assert(offsetof(CpuContext, tpidruro) == 64,
               "the thread pointer sits where the switch reads it");
 static_assert(sizeof(CpuContext) == 72,

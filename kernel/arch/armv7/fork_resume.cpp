@@ -28,6 +28,7 @@ extern "C" cinux::arch::UserTrap* g_current_trap;
 }
 
 extern "C" void SeatForkChildEntry();
+extern "C" unsigned long ReadUserLr();
 
 namespace cinux::proc {
 
@@ -47,6 +48,12 @@ void PrepareForkResume(Task& child, const Task& parent, unsigned long long frame
     child.ctx.sp   = kFrame;
     child.ctx.lr   = reinterpret_cast<unsigned long>(&SeatForkChildEntry);
     child.ctx.spsr = 0x13UL;  // supervisor: the entry runs as a kernel body
+    // The user link register is not part of the episode frame: it is a
+    // banked register the kernel never touched while the parent sat in
+    // the service call. The child has to be handed the parent's, or the
+    // wrapper that made the call returns through whatever r14_usr the
+    // last-run world left behind.
+    child.ctx.user_lr = ReadUserLr();
     // The thread pointer is a register, not memory: a fork's child has
     // to be handed the parent's, or its first errno write lands at
     // TP=0 and the child dies before it can exec.

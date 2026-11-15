@@ -18,6 +18,8 @@
  */
 
 #include "kernel/arch/abi.hpp"
+
+#include <string_view>
 #include "kernel/arch/armv7/user_fs.hpp"
 
 #include "cinux/result.hpp"
@@ -37,6 +39,7 @@
 #include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
+#include "kernel/proc/scheduler.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/device_tree.hpp"
 #include "kernel/fs/devfs/fb_node.hpp"
@@ -89,6 +92,74 @@ void seed_file(const char* name, const char* text, unsigned long bytes) {
     }
 }
 
+/// Resolves the current task's program through this port's own VFS.
+/// The /proc/self/exe seat answers from here, so a busybox applet that
+/// re-execs itself finds the image the shell was seated from; without
+/// it the node reads as an empty file and every non-NOEXEC applet
+/// reports "not found".
+bool proc_exe_view(fs::FsView& view, fs::FsNode& node) {
+    const proc::Task* const kSelf = proc::Scheduler::self().current();
+    if (kSelf == nullptr || kSelf->exe[0] != '/') {
+        return false;
+    }
+    // A task whose own record is the magic path can only be asking the
+    // window about itself: answer nothing rather than recurse.
+    if (std::string_view{kSelf->exe} == "/proc/self/exe") {
+        return false;
+    }
+    const base::Result<fs::FsView> kView = g_vfs->resolve(kSelf->exe);
+    if (!kView.ok()) {
+        return false;
+    }
+    view                                 = kView.value();
+    const base::Result<fs::FsNode> kNode = view.ops->lookup(view.self, view.rest);
+    if (!kNode.ok()) {
+        return false;
+    }
+    node = kNode.value();
+    return true;
+}
+
+unsigned long proc_exe_path(void* /*context*/, char* out, unsigned long cap) {
+    const proc::Task* const kSelf = proc::Scheduler::self().current();
+    if (kSelf == nullptr || cap == 0) {
+        return 0;
+    }
+    unsigned long used = 0;
+    while (used + 1 < cap && kSelf->exe[used] != '\0') {
+        out[used] = kSelf->exe[used];
+        ++used;
+    }
+    out[used] = '\0';
+    return used;
+}
+
+bool proc_exe_bytes(void* /*context*/, unsigned long offset, void* sink, unsigned long count,
+                    unsigned long& gave) {
+    fs::FsView view{};
+    fs::FsNode node{};
+    if (!proc_exe_view(view, node)) {
+        return false;
+    }
+    const base::Result<unsigned long> kGot = view.ops->read(view.self, node, offset, sink, count);
+    if (!kGot.ok()) {
+        return false;
+    }
+    gave = kGot.value();
+    return true;
+}
+
+unsigned long proc_exe_size(void* /*context*/) {
+    fs::FsView view{};
+    fs::FsNode node{};
+    if (!proc_exe_view(view, node)) {
+        return 0;
+    }
+    fs::FsStat               probed{};
+    const base::Result<void> kProbed = view.ops->stat(view.self, node, probed);
+    return kProbed.ok() ? probed.size : 0;
+}
+
 }  // namespace
 
 void init() {
@@ -108,11 +179,14 @@ void init() {
     seed_file("scratch", "", 0);
     const base::Result<void> kRoot = g_vfs->mount("/", *g_ram, "ramfs");
     base::safety::Check(kRoot.ok(), "root mount failed");
-    // The facts instance answers from the port's own identity decode
-    // and the page manager; every seat the arm lane cannot fill yet
-    // stays null and reads as a quiet empty file.
+    // The facts instance answers from the port's own identity decode,
+    // the page manager, and the executable window; the seats this lane
+    // cannot fill yet stay null and read as a quiet empty file.
     g_proc = new fs::ProcFs();
     g_proc->set_source(fs::ProcSource{
+        .exe_path  = proc_exe_path,
+        .exe_bytes = proc_exe_bytes,
+        .exe_size  = proc_exe_size,
         .memory =
             [](void*, unsigned long& free_pages, unsigned long& total_pages) {
                 free_pages  = mm::Pmm::self().free_page_count();

@@ -367,7 +367,23 @@ long long HandleExecve(const SyscallFrame& frame) {
     kSelf->keep_capabilities = false;
     kSelf->clear_child_tid   = 0;
     kSelf->files->close_on_exec();
-    note_program_identity(*kSelf, path);
+    // A program that re-execs itself through /proc/self/exe must be
+    // recorded under the file that path really names: the node is a
+    // window onto the *current* program, and a task whose exe said
+    // "/proc/self/exe" would make every later read of that window
+    // resolve to itself.
+    char        identity_storage[fs::kFsPathMax] = {};
+    const char* identity                         = path;
+    if (std::string_view{path} == "/proc/self/exe" && kSelf->exe[0] == '/') {
+        unsigned long used = 0;
+        while (used + 1 < sizeof(identity_storage) && kSelf->exe[used] != '\0') {
+            identity_storage[used] = kSelf->exe[used];
+            ++used;
+        }
+        identity_storage[used] = '\0';
+        identity               = identity_storage;
+    }
+    note_program_identity(*kSelf, identity);
     // The dying worlds must not come apart while CR3 still walks them:
     // park the old holds aside, switch, and let them go at scope end.
     // NOLINTNEXTLINE(misc-const-correctness) the dying worlds go at scope end

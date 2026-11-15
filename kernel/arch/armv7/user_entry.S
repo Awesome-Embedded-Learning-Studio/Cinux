@@ -19,6 +19,10 @@
 
 EnterUserModeWithReturn:
     stmia   r2, {r4-r11, sp, lr}
+    cps     #0x1F                   @ System mode: r14 is the user's
+    mov     r3, lr
+    cps     #0x13
+    str     r3, [r2, #44]           @ the kernel half keeps the user lr
     mov     r3, #0x10               @ user mode CPSR
     cps     #0x1F                   @ system mode: the user bank's sp
     mov     sp, r1
@@ -50,5 +54,9 @@ SaveContextResumeTrap:
     stmia   r0, {r4-r11, sp, lr}
     mrs     r2, spsr
     str     r2, [r0, #40]
+    cps     #0x1F
+    mov     r2, lr
+    cps     #0x13
+    str     r2, [r0, #44]
     mov     r0, r1
     b       ResumeTrap
