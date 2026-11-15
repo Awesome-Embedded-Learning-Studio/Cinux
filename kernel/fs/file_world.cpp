@@ -63,11 +63,15 @@ unsigned long long wall_clock() {
 
 }  // namespace
 
-void FileWorld::init() {
+void FileWorld::init(driver::BlockPort& root_port) {
     // The neutral ladder: erased port, queue, cache, volume, mount. Only
     // the device and the mount point are this port's words.
-    block_port_ = new driver::BlockPort();
-    block_port_->adopt(driver::Ahci::self());
+    // The port naming the root volume is the caller's word: the x86
+    // lane hands one adopted over its SATA host, another port could
+    // hand the very card a bring-up lane mounted. The ladder from the
+    // port up -- queue, cache, volume, the "/" seat -- is the shared
+    // one either way.
+    block_port_ = &root_port;
     const fs::BlockVolume kVolume = fs::MountBlockVolume(vfs_, "/", *block_port_, wall_clock);
     queue_                        = kVolume.queue;
     cache_                        = kVolume.cache;

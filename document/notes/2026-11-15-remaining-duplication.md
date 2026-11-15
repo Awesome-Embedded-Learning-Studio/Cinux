@@ -95,6 +95,16 @@ huge window，arm 建一级描述符表、按 1 MiB 段填），没有可合并�
 
 ## 四、已经中立、不用动的
 
+完整启动的差距盘点与第一缝（2026-11-15 第十四轮）：对齐 x86 与 arm 的第一用户世界后差距
+清楚了——x86 是 KernelEntry 起调度循环再 StartInitThread（kernel_init 任务读 /sbin/init、
+座位循环带重生），arm 是 kmain 自检后手摇 run_seated_world。GUI 不缺（desk 车道绿），
+缺的是 pid 1 这条路。StartInitThread 的依赖在 arm 上大多已链接（net 泵、调度器、SeatProgram
+梯子、kernel_vfs 已指向卡根），最深的焊死是 FileWorld::init 内部自建 BlockPort 并 adopt
+AHCI。第一缝：根端口改为参数（init(driver::BlockPort& root_port)），x86 车道在调用处
+自建 SATA 端口递进去，别的车道可以递自己的卡端口。arm 侧 user_fs 仍用自己的梯子挂卡，
+下一轮把 FileWorld 剩下的 x86 词（键源、sata/nvme 设备座位、devfs/procfs）逐件审视后
+让 arm 递 usdhc 端口进同一扇门。
+
 入场随机与栈顶滑动收进 loader（2026-11-15 第十三轮）：三个 SeatProgram 调用点审计后，
 梯子本身早已一体，剩的是入场装配的拼法两边各写一份——十六字节随机（init_thread 用裸
 Word 连写两拍，sys_exec 的 draw_entry_random 逐字带 TryWord 回退）与栈顶滑动（同一张

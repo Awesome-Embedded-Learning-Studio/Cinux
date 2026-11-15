@@ -73,7 +73,7 @@ public:
      * @since   0.1.0
      * @ingroup kernel_fs
      */
-    void init();
+    void init(driver::BlockPort& root_port);
 
     /**
      * @brief Flushes the persistent root cache and waits for the device.

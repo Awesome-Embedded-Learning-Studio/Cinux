@@ -38,6 +38,8 @@
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/drivers/ahci/ahci.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
@@ -246,7 +248,12 @@ bool seat_shell_task(proc::Task& parent) {
 
 void StartInitThread() {
     auto kernel_init = +[] {
-        fs::FileWorld::self().init();
+        // The root volume's door: one port adopted over the SATA host
+        // this lane owns. A lane with another block device hands its
+        // own port; the mount ladder above it is shared.
+        static driver::BlockPort sata_port;
+        sata_port.adopt(driver::Ahci::self());
+        fs::FileWorld::self().init(sata_port);
         fs::StartConsoleInputPump();
         base::safety::Check(net::NetWorld::self().start_pump(), "net pump refused its seat");
         {
