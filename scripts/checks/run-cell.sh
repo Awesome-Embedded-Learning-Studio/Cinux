@@ -42,7 +42,7 @@ case "$mode" in
     checks) flags+=(-DCINUX_UBSAN=ON -DCINUX_LOCKDEP=ON) ;;
 esac
 launcher=${CINUX_COMPILER_LAUNCHER:-}
-if [[ "$suite" == selfhost || "$suite" == native ]]; then
+if [[ "$suite" == native ]]; then
     launcher=""
 fi
 flags+=(-DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher")

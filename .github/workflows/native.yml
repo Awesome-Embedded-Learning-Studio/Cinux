@@ -1,26 +1,27 @@
-name: Cinux self-host and persistence
+name: Cinux native build and persistence
 
+# Manual only. The native lane bakes a Buildroot volume and takes about an
+# hour, so it is not run on a schedule or on every push. The self-host cell
+# this workflow used to carry retired with the in-guest kernel build, and
+# run-cell no longer accepts that suite.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 19 * * 5'
 
 permissions:
   contents: read
 
 concurrency:
-  group: selfhost-${{ github.ref }}
+  group: native-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  selfhost:
-    name: ${{ matrix.suite }} (Release, ${{ matrix.checks }})
+  native:
+    name: native (Release, ${{ matrix.checks }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        suite: [selfhost, native]
         checks: [none, checks]
     steps:
       - uses: actions/checkout@v4
@@ -29,20 +30,19 @@ jobs:
       - uses: ./.github/actions/setup-cinux
         with:
           kvm: 'true'
-          cache-key: ${{ matrix.suite }}-${{ matrix.checks }}
+          cache-key: native-${{ matrix.checks }}
       - name: Prepare tar-capable mke2fs for the native Buildroot volume
-        if: matrix.suite == 'native'
         run: |
           bash scripts/checks/setup-mke2fs.sh "$RUNNER_TEMP/cinux-e2fsprogs"
           echo "$RUNNER_TEMP/cinux-e2fsprogs/sbin" >> "$GITHUB_PATH"
-      - name: Run existing complete self-build validation
+      - name: Run the native build cell
         env:
           CINUX_CHECK_JOBS: '4'
-        run: bash scripts/checks/run-cell.sh ${{ matrix.suite }} Release ${{ matrix.checks }} build-ci
+        run: bash scripts/checks/run-cell.sh native Release ${{ matrix.checks }} build-ci
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.suite }}-${{ matrix.checks }}-logs
+          name: native-${{ matrix.checks }}-logs
           path: |
             build-ci/*.log
             build-ci/*.json
