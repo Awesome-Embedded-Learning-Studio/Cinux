@@ -70,7 +70,7 @@ def main():
             guest.command('ping -c 2 -W 2 ' + shlex.quote(host) +
                           f'; echo PING_{index}_$?', f'PING_{index}')
         guest.command(r"printf '#include <stdint.h>\nuint32_t x;\n' | g++ -m32 -ffreestanding -x c++ -c - -o /tmp/boot32.o; echo BOOT32_$?", 'BOOT32')
-        guest.command('tar --format=ustar -C assets/initrd -cf /tmp/native-initrd.tar readme.txt docs; echo TAR_$?', 'TAR')
+        guest.command('tar --format=ustar -C assets -cf /tmp/native-assets.tar README font.psf; echo TAR_$?', 'TAR')
         if args.probe_only:
             guest.command('sync; echo SYNC_$?', 'SYNC')
             ensure_clean(guest.transcript)

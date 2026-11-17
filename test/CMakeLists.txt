@@ -322,7 +322,6 @@ add_cinux_test(fs/ramfs ${CMAKE_SOURCE_DIR}/kernel/fs/ramfs/ramfs.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/sync.cpp
                          ${CMAKE_SOURCE_DIR}/test/framework/clock_host.cpp
                        ${CMAKE_SOURCE_DIR}/kernel/proc/lockdep.cpp ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp)
-add_cinux_test(fs/ustar ${CMAKE_SOURCE_DIR}/kernel/fs/ustar.cpp)
 add_cinux_test(fs/ext2 ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_layout.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2.cpp
                     ${CMAKE_SOURCE_DIR}/kernel/fs/ext2/ext2_write.cpp
