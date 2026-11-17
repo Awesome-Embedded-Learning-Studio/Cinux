@@ -212,20 +212,34 @@ sys3(4UL, 1UL, (unsigned long)(good ? kEdB : kEdA), slen(good ? kEdB : kEdA));
             sys3(4UL, 1UL, (unsigned long)kLiA, slen(kLiA));
         }
     }
-    // The code page is read-only: a write faults, and the seat's cow
-    // seam must hand back a private writable copy before the readback.
+    // The code page is read-only: a write from a child faults, ends that
+    // child with the fault word, and leaves the page's own bytes alone.
+    // The parent checks all three, so a write that quietly took a private
+    // copy fails this line.
     {
-        static const char kRoA[] = "[guest] code page stayed read-only\n";
-        static const char kRoB[] = "[guest] cow seat ok, code write repaired\n";
-        // The pad lands inside its own sacrificial rodata bytes: an
-        // address picked bare once landed on kRoB's own space byte and
-        // the "corrupted" UART byte was the probe rewriting itself.
+        static const char kRoA[] = "[guest] code page check failed\n";
+        static const char kRoB[] = "[guest] code page stayed read-only\n";
+        // The pad lands inside this probe's own rodata: the RX segment
+        // carries it, so its range never promises a write.
         static const unsigned char kScratch[16] = {1, 2, 3, 4, 5, 6, 7, 8,
                                                    9, 10, 11, 12, 13, 14, 15, 16};
         volatile unsigned char* kPad = (volatile unsigned char*)kScratch + 8;
-        *kPad = 0xA5;
-        sys3(4UL, 1UL, (unsigned long)(*kPad == 0xA5 ? kRoB : kRoA),
-             *kPad == 0xA5 ? slen(kRoB) : slen(kRoA));
+        const unsigned char kBefore = *kPad;
+        const long kChild = sys3(2UL, 0UL, 0UL, 0UL);  // fork
+        if (kChild < 0) {
+            sys3(4UL, 1UL, (unsigned long)kRoA, slen(kRoA));
+        } else if (kChild == 0) {
+            *kPad = 0xA5;              // must fault and end this child
+            sys3(1UL, 0UL, 0UL, 0UL);  // reached only when the write passed
+            for (;;) {
+            }
+        } else {
+            unsigned int status = 0;
+            const long kReaped = sys3(114UL, (unsigned long)kChild,
+                                      (unsigned long)&status, 0UL);
+            const int kOk = kReaped == kChild && status == 0xDEADU && *kPad == kBefore;
+            sys3(4UL, 1UL, (unsigned long)(kOk ? kRoB : kRoA), slen(kOk ? kRoB : kRoA));
+        }
     }
     // Nonblocking stdin: F_SETFL arms O_NONBLOCK, and the empty
     // line answers EAGAIN instead of parking the caller.

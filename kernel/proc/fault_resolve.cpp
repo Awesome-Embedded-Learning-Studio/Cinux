@@ -28,7 +28,7 @@ namespace {
 bool resolve_current_fault(unsigned long long address, unsigned long long error_code) {
     const Task* const kSelf = Scheduler::self().current();
     if (kSelf == nullptr || !kSelf->space.holds() || !kSelf->vmas.holds()) {
-            return false;
+        return false;
     }
     // Work on a copy: the region could be unregistered and freed by a
     // sibling thread the moment find() returns, so the terms are read
@@ -41,14 +41,10 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     if ((error_code & arch::isr::kFaultReserved) != 0) {
         return false;
     }
-    // Copy-on-write runs ahead of the register's terms: a leaf the
-    // kernel itself made read-only — a shared frame, or a page the seat
-    // mapped protected — may become private on a write even when the
-    // range promised read-only execution. The range's terms judge what
-    // the kernel has not touched; repair judges what it has.
-    if (mm::cow::TryResolvePageFault(address, error_code)) {
-        return true;
-    }
+    // The range's terms come first: a write the range never promised is
+    // refused even when the leaf still carries a share mark from a fork.
+    // Copy-on-write answers only the faults the range allows, so a
+    // read-only promise costs the writer a fault, never a silent copy.
     const bool kAllowed = kRegion != nullptr && (!kWrite || kRegion->writable) &&
                           (!kInstruction || kRegion->executable) &&
                           (kWrite || kInstruction || kRegion->readable) &&
@@ -59,6 +55,9 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
         // repair question only, and the arch door that called it owns
         // the death (x86 exits the task, arm retires the episode).
         return false;
+    }
+    if (mm::cow::TryResolvePageFault(address, error_code)) {
+        return true;
     }
     // kRetry counts as resolved: the page already stands mapped and the
     // fault was the CPU's spurious one, so the instruction just runs

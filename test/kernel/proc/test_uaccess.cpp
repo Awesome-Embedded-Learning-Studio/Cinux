@@ -110,15 +110,8 @@ void write_readonly_pages() {
     const cinux::base::Own<cinux::mm::AddressSpace> kChild(
         cinux::mm::cow::CloneSharedSpace(*self.space));
     ASSERT_TRUE(kChild.holds());
-    // Fork shares the read-only frame and marks the leaf copy-on-write.
-    // The engine runs ahead of the range's terms by design — the seat's
-    // protected code page is repaired through the same door — so this
-    // write takes a private frame in the writer and leaves the child on
-    // the original read-only one.
-    const unsigned long kShared = self.space->translate(kCopyAddress);
-    ASSERT_TRUE(cinux::syscall::uaccess::CopyToUser(kCopyAddress, &kPayload, sizeof(kPayload)));
-    ASSERT_TRUE(self.space->translate(kCopyAddress) != kShared);
-    ASSERT_EQ(kChild->translate(kCopyAddress), kShared);
+    check_write_refused();
+    ASSERT_EQ(self.space->translate(kCopyAddress), kChild->translate(kCopyAddress));
 }
 
 void copy_stack_guard() {
@@ -175,7 +168,7 @@ TEST("uaccess: a post-fork write copies a shared page and preserves the child") 
     run_in_world(write_shared_page);
 }
 
-TEST("uaccess: read-only promises reject writes until a fork makes the page copy-on-write") {
+TEST("uaccess: read-only promises reject writes before and after residency and fork") {
     run_in_world(write_readonly_pages);
 }
 
