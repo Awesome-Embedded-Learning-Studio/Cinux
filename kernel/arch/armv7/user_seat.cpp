@@ -10,8 +10,8 @@
  * the user frame and switches the body back through ContextSwitch's
  * exception return — no new assembly, the SPSR decides the world.
  *
- * Two worlds ride this seat today: an inline probe program and the
- * loader's ELF guest; both are ordinary processes from here on.
+ * One world rides this seat: the inline probe program built into the
+ * kernel image, an ordinary task from the moment it is seated.
  *
  * @author  Charliechen114514
  * @date    2026-11-13
@@ -137,9 +137,8 @@ bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned lon
     if (kTask == nullptr) {
         return false;
     }
-    // The register of promises the neutral demand pager fills against;
-    // the loader already wrote the guest's segments into its own store,
-    // the probe starts a fresh one.
+    // The register of promises the neutral demand pager fills against:
+    // the caller hands one over, and a fresh store serves otherwise.
     if (run.ranges == nullptr) {
         kTask->vmas = base::MakeShared<mm::VmaStore>();
         run.ranges  = kTask->vmas.get();
@@ -166,7 +165,7 @@ bool run_seated_world(mm::AddressSpace* space, unsigned long entry, unsigned lon
 }
 
 /// Runs one seated world that carries its own promise register: the
-/// guest's segments were written into the loader's store.
+/// caller already wrote the program's segments into it.
 bool run_seated_world_with_ranges(mm::AddressSpace* space, unsigned long entry,
                                   unsigned long stack_top, bool owns_space, bool expect_exit,
                                   unsigned long expect_status, const char* name,
@@ -203,9 +202,9 @@ bool run_probe_world() {
         kCodeBytes[index] =
             index < kProgBytes ? static_cast<unsigned char>(SeatProgStart[index]) : 0U;
     }
-    // The code page is law: read-only and executable. A guest write
-    // against it faults, and the seat's repair seam hands back a
-    // private writable copy through the one armv7 cow door.
+    // The code page is law: read-only and executable. The range below
+    // promises no write either, so a write against it dies at the
+    // resolver instead of earning a private copy.
     if (!kSpace->map_user(0x40000000UL, kCode.raw,
                           cinux::arch::page::UserLeafTerms(false, true)) ||
         !kSpace->map_user(0x40010000UL, kStack.raw)) {
@@ -318,32 +317,15 @@ extern "C" void SeatForkChildEntry() {
 }
 
 bool RunSchedulerUserSelfCheck() {
-    // The seated world owns the user file system now: ram files, the
-    // devfs tree and the guest ELF all come up with it.
+    // The seated world owns the user file system now: the card's volume
+    // and the devfs tree come up with it.
     userfs::init();
     // The neutral resolver: CoW first, then the register's promises. It
     // is the same door the x86 lane seats, and the death a fatal fault
     // means stays here — SeatFaultDeath retires the episode, which is
     // what this world's protocol expects.
     proc::InstallFaultResolver();
-    if (!run_probe_world()) {
-        return false;
-    }
-    // The loader's guest is no ordinary probe: it is the first cross-
-    // compiled process, and from here on it rides the real scheduler
-    // like any process would.
-    mm::AddressSpace* const kGuest = userfs::take_guest();
-    if (kGuest == nullptr) {
-        return false;
-    }
-    cinux::print::Println("[armv7] guest runs on the scheduler entry %X",
-                          userfs::guest_entry());
-    mm::VmaStore* const kGuestRanges = userfs::take_guest_ranges();
-    const bool kGuestOk = run_seated_world_with_ranges(
-        kGuest, userfs::guest_entry(), 0x40011000UL, true, true, 0, "guest", kGuestRanges);
-    cinux::print::Println(kGuestOk ? "[armv7] guest exited with status 0"
-                                   : "[armv7] guest run FAILED");
-    return kGuestOk;
+    return run_probe_world();
 }
 
 }  // namespace cinux::armv7

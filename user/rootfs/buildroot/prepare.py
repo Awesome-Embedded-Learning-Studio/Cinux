@@ -105,23 +105,13 @@ def main():
             shutil.copy2(item, source / name)
     if args.arch == 'armv7':
         merge_overlay(repo / 'user/rootfs/buildroot/overlay', root)
-        # The boot ladder's seat world reads these fixtures from the
-        # card, the same paths the station card answered. Staged after
-        # the overlay merge so the 99-byte motd wins over the banner.
+        # The boot ladder's mount check reads this one fixture from the
+        # card. Staged after the overlay merge so the 99-byte motd wins
+        # over the banner.
         seeds = repo / 'scripts/ext2_seed'
         shutil.copy2(seeds / 'motd.txt', root / 'etc' / 'motd')
         for name in ('zh.txt', 'zh_ascii.txt'):
             shutil.copy2(seeds / name, root / 'etc' / name)
-        (root / 'motd').write_text('hi there\n')
-        (root / 'hello').write_text('hello\n')
-        (root / 'readme').write_text('readme!\n')
-        (root / 'scratch').write_text('')
-        for elf, target_path in (('armv7_diskprog.elf', 'prog'),
-                                 ('armv7_glibc_hello.elf', 'glibc')):
-            source_elf = repo / 'assets' / elf
-            if not source_elf.is_file():
-                raise RuntimeError(f'probe fixture missing: {source_elf}')
-            shutil.copy2(source_elf, root / target_path)
         print(f'[native-build] BR2_ROOTFS_OVERLAY={overlay_root}', flush=True)
         return
     stage_python(root)

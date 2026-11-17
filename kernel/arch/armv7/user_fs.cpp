@@ -2,9 +2,9 @@
  * @file    user_fs.cpp
  * @brief   Wiring the armv7 user world onto the shared fs stack.
  *
- * One RamFs volume seeded with the bring-up files sits behind one Vfs
- * root mount; the UART console appears as a character-device face so
- * descriptors 0-2 can live in the same FileTable as everything else.
+ * The card's ext2 volume is the one file world, and the UART console
+ * appears as a character-device face so descriptors 0-2 can live in the
+ * same FileTable as everything else.
  * The console's read keeps the stand-in's line discipline: drain while
  * bytes are ready, stop after a newline. Park-until-input stays in the
  * syscall layer, which knows about tasks.
@@ -28,7 +28,6 @@
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
-#include "kernel/fs/ramfs/ramfs.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/boot/print.hpp"
@@ -58,28 +57,8 @@
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/block_volume.hpp"
 #include "kernel/drivers/framebuffer/framebuffer.hpp"
-#include "kernel/loader/loader.hpp"
-#include "kernel/loader/program_seat.hpp"
-#include "kernel/mm/address_space.hpp"
-#include "kernel/mm/vma.hpp"
-#include "kernel/mm/pmm.hpp"
-
-extern "C" {
-extern unsigned char g_userprog_start[];
-extern unsigned char g_userprog_end[];
-}
 
 namespace cinux::armv7::userfs {
-namespace {
-
-/// Heap-owned on purpose: a static would construct before the kernel
-/// heap exists, and the RamFs root is heap-born.
-fs::RamFs* g_ram  = nullptr;
-mm::AddressSpace* g_guest_space = nullptr;
-mm::VmaStore*     g_guest_ranges = nullptr;
-unsigned long     g_guest_entry  = 0;
-
-}  // namespace
 
 void init() {
     static bool seeded = false;
@@ -87,7 +66,6 @@ void init() {
         return;
     }
     seeded = true;
-    g_ram = new fs::RamFs();
 
     // The screen joins the fs: the LCDIF's frame, adopted by the
     // neutral Framebuffer singleton, seats fb0 inside a real devfs.
@@ -151,12 +129,6 @@ void init() {
                     if (driver::SeatUsbKeyboard()) {
                         cinux::print::Println("[armv7] dev usbkbd seated");
                     }
-                    // The ramfs is the kernel's /tmp staging area, where
-                    // the loader lane parks the guest image and anything
-                    // else that lives only as long as the boot.
-                    const base::Result<void> kStage =
-                        kWorld.mount("/tmp", *g_ram, "ramfs");
-                    base::safety::Check(kStage.ok(), "tmp staging mount failed");
                     const auto kMotd = kWorld.resolve("/etc/motd");
                     base::Own<unsigned char[]> kMotdBytes;
                     unsigned long              kMotdSize = 0;
@@ -171,7 +143,7 @@ void init() {
                         kMotdSize);
                     // The shell needs no copy any more: /bin/sh on the
                     // card is a fast symlink over busybox, and the
-                    // guest's ext2 walk expands it.
+                    // card's own ext2 walk expands it.
                     const auto kShellView = kWorld.resolve("/bin/sh");
                     cinux::print::Println(kShellView.ok() ? "[armv7] bin/sh seated from the card"
                                                           : "[armv7] bin/sh missing on the card");
@@ -237,81 +209,11 @@ void init() {
         cinux::print::Println("[armv7] dev event0 %u bytes",
                               static_cast<unsigned long>(kChunk.value()));
 
-        // The loader lane: the guest ELF rides the blob into ramfs,
-        // then the very loader x86 execs through reads it back and
-        // maps its segments into a fresh user space.
-        const unsigned long kImageBytes =
-            static_cast<unsigned long>(g_userprog_end - g_userprog_start);
-        const base::Result<fs::FsNode> kGuest = g_ram->make_file("guest.elf");
-        base::safety::Check(kGuest.ok(), "guest elf staging refused");
-        const auto kSeated = g_ram->write(kGuest.value(), 0,
-                                          reinterpret_cast<const char*>(g_userprog_start),
-                                          kImageBytes);
-        base::safety::Check(kSeated.ok() && kSeated.value() == kImageBytes,
-                            "guest elf staging short");
-        const auto kGuestView = kWorld.resolve("/tmp/guest.elf");
-        base::safety::Check(kGuestView.ok(), "guest elf resolve failed");
-        const auto kGuestNode =
-            kGuestView.value().ops->lookup(kGuestView.value().self, kGuestView.value().rest);
-        base::safety::Check(kGuestNode.ok(), "guest elf lookup failed");
-        unsigned char* image = new unsigned char[kImageBytes];
-        unsigned long  taken = 0;
-        while (taken < kImageBytes) {
-            const auto kChunk2 =
-                kGuestView.value().ops->read(kGuestView.value().self, kGuestNode.value(), taken,
-                                             image + taken, kImageBytes - taken);
-            base::safety::Check(kChunk2.ok() && kChunk2.value() != 0, "guest elf read failed");
-            taken += static_cast<unsigned long>(kChunk2.value());
-        }
-        g_guest_space = new mm::AddressSpace{};
-        base::safety::Check(g_guest_space != nullptr && g_guest_space->init(),
-                            "guest elf address space refused to init");
-        g_guest_ranges = new mm::VmaStore{};
-        // The one ladder every image climbs, the same one exec seats a
-        // replacement through; the static probe takes the interpreter
-        // half as a no-op.
-        const auto kSeat = loader::SeatProgram(image, taken, kGuestNode.value(),
-                                               kGuestView.value(), *g_guest_space,
-                                               *g_guest_ranges);
-        base::safety::Check(kSeat.ok(), "guest elf refused the neutral loader");
-        const loader::EntryFacts& facts = kSeat.value().facts;
-        base::safety::Check(facts.program_entry >= 0x40000000U &&
-                                facts.program_entry < 0x40100000UL,
-                            "guest elf entry did not land where it was linked");
-        // One stack page above the mmap base, inside the user window.
-        const auto kStackFrame = mm::Pmm::self().allocate_page();
-        base::safety::Check(kStackFrame.raw != 0 &&
-                                g_guest_space->map_user(0x40010000UL, kStackFrame.raw),
-                            "guest stack refused its mapping");
-        g_guest_entry = static_cast<unsigned long>(facts.program_entry);
-        cinux::print::Println("[armv7] load guest entry %X phnum %u", g_guest_entry,
-                              facts.header_count);
                 }
             }
         }
     }
 }
-
-mm::VmaStore* take_guest_ranges() {
-    // The seated task adopts the register; this hand-off is one-way,
-    // so the global stops aliasing what the task's Shared will free.
-    mm::VmaStore* const kTaken = g_guest_ranges;
-    g_guest_ranges              = nullptr;
-    return kTaken;
-}
-
-mm::AddressSpace* take_guest() {
-    // Same one-way hand-off as the register: the task's Shared owns
-    // the teardown from here on.
-    mm::AddressSpace* const kTaken = g_guest_space;
-    g_guest_space                    = nullptr;
-    return kTaken;
-}
-
-unsigned long guest_entry() {
-    return g_guest_entry;
-}
-
 
 
 fs::Vfs& vfs() {
@@ -319,10 +221,6 @@ fs::Vfs& vfs() {
     // world itself, so the one neutral door names the card on this
     // port exactly as it names the volume on x86.
     return fs::FileWorld::self().vfs();
-}
-
-fs::RamFs& ram() {
-    return *g_ram;
 }
 
 }  // namespace cinux::armv7::userfs

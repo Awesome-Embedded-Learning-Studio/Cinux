@@ -1,4 +1,0 @@
-cinux
-interactive ok
-echo interactive run ok
-exit

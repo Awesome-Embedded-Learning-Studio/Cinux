@@ -4,9 +4,11 @@ math(EXPR _grace "${RUN_SECONDS} + 20")
 if(NOT DEFINED USB_DEVICES)
     set(USB_DEVICES "-device usb-kbd")
 endif()
-# A -D value with spaces arrives as a semicolon list; the shell below
-# wants the plain string back.
+# A -D value with spaces arrives as a semicolon list; the shell branch
+# wants the plain string back, and the direct branch wants real argv
+# words, so keep both forms.
 string(REPLACE ";" " " USB_DEVICES "${USB_DEVICES}")
+separate_arguments(USB_DEVICE_ARGS UNIX_COMMAND "${USB_DEVICES}")
 
 # Runs the bring-up image for a fixed window and checks the serial banner.
 # With STDIN_FILE set, the file's bytes drip into the guest's UART after
@@ -25,7 +27,7 @@ else()
         COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
                 -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
                 -sd ${SD_FILE}
-                -nographic -monitor none ${USB_DEVICES}
+                -nographic -monitor none ${USB_DEVICE_ARGS}
         TIMEOUT ${RUN_SECONDS}
         OUTPUT_VARIABLE serial_out
         ERROR_VARIABLE serial_err

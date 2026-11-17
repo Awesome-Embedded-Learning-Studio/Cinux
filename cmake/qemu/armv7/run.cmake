@@ -18,18 +18,13 @@ set(CINUX_ARM_DTB_ADDR 0x81000000)
 # is the same word the buildroot directory computes.
 set(CINUX_ARM_BUILDROOT_VOLUME ${CMAKE_BINARY_DIR}/boot/native-build.ext2)
 
-# The desk and the glibc probe ride the build graph: the overlay stage
-# copies them onto the buildroot card, so the volume target declares
-# these dependencies and a plain cmake --build produces everything.
+# The desk rides the build graph: the overlay stage copies it onto the
+# buildroot card, so the volume target declares the dependency and a
+# plain cmake --build produces everything.
 add_custom_target(vesper_desk
     COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build-armv7-vesper-desk.sh
             ${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk
     COMMENT "armv7 vesper desk (cached by the script's input fingerprint)")
-add_custom_target(arm_glibc_hello
-    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build-armv7-glibc-prog.sh
-            ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf
-    COMMENT "armv7 glibc probe fixture")
-
 # Every -D value that contains a space must be quoted: an unquoted one is
 # split into several arguments and the check only ever sees its first word.
 # A repeated -D name silently keeps only the last value, which quietly
@@ -46,26 +41,6 @@ foreach(_arm_def IN LISTS _arm_defs)
     endif()
     list(APPEND _arm_names "${_arm_name}")
 endforeach()
-
-# The buildroot card always carries busybox and the glibc probe, so
-# their judgements join unconditionally: `stat` proves the binary
-# started, the metadata street answered, and the record reached its own
-# libc.
-set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
-set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
-set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
-set(_arm_shell_typed_arg "-DEXPECTED_ARM_SHELL_TYPED=typed:interactive ok")
-set(_arm_interactive_arg "-DEXPECTED_ARM_INTERACTIVE=interactive run ok")
-set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
-list(APPEND _arm_glibc_arg
-     "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok, argc 1, "
-    "self /glibc")
-# The frame-buffer landing: the kernel stamps a marker before the
-# program starts, the program reads it through its own mapping.
-list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")
-# The stdio face: fopen/fgets on the disk's motd, the one path a
-# tool like cat takes before it does anything else.
-list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_STDIO=[glibc] stdio read: hi there")
 
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
@@ -100,56 +75,17 @@ add_test(NAME arm_boot
             "-DEXPECTED_EHCI_SEATED=ehci device 0627:0001 seated"
     "-DEXPECTED_EHCI_KEYBOARD=ehci keyboard street ok"
             "-DEXPECTED_USBKBD=dev usbkbd seated"
-            "-DEXPECTED_GUEST_USBKBD=usbkbd ok, empty answers EAGAIN or a glyph"
-            "-DEXPECTED_GUEST_DISK_MOTD=[guest] disk motd: Cinux says hello from a real disk."
-            "-DEXPECTED_GUEST_NAP=[guest] nanosleep ok, the clock advanced"
-            "-DEXPECTED_GUEST_POLL=[guest] poll timeout ok, waited"
-            "-DEXPECTED_GUEST_LINK=[guest] symlink ok, bin/sh opens as an ELF"
-            "-DEXPECTED_DISK_EXEC=[disk] hello from ext2, exec replaced me"
-            ${_arm_glibc_arg}
-            ${_arm_busybox_arg}
-            ${_arm_shell_arg}
-            ${_arm_shell_cat_arg}
-            ${_arm_shell_typed_arg}
-            ${_arm_interactive_arg}
-
             "-DEXPECTED_FB0=dev fb0 640x480"
             "-DEXPECTED_EVENT0=dev event0 48 bytes"
-            "-DEXPECTED_PTY=pty ok, master and slave echo"
-            "-DEXPECTED_FCNTL=fcntl ok, empty stdin answers EAGAIN"
-            "-DEXPECTED_GUESTSTAT=fstat ok, motd is a regular 9-byte file"
-            "-DEXPECTED_GETDENTS=getdents ok, root holds a bin tree with hello"
-            "-DEXPECTED_STDIN=stdin ok, line read back"
-            "-DSTDIN_FILE=${CMAKE_SOURCE_DIR}/assets/armv7_stdin.txt"
-            "-DSTDIN_DELAY=6"
-            "-DSTDIN_DELAY2=15"
-            "-DSTDIN_DELAY3=20"
-            "-DEXPECTED_GUESTLOAD=load guest entry 40000000 phnum 2"
-            "-DEXPECTED_GUESTRUN=guest runs on the scheduler entry 40000000"
-            "-DEXPECTED_GUESTEXIT=guest exited with status 0"
-            "-DEXPECTED_GUESTMOTD=[guest] motd: "
-            "-DEXPECTED_GUESTHELLO=[guest] hello from the loaded image"
-            "-DEXPECTED_GUESTBRK=[guest] brk ok, heap page reads back"
-            "-DEXPECTED_GUESTMMAP=[guest] mmap ok, anon page reads back"
-            "-DEXPECTED_GUESTFORK=[guest] fork ok, child reaped with own page"
-            "-DEXPECTED_GUESTLITTER=[guest] litter ok, three young and a grandchild"
-            "-DEXPECTED_GUESTEDGES=[guest] edges ok, refusals refused and hints honored"
-            "-DEXPECTED_GUESTGRIM=[guest] grim reaper ok, faulted child answered DEAD"
-            "-DEXPECTED_GUESTSLICE=[guest] slice ok, two spinners shared one core"
-            "-DEXPECTED_SEATCOW=code page stayed read-only"
             "-DEXPECTED_SEATWRITE=[seat] scheduler task writes from user m"
             "-DEXPECTED_SEATOK=sched user seat ok"
             "-DEXPECTED_TEARDOWN=space teardown ok"
             "-DEXPECTED_COW=cow ledger ok"
             "-DEXPECTED_SHARED=shared frame ok"
             "-DEXPECTED_FORKCLONE=fork clone ok"
-            "-DEXPECTED_BRKOK=brk ok"
-            "-DEXPECTED_MMAPOK=mmap ok"
-            "-DEXPECTED_FSTATOK=fstat ok"
             "-DEXPECTED_TASKS=two tasks ok"
             "-DEXPECTED_USER=user mode round trip ok"
             "-DEXPECTED_ROTATE=two tasks ok"
-            "-DEXPECTED_USERFAULT=user fault at 50000000"
             "-DEXPECTED_FAULT=data abort at 51000000 status 805 code 2"
             "-DSERIAL_LOG=${CMAKE_BINARY_DIR}/serial-test.log"
             -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/boot_check.cmake)

@@ -32,9 +32,6 @@ echo '== armv7 lane =='
 if [[ ! -f build-armv7/build.ninja ]]; then
     cmake -S . -B build-armv7 -G Ninja -DCINUX_ARCHITECTURE=armv7 || exit 1
 fi
-# The probe ELF is a gitignored build product the image embeds; re-link it
-# so the blob always matches its source before the image compiles.
-scripts/build-armv7-probe.sh || exit 1
 # The boot check opens the buildroot volume; arm_image itself does not
 # depend on it, so both targets have to be asked for on a cold build
 # directory. The desk joins the volume through the overlay stage.
