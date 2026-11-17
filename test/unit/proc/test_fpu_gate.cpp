@@ -21,11 +21,16 @@ void set_live_value(unsigned long long value) {
     cinux::arch::RestoreFpu(image);
 }
 
-unsigned long long live_value() {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    cinux::arch::FpuImage image;
+/// The live image minus the XMM window. Function calls may spend the
+/// XMM registers (they are caller-saved), so a comparison that crosses
+/// a call cannot hold those words; the x87 control words, the pending
+/// exception state and MXCSR are the part a save-and-restore owns.
+/// FXSAVE64 puts XMM0..15 in words 20 through 51.
+void capture_live_minus_xmm(cinux::arch::FpuImage& image) {
     cinux::arch::SaveFpu(image);
-    return image.words[kXmmWord];
+    for (unsigned long index = 20; index <= 51; ++index) {
+        image.words[index] = 0;
+    }
 }
 
 enum class Scenario : unsigned char {
@@ -127,10 +132,23 @@ void run_world(GateWorld& world) {
 }
 
 TEST("fpu gate: entries before scheduling leave the live image alone") {
-    const unsigned long long kBefore = live_value();
+    // No current task: the gate must return without touching the live
+    // image. The XMM window is excluded because the ABI lets the calls
+    // in between spend it; everything else must come back untouched.
+    // Value-initialized: FXSAVE64 leaves its reserved tail untouched,
+    // so two uninitialized stack images would compare stack garbage.
+    cinux::arch::FpuImage before{};
+    capture_live_minus_xmm(before);
     EnterFpuGate();
     ExitFpuGate();
-    ASSERT_EQ(live_value(), kBefore);
+    cinux::arch::FpuImage after{};
+    capture_live_minus_xmm(after);
+    for (unsigned long index = 0; index < 64; ++index) {
+        if (index >= 20 && index <= 51) {
+            continue;
+        }
+        ASSERT_EQ(after.words[index], before.words[index]);
+    }
 }
 
 TEST("fpu gate: only the outer exit consumes the task's own entry image") {
