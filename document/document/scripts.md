@@ -48,7 +48,7 @@ Linux 上还有一个默认就开的开关，名字落在了 CINUX_QEMU_SLIRP_WA
 
 磁盘侧的总装文件是 cmake/rootfs.cmake，生态卷的活归 ext2_img 目标管，管的是 build/boot/ext2.img，它把活交给了 scripts/create_ext2_disk.sh。喂过去的是环境变量，咱们数下来十几个用户态的 ELF 在列，从 user_hello 一直排到 user_smpstress 的位置，配角的名单有四样，busybox-glibc 与 hello-glibc 是其中的两样，toolchain-staging 算的是第三样，vesper 的桌面补上画面，种子文件变了也会重烤，fstab 与 inittab 是其中的例子，其余的 passwd、group、smp-stress.sh 也算。ext2_ktest_img 复制了一份，给机内的测试当 scratch，怎么写都不心疼共享的夹具盘。
 
-create_ext2_disk.sh 认的是两条路，默认的是 glibc 路，咱们把搭树的过程看一遍。build/rootfs-assemble 被它当目录树搭了起来，/etc 放的是种子文件，/bin 放的是 busybox，二十多个 applet 的名字硬链到了同一个 inode 上，cat、ls、ps 也是名单上的，一直排到了 sh 与 mount，sbin/init 的座位也在，十二个教学 ELF 各就各位了，glibc 的运行库用 gcc -print-file-name 就地取材，vesper 桌面在场时往 inittab 里补了一行 respawn，工具链 staging 树整个叠在了最上层。mkfs.ext2 用 -d 把目录树一把灌进了镜像，规格是 192 MiB 的盘，1 KiB 的块，特性是全关的，inode 给到了 16384。走目录树而不走逐文件的 debugfs，这是脚本注释解释过的，mkfs.ext2 -d 保住了硬链接，busybox 一个 inode 挂所有的 applet 名字，SONAME 的符号链接也保住了，这样的规模 debugfs 表达不了，192 MiB 的规格跟着自编译卷的量级走，自编译卷就是后文要清点的 kernel_selfhost_volume，一张装满源码的盘。
+create_ext2_disk.sh 认的是两条路，默认的是 glibc 路，咱们把搭树的过程看一遍。build/rootfs-assemble 被它当目录树搭了起来，/etc 放的是种子文件，/bin 放的是 busybox，二十多个 applet 的名字硬链到了同一个 inode 上，cat、ls、ps 也是名单上的，一直排到了 sh 与 mount，sbin/init 的座位也在，十二个教学 ELF 各就各位了，glibc 的运行库用 gcc -print-file-name 就地取材，vesper 桌面在场时往 inittab 里补了一行 respawn，工具链 staging 树整个叠在了最上层。mkfs.ext2 用 -d 把目录树一把灌进了镜像，规格是 192 MiB 的盘，1 KiB 的块，特性是全关的，inode 给到了 16384。走目录树而不走逐文件的 debugfs，这是脚本注释解释过的，mkfs.ext2 -d 保住了硬链接，busybox 一个 inode 挂所有的 applet 名字，SONAME 的符号链接也保住了，这样的规模 debugfs 表达不了，192 MiB 的规格是教学盘的分量。
 
 CINUX_LIBC=musl 的话是另一条 16 MiB 小盘路，咱们想轻装就用它，inode 的数目是 512，逐个地用 debugfs 写进去。动态链接器在 ~/.local/musl 与系统的 musl 路径里找，找得到的话就装进 /lib，找不到的话只留一行提示，盘照常烤出来了。静态的 busybox 由 build-busybox.sh 编出来，源码树是现成的，落在了 ~/.local/src/busybox-1.38.0 里。
 
@@ -59,10 +59,6 @@ CINUX_LIBC=musl 的话是另一条 16 MiB 小盘路，咱们想轻装就用它�
 客人那侧的桌面有专门的一段，build-vesper-desk.sh 干的就是从源码把它烤出来。源码是 third_party/vesper 的 git 子模块，缺了它的话脚本会大声报错，报错信息给了补法的命令（`git submodule update --init --recursive`），咱们照着敲就行。构建做在自己的 out-of-tree 目录里，用的是 Ninja，选的是 Release，链接是全静态的，后端定的是 fbdev。产物在拷走之前还要过 file 的一眼，不是 statically linked 的话就拒收。脚本注释交代了这么绕一圈的道理，客人拿到的桌面二进制必须来自本仓库自己的构建。桌面仓库构建目录里上一轮剩下的成品拿不得，真出了对不上的现象，咱们说不出它是从哪一份代码来的。
 
 动态链接的验收由两份 hello 承担，两边的参数咱们对下来是一个用意。glibc 的版本住在 scripts/glibc/ 里，musl 的版本住在 scripts/musl/ 里，两边都编非 PIE 的 ET_EXEC，两边都把客人那侧的解释器路径用 `-Wl,-dynamic-linker` 烤进了程序，脚本注释说清了原因，宿主工具链自带的路径在客人的盘上是不存在的。
-
-最重的目标叫 kernel_selfhost_volume，卷里装了什么，咱们把导出的内容清点一遍。导出的活由 prepare-kernel-selfhost.py 干，它的家在 scripts/ 下，把当前配置的内核构建导成了一个纯源码卷，内核与 base 的源码、assets、生成的配置头都进了卷，编好的 mbr 与 stage2（当自举输入）也在，python3 运行时连同它 ldd 出来的库，编译与链接命令整理进了 build.json 随卷走，卷里不带任何内核的对象文件。客人的那边由 build-kernel-in-guest.py 接手，从空的输出目录把所有的编译单元跑一遍，在机内生成了资源对象与 kallsyms，链接跑了满满两轮，镜像头也核验过了，启动盘也拼出来了。
-
-scripts/checks/README.md 记着它的规格，验收的脚本就是 `scripts/test_station34_kernel_selfhost.py`（station 是这片仓库给验收步骤编的站台号，脚本名里 test_stationNN 的前缀就是站牌，33 号站管的是生态扫描，34 号站管的是自编译，35 号站管的是 GUI。日志落在构建目录的根下，站号写在了文件名里，咱们按站号一找就到，35 号站的截图与 monitor 的 socket 住在 build/station35/），256 MiB 的源码卷，512 MiB 的客人内存。产物的住处分在两处，盘的一份在 build/boot/ 下，名成了 cinux-selfhost.img，内核的安家处是 build/kernel/，名成了 cinux_kernel_selfhost。
 
 ## 测试的两层：host 套件与机内 ktest
 
@@ -80,11 +76,11 @@ host 测试这层的家是 test/CMakeLists.txt，登记的活由 add_cinux_test 
 
 检查开关是另一层的保险，全在 cmake/checks/ 的 options.cmake，咱们数下来是四个。CINUX_HOST_ASAN 挂的是 ASan 与 UBSan，落的位置在 host 侧，-fno-sanitize-recover=all 的含义是出错即停，泄漏的检查随 ASan 走。CINUX_HOST_TSAN 查的是数据竞争，跟 ASan 是天生的互斥，两个一起开的话就是 FATAL_ERROR，报错文本说得分家住的是两个构建目录，咱们想都开就得另起一个目录。CINUX_LOCKDEP 打开自旋锁的顺序检查，host 与内核的两边都生效，开关的值烤成了一个头，模板的名字是 checks_config.hpp.in，家定在了 cmake/checks/，烤出来的产物是 `generated/kernel/proc/checks_config.hpp`，锁顺序怎么记归 [同步原语](kernel/proc/sync.md)那一页。CINUX_UBSAN 管的只是内核，用的是编译器的 trap 模式，踩到未定义行为的话当场就崩在原地，不需要链接宿主的 sanitizer 运行库。
 
-单格的入口是 scripts/checks/ 下的 run-cell.sh，格（cell）就是一次 run-cell 跑下来的验收单元，参数收的是 suite、构建类型、模式与构建目录四样，suite 指的就是下面列出的五个验收范围。asan 格开的是 HOST_ASAN 加 LOCKDEP，tsan 格开的是 HOST_TSAN 加 LOCKDEP，ubsan 格开的是 UBSAN，checks 格开的是 UBSAN 加 LOCKDEP，Release 的 C 与 C++ 旗标都被按成了 -O2 -DNDEBUG，Debug 的内核走 -O0。配置完过 test-inventory.py 的清点，脚本的家在 scripts/checks/ 下，名字要跟 test/ctest-baseline.json 的底册对上，登记少了一个的话都不放行。native 格发现构建目录里已有开发盘的话就拒绝运行，日常的盘不能被它覆盖。凡要起 QEMU 的格都要求 /dev/kvm 可读可写。selfhost 与 native 两格把编译器 launcher 清空了，缘由记在了 scripts/checks/README.md 里，客人导出构建命令时要拿到真实的编译器命令，平时咱们想用 ccache 的话，挂进的通道是 CINUX_COMPILER_LAUNCHER。
+单格的入口是 scripts/checks/ 下的 run-cell.sh，格（cell）就是一次 run-cell 跑下来的验收单元，参数收的是 suite、构建类型、模式与构建目录四样，suite 指的就是下面列出的四个验收范围。asan 格开的是 HOST_ASAN 加 LOCKDEP，tsan 格开的是 HOST_TSAN 加 LOCKDEP，ubsan 格开的是 UBSAN，checks 格开的是 UBSAN 加 LOCKDEP，Release 的 C 与 C++ 旗标都被按成了 -O2 -DNDEBUG，Debug 的内核走 -O0。配置完过 test-inventory.py 的清点，脚本的家在 scripts/checks/ 下，名字要跟 test/ctest-baseline.json 的底册对上，登记少了一个的话都不放行。native 格发现构建目录里已有开发盘的话就拒绝运行，日常的盘不能被它覆盖。凡要起 QEMU 的格都要求 /dev/kvm 可读可写。native 格把编译器 launcher 清空了，缘由记在了 scripts/checks/README.md 里，客人导出构建命令时要拿到真实的编译器命令，平时咱们想用 ccache 的话，挂进的通道是 CINUX_COMPILER_LAUNCHER。
 
-suite 的五个范围，咱们一格一格跑下来。host 格跑的是 test_host。kernel 格跑的是 test_host 与 test_kernel，boot_image 也顺带刷新了。ecosystem 格烤的是三样（`boot_image`、`ext2_img`、`qemu_disks`），随后连放了五段的实弹，生态扫描走的是 `test_station33_ecosystem.py`，工具链自检走的是 `test_station34_selfhost.py`，它跟内核自编译的 `test_station34_kernel_selfhost.py` 名字只差了 kernel 一截，验的是 as、ld、GCC、G++ 的产物全是默认 PIE，外网 ping 走的是 `test_net_ping.py`，客人给的是双核，loopback 上的 TCP 走的是 `test_net_tcp.py`，GUI 实弹走的是 `test_station35_gui.py`，--keep 会保留截图的证据。selfhost 格编的是 kernel_selfhost_volume，跑的是 station34 的内核自编译脚本。native 格烤的是 buildroot_rootfs，随后的实弹按验证分头跑，build 的验证交给的脚本是 test_native_build.py，GUI 的交给 test_native_gui.py，persistence 的验证来两轮，两轮的脚本是同一个 test_persistence.py，第二轮带上了 --gui。
+suite 的四个范围，咱们一格一格跑下来。host 格跑的是 test_host。kernel 格跑的是 test_host 与 test_kernel，boot_image 也顺带刷新了。ecosystem 格烤的是三样（`boot_image`、`ext2_img`、`qemu_disks`），随后连放了五段的实弹，生态扫描走的是 `test_station33_ecosystem.py`，工具链自检走的是 `test_station34_selfhost.py`，验的是 as、ld、GCC、G++ 的产物全是默认 PIE，外网 ping 走的是 `test_net_ping.py`，客人给的是双核，loopback 上的 TCP 走的是 `test_net_tcp.py`，GUI 实弹走的是 `test_station35_gui.py`，--keep 会保留截图的证据。native 格烤的是 buildroot_rootfs，随后的实弹按验证分头跑，build 的验证交给的脚本是 test_native_build.py，GUI 的交给 test_native_gui.py，persistence 的验证来两轮，两轮的脚本是同一个 test_persistence.py，第二轮带上了 --gui。
 
-验收的入口是 acceptance.sh，家安在了 scripts/checks/，六格由它串成了一趟，default、asan、tsan、checks 是头里的四格，ecosystem 与 ecosystem-checks 补齐了尾，每格的内部遇错即停，六格走完了再统一汇总，设了 CINUX_CHECK_LOG_DIR 的话成功时也留全套日志。matrix.sh 是同一入口的另一种排法，家定在了 scripts/checks/，格子铺得比六格的密度更大，构建的隔离位置在 build-matrix，咱们想把矩阵挪个地方，改的就是 CINUX_MATRIX_DIR，kernel 格还会拿该格自己烤的镜像补跑一遍生态扫描。CI 的分工与排期 scripts/checks/README.md 记着，随 push 与 PR 跑的三项是 `host`、`kernel`、`ecosystem`，selfhost 与 native 的两个长任务，跑在每周六的北京时间 03:17。
+验收的入口是 acceptance.sh，家安在了 scripts/checks/，六格由它串成了一趟，default、asan、tsan、checks 是头里的四格，ecosystem 与 ecosystem-checks 补齐了尾，每格的内部遇错即停，六格走完了再统一汇总，设了 CINUX_CHECK_LOG_DIR 的话成功时也留全套日志。matrix.sh 是同一入口的另一种排法，家定在了 scripts/checks/，格子铺得比六格的密度更大，构建的隔离位置在 build-matrix，咱们想把矩阵挪个地方，改的就是 CINUX_MATRIX_DIR，kernel 格还会拿该格自己烤的镜像补跑一遍生态扫描。CI 的分工与排期 scripts/checks/README.md 记着，随 push 与 PR 跑的三项是 `host`、`kernel`、`ecosystem`，native 那个长任务只在手动触发时跑。
 
 scripts/checks 里的工具还有三件。setup-mke2fs.sh 的差事是装 mke2fs，源码的来处是 kernel.org，版本定的是 e2fsprogs 1.47.2，校验是 SHA-256 的，libarchive 也是开着的，装的位置是给定的前缀，末了拿 tar 实测了一把装盘，scripts/checks/README.md 解释了为什么不用发行版自带的 mke2fs，Ubuntu 24.04 的 1.47.0 只认目录输入，Buildroot 那套用户与组的元数据装盘走不通。test-inventory.py 前面说过了。net_decoupling.sh 是两行 grep 的边界检查，kernel/net 不许去 include 驱动与中断层的头，kernel/drivers/net 反手抱协议栈的头也不许，谁越了线谁就会被报出来。咱们往 kernel/net 与 kernel/drivers/net 里添代码的时候，头别伸错了边。
 
@@ -142,7 +138,6 @@ pnpm check:links
 - `cmake/rootfs.cmake` — ext2 生态卷，ktest 副本，自编译卷的总装
 - `cmake/test/` — ktest 编目，机内判卷，镜像头用例
 - `scripts/create_ext2_disk.sh`、`scripts/build-busybox-glibc.sh`、`scripts/build-toolchain-staging.sh`、`scripts/build-vesper-desk.sh` — 磁盘与用户态的烤制
-- `scripts/prepare-kernel-selfhost.py`、`scripts/build-kernel-in-guest.py` — 机内自编译的两端
 - `scripts/checks/` — acceptance，matrix，run-cell，test-inventory，net_decoupling，setup-mke2fs
 - `scripts/checks/README.md`、`scripts/tags.json` — 验收与 CI 的说明，标签词表
 - `scripts/test_*.py` — QEMU 实弹脚本
