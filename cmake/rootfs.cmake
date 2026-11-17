@@ -1,4 +1,3 @@
-set(CINUX_EXT2_IMG ${CMAKE_BINARY_DIR}/boot/ext2.img)
 set(CINUX_BUSYBOX_GLIBC ${CMAKE_BINARY_DIR}/busybox-glibc/busybox)
 set(CINUX_HELLO_GLIBC ${CMAKE_BINARY_DIR}/glibc/hello-glibc)
 add_custom_command(
@@ -55,43 +54,21 @@ add_custom_command(
             ${CINUX_VESPER_INPUTS}
     COMMENT "vesper fbdev desk, static")
 add_custom_target(vesper_desk DEPENDS ${CINUX_VESPER_DESK})
-add_custom_command(
-    OUTPUT ${CINUX_EXT2_IMG}
-    COMMAND ${CMAKE_COMMAND} -E touch ${CINUX_EXT2_IMG}
-    COMMAND ${CMAKE_COMMAND} -E env "CINUX_BUILD_DIR=${CMAKE_BINARY_DIR}"
-            "CINUX_TOOLCHAIN_STAGING=${CINUX_TOOLCHAIN_STAGING}"
-            "CINUX_HELLO_ELF=$<TARGET_FILE:user_hello>"
-            "CINUX_SHELL_ELF=$<TARGET_FILE:user_shell>"
-            "CINUX_MAPPER_ELF=$<TARGET_FILE:user_mapper>"
-            "CINUX_SIGDEMO_ELF=$<TARGET_FILE:user_sigdemo>"
-            "CINUX_SIGCATCH_ELF=$<TARGET_FILE:user_sigcatch>"
-            "CINUX_NXDEMO_ELF=$<TARGET_FILE:user_nxdemo>"
-            "CINUX_EFAULTER_ELF=$<TARGET_FILE:user_efaulter>"
-            "CINUX_SMEPDEMO_ELF=$<TARGET_FILE:user_smepdemo>"
-            "CINUX_ASLRDEMO_ELF=$<TARGET_FILE:user_aslrdemo>"
-            "CINUX_TLSDEMO_ELF=$<TARGET_FILE:user_tlsdemo>"
-            "CINUX_THREADDEMO_ELF=$<TARGET_FILE:user_threaddemo>"
-            "CINUX_TTYDEMO_ELF=$<TARGET_FILE:user_ttydemo>"
-            "CINUX_SMPSTRESS_ELF=$<TARGET_FILE:user_smpstress>"
-            "CINUX_VESPER_DESK=${CINUX_VESPER_DESK}"
-            bash ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh ${CINUX_EXT2_IMG}
-    DEPENDS user_hello user_shell user_mapper user_sigdemo user_sigcatch user_nxdemo user_ecotest
-            user_efaulter user_smepdemo user_aslrdemo
-            user_tlsdemo user_threaddemo user_ttydemo user_smpstress
-            busybox_glibc hello_glibc toolchain_staging vesper_desk
-            ${CINUX_VESPER_DESK}
-            ${CINUX_TOOLCHAIN_STAGING}/hello.s
-            ${CMAKE_SOURCE_DIR}/scripts/create_ext2_disk.sh
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/fstab
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/inittab
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/passwd
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/group
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/smp-stress.sh
-    COMMENT "teaching ext2 volume for the block and fs experiments")
-add_custom_target(ext2_img DEPENDS ${CINUX_EXT2_IMG})
+# The scratch volume the kernel tests mount. The ext2 ktests assert
+# against bytes baked here (hello.txt) and grow files at runtime, so
+# this image belongs to the test world, not to any run lane, and stays
+# small enough that per-test copies are cheap.
+set(CINUX_KTEST_FIXTURE_DIR ${CMAKE_BINARY_DIR}/ktest-fixture)
+file(MAKE_DIRECTORY ${CINUX_KTEST_FIXTURE_DIR}/etc)
+file(COPY ${CMAKE_SOURCE_DIR}/test/kernel/fs/fixtures/hello.txt
+     DESTINATION ${CINUX_KTEST_FIXTURE_DIR})
 set(CINUX_EXT2_KTEST_IMG ${CMAKE_BINARY_DIR}/boot/ext2_ktest.img)
-add_custom_target(ext2_ktest_img
+add_custom_command(
+    OUTPUT ${CINUX_EXT2_KTEST_IMG}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${CINUX_EXT2_KTEST_IMG}
-    COMMAND ${CMAKE_COMMAND} -E copy ${CINUX_EXT2_IMG} ${CINUX_EXT2_KTEST_IMG}
-    DEPENDS ext2_img
-    COMMENT "scratch copy of the ext2 volume for kernel tests")
+    COMMAND mke2fs -q -t ext2 -b 1024 -O none
+            -d ${CINUX_KTEST_FIXTURE_DIR}
+            ${CINUX_EXT2_KTEST_IMG} 16384k
+    DEPENDS ${CINUX_KTEST_FIXTURE_DIR}/hello.txt
+    COMMENT "ktest ext2 fixture volume")
+add_custom_target(ext2_ktest_img DEPENDS ${CINUX_EXT2_KTEST_IMG})

@@ -129,33 +129,23 @@ endif()
 # serial terminal -- type at it once "Cinux up" and the respawn lines
 # have passed. The root is the buildroot card, the same root the x86
 # lane's run mounts; CINUX_ARM_ROOTFS can name another card (the boot
-# check's fixture card, for example) without editing this file.
+# check's fixture card, for example) without editing this file. The
+# board's LCD opens as a QEMU window and the GUI dtb says
+# CINUX_SESSION=gui so the shared desktop script lights the desk
+# beside the console shell: a windowed desk is the one posture, there
+# is no console-only lane. Keyboard and tablet use separate chipidea
+# buses, feeding /dev/event0 and /dev/event1.
 set(CINUX_ARM_ROOTFS "${CINUX_ARM_BUILDROOT_VOLUME}"
     CACHE FILEPATH "rootfs card the armv7 run targets mount")
 add_custom_target(run
-    COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
-            -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -drive if=sd,format=raw,file=${CINUX_ARM_ROOTFS}
-            -nographic -monitor none
-    DEPENDS arm_image arm_init_dtb
-    USES_TERMINAL
-    COMMENT "Booting full Cinux on armv7 (console shell on this terminal)")
-if(CINUX_ARM_ROOTFS STREQUAL CINUX_ARM_BUILDROOT_VOLUME)
-    add_dependencies(run buildroot_volume)
-endif()
-
-# The GUI face of the same boot: the board's LCD opens as a QEMU
-# window, the rootfs is the unified buildroot volume with the desk at
-# /bin/vesper, and the GUI dtb says CINUX_SESSION=gui so the shared
-# desktop script lights the desk beside the console shell. Keyboard and
-# tablet use separate chipidea buses, feeding /dev/event0 and
-# /dev/event1. The gui dtb rides the same build as the plain one.
-add_custom_target(run_gui
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_INIT_GUI_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
             -drive if=sd,format=raw,file=${CINUX_ARM_ROOTFS}
             -display gtk,gl=off -serial stdio -monitor none
             -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1
-    DEPENDS arm_image arm_init_gui_dtb buildroot_volume
+    DEPENDS arm_image arm_init_gui_dtb
     USES_TERMINAL
-    COMMENT "Booting full Cinux on armv7 with the GUI desk")
+    COMMENT "Booting full Cinux on armv7 (GUI desk, console shell on this terminal)")
+if(CINUX_ARM_ROOTFS STREQUAL CINUX_ARM_BUILDROOT_VOLUME)
+    add_dependencies(run buildroot_volume)
+endif()

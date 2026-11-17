@@ -32,9 +32,9 @@ cmake --build build --target buildroot_configure
 cmake --build build --target native_build_overlay
 ```
 
-显式构建 `buildroot_rootfs` 会重建开发磁盘，覆盖其中已有源码修改与构建结果，需要刷新盘内内容时直接跑它。日常用 `run` 或 `run_gui` 复用磁盘，磁盘缺失时由启动目标自动构建一次，不覆盖已有工作。
+显式构建 `buildroot_rootfs` 会重建开发磁盘，覆盖其中已有源码修改与构建结果，需要刷新盘内内容时直接跑它。日常用 `run` 复用磁盘，磁盘缺失时由启动目标自动构建一次，不覆盖已有工作。
 
-启动入口统一为 `run`、`run_debug` 和 `run_gui`，默认都挂载这张含 `/home/cinux/Cinux` 的开发盘，内存为 1024 MiB。启动目标构建内核、引导镜像与缺失的辅助磁盘，开发盘缺失时同样自动首次构建，之后持续复用。QEMU 配置集中在 `cmake/qemu/`；需要换盘或调整内存时设置 `CINUX_QEMU_ROOTFS` 和 `CINUX_QEMU_MEMORY`，不增加启动目标。`boot/ext2.img` 保留为生态与内核测试夹具。
+启动入口统一为 `run`、`run_debug` 和 `run_card`，默认都挂载这张含 `/home/cinux/Cinux` 的开发盘，内存为 1024 MiB，QEMU 窗口亮起 Vesper 桌面，串口终端跟着滚日志。启动目标构建内核、引导镜像与缺失的辅助磁盘，开发盘缺失时同样自动首次构建，之后持续复用。QEMU 配置集中在 `cmake/qemu/`；需要换盘或调整内存时设置 `CINUX_QEMU_ROOTFS` 和 `CINUX_QEMU_MEMORY`，不增加启动目标。`boot/ext2_ktest.img` 是内核测试现烤的夹具盘。
 
 结束使用时，在 Cinux 终端运行：
 
@@ -76,9 +76,9 @@ Buildroot 的工具链、libc 或包选择变化通常需要干净重建。入�
 
 开发盘的 `ping` 使用宿主 iputils 程序及其运行库，普通用户通过 ICMP datagram socket 收发，可直接执行 `ping -c 3 baidu.com`。默认网络为 QEMU 的 `10.0.2.0/24`，公网经 `10.0.2.2` 转发；`/etc/resolv.conf` 使用 `10.0.2.3`，并通过 `options use-vc` 让系统解析器走 DNS over TCP。当前未实现 ICMP 错误队列和 IPv4 选项回传，iputils 对这些可选功能可能输出警告；回显回复、TTL、接收时间戳和丢包统计正常工作。
 
-Linux 宿主默认构建一个 QEMU 辅助共享库，由仓库启动器通过 `LD_PRELOAD` 加载到 QEMU。它在 `slirp_input` 返回后调用 `qemu_notify_event`，让主循环立即重新收集新建的宿主 socket，避免外网 ICMP 回包等待约一秒后批量到达。`run`、`run_debug`、`run_gui` 和测试脚本共用该启动器；不需要手工设置环境变量，也不修改系统 QEMU。此补偿依赖动态链接的 libslirp 和 QEMU 导出的通知符号；对已修复或不兼容的 QEMU，可配置 `-DCINUX_QEMU_SLIRP_WAKEUP=OFF`，或单次使用 `CINUX_QEMU_SLIRP_WAKEUP=0 cmake --build build --target run_gui`。Cinux 机内默认关闭该宿主组件。
+Linux 宿主默认构建一个 QEMU 辅助共享库，由仓库启动器通过 `LD_PRELOAD` 加载到 QEMU。它在 `slirp_input` 返回后调用 `qemu_notify_event`，让主循环立即重新收集新建的宿主 socket，避免外网 ICMP 回包等待约一秒后批量到达。`run`、`run_card` 和测试脚本共用该启动器；不需要手工设置环境变量，也不修改系统 QEMU。此补偿依赖动态链接的 libslirp 和 QEMU 导出的通知符号；对已修复或不兼容的 QEMU，可配置 `-DCINUX_QEMU_SLIRP_WAKEUP=OFF`，或单次使用 `CINUX_QEMU_SLIRP_WAKEUP=0 cmake --build build --target run`。Cinux 机内默认关闭该宿主组件。
 
-串口默认通过 `su - cinux` 进入开发用户，HOME 与初始工作目录都是 `/home/cinux`。`run_gui` 由 init 自动以同一用户启动 Vesper，PTY 终端继承相同身份与环境。项目工作区在 `~/Cinux`，系统程序仍放 `/usr/bin` 等目录。
+串口默认通过 `su - cinux` 进入开发用户，HOME 与初始工作目录都是 `/home/cinux`。`run` 由 init 自动以同一用户启动 Vesper，PTY 终端继承相同身份与环境。项目工作区在 `~/Cinux`，系统程序仍放 `/usr/bin` 等目录。
 
 当前账户身份可用于单人开发，但内核尚未完整实现文件权限隔离：路径访问、文件创建属主、umask、chmod 鉴权及 stat 属主信息仍有缺口。镜像里的 UID/GID 元数据得到保留，不代表普通用户已受到完整 Unix 权限约束；多用户隔离需另行补齐和验收。
 
@@ -114,7 +114,7 @@ python3 scripts/test_native_build.py
 
 `/proc/cpuinfo` 按在线逻辑 CPU 逐项输出 CPUID 标识、品牌、修订和已识别的特征，支持跨读取边界访问。`/proc/meminfo` 使用 PMM 的实际页数与架构页大小，提供 kB 字段及旧式字节表；后者兼容根据内核版本号猜格式的 [CMake 系统信息解析器](https://github.com/Kitware/CMake/blob/master/Source/kwsys/SystemInformation.cxx)，保留 Cinux 自身的版本号。`MemAvailable` 保守取空闲内存，尚未单独计账的 Buffers/Cached 及未实现的 swap 项返回 0，不将这些项目加进可用内存。
 
-GUI：运行 `cmake --build build --target run_gui` 即自动进入桌面，双击终端图标后执行同样三行命令。串口终端同时保留；`run` 和 `run_debug` 进入命令行。三种入口共享开发盘，切换模式不改写盘内配置。
+GUI：运行 `cmake --build build --target run` 即自动进入桌面，双击终端图标后执行同样三行命令。串口终端同时保留；`run_debug` 停在复位处等 GDB。入口共享开发盘，切换不改写盘内配置。
 
 GUI 入口通过 [QEMU fw_cfg](https://www.qemu.org/docs/master/specs/fw_cfg.html) 的 `opt/cinux/init-env` 传递 `CINUX_SESSION=gui`。内核只负责把有界的初始环境项交给 `/sbin/init`；`inittab` 调用 `/bin/sh /etc/init.d/desktop`，由用户态选择是否启动桌面。该环境项缺省时服务直接退出，串口登录继续运行。
 
@@ -126,4 +126,4 @@ GUI 入口通过 [QEMU fw_cfg](https://www.qemu.org/docs/master/specs/fw_cfg.htm
 
 2026-10-27 实测：宿主和客体使用同一张构建图，客体从空目录完成 284 步构建，增量与源码修改后的重编译通过；产物哈希比对、启动标记、GCC hello 通过。GUI 中通过 PS/2 输入和 PTY 登录 shell 执行两条命令，并验证源码长度变化和对象时间更新。普通及 UBSan/lockdep 镜像的 GUI 回归、检查版开发探针通过。证据见 `build/native-build-test.log`（全量构建；首次重启受宿主 KVM 权限变更阻断）、`build/native-build-resume-test.log`（恢复后全流程 PASS）、`build/native-gui/`、`build/native-acceptance/`。
 
-HOME 布局实测：UID/GID 1000 下完成迁移后的 284 步编译、增量、哈希与产物重启；新打包镜像登录和 CMake 配置通过。GUI 用户身份、补全和内核增量编译通过；`run`、`run_debug`、`run_gui` 实际启动均通过。四组验收全绿。证据在 `build/home-migration/`；权限审计同时记录 root 私有文件仍可读等缺口，未宣称完整用户隔离。
+HOME 布局实测：UID/GID 1000 下完成迁移后的 284 步编译、增量、哈希与产物重启；新打包镜像登录和 CMake 配置通过。GUI 用户身份、补全和内核增量编译通过；`run`、`run_debug`、`run_card` 实际启动均通过。四组验收全绿。证据在 `build/home-migration/`；权限审计同时记录 root 私有文件仍可读等缺口，未宣称完整用户隔离。

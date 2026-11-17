@@ -8,7 +8,7 @@ bash user/rootfs/busybox/build.sh
 
 这一条命令下载并校验 BusyBox 1.38.0、按仓内配置编译动态 BusyBox、构建内核和用户程序、生成 ext2 系统盘，再启动双核 KVM。依赖 GCC/G++ 14 或更新版本、glibc 开发环境、CMake、make、QEMU、e2fsprogs、Python 3、curl、tar 和 bzip2。编译工具链及复制进盘的 glibc 必须来自同一套宿主运行时。
 
-整条链已并入 CMake 依赖图，也可以直接用构建系统入口：`cmake --build build --target run`（交互启动）、`run_gui`（同链，窗口方式启动）、`run_debug`（冻结复位加 gdb stub），三者都会先备齐镜像和系统盘再开机。`user/rootfs/busybox/build.sh` 是同一入口的薄壳，只负责挑选出口。
+整条链已并入 CMake 依赖图，也可以直接用构建系统入口：`cmake --build build --target run`（窗口启动，桌面即默认姿态）、`run_card`（单盘形态）、`run_debug`（冻结复位加 gdb stub），三者都会先备齐镜像和系统盘再开机。`user/rootfs/busybox/build.sh` 是同一入口的薄壳，只负责挑选出口。
 
 ```sh
 bash user/rootfs/busybox/build.sh build

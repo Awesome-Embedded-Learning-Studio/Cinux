@@ -51,6 +51,13 @@ inline bool HasRdrand() {
  * @copyright Copyright (c) 2026
  */
 inline bool TryRdrand(unsigned long long& out) {
+    // A CPU without the instruction faults on the opcode itself, so the
+    // probe comes first: cpuid said no means report failure without
+    // ever issuing rdrand. The default QEMU cpu model (qemu64) is one
+    // such guest and boots plain command lines without -cpu max.
+    if (!HasRdrand()) {
+        return false;
+    }
     for (unsigned int attempt = 0; attempt < 10; ++attempt) {
         unsigned long long value = 0;  // NOLINT(misc-const-correctness) written by the asm output
         unsigned char      carry = 0;  // NOLINT(misc-const-correctness) written by the asm output

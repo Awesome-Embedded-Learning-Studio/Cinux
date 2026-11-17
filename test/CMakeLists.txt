@@ -415,7 +415,7 @@ foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)
         message(FATAL_ERROR
             "ktest '${ktest}' declares unknown stage '${ktest_stage}'; known: ${CINUX_KTEST_STAGES}")
     endif()
-    string(REPLACE "boot/ext2.img" "boot/ext2_ktest.img" CINUX_KTEST_DEVICE_ARGS
+    string(REPLACE "boot/native-build.ext2" "boot/ext2_ktest.img" CINUX_KTEST_DEVICE_ARGS
                    "${CINUX_QEMU_DEVICE_ARGS}")
     set(ktest_cpus 1 2)
     if(ktest IN_LIST CINUX_KTESTS_DUAL_CPU)

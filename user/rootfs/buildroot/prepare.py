@@ -94,7 +94,11 @@ def main():
         else:
             raise RuntimeError('desk artifact missing; build the vesper_desk target first')
     else:
-        shutil.copytree(build / 'toolchain-staging', overlay_root, symlinks=True)
+        # The overlay root already exists at this point (its etc seat
+        # was made above), so merge the staging tree into it instead of
+        # demanding a fresh directory.
+        shutil.copytree(build / 'toolchain-staging', overlay_root,
+                        symlinks=True, dirs_exist_ok=True)
     source = root / 'home/cinux/Cinux'
     source.mkdir(parents=True)
     for name in ('CMakeLists.txt', '.gitmodules', 'kernel', 'base', 'user', 'assets', 'cmake', 'scripts', 'test', 'third_party'):
