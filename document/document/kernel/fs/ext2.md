@@ -1,65 +1,146 @@
 # ext2 文件系统
 
-> 里程碑: `028_fs_ext2` `028b_fs_ext2_write` `028c_fs_cwd_stat`
-
 ## 功能概述
 
-ext2 文件系统驱动，挂载 QEMU ext2 分区。支持读取、写入、创建/删除文件和目录、per-process 工作目录和 stat 元数据。数据通过 AHCI SATA DMA 回写磁盘。
+这一页咱们把内核里真正读写盘的那个文件系统走一遍。它的家在 `kernel/fs/ext2/`，是一个叫 `Ext2` 的后端类，坐在块缓存 `BlockCache` 的背上：咱们向它要一块，它就把盘上的字节交到咱们手上。咱们向它写一段，它把咱们的改动铺进缓存，等到 `flush()` 的时候，脏页（改过还没写回的缓存页）才一起送回了设备。块缓存的脚下是块队列，队列再往下就是 AHCI 的命令链，[AHCI 与它脚下的 PCI 总线](../drivers/ahci_pci.md)讲的是那半边，这一页只管盘上的这一半。VFS 抽象与内存盘（ramdisk）的故事在 [VFS 与内存盘](vfs_and_ramdisk.md)，打开描述与文件表的分工归[文件与路径](file_and_path.md)那一页。
 
-## 磁盘格式
+ext2 的盘面把整卷切成若干个块组，每个块组自带的是两份位图和一份 inode 表。inode 是文件系统里给每个文件记身家的编号记录，咱们想知道一个文件多大、数据摊在哪些块上、有几个名字，答案都记在它的身上。位图分开记块与 inode 的占用，超级块住在全卷字节 1024 的位置，组描述符表跟在第一个数据块的后面往后排。挂载只认教学盘的形状：1 KiB 的块、不小于 128 字节的 inode、不带任何额外的特性，咱们见了形状不对的盘就当场拒绝，绝不带着半懂的读法过去。咱们从盘上的字节走起，一路走到 ktest 的用例，每一步的依据都对着源码。
 
-### Superblock (`kernel/fs/ext2_types.hpp`)
-- `s_inodes_count / s_blocks_count / s_log_block_size / s_magic = 0xEF53`
-- `block_size = 1024 << s_log_block_size`
+## 盘上的字节
 
-### Inode
-- `i_mode / i_uid / i_size / i_block[15]`
-- 直接块 0-11，`i_block[12]` 单重间接块，`i_block[13]` 双重间接块
+盘上摆的是什么，`ext2_layout.hpp` 一个头文件就说了算。超级块是 1024 字节的定长结构，魔数 `0xEF53` 停在偏移 56 的地方，块大小、每组的块数与 inode 数、全卷的空闲计数都从它这里来。组描述符是 32 字节一张的小结构，头三个字段就是这一组的全部地理，块位图和 inode 位图各占的块号写在头两个字段里，inode 表的起点在第三个字段里。一条 inode 的身量是 128 字节，躺在它所属组的表里，咱们把 `i_block` 的十五个槽当成文件的地图来读。目录项是变长的，头部的 8 字节装着 inode 号、记录长度 `rec_len` 与名字长度，名字的字节紧跟在头后面，条目一个个靠 `rec_len` 的步长往前走，落点始终对齐到 4 字节的边界上。
 
-### 目录项
-- `Ext2DirEntry [[gnu::packed]]`: `inode / rec_len / name_len / file_type / name[]`
+这套机器是小端的盘配小端的机器，结构体按字段的次序摆好之后，咱们就在原地直接读，全程的字节交换一次都不用做。咱们真正花力气的地方在于让布局错误在编译期就现形：`ext2_layout.cpp` 里一排 `static_assert` 把四个结构体的尺寸、十二处字段偏移、魔数与根 inode 号这些常量在构建的时候就查了一遍，哪一处错了构建都不放行，轮不到盘来替咱们发现。块号的算术也住在同一个头文件里，读路径与写路径共用的是同一份，两边的答案永远吵不起来。
 
-## 初始化 (`ext2_init()`)
-1. 读 superblock (磁盘偏移 1024B)，验证 magic `0xEF53`
-2. 计算 `block_size`
-3. 读 block group descriptor table
+inode 在内核里是没有缓存的。`read_inode` 每次都从组表里把 128 字节的原文读上栈，它把 inode 号换算成它住的组号与组内的序号，再落成组表里的块号与块内偏移，算完了就交给 `read_block`。咱们不另立一份 inode 缓存，因为反复读的那些块（位图、组表、inode 表、文件页）块缓存都会接着，再搭的那一层就是重复劳动。
 
-## 读取操作
-- `ext2_read_inode(ino)` — group=(ino-1)/inodes_per_group，偏移计算
-- `ext2_read_file(inode, buf, offset, len)` — 遍历 `i_block[0-11]` + `i_block[12]` 间接块
-- `ext2_readdir(inode, index)` — `rec_len` 步进遍历目录数据块
+## 块号翻译：一份纯函数管三层
 
-## 写入操作 (028b)
-- **Block 分配器**: 扫描 block bitmap → 分配并标记 → 回写 bitmap
-- **Inode 分配器**: 扫描 inode bitmap → 分配并标记 → 回写 bitmap
-- `ext2_file_write()` — 按需分配新 block，更新 inode size，回写 inode
-- `ext2_create(parent, name)` — 分配 inode + 目录项 + 回写
-- `ext2_mkdir(parent, name)` — 分配 inode + 初始化 `.`/`..` 目录项
-- `ext2_unlink(parent, name)` — 移除目录项 + 释放 block/inode + 回写 bitmap
+文件内的第 N 块落在盘上哪里，这个问题是读写两条路都要问的，所以答案只写一份。咱们把它写成纯函数 `MapFileBlock`，吃进去的是文件内的块号，交出来的是一个 `BlockSlot`。十二个直槽的号码直接存在 `i_block` 里，槽 12 指向的是一张单间接表，槽 13 指向双间接的外表。1 KiB 的表装 256 个四字节指针，所以直层管头 12 块，单层在它的后面接上 256 块，双层再往后能铺的地盘到 65536 块。三层之外本来还有三间接的一层，这一版是刻意不走它的，函数直接回的是 `kUnsupported`，调用方拿到了就大声地拒绝。
 
-## 工作目录 & stat (028c)
-- per-process `cwd[256]` 字段，初始 `"/"`
-- 相对路径解析: 结合 cwd 拼接为绝对路径
-- `sys_chdir`: 更新 cwd，验证目标路径存在且为目录
-- `sys_getcwd`: 返回 cwd 字符串
-- `sys_stat / sys_fstat`: 返回 `struct stat {st_mode, st_size, st_ino, st_type}`
+```cpp
+BlockSlot MapFileBlock(unsigned long file_block) {
+    if (file_block < kSingleFirst) {
+        return {
+            .kind  = BlockSlot::Kind::kDirect,
+            .slot  = file_block,
+            .outer = 0,
+            .inner = 0,
+        };
+    }
+    if (file_block < kDoubleFirst) {
+        return {
+            .kind  = BlockSlot::Kind::kSingle,
+            .slot  = kSingleSlot,
+            .outer = file_block - kSingleFirst,
+            .inner = 0,
+        };
+    }
+    if (file_block < kDoubleFirst + kDoubleTableSlots) {
+        const unsigned long kPast = file_block - kDoubleFirst;
+        return {
+            .kind  = BlockSlot::Kind::kDouble,
+            .slot  = kDoubleSlot,
+            .outer = kPast / kSingleTableSlots,
+            .inner = kPast % kSingleTableSlots,
+        };
+    }
+    return {
+        .kind  = BlockSlot::Kind::kUnsupported,
+        .slot  = 0,
+        .outer = 0,
+        .inner = 0,
+    };
+}
+```
 
-## AHCI 回写
-- ext2 修改后的 block/bitmap/inode 通过 `AHCI::write` 回写磁盘
+摘自 `kernel/fs/ext2/ext2_layout.cpp` 的这段就是块号翻译的全身，咱们把三层判断一层层认过去：直层的答案就是块号本身，单层把越过十二块的余数交给表项，双层的分支再拿商与余数分给外表与内表，三层都没接住的回的是 `kUnsupported`。
 
-## 系统调用
-| 编号 | 功能 |
-|------|------|
-| `SYS_creat` | 创建文件 |
-| `SYS_mkdir` | 创建目录 |
-| `SYS_unlink` | 删除文件 |
-| `SYS_rmdir` | 删除目录 |
-| `SYS_chdir` | 切换工作目录 |
-| `SYS_getcwd` | 获取工作目录 |
-| `SYS_stat` / `SYS_fstat` | 获取文件元数据 |
+咱们读文件的时候拿着 `BlockSlot` 去问 `resolve_data_block`，它的回答是：直层直接回槽里的号，单层的路要多读一张表，双层的路要读外表再读内表。指针为零的地方当洞来处理，读回来的就是零。咱们写文件的时候换 `ensure_data_block` 来接手，缺的是哪一块它就补哪一块，它的展开放在写路径一节。
+
+## 挂载时的准入检查
+
+`mount()` 的前半段全是盘的体检。读上来的魔数不对，回给调用方的就是 `kIOError`。其余的条件咱们逐条查过去，每一条都带着自己的错误码：
+
+- 块大小字段非零（也就是块不是 1 KiB 的盘），回的是 `kNotSupported`。
+- 不兼容特性位非零，回的是 `kNotSupported`。
+- inode 尺寸小于 128 字节，或者整除不了 1 KiB 的块，回的是 `kNotSupported`。
+- 第一个数据块的号不是 1，回的是 `kIOError`。
+- 每组的块数超过 8192，回的是 `kIOError`。
+- inode 的总数对不上组数，回的也是 `kIOError`。
+
+算出来的组数要是超过 256，咱们也拒收，因为内存里的组描述符表是张定长的数组，上限在编译期就定好了。
+
+体检过了，咱们把组描述符表整表读进内存，再把根 inode（2 号）读了出来，咱们确认它是目录，`mounted_` 的开关这才置上。这套口径跟教学盘是配套的：`scripts/create_ext2_disk.sh` 烤的盘用 1 KiB 块、关掉全部可选的特性，烤出来的形状刚好过关。日常的开发盘由 `ext2_img` 目标供给，跑内核测试用的是它的暂存拷贝 `ext2_ktest.img`，测试写花的是拷贝，日常的盘不受牵连。
+
+## 读路径：从路径名到字节
+
+进来的路径名不带前导斜杠，空的路径就是根。`walk_from` 从起点的 inode 开始逐段走，每一段都在当前的目录里查名字、读子 inode。路上遇见了符号链接，就把目标拼回待走的路径重新走，重走的次数封顶 40 次，走不完的回 `kInvalidArgument`。链接的目标若是绝对路径，只在从根起步的行走里接受，相对锚点的行走一律拒绝。符号链接还有个快捷的身位：目标不超过 60 字节、文件又不带数据块的时候，目标文本就存在 `i_block` 的槽里，咱们直接把它拷出来用，连盘的面都不用见。
+
+读文件的字节走的是 `read_locked`。目录的字节不给读，偏移越过了文件尾就回零，请求的尾部按文件大小截断。咱们逐块解算盘上的块号，洞的地方补零，非洞的读块再按块内的偏移拷贝，缓冲是调用栈上一块 1 KiB 的暂存，每次请求各用各的，咱们不让它们共享。
+
+列目录的活归 `read_dir`，咱们按序号向它领条目。`.` 与 `..` 在盘上是两条真实的条目，排号的时候跟别的名字一起排。名字长过 255 字节的条目跳过且不占号。条目的类型不是从条目自身读的，盘上的那个布局里根本没有类型字节，咱们拿着条目的 inode 号把子 inode 读出来，从 mode 的类型段判定它是目录还是文件。
+
+所有的目录行走共用同一个骨架 `walk_entries`：它按 `rec_len` 的步长逐项前进，咱们在每项开读之前查它四件事（记录长度不小于 8、位置对齐、不出块、头部加名字装得进记录长度），任何一条过不了就回的是 `kIOError`，盘面有了损就大声地拒绝，咱们绝不把条目读一半就扔下。查名字和按号发条目只是往骨架里塞不同的回调，`rec_len` 的走法全盘只有一处。
+
+## 写路径：位图分配与文件生长
+
+分配一个盘块的活是典型的读-改-写：咱们把位图块读上栈上的字数组，找一位清零的，把选中的位一置，再把改动的那个字节补回位图块，同时把超级块与组描述符里的空闲计数减一。`alloc_block` 逐组地扫，空闲计数为零的组直接跳过。`alloc_inode` 是同型的活，inode 的号从一数起，分配目录 inode 时组描述符里的目录计数还要加一。计数器在减之前查的是够不够减，不够的申请直接拒掉，计数的底永远穿不了。
+
+写文件的活走的是 `write_locked`。咱们逐块把文件内的块号交给 `ensure_data_block`：直槽空着的地方就补一块。单间接的表指针空着就补一张表，表项空着的地方再补一块。双间接是同样的路数，外表、内表、数据块一级级地补。每块新盘块都经 `zero_fresh_block` 的手分配并整块写零，所以洞读回来才是零，这个性质从分配的那一刻就成立。`i_blocks` 的计数单位是 512 字节的扇区，一块盘块对应的是二，这是盘面格式的老口径，跟块的大小无关。字节的正文用 `patch_storage` 补进块里，收尾把 `i_size` 涨到本次写入的终点，`mtime` 与 `ctime` 的时间戳都盖上，整个的 inode 写回组表。
+
+`append` 在同一把锁里读出当前的长度，在文件的尾部写入，再把写后的游标回填给调用者，三步是连着做的，别的写入插不进它的中间。`truncate` 把三层映射上的数据块全部归还位图，咱们再把 `i_block` 的槽位清空，尺寸与占用的字段归零。`chmod` 用位段的工具只存权限段（低 12 位），类型段是原样保留的，`ctime` 的章一并盖上。
+
+## 目录的增删改
+
+咱们往目录里插一个条目，`add_dir_entry` 找的是三种落点。头一种是死槽的复活，条目的 inode 号为零的槽位，身位够长的新条目就直接住进去，住完剩出的地方若还装得下 8 字节头部，尾巴上立一个新的死槽，`rec_len` 把剩余的量吞掉。第二种是活项的缩身，一个活条目的 `rec_len` 往往比它需要的最小身位大，咱们把前项缩到最小的身位，腾出的地方立新项，剩余的量归新项。两种落点都轮不上的时候，就补上一块新的目录块，新的项从头立起，`rec_len` 吞掉整块的长度，父目录的尺寸涨一块并写回。
+
+`make_dir` 要办的头一件事是把两个点条目立起来。新目录拿的是一份 inode 加一块数据，inode 的链接数从 2 起算（`.` 算一个，父目录的名字算一个），`.` 的记录长 12 字节，`..` 的记录长度写成 1024 减 12，把整块的余量吞干净。父目录的链接数加一，条目挂了进去，咱们一口气办完。
+
+删除的活走 `remove_dir_entry`。找到了目标之后，前面有活项就让前项的 `rec_len` 把它并吞，一次的补写就办完事。它要是站在块的头一个位置，咱们就把 inode 号写成零，槽位就变成了死槽，留给下一回的插入来复活。删除的要是文件，掉的就是它的一个链接，`drop_file_link` 把链接数减到零、且没有打开描述拿着它的时候，数据块三层全拆了，`dtime` 盖了章，inode 号也归还了位图。
+
+目录要求空（只剩它自己的两个点条目）才能删。删的时候 `.` 与 `..` 对应的两份链接一起退掉，父目录的链接数减一，组里的目录计数减一。目录的家当咱们也照实说，它跟文件走的是同一条路子：`retire_empty_directory` 在链接数归零、又没有打开描述按着它的时候动手，`dtime` 是这时候填上的，数据块也全数归还了位图，inode 的号一并归还，空闲的计数一起加回去。要是有打开描述还按着它的话，拆除就挪到 `reap_pending` 的延迟路径里去办。
+
+`rename` 只动的是普通文件，目标的位置上若已有一个目录，咱们就直接拒绝。替换目标的时候不删条目，把那一项的 inode 号字段补写成源号，旧的目标随后掉链接。整趟 rename 连同 unlink 都包在下面的事务里。
+
+## 一口气做完的元数据序列
+
+一次元数据的写入是长长的一串读-改-写，步子与写路径一节里讲过的是同一套，咱们就不在这一页重念了，只把落在盘上的字段说明白：置位与补写动的是位图块，计数加减动的是超级块里的空闲块计数 `s_free_blocks_count` 与空闲 inode 计数 `s_free_inodes_count`，组描述符里对应的两份跟着一起改。这一串要是被切开了，两个文件分到同一个盘块的事故就来了，这是后端绝不收下的竞争。所以全部写面孔与读面孔都取同一把 `write_gate_`，它的真身是睡眠锁（`proc::Mutex`），取锁的理由咱们直说：临界区的中间要穿队列命令，而队列命令会让任务睡过去，自旋锁横跨睡眠是这棵树里记载最详尽的死法。锁族的底细在 [同步原语](../proc/sync.md)那一页。
+
+锁保证的是串行，中间态的藏与露它管不着，这一层的活由 `Mutation` 补上。咱们开一个 `Mutation`，它就把超级块与全部的组描述符快照进一份私有的底稿，同时开出一份 `BlockCache::Batch`：事务里咱们做的每次 `patch_storage` 写的都是私有页副本，`read_storage` 也改道去读暂存的页，所以事务内部读写一致。咱们调 `commit()`，整批的私有页就一起发布，发布的动作本身不碰设备。咱们没提交就让事务析构的话，内存侧的超级块与组描述符回滚到底稿，暂存的页整个作废，盘面与内存都停在事务开跑之前的样子。读端调用者也取写锁的原因在这里：改名的中间态躺在暂存的页里，排在锁后面的读端调用者看到的自然是发布之后的盘面。
+
+## inode 的住与拆
+
+`FsNode` 是个四字段的节点标记（类型、inode 号、大小、后端私用的一根指针），`Ext2` 把指针留的是空，因为盘上每组的表本来就收着全部的 inode，节点标记够用了。打开描述要按住一个 inode 的时候走 `retain`，放手的时候走 `release`，两件事只是在一个受自旋锁保护的链表上记号计数。文件表那一层的分工归[文件与路径](file_and_path.md)那一页讲，这里咱们只管后端这一侧。
+
+删除的路径与回收的路径在这里接上头。`unlink` 把链接数减到零的时候，若有打开的描述还按着这个 inode，数据块与 inode 的号都留着不拆，真正的拆除挪到 `reap_pending`：`sync()` 在写锁内把持有的链表扫一遍，计数已归零的咱们逐个检查，链接数仍非零的继续住着，归零的才开事务拆块、盖 `dtime`、归还 inode 号。`sync` 收完了尾再调 `cache_.flush()` 把脏页全部送回设备，全部的成功才算数。
+
+时间戳有它单独的一段小讲究。后端是不自己读钟的，构造时咱们接一个返回 Unix 秒的函数指针。不给钟的时候就盖零，删除时刻回落到盘的出生时间，这个安排让没有钟的机器也能交出一份让 fsck 安静的盘面。
+
+## ktest 的八场用例
+
+ext2 的用例住在 `test/kernel/test_ext2.cpp`，跑在块梯级上：中断开了、PCI 与 AHCI 也装好了，每场用例自建的是队列、缓存与 `Ext2` 的实例，测试盘就是暂存的拷贝 `boot/ext2_ktest.img`，盘不在的话，提示打完了就停机，ktest 的装配与梯级在 [内核测试基建](../test.md)里讲全。八场用例咱们逐场数过：
+
+- 挂载烤好的盘，确认 `mount()` 能过。
+- 按名找到 `hello.txt`，核对它 23 字节的身量。
+- 把烤盘时写下的内容逐字节读回来。
+- `stat` 报出的身量、模式与链接数逐项对上烤盘，时间戳对上的是烤盘烤进去的非零值。
+- 根目录能列出烤进去的条目。
+- 新文件写入并生长。
+- 写回的内容读回来，再删掉。
+- 新建的目录能列出，也能删空。
+
+用例里的种子文件来自 `scripts/ext2_seed/`，`hello.txt` 就是其中的一份。测试是不喂钟的，咱们构造 `Ext2` 的时候不传时钟指针，所以用例里新写下的文件时间戳全是零，这一点咱们照实交代，专门校验零值的用例一场都没有。`stat` 那场对着的是烤盘上的 `hello.txt`，身量、模式与链接数咱们一项项都对过，mtime 是烤盘烤进去的非零值。读写两路都过的是块缓存，位图、组表、inode 表这些热块反复地命中，真正下到设备的命令因此省了一截，这也是缓存存在的意义。
 
 ## 源码位置
-- `kernel/fs/ext2.hpp/cpp` — ext2 驱动
-- `kernel/fs/ext2_types.hpp` — ext2 磁盘格式定义
-- `kernel/fs/path.hpp/cpp` — 路径解析工具
-- `kernel/fs/stat.hpp` — stat 结构体
+
+- `kernel/fs/ext2/ext2_layout.hpp`、`kernel/fs/ext2/ext2_layout.cpp` — 盘上四结构的字段与尺寸、块号三层映射的纯函数、编译期布局断言
+- `kernel/fs/ext2/ext2.hpp`、`kernel/fs/ext2/ext2.cpp` — `Ext2` 后端的全部公共面孔、挂载体检、路径行走、读路径与目录走查骨架，文件尾用 `static_assert` 验明 `FileSystem` 概念的正身
+- `kernel/fs/ext2/ext2_write.cpp` — 位图分配与归还、文件生长、目录项的插入删除改名、`chmod`
+- `kernel/fs/ext2/ext2_mutation.hpp`、`kernel/fs/ext2/ext2_mutation.cpp` — `Mutation` 事务域、`InodeHold` 持有链表与延迟回收
+- `kernel/driver/block/block_cache.hpp` — 页粒块缓存与 `Batch` 私有页发布
+- `kernel/fs/vfs.hpp` — `FileSystem` 概念与 `FsNode` 节点标记
+- `kernel/fs/fs_config.hpp` — 路径与名字的长度上限、文件与目录的默认权限字
+- `test/kernel/test_ext2.cpp` — 八场用例的全文
+- `scripts/create_ext2_disk.sh`、`scripts/ext2_seed/` — 教学盘的烤法与种子文件，`hello.txt` 的出处
+- `cmake/rootfs.cmake` — `ext2_img` 与 `ext2_ktest_img` 两个目标，后者是前者的暂存拷贝
