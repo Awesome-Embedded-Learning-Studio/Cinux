@@ -23,6 +23,13 @@ void arm_write_protect() {
     cinux::arch::WriteCr0(cinux::arch::ReadCr0() | cinux::arch::kCr0WriteProtect);
 }
 
+/// These cases write shared frames from kernel mode, where no task owns
+/// the address, so the task-door resolver the production path seats would
+/// decline. Seat the engine itself on the arch's page-fault door.
+void seat_cow() {
+    cinux::arch::isr::InstallPageFaultResolver(&cinux::mm::cow::TryResolvePageFault);
+}
+
 void map_shared(const cinux::mm::AddressSpace& space, unsigned long spot,
                 const cinux::base::PhysAddr& frame) {
     cinux::base::safety::Check(space.map_user(spot, frame.raw), "cow test map failed");
@@ -47,7 +54,7 @@ void assert_leaf_terms(unsigned long root, unsigned long spot, LeafWants wants) 
 }
 
 TEST("cow: a shared write earns a private copy, company keeps the original") {
-    cinux::mm::cow::InstallResolver();
+    seat_cow();
     arm_write_protect();
     auto&                   ledger  = cinux::mm::Pmm::self();
     const unsigned long     kBefore = ledger.free_page_count();
@@ -74,7 +81,7 @@ TEST("cow: a shared write earns a private copy, company keeps the original") {
 }
 
 TEST("cow: the no-execute bit survives sharing and the private copy") {
-    cinux::mm::cow::InstallResolver();
+    seat_cow();
     arm_write_protect();
     auto&                   ledger  = cinux::mm::Pmm::self();
     const unsigned long     kBefore = ledger.free_page_count();
@@ -103,7 +110,7 @@ TEST("cow: the no-execute bit survives sharing and the private copy") {
 }
 
 TEST("cow: the last sharer writes in place, no frame changes hands") {
-    cinux::mm::cow::InstallResolver();
+    seat_cow();
     arm_write_protect();
     auto&                   ledger  = cinux::mm::Pmm::self();
     const unsigned long     kBefore = ledger.free_page_count();
