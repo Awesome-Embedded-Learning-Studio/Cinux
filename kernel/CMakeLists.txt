@@ -130,22 +130,6 @@ add_custom_command(
     DEPENDS ${CMAKE_SOURCE_DIR}/assets/font.psf
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-file(GLOB CINUX_INITRD_FILES CONFIGURE_DEPENDS
-    ${CMAKE_SOURCE_DIR}/assets/initrd/* ${CMAKE_SOURCE_DIR}/assets/initrd/*/*)
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
-    COMMAND tar --format=ustar -C ${CMAKE_SOURCE_DIR}/assets/initrd -cf
-            ${CMAKE_CURRENT_BINARY_DIR}/initrd.tar readme.txt docs
-    COMMAND ${CMAKE_OBJCOPY} -I binary -O elf64-x86-64 -B i386:x86-64
-            --rename-section .data=.rodata.initrd
-            --redefine-sym _binary_initrd_tar_start=g_initrd_start
-            --redefine-sym _binary_initrd_tar_end=g_initrd_end
-            --set-section-flags .rodata.initrd=alloc,load,readonly,data
-            initrd.tar
-            initrd_blob.o
-    DEPENDS ${CINUX_INITRD_FILES}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
 function(add_cinux_kernel name bin_stem)
     set(kallsyms_source ${CMAKE_CURRENT_BINARY_DIR}/${name}_kallsyms.cpp)
     add_library(${name}_core OBJECT ${CINUX_KERNEL_CORE_SOURCES})
@@ -156,7 +140,6 @@ function(add_cinux_kernel name bin_stem)
         ${CMAKE_SOURCE_DIR}/kernel/kernel.cpp
         $<TARGET_OBJECTS:${name}_core>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
-        ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
         ${ARGN})
     cinux_kernel_compile_settings(${name}_unsym)
     cinux_kernel_link_settings(${name}_unsym)
@@ -169,7 +152,6 @@ function(add_cinux_kernel name bin_stem)
         ${CMAKE_SOURCE_DIR}/kernel/kernel.cpp
         $<TARGET_OBJECTS:${name}_core>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
-        ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
         ${ARGN}
         ${kallsyms_source})
     cinux_kernel_compile_settings(${name})
