@@ -231,10 +231,21 @@ int main() {
 }
 ''')
             binary = work / 'probe'
+            # A configured build generates the port shims the neutral
+            # arch headers forward to; recreate them here so this
+            # standalone compile sees the same surface.
+            port = work / 'generated/cinux/port'
+            port.mkdir(parents=True)
+            for neutral in sorted((ROOT / 'kernel/arch').glob('*.hpp')):
+                if (ROOT / 'kernel/arch/x86_64' / neutral.name).is_file():
+                    (port / neutral.name).write_text(
+                        '#pragma once\n#include "kernel/arch/x86_64/'
+                        + neutral.name + '"\n')
             compiler = os.environ.get('CXX', shutil.which('g++'))
             result = subprocess.run(
                 [compiler, '-std=c++23', '-O0', '-D_GLIBCXX_ASSERTIONS',
-                 '-I', str(ROOT), '-I', str(ROOT / 'base/include'), str(source),
+                 '-I', str(work / 'generated'), '-I', str(ROOT),
+                 '-I', str(ROOT / 'base/include'), str(source),
                  str(ROOT / 'kernel/lib/assert.cpp'), str(ROOT / 'base/src/format/entry.cpp'),
                  str(ROOT / 'base/src/format/radix.cpp'), '-o', str(binary)],
                 capture_output=True, text=True)
