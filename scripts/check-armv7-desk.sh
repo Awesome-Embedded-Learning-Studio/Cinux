@@ -29,7 +29,13 @@ cmake -S "${repo}" -B "${build}" >/dev/null
 # The desk and the volume both ride the build graph: the overlay stage
 # copies the desk onto the buildroot card, and the GUI dtb says
 # CINUX_SESSION=gui so the card's inittab lights the desk on its own.
-cmake --build "${build}" --target vesper_desk buildroot_volume arm_init_gui_dtb >/dev/null || exit 1
+build_log="${build}/check-armv7-desk.build.log"
+if ! cmake --build "${build}" --target vesper_desk buildroot_volume arm_init_gui_dtb \
+        >"${build_log}" 2>&1; then
+    echo "[check-armv7-desk] build failed, tail of ${build_log}:" >&2
+    tail -n 40 "${build_log}" >&2
+    exit 1
+fi
 
 log="${CINUX_ARM_DESK_LOG:-$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)}"
 qmp="$(mktemp -d /tmp/cinux-desk-qmp.XXXXXX)/qmp"

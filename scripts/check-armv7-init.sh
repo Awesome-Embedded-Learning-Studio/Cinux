@@ -11,7 +11,15 @@ run_seconds="${CINUX_ARM_RUN_SECONDS:-55}"
 qemu="${CINUX_ARM_QEMU:-qemu-system-arm}"
 
 cmake -S "$root" -B "$build" -G Ninja -DCINUX_ARCHITECTURE=armv7 >/dev/null || exit 1
-cmake --build "$build" --target arm_image buildroot_volume >/dev/null || exit 1
+build_log="${build}/check-armv7-init.build.log"
+# Ninja writes its errors to stdout, so a bare >/dev/null hides the one
+# line that says why the card could not be baked. Keep the log and show
+# its tail when the build fails.
+if ! cmake --build "$build" --target arm_image buildroot_volume >"${build_log}" 2>&1; then
+    echo "[check-armv7-init] build failed, tail of ${build_log}:" >&2
+    tail -n 40 "${build_log}" >&2
+    exit 1
+fi
 
 exec cmake -DTYPED=1 \
     "-DQEMU_PROGRAM=$qemu" \
