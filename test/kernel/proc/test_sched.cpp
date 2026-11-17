@@ -756,16 +756,23 @@ void forking_parent_task() {
     kSelf->files->get(kFirst.value()).value()->offset = 128;
     arm_fork_frame();
     stage_callee_saved();
-    cinux::arch::SaveFpu(kSelf->entry_fpu);
-    kSelf->entry_fpu.words[20] = kSentinelXmm0;
-    cinux::proc::Task* const kChild =
-        cinux::proc::BuildForkChild(reinterpret_cast<unsigned long long>(&g_fork_frame));
-    g_fork_built = kChild != nullptr;
-    if (kChild == nullptr) {
-        return;
+    // The FPU gate saves the live image into entry_fpu on every fault,
+    // so an interrupt landing between the sentinel write and the copy
+    // would clobber the very word this case inspects. Keep the window
+    // closed to interrupts.
+    {
+        const cinux::arch::IrqGuard kFpuGuard;
+        cinux::arch::SaveFpu(kSelf->entry_fpu);
+        kSelf->entry_fpu.words[20] = kSentinelXmm0;
+        cinux::proc::Task* const kChild =
+            cinux::proc::BuildForkChild(reinterpret_cast<unsigned long long>(&g_fork_frame));
+        g_fork_built = kChild != nullptr;
+        if (kChild == nullptr) {
+            return;
+        }
+        inspect_fork_child(*kChild, *kSelf, kFirst.value());
+        retire_fork_child(*kChild);
     }
-    inspect_fork_child(*kChild, *kSelf, kFirst.value());
-    retire_fork_child(*kChild);
     kSelf->space = {};
     kSelf->vmas  = {};
 }
@@ -832,21 +839,26 @@ void cloning_parent_task() {
     kSelf->files->get(kOnly.value()).value()->offset = 64;
     arm_fork_frame();
     stage_callee_saved();
-    cinux::arch::SaveFpu(kSelf->entry_fpu);
-    kSelf->entry_fpu.words[20] = kSentinelXmm0;
-    const cinux::proc::ClonePlan kPlan{
-        .flags      = g_clone_flags,
-        .user_stack = kCloneChildRsp,
-        .tls        = g_clone_tls,
-    };
-    cinux::proc::Task* const kChild =
-        cinux::proc::BuildCloneChild(reinterpret_cast<unsigned long long>(&g_fork_frame), kPlan);
-    g_clone_built = kChild != nullptr;
-    if (kChild == nullptr) {
-        return;
+    // Same closed window as the fork fixture: the gate rewrites
+    // entry_fpu whenever a fault lands on this task.
+    {
+        const cinux::arch::IrqGuard kFpuGuard;
+        cinux::arch::SaveFpu(kSelf->entry_fpu);
+        kSelf->entry_fpu.words[20] = kSentinelXmm0;
+        const cinux::proc::ClonePlan kPlan{
+            .flags      = g_clone_flags,
+            .user_stack = kCloneChildRsp,
+            .tls        = g_clone_tls,
+        };
+        cinux::proc::Task* const kChild =
+            cinux::proc::BuildCloneChild(reinterpret_cast<unsigned long long>(&g_fork_frame), kPlan);
+        g_clone_built = kChild != nullptr;
+        if (kChild == nullptr) {
+            return;
+        }
+        inspect_clone_child(*kChild, *kSelf, kOnly.value());
+        retire_fork_child(*kChild);
     }
-    inspect_clone_child(*kChild, *kSelf, kOnly.value());
-    retire_fork_child(*kChild);
     kSelf->space = {};
     kSelf->vmas  = {};
 }
