@@ -18,6 +18,18 @@
 
 namespace cinux::arch::abi {
 
+/// The sigreturn number this port's signal trampoline issues in r7.
+inline constexpr unsigned long kSigreturnNumber = 173;
+
+/// ARM restorer stubs: rt_sigreturn at +0, legacy sigreturn at +8.
+/// Each loads r7 then executes svc; bx lr interworks from Thumb handlers.
+inline constexpr unsigned char kSignalReturnStub[] = {0xAD, 0x70, 0xA0, 0xE3,
+                                                      0x00, 0x00, 0x00, 0xEF,
+                                                      // Legacy sigreturn (119), no siginfo prefix.
+                                                      0x77, 0x70, 0xA0, 0xE3,
+                                                      0x00, 0x00, 0x00, 0xEF};
+
+
 inline long long CallKernel(unsigned long long number, unsigned long long arg1,
                             unsigned long long arg2, unsigned long long arg3) {
     // NOLINTNEXTLINE(misc-const-correctness)

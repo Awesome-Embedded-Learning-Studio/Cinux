@@ -137,7 +137,12 @@ constexpr Entry MakePageEntry(unsigned long physical, Entry flags) {
     if (!flags.has(kUser)) {
         terms |= (0x1U << 4U);                       // AP: PL1 only
     } else if (flags.has(kReadOnly)) {
-        terms |= (0x2U << 4U);                       // AP: PL1 RW, user read-only
+        // Read-only means read-only for both worlds: AP 0x2 leaves the
+        // privileged half writable, and a kernel store through a raw user
+        // VA would then silently write a COW-shared frame without ever
+        // reaching the repair. AP 0x6 makes the privileged half read-only
+        // too, so the store aborts and the COW door copies the page.
+        terms |= (0x6U << 4U);                       // AP: both worlds read-only
     } else {
         terms |= (0x3U << 4U);                       // AP: both worlds
     }

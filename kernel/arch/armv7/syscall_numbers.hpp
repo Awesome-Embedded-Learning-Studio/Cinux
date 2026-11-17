@@ -86,6 +86,7 @@ inline constexpr unsigned long kGetpgrp        = 65;
 /// the mask word, both in this ABI's shape.
 inline constexpr unsigned long kRtSigaction    = 174;
 inline constexpr unsigned long kRtSigprocmask  = 175;
+inline constexpr unsigned long kSigreturn = 119;
 inline constexpr unsigned long kRtSigreturn    = 173;
 inline constexpr unsigned long kRtSigtimedwait = 177;
 /// The identity words and the names a shell reads before its first
@@ -118,6 +119,16 @@ inline constexpr unsigned long kGetdents    = 217;
 inline constexpr unsigned long kGetrandom   = 384;
 inline constexpr unsigned long kPrctl       = 172;
 inline constexpr unsigned long kReadlinkat  = 332;
+// The console-init ladder on the volume: busybox's init arms a real
+// interval timer, su follows a link and walks its group list, and the
+// legacy 32-bit uid spellings ride their own numbers here.
+inline constexpr unsigned long kReadlink    = 85;
+inline constexpr unsigned long kReboot      = 88;
+inline constexpr unsigned long kSetitimer   = 104;
+inline constexpr unsigned long kGetgroups   = 80;
+inline constexpr unsigned long kSetgroups   = 81;
+inline constexpr unsigned long kGetgroups32 = 205;
+inline constexpr unsigned long kSetgroups32 = 206;
 // 239 is sendfile64, the EABI spelling; busybox's cat and cp take this
 // fast path before ever staging a buffer of their own.
 inline constexpr unsigned long kSendfile64 = 239;

@@ -40,8 +40,12 @@ _vec4: sub  lr, lr, #8
        stmdb sp!, {r3}            @ park r3 while the mode is checked
        mrs  r3, spsr
        and  r3, r3, #0x1F
-       cmp  r3, #0x10              @ only a user fault may be repaired
-       bne  _abort_plain
+       cmp  r3, #0x10              @ user-mode data abort
+       beq  1f
+       cmp  r3, #0x13              @ syscall accesses may demand-fault too
+       beq  _abort_svc_save
+       b    _abort_plain
+1:
        ldmia sp!, {r3}
        b    _abort_trap_save
 _abort_plain:
@@ -86,11 +90,13 @@ _svc_trap:
 @ leaves the frame parked where the interrupted task's kernel stack
 @ keeps it safe while another task runs its own episode.
 _svc_trap_save:
-       sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
+       sub   sp, sp, #20           @ room for sp/pc/SPSR/user LR and padding
        stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
        cps   #0x1F                 @ System mode shares the user sp bank
        mov   r1, sp
+       mov   r2, lr
        cps   #0x13                 @ back to supervisor mode
+       str   r2, [sp, #64]        @ banked user LR
        mov   r2, lr                @ the user's return address
        mrs   r3, spsr
        str   r1, [sp, #52]         @ user sp
@@ -105,11 +111,12 @@ _svc_trap_save:
        ldr   r12, [r3, #56]        @ user pc
        cps   #0x1F
        mov   sp, r1
+       ldr   lr, [r3, #64]
        cps   #0x13
        msr   spsr_cxsf, r2
        mov   lr, r12
        ldmia r3, {r0-r12}
-       add   sp, sp, #64           @ the episode's frame comes off
+       add   sp, sp, #72           @ the episode's frame comes off
        movs  pc, lr
 
 @ Same stack frame shape as the svc path, on the IRQ bank's own stack:
@@ -119,11 +126,13 @@ _svc_trap_save:
 @ lends the CPU elsewhere, and that switch must happen on the task's
 @ own supervisor stack, never on the one-per-CPU bank.
 _irq_trap_save:
-        sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
+        sub   sp, sp, #20           @ room for sp/pc/SPSR/user LR and padding
         stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
         cps   #0x1F                 @ System mode shares the user sp bank
         mov   r1, sp
+        mov   r2, lr
         cps   #0x12                 @ back to IRQ mode
+        str   r2, [sp, #64]        @ banked user LR
         mov   r2, lr                @ the user's resume address
         mrs   r3, spsr
         str   r1, [sp, #52]         @ user sp
@@ -137,12 +146,13 @@ _irq_trap_save:
         mov   r1, #0                @ interrupt
         bl    c_trap_entry
         mov   r3, r0
-        add   sp, sp, #64           @ free the frame on this bank's stack
+        add   sp, sp, #72           @ free the frame on this bank's stack
         ldr   r1, [r3, #52]         @ user sp
         ldr   r2, [r3, #60]         @ SPSR
         ldr   r12, [r3, #56]        @ user pc
         cps   #0x1F
         mov   sp, r1
+        ldr   lr, [r3, #64]
         cps   #0x13
         msr   spsr_cxsf, r2
         mov   lr, r12
@@ -156,27 +166,28 @@ _irq_trap_save:
 @ owns. The handler returns the same frame; a preempted task simply
 @ arrives back here later and resumes the interrupted user code.
 _irq_seated_rehome:                 @ r0 = the frame on the IRQ bank's stack
-@ rehome: copy the 64-byte frame to the task's supervisor stack
+@ rehome: copy the 72-byte frame to the task's supervisor stack
         cps   #0x13                 @ supervisor: sp = the task's kernel sp
-        sub   sp, sp, #64
+        sub   sp, sp, #72
         mov   r4, sp
-        add   r5, sp, #64
+        add   r5, sp, #72
 1:      ldmia r0!, {r2, r3}
         stmia r4!, {r2, r3}
         cmp   r4, r5
         blo   1b
         mov   r0, sp                @ r0 = the frame in its final home
         cps   #0x12
-        add   sp, sp, #64           @ the IRQ bank comes back to its top
+        add   sp, sp, #72           @ the IRQ bank comes back to its top
         cps   #0x13
         bl    c_irq_trap_seated
         mov   r3, r0                @ same frame, maybe much later
-        add   sp, sp, #64           @ the episode's frame comes off
+        add   sp, sp, #72           @ the episode's frame comes off
         ldr   r1, [r3, #52]         @ user sp
         ldr   r2, [r3, #60]         @ SPSR
         ldr   r12, [r3, #56]        @ user pc
         cps   #0x1F
         mov   sp, r1
+        ldr   lr, [r3, #64]
         cps   #0x13
         msr   spsr_cxsf, r2
         mov   lr, r12
@@ -191,11 +202,13 @@ _irq_seated_rehome:                 @ r0 = the frame on the IRQ bank's stack
 @ same home the svc path parks its frames on - and the bank stack
 @ comes back to its top before any C runs.
 _abort_trap_save:
-       sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
+       sub   sp, sp, #20           @ room for sp/pc/SPSR/user LR and padding
        stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
        cps   #0x1F                 @ System mode shares the user sp bank
        mov   r1, sp
+       mov   r2, lr
        cps   #0x17                 @ back to abort mode
+       str   r2, [sp, #64]        @ banked user LR
        mov   r2, lr                @ the faulting instruction
        mrs   r3, spsr
        str   r1, [sp, #52]         @ user sp
@@ -204,18 +217,59 @@ _abort_trap_save:
        mov   r1, #2                @ data abort
        b     _banked_trap_run
 
+@ A privileged fault must preserve the interrupted SVC lr as well as
+@ its sp. The user return path overwrites that bank, so it cannot be
+@ used here. Keep C on the task stack and release the abort bank before
+@ calling the pager, whose file read may schedule another task.
+_abort_svc_save:
+       ldmia sp!, {r3}
+       sub   sp, sp, #12
+       stmdb sp!, {r0-r12}
+       mov   r0, sp
+       mov   r2, lr
+       mrs   r3, spsr
+       str   r2, [r0, #56]
+       str   r3, [r0, #60]
+       cps   #0x13
+       mov   r2, sp
+       str   r2, [r0, #52]
+       stmdb sp!, {r2, lr}         @ padding and interrupted SVC lr
+       sub   sp, sp, #64
+       mov   r4, sp
+       add   r5, sp, #64
+1:     ldmia r0!, {r2, r3}
+       stmia r4!, {r2, r3}
+       cmp   r4, r5
+       blo   1b
+       cps   #0x17
+       add   sp, sp, #64
+       cps   #0x13
+       mov   r0, sp
+       bl    c_abort_trap          @ keep the enclosing syscall's trap current
+       mov   r3, r0
+       ldr   lr, [sp, #68]
+       add   sp, sp, #72
+       cps   #0x17
+       ldr   lr, [r3, #56]
+       ldr   r2, [r3, #60]
+       msr   spsr_cxsf, r2
+       ldmia r3, {r0-r12}
+       movs  pc, lr
+
 @ A kernel-mode prefetch abort: dump the kernel world and stop. The
 @ frame shape matches the abort save path so C can read it the same way.
 @ A user-mode prefetch abort: same frame shape as the data-abort
 @ save, taken in the prefetch-abort bank. lr already names the
 @ faulting instruction, so resuming re-executes it uncorrected.
 _prefetch_trap_save:
-       sub   sp, sp, #12           @ room for the user's sp/pc/SPSR
+       sub   sp, sp, #20           @ room for sp/pc/SPSR/user LR and padding
        stmdb sp!, {r0-r12}         @ r0@0 .. r12@48
        cps   #0x1F                 @ System mode shares the user sp bank
        mov   r1, sp
+       mov   r2, lr
        cps   #0x17                 @ back to abort mode: prefetch and
                                     @ data aborts share the one bank
+       str   r2, [sp, #64]        @ banked user LR
        mov   r2, lr                @ the faulting instruction
        mrs   r3, spsr
        str   r1, [sp, #52]         @ user sp
@@ -231,16 +285,16 @@ _prefetch_trap_save:
 _banked_trap_run:
        mov   r0, sp                @ r0 = the bank-frame to move
        cps   #0x13                 @ supervisor: sp = the task's kernel sp
-       sub   sp, sp, #64
+       sub   sp, sp, #72
        mov   r4, sp                @ r4 = the frame's new home
-       add   r5, sp, #64           @ r5 = one past the frame's end
+       add   r5, sp, #72           @ r5 = one past the frame's end
 1:     ldmia r0!, {r2, r3}
        stmia r4!, {r2, r3}
        cmp   r4, r5
-       blo   1b                    @ sixteen words shuttled, 64 bytes done
+       blo   1b                    @ eighteen words shuttled, 72 bytes done
        mov   r0, sp                @ r0 = the frame on the task stack
        cps   #0x17
-       add   sp, sp, #64           @ the bank stack is whole again
+       add   sp, sp, #72           @ the bank stack is whole again
        cps   #0x13
        bl    c_trap_entry          @ C runs on the task's own stack
        mov   r3, r0
@@ -249,11 +303,12 @@ _banked_trap_run:
        ldr   r12, [r3, #56]        @ user pc
        cps   #0x1F
        mov   sp, r1
+       ldr   lr, [r3, #64]
        cps   #0x13
        msr   spsr_cxsf, r2
        mov   lr, r12
        ldmia r3, {r0-r12}
-       add   sp, sp, #64           @ the frame comes off the task stack
+       add   sp, sp, #72           @ the frame comes off the task stack
        movs  pc, lr
 
 _prefetch_dump:
@@ -274,6 +329,7 @@ _prefetch_dump:
 @ Everything else: report the slot and stop.
 _dispatch:
     push    {r0-r3, lr}
+    mov     r1, lr                  @ the faulting instruction's own address
     bl      c_exception_dispatch
     pop     {r0-r3, lr}
     movs    pc, lr

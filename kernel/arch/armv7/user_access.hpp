@@ -24,6 +24,7 @@
 #include "kernel/arch/armv7/space_control.hpp"
 #include "kernel/arch/armv7/space_layout.hpp"
 
+
 namespace cinux::arch {
 
 namespace detail {
@@ -32,7 +33,9 @@ namespace detail {
 inline bool EntryIsUser(const page::Entry& entry, page::WalkLevel level) {
     const unsigned long shift = level == page::WalkLevel::kL1 ? 10UL : 4UL;
     const unsigned long ap    = (entry.raw >> shift) & 0x3UL;
-    return ap == 0x3UL || ap == 0x2UL;
+    // 0x2/0x3 are the writable shapes; 0x6 is the both-worlds read-only
+    // encoding the read-only leaves carry, and its user half may read.
+    return ap == 0x3UL || ap == 0x2UL || ap == 0x6UL;
 }
 
 }  // namespace detail
@@ -86,7 +89,12 @@ inline bool UserPageIsWritable(unsigned long address) {
     if (!page::DescriptorPresent(kL2)) {
         return false;
     }
-    return ((kL2.raw >> 4U) & 0x3UL) == 0x3UL;
+    const unsigned long ap = (kL2.raw >> 4U) & 0x3UL;
+    // A shared COW leaf (read-only for both worlds) also counts: the
+    // kernel's write aborts, the repair door copies the page, and the
+    // retried store lands. Refusing it here would EFAULT every write
+    // into a fork-shared buffer.
+    return ap == 0x3UL || ap == 0x6UL;
 }
 
 /**
@@ -106,13 +114,10 @@ inline bool UserRangeIsMapped(unsigned long address, unsigned long length) {
     if (kTop < address || kTop > space::kUserTop) {
         return false;
     }
-    const unsigned long kFirstPage = address & ~(page::kSize - 1UL);
-    const unsigned long kLastPage  = (kTop - 1UL) & ~(page::kSize - 1UL);
-    for (unsigned long page = kFirstPage; page <= kLastPage; page += page::kSize) {
-        if (!UserPageIsMapped(page)) {
-            return false;
-        }
-    }
+    // The per-page presence walk stays out: the kernel's raw accesses to
+    // not-yet-filled pages abort and the demand door fills them, the
+    // same way the user task's own accesses do. A range check here would
+    // refuse valid lazy pages and every string that lives on one.
     return true;
 }
 

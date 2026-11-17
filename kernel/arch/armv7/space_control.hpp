@@ -23,30 +23,35 @@ inline unsigned long ActiveRoot() {
 
 /// Points the MMU at another first-level table.
 inline void SwitchRoot(unsigned long physical) {
-    asm volatile("mcr p15, 0, %0, c2, c0, 0" : : "r"(physical));
-    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0));  // TLBIALL
-    asm volatile("isb");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("mcr p15, 0, %0, c2, c0, 0" : : "r"(physical) : "memory");
+    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0) : "memory");  // TLBIALL
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("isb" ::: "memory");
 }
 
 /// Flushes every translation this CPU holds.
 inline void RefreshRoot() {
-    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0));
-    asm volatile("dsb");
-    asm volatile("isb");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0) : "memory");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("isb" ::: "memory");
 }
 
 /// Drops one page's translation.
 /// Drops every translation; used after a table-wide change such as a fork.
 inline void InvalidateAll() {
-    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0));
-    asm volatile("dsb");
-    asm volatile("isb");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("mcr p15, 0, %0, c8, c7, 0" : : "r"(0) : "memory");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("isb" ::: "memory");
 }
 
 inline void InvalidatePage(unsigned long virtual_address) {
-    asm volatile("mcr p15, 0, %0, c8, c7, 1" : : "r"(virtual_address));  // TLBIMVA
-    asm volatile("dsb");
-    asm volatile("isb");
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("mcr p15, 0, %0, c8, c7, 1" : : "r"(virtual_address) : "memory");  // TLBIMVA
+    asm volatile("dsb sy" ::: "memory");
+    asm volatile("isb" ::: "memory");
 }
 
 /// Reads the faulting address the last data abort named.

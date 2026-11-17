@@ -21,6 +21,10 @@
 #include "kernel/boot/print.hpp"
 #include "kernel/mm/vma.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/mm/cow.hpp"
+#include "kernel/mm/vmm.hpp"
+#include "kernel/mm/address_space.hpp"
+#include "kernel/mm/page_walk.hpp"
 
 extern "C" [[noreturn]] void c_user_faulted();
 namespace cinux::armv7 {
@@ -86,9 +90,17 @@ extern "C" cinux::arch::UserTrap* c_abort_trap(cinux::arch::UserTrap* trap) {
     asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r"(fault_status));   // DFSR
     const unsigned long long code =
         cinux::arch::isr::FaultCodeFromStatus(fault_status, trap->spsr);
+    // User-window faults go to the resolver from both worlds: the
+    // read-only encoding now refuses privileged stores too, so the
+    // kernel's own copyout to a COW-shared page aborts here and the
+    // repair must answer it. Faults outside the user window stay fatal.
+    const bool kInUserWindow = fault_address < 0x80000000UL;
+    if (kInUserWindow && g_repair != nullptr && g_repair(fault_address, code)) {
+        return trap;  // the same instruction runs again on the new mapping
+    }
     if ((trap->spsr & 0x1FUL) != 0x10UL) {
-        cinux::print::Println("[armv7] data abort at %X status %X code %X", fault_address,
-                              fault_status, code);
+        cinux::print::Println("[armv7] data abort at %X status %X code %X pc %X",
+                              fault_address, fault_status, code, trap->lr);
         cinux::arch::Halt();
     }
     // Same translation as the fetch door: the synthetic code, not the

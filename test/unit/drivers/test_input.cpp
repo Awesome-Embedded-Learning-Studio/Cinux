@@ -57,10 +57,12 @@ TEST("input: grabs belong to independent opens and final close releases them") {
     int         first  = 0;
     int         second = 0;
     bool        heard  = false;
+    ASSERT_FALSE(stream.grabbed());
     stream.set_grab_hook(
         [](void* context, bool grabbed) { *static_cast<bool*>(context) = grabbed; }, &heard);
     ASSERT_EQ(stream.answer(&first, cinux::driver::kEvdevGrab, 1), 0);
     ASSERT_TRUE(heard);
+    ASSERT_TRUE(stream.grabbed());
     ASSERT_EQ(stream.answer(&first, cinux::driver::kEvdevGrab, 1), -cinux::syscall::kEbusy);
     ASSERT_EQ(stream.answer(&second, cinux::driver::kEvdevGrab, 1), -cinux::syscall::kEbusy);
     ASSERT_EQ(stream.answer(&second, cinux::driver::kEvdevGrab, 0), -cinux::syscall::kEinval);
@@ -69,11 +71,14 @@ TEST("input: grabs belong to independent opens and final close releases them") {
     ASSERT_TRUE(stream.poll(&first));
     stream.release_owner(&second);
     ASSERT_TRUE(heard);
+    ASSERT_TRUE(stream.grabbed());
     stream.release_owner(&first);
     ASSERT_FALSE(heard);
+    ASSERT_FALSE(stream.grabbed());
     ASSERT_TRUE(stream.poll(&second));
     ASSERT_EQ(stream.answer(&second, cinux::driver::kEvdevGrab, 1), 0);
     ASSERT_EQ(stream.answer(&second, cinux::driver::kEvdevGrab, 0), 0);
+    ASSERT_FALSE(stream.grabbed());
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order

@@ -1,4 +1,8 @@
 #include "kernel/proc/signals.hpp"
+#if defined(__arm__)
+#include "kernel/arch/armv7/signal_frame.hpp"
+
+#endif
 
 #include "kernel/arch/irq_guard.hpp"
 #include "kernel/arch/page.hpp"
@@ -35,6 +39,7 @@ void apply_handler_mask(Task& self, const SigAction& action, int number) {
     }
 }
 
+#if !defined(__arm__)
 /// Preserve the interrupted function's red zone as well as alignment
 /// slack, the saved context and the handler's return address.
 constexpr unsigned long long kRedZoneBytes  = 128;
@@ -57,6 +62,8 @@ bool stack_holds_delivery(unsigned long long rsp) {
     return rsp >= kDeliveryBytes && kSelf != nullptr && kSelf->vmas.holds() &&
            kSelf->vmas->stack_contains(rsp - kDeliveryBytes, kDeliveryBytes);
 }
+
+#endif
 
 /**
  * @brief         The lowest unblocked pending signal, zero when none.
@@ -119,6 +126,35 @@ void die_by_signal(int number) {
  */
 bool frame_handler_entry(SyscallFrame& frame, int number, const SigAction& act,
                          const SigSet& blocked_before) {
+#if defined(__arm__)
+    const bool realtime = (act.flags & syscall::kSaSiginfo) != 0;
+    const unsigned long prefix = realtime ? 0 : 128;
+    const unsigned long bytes = sizeof(arch::ArmSignalFrame) - prefix;
+    const unsigned long context = (frame.user_rsp - bytes) & ~7UL;
+    const Task* self = Scheduler::self().current();
+    if (frame.user_rsp < bytes || !self->vmas.holds() ||
+        !self->vmas->stack_contains(context, bytes)) return false;
+    arch::ArmSignalFrame image{};
+    arch::SaveSignalRegisters(frame, image);
+    image.info[0] = number;
+    image.oldmask = static_cast<unsigned int>(blocked_before.raw);
+    image.mask[0] = static_cast<unsigned int>(blocked_before.raw);
+    image.mask[1] = static_cast<unsigned int>(blocked_before.raw >> 32);
+    if (!syscall::uaccess::CopyToUser(context,
+            reinterpret_cast<const unsigned char*>(&image) + prefix, bytes)) return false;
+    const unsigned long restorer = (act.flags & syscall::kSaRestorer) != 0
+        ? act.restorer : SignalTrampolineAddress() + (realtime ? 0 : 8);
+    frame.user_rsp = context;
+    frame.rbp = (frame.rbp & 0xFFFFFFFF00000000ULL) | restorer;
+    frame.rcx = act.handler;
+    // Handler entry selects ARM/Thumb independently of the interrupted code.
+    frame.r11 &= ~0x0700FC20ULL;  // J, IT and T
+    frame.rax = number;
+    frame.rdi = number;
+    frame.rsi = context;
+    frame.rdx = context + 128;
+    return true;
+#else
     if (!stack_holds_delivery(frame.user_rsp)) {
         return false;
     }
@@ -156,6 +192,7 @@ bool frame_handler_entry(SyscallFrame& frame, int number, const SigAction& act,
     frame.rdi      = static_cast<unsigned long long>(number);
     frame.rax      = 0;
     return true;
+#endif
 }
 
 }  // namespace

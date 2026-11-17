@@ -12,52 +12,43 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "${here}/.." && pwd)"
 build="${CINUX_ARM_BUILD:-${repo}/build-armv7}"
-image="${CINUX_ARM_DESK_IMG:-${build}/armv7-desk.img}"
+image="${CINUX_ARM_DESK_IMG:-${build}/boot/native-build.ext2}"
 shot="${CINUX_ARM_DESK_SHOT:-${build}/armv7-desk.ppm}"
 shot2="${CINUX_ARM_DESK_PAIR_SHOT:-${build}/armv7-desk-pair.ppm}"
 shot3="${CINUX_ARM_DESK_CLOSED_SHOT:-${build}/armv7-desk-closed.ppm}"
 icon_x="${CINUX_ARM_ICON_X:-40}"
 icon_y="${CINUX_ARM_ICON_Y:-110}"
-settle="${CINUX_ARM_DESK_DELAY:-16}"
+settle="${CINUX_ARM_DESK_DELAY:-24}"
 # A pipeline, not a single word: the shell's fork, pipe, exec and
 # redirect all have to survive for its answer to reach the screen.
 command_text="${CINUX_ARM_DESK_TEXT:-ls / | head -2}"
-seconds="${CINUX_ARM_RUN_SECONDS:-34}"
+seconds="${CINUX_ARM_RUN_SECONDS:-50}"
 
 echo '== armv7 desk lane =='
 cmake -S "${repo}" -B "${build}" >/dev/null
-CINUX_ARM_PROBE_DESK=1 "${here}/build-armv7-glibc-prog.sh" >/dev/null
-# The probe is one artifact shared with the default lane: build the desk
-# variant, and put the judged card back on the way out -- probe and image
-# both, so a later `ctest -R arm_boot` sees the lane it expects.
-restore_default_lane() {
-    "${here}/build-armv7-glibc-prog.sh" >/dev/null 2>&1 || true
-    # Remove the card first: the target's dependency check alone has been
-    # seen to leave a desk-mode image behind, and a stale one fails the
-    # next arm_boot run.
-    rm -f "${build}/armv7-sd.img"
-    cmake --build "${build}" --target arm_sd_image >/dev/null 2>&1 || true
-}
-"${here}/build-armv7-vesper-desk.sh" >/dev/null
-# The image bakes whatever the artifacts currently hold: mold a desk
-# image of its own so the default lane's card stays untouched.
-CINUX_ARM_SD_IMAGE="${image}" cmake --build "${build}" --target arm_image >/dev/null
-rm -f "${image}"
-/bin/sh "${here}/create_armv7_sd.sh" "${image}" >/dev/null
+# The desk and the volume both ride the build graph: the overlay stage
+# copies the desk onto the buildroot card, and the GUI dtb says
+# CINUX_SESSION=gui so the card's inittab lights the desk on its own.
+cmake --build "${build}" --target vesper_desk buildroot_volume arm_init_gui_dtb >/dev/null || exit 1
 
 log="${CINUX_ARM_DESK_LOG:-$(mktemp /tmp/cinux-armv7-desk.XXXXXX.log)}"
-qmp="$(mktemp -u /tmp/cinux-desk-qmp.XXXXXX.sock)"
+qmp="$(mktemp -d /tmp/cinux-desk-qmp.XXXXXX)/qmp"
+# QMP pipes need no socket bind permission in a restricted runner.
+mkfifo "${qmp}.in" "${qmp}.out"
 # One exit door for both duties: the lane restores the default art, and
 # a scratch log goes away. A caller who named the log keeps it.
 finish() {
-    restore_default_lane
     if [ -z "${CINUX_ARM_DESK_LOG:-}" ]; then
         rm -f "${log}"
     fi
-    rm -f "${qmp}"
+    if [ -n "${qmp_reader:-}" ]; then kill "${qmp_reader}" 2>/dev/null || true; fi
+    rm -f "${qmp}.in" "${qmp}.out"
+    rmdir "$(dirname "${qmp}")"
 }
 trap finish EXIT
 rm -f "${shot}" "${shot2}" "${shot3}"
+cat "${qmp}.out" >/dev/null &
+qmp_reader=$!
 # The keys go down the serial line after the desktop is up, so the
 # terminal already owns the keyboard when they land.
 # The UART's receive FIFO is thirty-two bytes deep and QEMU hands a
@@ -72,13 +63,13 @@ type_text() {
     done
     printf '\r'
 }
-( sleep 8; cat "${repo}/assets/armv7_stdin.txt"; sleep "${settle}"; type_text "${command_text}"; sleep 12 ) |
+( sleep "${settle}"; type_text "${command_text}"; sleep 12 ) |
     timeout "$((settle + seconds))" "$(command -v qemu-system-arm)" \
         -M mcimx6ul-evk \
         -kernel "${build}/kernel/arch/armv7/arm.elf" \
-        -device "loader,file=${build}/armv7-qemu.dtb,addr=0x81000000,force-raw=on" \
+        -device "loader,file=${build}/armv7-init-gui.dtb,addr=0x81000000,force-raw=on" \
         -drive "file=${image},if=sd,format=raw" \
-        -display none -serial stdio -monitor none -qmp "unix:${qmp},server,nowait" \
+        -display none -serial stdio -monitor none -qmp "pipe:${qmp}" \
         -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1 \
         > "${log}" 2>/dev/null &
 qemu_pid=$!
@@ -137,7 +128,7 @@ sleep 1
     sleep 3
     printf '%s\n' "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"${shot3}\"}}"
     sleep 1
-) | socat - "UNIX-CONNECT:${qmp}" >/dev/null 2>&1 || true
+) > "${qmp}.in" || true
 wait "${qemu_pid}" 2>/dev/null || true
 
 failed=0

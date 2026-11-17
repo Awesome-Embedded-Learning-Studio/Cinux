@@ -19,6 +19,14 @@
 
 namespace cinux::arch::abi {
 
+/// The sigreturn number the x86 signal trampoline issues in eax.
+inline constexpr unsigned long kSigreturnNumber = 15;
+
+/// x86 machine code: mov eax, 15; syscall.
+inline constexpr unsigned char kSignalReturnStub[] = {0xB8, 0x0F, 0x00, 0x00,
+                                                      0x00, 0x0F, 0x05};
+
+
 /**
  * @brief         Issue one syscall; the ABI constant, spelled once.
  * @param[in]     number   Syscall number, lands in RAX.

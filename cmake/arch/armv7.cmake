@@ -51,6 +51,7 @@ set(CINUX_ARM_DTB ${CMAKE_BINARY_DIR}/armv7-qemu.dtb)
 # Set here so the parent-scope run targets can name it; the
 # subdirectory's custom command compiles it.
 set(CINUX_ARM_INIT_DTB ${CMAKE_BINARY_DIR}/armv7-init.dtb)
+set(CINUX_ARM_INIT_GUI_DTB ${CMAKE_BINARY_DIR}/armv7-init-gui.dtb)
     add_subdirectory(kernel/arch/armv7)
     include(${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/run.cmake)
     set(CINUX_ARCH_LANE_TERMINAL ON)

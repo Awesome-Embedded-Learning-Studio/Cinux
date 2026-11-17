@@ -20,6 +20,11 @@
 
 namespace cinux::arch {
 
+/// Fresh user RFLAGS, with interrupts enabled and the reserved bit set.
+constexpr unsigned long long UserEntryFlags(unsigned long long) {
+    return 0x202ULL;
+}
+
 /**
  * @brief         Leaves the kernel for a user entry point.
  * @param[in]     entry   User virtual address of the first instruction.

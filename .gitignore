@@ -72,3 +72,5 @@ site/api-gen/xml/
 site/api-gen/dist/
 site/api-gen/generated/
 document/api/
+.codex-state/
+.npm-cache/

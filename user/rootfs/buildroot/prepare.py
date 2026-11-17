@@ -1,18 +1,36 @@
 #!/usr/bin/env python3
 """Prepare the source-only Cinux development overlay for Buildroot."""
 import argparse
-import importlib.util
 import pathlib
 import re
 import shutil
 import subprocess
+import sysconfig
 
 
-def load_helpers(repo):
-    spec = importlib.util.spec_from_file_location('selfhost', repo / 'scripts/prepare-kernel-selfhost.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def copy_file(source, root, target=None):
+    source = pathlib.Path(source)
+    destination = root / (target or str(source)).lstrip("/")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source.resolve(), destination)
+
+
+def stage_python(root):
+    python = pathlib.Path(shutil.which("python3")).resolve()
+    copy_file(python, root, "/usr/bin/python3")
+    library = pathlib.Path(sysconfig.get_path("stdlib"))
+    destination = root / str(library).lstrip("/")
+    shutil.copytree(library, destination, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("site-packages", "__pycache__", "test", "tests", "config-*", "*.a",
+                                                  "idlelib", "tkinter", "turtledemo", "ensurepip"))
+    programs = [python, *destination.glob("lib-dynload/*.so")]
+    for program in programs:
+        listing = subprocess.run(["ldd", str(program)], check=True, capture_output=True,
+                                 text=True).stdout
+        for line in listing.splitlines():
+            fields = line.split()
+            if len(fields) >= 3 and fields[1] == "=>" and fields[2].startswith("/"):
+                copy_file(fields[2], root)
 
 
 def stage_program(name, root, copy_file):
@@ -54,24 +72,59 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--overlay-only', action='store_true', help='only generate the BR2_ROOTFS_OVERLAY directory')
     parser.add_argument('--build-dir', type=pathlib.Path, default=pathlib.Path('build'))
+    parser.add_argument('--arch', default='x86_64', choices=['x86_64', 'armv7'])
     args = parser.parse_args()
     repo = pathlib.Path(__file__).resolve().parents[3]
     build = args.build_dir.resolve()
-    helper = load_helpers(repo)
     overlay_root = build / 'buildroot/overlay'
     shutil.rmtree(overlay_root, ignore_errors=True)
-    shutil.copytree(build / 'toolchain-staging', overlay_root, symlinks=True)
     root = overlay_root
     (root / 'etc').mkdir(parents=True, exist_ok=True)
+    if args.arch == 'armv7':
+        # No native compiler rides the armv7 volume: buildroot has no
+        # target-side gcc, and the x86 staging binaries could not run in
+        # the arm guest anyway. The guest works through the busybox the
+        # defconfig builds; the source tree stays for reference. The
+        # cross-built fbdev desk joins the volume the same way the x86
+        # lane's vesper rides the development volume.
+        desk = repo / 'build/armv7-vesper/desk'
+        if desk.exists():
+            (root / 'bin').mkdir(parents=True, exist_ok=True)
+            shutil.copy2(desk, root / 'bin' / 'vesper')
+        else:
+            raise RuntimeError('desk artifact missing; build the vesper_desk target first')
+    else:
+        shutil.copytree(build / 'toolchain-staging', overlay_root, symlinks=True)
     source = root / 'home/cinux/Cinux'
     source.mkdir(parents=True)
-    for name in ('CMakeLists.txt', '.gitmodules', 'boot', 'kernel', 'base', 'user', 'assets', 'cmake', 'scripts', 'test', 'third_party'):
+    for name in ('CMakeLists.txt', '.gitmodules', 'kernel', 'base', 'user', 'assets', 'cmake', 'scripts', 'test', 'third_party'):
         item = repo / name
         if item.is_dir():
             shutil.copytree(item, source / name, ignore=source_ignores)
         else:
             shutil.copy2(item, source / name)
-    helper.stage_python(root)
+    if args.arch == 'armv7':
+        merge_overlay(repo / 'user/rootfs/buildroot/overlay', root)
+        # The boot ladder's seat world reads these fixtures from the
+        # card, the same paths the station card answered. Staged after
+        # the overlay merge so the 99-byte motd wins over the banner.
+        seeds = repo / 'scripts/ext2_seed'
+        shutil.copy2(seeds / 'motd.txt', root / 'etc' / 'motd')
+        for name in ('zh.txt', 'zh_ascii.txt'):
+            shutil.copy2(seeds / name, root / 'etc' / name)
+        (root / 'motd').write_text('hi there\n')
+        (root / 'hello').write_text('hello\n')
+        (root / 'readme').write_text('readme!\n')
+        (root / 'scratch').write_text('')
+        for elf, target_path in (('armv7_diskprog.elf', 'prog'),
+                                 ('armv7_glibc_hello.elf', 'glibc')):
+            source_elf = repo / 'assets' / elf
+            if not source_elf.is_file():
+                raise RuntimeError(f'probe fixture missing: {source_elf}')
+            shutil.copy2(source_elf, root / target_path)
+        print(f'[native-build] BR2_ROOTFS_OVERLAY={overlay_root}', flush=True)
+        return
+    stage_python(root)
     shutil.copytree('/usr/include', root / 'usr/include', dirs_exist_ok=True)
     for name in ('include', 'include-fixed'):
         directory = pathlib.Path(subprocess.run(['gcc', f'-print-file-name={name}'],
@@ -79,7 +132,7 @@ def main():
         if directory.is_absolute() and directory.is_dir():
             shutil.copytree(directory, root / str(directory).lstrip('/'), dirs_exist_ok=True)
     for name in ('cmake', 'ninja', 'make', 'ar', 'ranlib', 'nm', 'objcopy', 'readelf', 'tar', 'dd', 'ping'):
-        stage_program(name, root, helper.copy_file)
+        stage_program(name, root, copy_file)
     (root / 'bin/ping').unlink(missing_ok=True)
     (root / 'bin/ping').symlink_to('/usr/bin/ping')
     information = subprocess.run(['cmake', '--system-information'], capture_output=True,
@@ -95,7 +148,7 @@ def main():
         (root / 'usr/bin' / name).unlink(missing_ok=True)
         (root / 'usr/bin' / name).symlink_to(target)
     merge_overlay(repo / 'user/rootfs/buildroot/overlay', root)
-    helper.copy_file(build / 'glibc/vesper-desk', root, '/bin/vesper')
+    copy_file(build / 'glibc/vesper-desk', root, '/bin/vesper')
     print(f'[native-build] BR2_ROOTFS_OVERLAY={overlay_root}', flush=True)
 
 

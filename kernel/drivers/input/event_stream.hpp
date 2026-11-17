@@ -157,6 +157,9 @@ public:
      */
     void release_owner(const void* owner);
 
+    /// Whether an evdev reader owns the stream exclusively.
+    [[nodiscard]] bool grabbed() const;
+
 private:
     base::container::RingQueue<InputEventWire, kInputEventQueueCapacity> events_{};
     InputGrabHook                                                        grab_hook_ = nullptr;

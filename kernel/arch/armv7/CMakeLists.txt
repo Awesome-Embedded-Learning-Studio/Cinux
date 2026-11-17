@@ -86,6 +86,7 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_getrandom.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_prlimit.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_readlink.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_itimer.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_sendfile.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_msync.cpp
     ${CMAKE_SOURCE_DIR}/kernel/fs/pipe.cpp
@@ -260,5 +261,17 @@ add_custom_command(
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init.dts
     COMMENT "Compiling the full-boot device tree")
 add_custom_target(arm_init_dtb DEPENDS ${CINUX_ARM_INIT_DTB})
-add_dependencies(arm_image arm_init_dtb)
+
+# The GUI door's firmware words: the same full-boot tree with
+# CINUX_SESSION=gui in the environment, so the shared desktop script
+# lights the desk. run_gui mounts this variant; the text lane keeps the
+# plain one.
+add_custom_command(
+    OUTPUT ${CINUX_ARM_INIT_GUI_DTB}
+    COMMAND ${CINUX_DTC} -I dts -O dtb -o ${CINUX_ARM_INIT_GUI_DTB}
+            ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init-gui.dts
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init-gui.dts
+    COMMENT "Compiling the GUI device tree")
+add_custom_target(arm_init_gui_dtb DEPENDS ${CINUX_ARM_INIT_GUI_DTB})
+add_dependencies(arm_image arm_init_gui_dtb)
 add_dependencies(arm_image arm_dtb)

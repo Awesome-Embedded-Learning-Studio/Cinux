@@ -63,6 +63,11 @@ foreach(platform_header IN LISTS CINUX_PLATFORM_HEADERS)
 endforeach()
 
 cinux_arch_lane()
+# The buildroot volume is lane-uniform: one set of target names
+# (buildroot_configure, buildroot_volume) on every architecture; the
+# defconfig and the volume shape follow CINUX_ARCHITECTURE. It loads
+# before the terminal return so every lane owns it.
+add_subdirectory(user/rootfs/buildroot)
 if(CINUX_ARCH_LANE_TERMINAL)
     return()
 endif()
@@ -88,7 +93,6 @@ add_subdirectory(base)
 add_subdirectory(user)
 add_subdirectory(kernel)
 include(cmake/rootfs.cmake)
-add_subdirectory(user/rootfs/buildroot)
 include(cmake/qemu/devices.cmake)
 add_subdirectory(test EXCLUDE_FROM_ALL)
 include(cmake/qemu/run.cmake)

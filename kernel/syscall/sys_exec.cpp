@@ -17,6 +17,8 @@
 #include "kernel/arch/random.hpp"
 #include "kernel/arch/page.hpp"
 #include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/user_entry.hpp"
+
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
@@ -42,8 +44,6 @@ namespace cinux::syscall {
 namespace {
 
 using base::operator""_KiB;
-
-constexpr unsigned long long kUserFlags = 0x202;
 
 /// Records the program's short and full names on the task that becomes it.
 void note_program_identity(proc::Task& self, const char* path) {
@@ -277,6 +277,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     loader::EntryFacts facts            = kSeat.value().facts;
     const bool         kStackExecutable = kSeat.value().stack_executable;
     const unsigned long long kFirstInstruction = facts.program_entry;
+    const unsigned long long kUserFlags = arch::UserEntryFlags(kFirstInstruction);
     const unsigned long long kStackTop = loader::DrawEntryStackTop();
     if (!proc::MapSignalTrampoline(*fresh, *ranges)) {
         return -kEnomem;

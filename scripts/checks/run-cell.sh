@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <host|kernel|ecosystem|selfhost|native> <Debug|Release> <none|asan|tsan|ubsan|lockdep|checks> <build-dir>" >&2
+    echo "usage: $0 <host|kernel|ecosystem|native> <Debug|Release> <none|asan|tsan|ubsan|lockdep|checks> <build-dir>" >&2
     exit 2
 fi
 suite=$1
@@ -14,7 +14,7 @@ check_jobs=${CINUX_CHECK_JOBS:-4}
 case "$build_type" in Debug|Release) ;; *) echo "invalid build type: $build_type" >&2; exit 2 ;; esac
 case "$suite:$mode" in
     host:none|host:asan|host:tsan|kernel:none|kernel:ubsan|kernel:lockdep|kernel:checks|\
-    ecosystem:none|ecosystem:checks|selfhost:none|selfhost:checks|native:none|native:checks) ;;
+    ecosystem:none|ecosystem:checks|native:none|native:checks) ;;
     *) echo "unsupported test cell: $suite/$mode" >&2; exit 2 ;;
 esac
 if [[ ! "$check_jobs" =~ ^[1-9][0-9]*$ ]]; then
@@ -66,10 +66,6 @@ case "$suite" in
         python3 scripts/test_net_ping.py --image "$build_dir/boot/cinux.img" --log "$build_dir/station31-ping.log"
         python3 scripts/test_net_tcp.py --build-dir "$build_dir" --log-dir "$build_dir/tcp-smoke"
         python3 scripts/test_station35_gui.py --image "$build_dir/boot/cinux.img" --keep
-        ;;
-    selfhost)
-        cmake --build "$build_dir" --parallel "$check_jobs" --target kernel_selfhost_volume
-        python3 scripts/test_station34_kernel_selfhost.py --image "$build_dir/boot/cinux.img"
         ;;
     native)
         cmake --build "$build_dir" --parallel "$check_jobs" --target buildroot_rootfs

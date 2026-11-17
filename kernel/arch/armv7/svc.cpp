@@ -26,6 +26,7 @@
 #include "kernel/arch/armv7/uart_input.hpp"
 #include "kernel/boot/print.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/signals.hpp"
 #include "kernel/arch/armv7/user_trap.hpp"
 #include "kernel/arch/armv7/frame_bridge.hpp"
 #include "kernel/syscall/sys_clock.hpp"
@@ -46,6 +47,7 @@
 #include "kernel/syscall/sys_getrandom.hpp"
 #include "kernel/syscall/sys_prlimit.hpp"
 #include "kernel/syscall/sys_readlink.hpp"
+#include "kernel/syscall/sys_itimer.hpp"
 
 #include "kernel/syscall/sys_brk.hpp"
 #include "kernel/syscall/sys_close.hpp"
@@ -75,25 +77,19 @@ namespace cinux::armv7 {
 void SeatReturnToKernel() __attribute__((noreturn));
 void SeatExit(unsigned long status) __attribute__((noreturn));
 bool SeatWorldActive();
+// PID1's syscall life ring: (user pc, pid|nr) pairs, oldest first. The
+// fault reporter dumps it so the first divergent call shows itself.
 }  // namespace cinux::armv7
 
 namespace cinux::armv7 {
 
-/// The EABI clone spelling: clone(flags, newsp, parent_tid, tls,
-/// child_tid) puts the tls in the fourth register and carries the
-/// child tid word as the first word of the user stack, while the
-/// neutral frame keeps the x86 order -- tls in the fifth slot, the
-/// child tid in the fourth. One reshape bridges the spellings; the
-/// body served is the one neutral clone.
+/// ARM EABI passes clone(flags, newsp, parent_tid, tls, child_tid)
+/// in r0-r4. The neutral handler expects child_tid in its fourth
+/// argument slot and tls in its fifth, so swap those two slots.
 long long HandleArmClone(const cinux::syscall::SyscallFrame& frame) {
     cinux::syscall::SyscallFrame shaped = frame;
-    unsigned int                      child_tid = 0;
-    if (!cinux::syscall::uaccess::CopyFromUser(&child_tid, frame.user_rsp,
-                                               sizeof(child_tid))) {
-        return -14;  // EFAULT: the tid word's stack seat is unreadable
-    }
-    shaped.r8  = frame.r10;  // the tls word from the fourth register
-    shaped.r10 = child_tid;  // the tid word from the user stack
+    shaped.r10 = frame.r8;   // child_tid from trap.r4
+    shaped.r8  = frame.r10;  // tls from trap.r3
     return cinux::syscall::HandleClone(shaped);
 }
 
@@ -235,6 +231,7 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kKill,           &cinux::syscall::HandleKill},
     {cinux::armv7::syscall_nr::kRtSigaction,    &cinux::syscall::HandleRtSigaction},
     {cinux::armv7::syscall_nr::kRtSigprocmask,  &cinux::syscall::HandleRtSigprocmask},
+    {cinux::armv7::syscall_nr::kSigreturn,      &cinux::syscall::HandleArmSigreturn},
     {cinux::armv7::syscall_nr::kRtSigreturn,    &cinux::syscall::HandleRtSigreturn},
     {cinux::armv7::syscall_nr::kUname,          &cinux::syscall::HandleUname},
     {cinux::armv7::syscall_nr::kGetcwd,         &cinux::syscall::HandleGetcwd},
@@ -258,6 +255,17 @@ const NeutralService kNeutralServices[] = {
     {cinux::armv7::syscall_nr::kGetrandom,  &cinux::syscall::HandleGetrandom},
     {cinux::armv7::syscall_nr::kPrctl,      &cinux::syscall::HandlePrctl},
     {cinux::armv7::syscall_nr::kReadlinkat, &cinux::syscall::HandleReadlinkat},
+    // The volume's init ladder: busybox init arms an interval timer for
+    // its respawn pacing, su follows a link through readlink and walks
+    // its group list in the 32-bit spelling. The reboot number stays
+    // refused for now: the neutral handler powers off through ACPI,
+    // which this port does not own.
+    {cinux::armv7::syscall_nr::kReadlink,    &cinux::syscall::HandleReadlink},
+    {cinux::armv7::syscall_nr::kSetitimer,   &cinux::syscall::HandleSetitimer},
+    {cinux::armv7::syscall_nr::kGetgroups,   &cinux::syscall::HandleGetgroups},
+    {cinux::armv7::syscall_nr::kSetgroups,   &cinux::syscall::HandleSetgroups},
+    {cinux::armv7::syscall_nr::kGetgroups32, &cinux::syscall::HandleGetgroups},
+    {cinux::armv7::syscall_nr::kSetgroups32, &cinux::syscall::HandleSetgroups},
     // The transfer face: cat and cp's fast path moves card bytes to the
     // console without a user buffer.
     {cinux::armv7::syscall_nr::kSendfile64, &cinux::syscall::HandleSendfile},
@@ -285,7 +293,9 @@ cinux::arch::UserTrap* serve_seated_neutral(cinux::arch::UserTrap* trap, unsigne
     cinux::syscall::SyscallFrame frame{};
     cinux::arch::frame::Load(*trap, frame);
     frame.rax = static_cast<unsigned long long>(kService->handler(frame));
+    cinux::proc::DeliverPendingSignals(frame);
     cinux::arch::frame::Store(frame, *trap);
+
     return trap;
 }
 

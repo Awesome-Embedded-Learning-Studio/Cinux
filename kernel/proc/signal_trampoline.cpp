@@ -1,6 +1,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
 #include "kernel/arch/page.hpp"
+#include "kernel/arch/syscall_abi.hpp"
 #include "kernel/arch/page_entry.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
@@ -26,8 +27,8 @@ bool MapSignalTrampoline(const mm::AddressSpace& space, mm::VmaStore& vmas) {
     }
     auto* const kPage = cinux::base::PtrAt<void>(mm::DirectMapVirt(kFrame.raw));
     cinux::base::SetBytes(kPage, 0, cinux::arch::page::kSize);
-    constexpr unsigned char kStub[] = {0xB8, 0x0F, 0x00, 0x00, 0x00, 0x0F, 0x05};
-    cinux::base::CopyBytes(kPage, kStub, sizeof(kStub));
+    cinux::base::CopyBytes(kPage, cinux::arch::abi::kSignalReturnStub,
+                           sizeof(cinux::arch::abi::kSignalReturnStub));
     if (!space.map_user(SignalTrampolineAddress(), kFrame.raw, cinux::arch::page::kUser)) {
         mm::Pmm::self().free_page(kFrame);
         return false;

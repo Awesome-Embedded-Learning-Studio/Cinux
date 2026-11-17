@@ -25,6 +25,7 @@
 #include "kernel/mm/hardware_frames.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
+#include "kernel/boot/print.hpp"
 
 namespace cinux::mm::cow {
 

@@ -131,6 +131,22 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     }
     loader::EntryFacts facts = kSeat.value().facts;
     entry                    = facts.program_entry;
+    // The seat-time corruption hunt: the loader reports one AT_PHDR and
+    // this copy reads another, so the words of the local copy go out
+    // verbatim; a shifted field convicts the layout, a wrong word
+    // convicts the return copy.
+    {
+        const unsigned long* const kWords =
+            reinterpret_cast<const unsigned long*>(&facts);
+        cinux::print::Println("[kern] facts words (sizeof %u):",
+                              static_cast<unsigned>(sizeof(facts)));
+        for (unsigned index = 0; index < sizeof(facts) / sizeof(unsigned long);
+             ++index) {
+            cinux::print::Println("  facts[%u] %X", index, kWords[index]);
+        }
+    }
+    cinux::print::Println("[kern] shell seat: entry %X phnum %X", entry,
+                          static_cast<unsigned>(facts.program_headers));
     const bool kStackExecutable = kSeat.value().stack_executable;
     unsigned char randomness[16]{};
     loader::DrawEntryRandom(randomness);

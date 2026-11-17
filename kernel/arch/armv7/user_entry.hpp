@@ -23,6 +23,11 @@
 
 namespace cinux::arch {
 
+/// Fresh user CPSR: ARM/Thumb follows the ELF entry, with no inherited IT/J state.
+constexpr unsigned long long UserEntryFlags(unsigned long long entry) {
+    return 0x10ULL | ((entry & 1ULL) != 0 ? 0x20ULL : 0ULL);
+}
+
 /**
  * @brief         Drops to user mode at entry on the given user stack.
  * @param[in]     entry        User-mode entry address.

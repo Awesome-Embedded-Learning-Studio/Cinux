@@ -34,10 +34,12 @@ struct UserTrap {
     unsigned long r11;
     unsigned long r12;
     unsigned long sp;
-    unsigned long lr;
+    unsigned long lr;       // Exception resume PC, not the user LR bank.
     unsigned long spsr;
+    unsigned long user_lr;  // Handler return and interrupted function's LR.
+    unsigned long padding;
 };
 
-static_assert(sizeof(UserTrap) == 16 * sizeof(unsigned long), "trap is sixteen words");
+static_assert(sizeof(UserTrap) == 18 * sizeof(unsigned long), "trap is eighteen words");
 
 }  // namespace cinux::arch

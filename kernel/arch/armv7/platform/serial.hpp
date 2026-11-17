@@ -18,6 +18,7 @@
 
 #include "kernel/arch/armv7/uart.hpp"
 #include "kernel/arch/armv7/uart_input.hpp"
+#include "kernel/drivers/input/event_stream.hpp"
 
 namespace cinux::platform {
 
@@ -38,12 +39,16 @@ inline void SerialDrain() {
 
 /// Polls one byte in, false when the line is quiet.
 inline bool SerialTryGetChar(char* out) {
-    if (!cinux::armv7::UartReceiveReady()) {
-        return false;
+    while (cinux::armv7::UartReceiveReady()) {
+        *out = cinux::armv7::UartReadChar();
+        cinux::armv7::NoteSerialByte(*out);
+        // UART keys share event0 with USB keys. EVIOCGRAB must suppress
+        // their console copy too, while the evdev reader still gets them.
+        if (!cinux::armv7::UartKeyboardEvents().grabbed()) {
+            return true;
+        }
     }
-    *out = cinux::armv7::UartReadChar();
-    cinux::armv7::NoteSerialByte(*out);
-    return true;
+    return false;
 }
 
 /// Whether a byte waits behind the receive-ready bit.

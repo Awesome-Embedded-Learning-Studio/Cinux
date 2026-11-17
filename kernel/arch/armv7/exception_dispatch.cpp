@@ -50,7 +50,10 @@ extern "C" cinux::arch::UserTrap* c_trap_entry(cinux::arch::UserTrap* trap, unsi
 extern "C" void c_kernel_prefetch_dump(cinux::arch::UserTrap* trap) {
     unsigned long ifar = 0;
     asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r"(ifar));
-    cinux::print::Println("[armv7] kernel prefetch abort at %X spsr %X", ifar, trap->spsr);
+    // The banked lr of the faulted context names the instruction after
+    // the jump: the one address that says which body called into zero.
+    cinux::print::Println("[armv7] kernel prefetch abort at %X spsr %X lr %X", ifar,
+                          trap->spsr, trap->lr);
     cinux::print::Println("  r0 %X r1 %X r2 %X r3 %X r4 %X", trap->r0, trap->r1, trap->r2,
                           trap->r3, trap->r4);
     cinux::print::Println("  r5 %X r6 %X r7 %X r8 %X r9 %X", trap->r5, trap->r6, trap->r7,
@@ -64,7 +67,7 @@ extern "C" void c_kernel_prefetch_dump(cinux::arch::UserTrap* trap) {
     cinux::arch::Halt();
 }
 
-extern "C" void c_exception_dispatch(unsigned long vector) {
+extern "C" void c_exception_dispatch(unsigned long vector, unsigned long pc) {
     if (vector == 6) {
         HandleIrq();
         return;
@@ -73,6 +76,6 @@ extern "C" void c_exception_dispatch(unsigned long vector) {
         HandleDataAbort();
         return;
     }
-    cinux::print::Println("[armv7] exception %u unhandled, stopping", vector);
+    cinux::print::Println("[armv7] exception %u unhandled, stopping pc %X", vector, pc);
     cinux::arch::Halt();
 }

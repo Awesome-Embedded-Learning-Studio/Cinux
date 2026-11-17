@@ -42,6 +42,7 @@ ResumeTrap:
     ldr     r12, [r3, #56]          @ user pc
     cps     #0x1F
     mov     sp, r1
+    ldr     lr, [r3, #64]
     cps     #0x13
     msr     spsr_cxsf, r2
     mov     lr, r12

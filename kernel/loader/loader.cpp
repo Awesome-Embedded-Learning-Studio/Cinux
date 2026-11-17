@@ -91,7 +91,39 @@ bool map_segment(const LoadWorld& world, const ElfSegment& segment,
             return false;
         }
     }
-    return segment.file_bytes == 0 || kFileEnd == kWholeEnd ||
+    // The partial page at the tail carries INITIALIZED data neither
+    // region above serves: the file-backed one stops at the last full
+    // page, and the anonymous one zero-fills. glibc's stdio FILE
+    // structures live exactly there, and zeroed pointers sent the first
+    // stdio call through address zero. The seat fills the page eagerly:
+    // file bytes up to segment.file_bytes, zeros above, mapped writable
+    // or executable per the segment. The demand pager never fires for it.
+    bool tail_filled = false;
+    if (kFileEnd > kWholeEnd) {
+        const auto kTailFrame = mm::Pmm::self().allocate_page();
+        if (kTailFrame == mm::Pmm::PhysAddr{}) {
+            return false;
+        }
+        auto* const kBytes =
+            base::PtrAt<unsigned char>(mm::DirectMapVirt(kTailFrame.raw));
+        base::SetBytes(kBytes, 0, kSize);
+        const unsigned long long kFileOff =
+            segment.file_offset + (kWholeEnd - kSegmentVa);
+        const unsigned long long kCount =
+            base::math::Min(kFileEnd - kWholeEnd,
+                            static_cast<unsigned long long>(kSize));
+        const base::Result<unsigned long> kRead = world.file_ops->read(
+            world.file_self, world.file, kFileOff, kBytes, kCount);
+        if (!kRead.ok() || kRead.value() != kCount ||
+            !world.space.map_user(kWholeEnd, kTailFrame.raw,
+                                  arch::page::UserLeafTerms(region.writable,
+                                                            region.executable))) {
+            mm::Pmm::self().free_page(kTailFrame);
+            return false;
+        }
+        tail_filled = true;
+    }
+    return segment.file_bytes == 0 || kFileEnd == kWholeEnd || tail_filled ||
            (world.file_ops != nullptr && map_tail(world, region, kFileEnd));
 }
 

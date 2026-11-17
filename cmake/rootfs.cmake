@@ -95,10 +95,3 @@ add_custom_target(ext2_ktest_img
     COMMAND ${CMAKE_COMMAND} -E copy ${CINUX_EXT2_IMG} ${CINUX_EXT2_KTEST_IMG}
     DEPENDS ext2_img
     COMMENT "scratch copy of the ext2 volume for kernel tests")
-
-add_custom_target(kernel_selfhost_volume
-    COMMAND ${CINUX_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/prepare-kernel-selfhost.py
-            --build-dir ${CMAKE_BINARY_DIR}
-    DEPENDS ext2_img boot_image
-    COMMENT "Source-only kernel build volume for compilation inside Cinux"
-    VERBATIM)

@@ -1,4 +1,8 @@
 #include "kernel/syscall/sys_signal.hpp"
+#if defined(__arm__)
+#include "kernel/arch/armv7/signal_frame.hpp"
+
+#endif
 
 #include "kernel/arch/abi.hpp"
 #include "kernel/arch/irq_guard.hpp"
@@ -190,7 +194,34 @@ long long HandleRtSigprocmask(const SyscallFrame& frame) {
     return 0;
 }
 
+#if defined(__arm__)
+static long long restore_arm_signal(const SyscallFrame& frame, bool realtime) {
+    arch::ArmSignalFrame image{};
+    const unsigned long prefix = realtime ? 0 : 128;
+    const unsigned long bytes = sizeof(image) - prefix;
+    if ((frame.user_rsp & 7) != 0 || !in_stack_window(frame.user_rsp, bytes) ||
+        !uaccess::CopyFromUser(reinterpret_cast<unsigned char*>(&image) + prefix,
+                               frame.user_rsp, bytes) ||
+        (image.regs[16] & 0x1f) != 0x10 || (image.regs[16] & 0x01000000) != 0 ||
+        image.regs[15] >= kUserAddressLimit || image.regs[13] >= kUserAddressLimit) {
+        proc::Scheduler::self().exit_current(kSigSegv);
+        return 0;
+    }
+    arch::RestoreSignalRegisters(image, const_cast<SyscallFrame&>(frame));
+    CurrentTask()->signals->blocked = MaskableSignals(SigSet{
+        image.mask[0] | (static_cast<unsigned long long>(image.mask[1]) << 32)});
+    return static_cast<long long>(frame.rax);
+}
+
+long long HandleArmSigreturn(const SyscallFrame& frame) {
+    return restore_arm_signal(frame, false);
+}
+#endif
+
 long long HandleRtSigreturn(const SyscallFrame& frame) {
+#if defined(__arm__)
+    return restore_arm_signal(frame, true);
+#else
     const Word kContext = frame.user_rsp;
     if (!in_stack_window(kContext, sizeof(proc::SigReturnContext)) || (kContext & 0xFULL) != 0) {
         proc::Scheduler::self().exit_current(kSigSegv);
@@ -220,6 +251,7 @@ long long HandleRtSigreturn(const SyscallFrame& frame) {
     mutable_frame.r15               = image.r15;
     CurrentTask()->signals->blocked = image.old_blocked;
     return static_cast<long long>(image.rax);
+#endif
 }
 
 }  // namespace cinux::syscall

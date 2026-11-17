@@ -1,0 +1,19 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    model = "QEMU i.MX6UL EVK full boot";
+
+    opt {
+        cinux {
+            init-env = "CINUX_SESSION=gui";
+            init-lane = "yes";
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x10000000>;
+    };
+};

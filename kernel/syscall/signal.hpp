@@ -60,6 +60,9 @@ inline constexpr unsigned long long kSignalDefault = 0;
 /// Handler word meaning "throw this signal away on arrival".
 inline constexpr unsigned long long kSignalIgnore = 1;
 
+/// sa_flags: handler receives siginfo and ucontext arguments.
+inline constexpr unsigned long long kSaSiginfo = 0x00000004;
+
 /// sa_flags: interrupted syscalls restart where they left off.
 inline constexpr unsigned long long kSaRestart = 0x10000000;
 

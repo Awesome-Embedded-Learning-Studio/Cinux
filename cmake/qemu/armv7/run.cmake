@@ -12,33 +12,23 @@ set(CINUX_ARM_DTB_ADDR 0x81000000)
 # The bring-up SD card: an eight-megabyte raw image whose MBR carries
 # the boot signature, one Linux partition starting at sector 2048, and
 # a marker string in the second sector. Deterministic bytes, so the
-# block street's reads have something to recognize.
-set(CINUX_ARM_SD_IMG ${CMAKE_BINARY_DIR}/armv7-sd.img)
-add_custom_command(
-    OUTPUT ${CINUX_ARM_SD_IMG}
-    COMMAND /bin/sh ${CMAKE_SOURCE_DIR}/scripts/create_armv7_sd.sh ${CINUX_ARM_SD_IMG}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/create_armv7_sd.sh
-            ${CMAKE_SOURCE_DIR}/scripts/ext2_seed/motd.txt
-            ${CMAKE_SOURCE_DIR}/assets/armv7_diskprog.elf
-    VERBATIM
-    COMMENT "Molding the armv7 SD bring-up image")
+# The buildroot volume's path, spelled here: the lane's cmake loads
+# before the root's add_subdirectory(buildroot), so the variable that
+# the buildroot side exports does not exist yet at this point. The path
+# is the same word the buildroot directory computes.
+set(CINUX_ARM_BUILDROOT_VOLUME ${CMAKE_BINARY_DIR}/boot/native-build.ext2)
 
-# The glibc station's program is optional: only a host with the cross
-# toolchain builds it, and the image remolds when it appears.
-if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
-    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
-        OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
-endif()
-if(_arm_busybox_bin)
-    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
-        OBJECT_DEPENDS "${_arm_busybox_bin}")
-endif()
-if(_arm_desk_bin)
-    set_property(SOURCE ${CINUX_ARM_SD_IMG} APPEND PROPERTY
-        OBJECT_DEPENDS "${_arm_desk_bin}")
-endif()
-
-add_custom_target(arm_sd_image DEPENDS ${CINUX_ARM_SD_IMG})
+# The desk and the glibc probe ride the build graph: the overlay stage
+# copies them onto the buildroot card, so the volume target declares
+# these dependencies and a plain cmake --build produces everything.
+add_custom_target(vesper_desk
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build-armv7-vesper-desk.sh
+            ${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk
+    COMMENT "armv7 vesper desk (cached by the script's input fingerprint)")
+add_custom_target(arm_glibc_hello
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build-armv7-glibc-prog.sh
+            ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf
+    COMMENT "armv7 glibc probe fixture")
 
 # Every -D value that contains a space must be quoted: an unquoted one is
 # split into several arguments and the check only ever sees its first word.
@@ -57,53 +47,25 @@ foreach(_arm_def IN LISTS _arm_defs)
     list(APPEND _arm_names "${_arm_name}")
 endforeach()
 
-# The desktop station rides the same rule: built by
-# scripts/build-armv7-vesper-desk.sh on a host with the GCC 14 armhf tree.
-set(_arm_desk_bin "")
-foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk"
-        "${CMAKE_BINARY_DIR}/armv7-vesper/desk")
-    if(EXISTS "${_arm_candidate}" AND NOT _arm_desk_bin)
-        set(_arm_desk_bin "${_arm_candidate}")
-    endif()
-endforeach()
-
-# The busybox station rides the same optional-artifact rule: built by
-# scripts/build-armv7-busybox.sh on a host with the cross toolchain.
-set(_arm_busybox_arg "")
-set(_arm_shell_arg "")
-set(_arm_shell_typed_arg "")
-set(_arm_busybox_bin "")
-foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-busybox/busybox"
-        "${CMAKE_BINARY_DIR}/armv7-busybox/busybox")
-    if(EXISTS "${_arm_candidate}" AND NOT _arm_busybox_bin)
-        set(_arm_busybox_bin "${_arm_candidate}")
-    endif()
-endforeach()
-if(_arm_busybox_bin)
-    # busybox runs one applet: `stat` proves the binary started, the
-    # metadata street answered, and the record reached its own libc.
-    set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
-    set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
-    set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
-    set(_arm_shell_typed_arg "-DEXPECTED_ARM_SHELL_TYPED=typed:interactive ok")
-    set(_arm_interactive_arg "-DEXPECTED_ARM_INTERACTIVE=interactive run ok")
-endif()
-
-# The glibc station rides an optional artifact: only a host with the
-# cross toolchain built it, so its judgement joins only there.
-set(_arm_glibc_arg "")
-if(EXISTS ${CMAKE_SOURCE_DIR}/assets/armv7_glibc_hello.elf)
-    set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
-    list(APPEND _arm_glibc_arg
-         "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok, argc 1, "
-        "self /glibc")
-    # The frame-buffer landing: the kernel stamps a marker before the
-    # program starts, the program reads it through its own mapping.
-    list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")
-    # The stdio face: fopen/fgets on the disk's motd, the one path a
-    # tool like cat takes before it does anything else.
-    list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_STDIO=[glibc] stdio read: hi there")
-endif()
+# The buildroot card always carries busybox and the glibc probe, so
+# their judgements join unconditionally: `stat` proves the binary
+# started, the metadata street answered, and the record reached its own
+# libc.
+set(_arm_busybox_arg "-DEXPECTED_ARM_BUSYBOX=File: /prog")
+set(_arm_shell_arg "-DEXPECTED_ARM_SHELL=shell ok")
+set(_arm_shell_cat_arg "-DEXPECTED_ARM_SHELL_CAT=readme!")
+set(_arm_shell_typed_arg "-DEXPECTED_ARM_SHELL_TYPED=typed:interactive ok")
+set(_arm_interactive_arg "-DEXPECTED_ARM_INTERACTIVE=interactive run ok")
+set(_arm_glibc_arg "-DEXPECTED_GLIBC_EXEC=[glibc] hello from ext2, real libc ran")
+list(APPEND _arm_glibc_arg
+     "-DEXPECTED_GLIBC_LIBC=[glibc] malloc, printf, open all ok, argc 1, "
+    "self /glibc")
+# The frame-buffer landing: the kernel stamps a marker before the
+# program starts, the program reads it through its own mapping.
+list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_FB=[glibc] fb seed ABCD1234")
+# The stdio face: fopen/fgets on the disk's motd, the one path a
+# tool like cat takes before it does anything else.
+list(APPEND _arm_glibc_arg "-DEXPECTED_GLIBC_STDIO=[glibc] stdio read: hi there")
 
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
@@ -112,7 +74,7 @@ add_test(NAME arm_boot
             "-DRUN_SECONDS=${CINUX_ARM_RUN_SECONDS}"
             "-DDEVICE_FILE=${CINUX_ARM_DTB}"
             "-DDEVICE_ADDR=${CINUX_ARM_DTB_ADDR}"
-            "-DSD_FILE=${CINUX_ARM_SD_IMG}"
+            "-DSD_FILE=${CINUX_ARM_BUILDROOT_VOLUME}"
             "-DEXPECTED=Cinux armv7: alive on i.MX6ULL"
             "-DEXPECTED_TICK=tick 1"
             "-DEXPECTED_MEMORY=dtb memory 0x80000000"
@@ -129,9 +91,9 @@ add_test(NAME arm_boot
             "-DEXPECTED_PROCCPU=proc cpuinfo"
             "-DEXPECTED_SCHED=sched roundtrip ok"
             "-DEXPECTED_LCDIF=lcdif 640x480 fb"
-            "-DEXPECTED_USDHC=usdhc card 16384 sectors mbr 55AA"
+            "-DEXPECTED_USDHC=usdhc card 4194304 sectors mbr 55AA"
             "-DEXPECTED_USDHC_WRITE=usdhc write readback ok"
-            "-DEXPECTED_MMCBLK0=dev mmcblk0 16384 sectors mbr 55AA"
+            "-DEXPECTED_MMCBLK0=dev mmcblk0 4194304 sectors mbr 55AA"
             "-DEXPECTED_MMCBLK1=mmcblk0 p1 at 2048"
             "-DEXPECTED_EXT2=ext2 mounted, motd is 99 bytes"
             "-DEXPECTED_EHCI=ehci 2184200 rev 100 ports 1, port 1 attached"
@@ -228,32 +190,37 @@ endif()
 
 # The interactive door the x86 lane has always had: `run` boots the
 # real system, not the self-check world. kernel_init takes over, pid 1
-# climbs the card's /sbin/init, and the console shell answers on the
+# climbs the volume's /sbin/init, and the console shell answers on the
 # serial terminal -- type at it once "Cinux up" and the respawn lines
-# have passed. GUI needs the desk on the card; the text lane stays
-# usable without it.
+# have passed. The root is the buildroot card, the same root the x86
+# lane's run mounts; CINUX_ARM_ROOTFS can name another card (the boot
+# check's fixture card, for example) without editing this file.
+set(CINUX_ARM_ROOTFS "${CINUX_ARM_BUILDROOT_VOLUME}"
+    CACHE FILEPATH "rootfs card the armv7 run targets mount")
 add_custom_target(run
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
             -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -drive if=sd,format=raw,file=${CINUX_ARM_SD_IMG}
+            -drive if=sd,format=raw,file=${CINUX_ARM_ROOTFS}
             -nographic -monitor none
-    DEPENDS arm_image arm_init_dtb arm_sd_image
+    DEPENDS arm_image arm_init_dtb
     USES_TERMINAL
     COMMENT "Booting full Cinux on armv7 (console shell on this terminal)")
+if(CINUX_ARM_ROOTFS STREQUAL CINUX_ARM_BUILDROOT_VOLUME)
+    add_dependencies(run buildroot_volume)
+endif()
 
 # The GUI face of the same boot: the board's LCD opens as a QEMU
-# window. Keyboard and tablet use separate chipidea buses, feeding
-# /dev/event0 and /dev/event1. The check fails early and
-# says how to build the desk when the artifact is missing: without it
-# the card has no /desk seat and no desktop would ever appear.
+# window, the rootfs is the unified buildroot volume with the desk at
+# /bin/vesper, and the GUI dtb says CINUX_SESSION=gui so the shared
+# desktop script lights the desk beside the console shell. Keyboard and
+# tablet use separate chipidea buses, feeding /dev/event0 and
+# /dev/event1. The gui dtb rides the same build as the plain one.
 add_custom_target(run_gui
-    COMMAND ${CMAKE_COMMAND} -DDESK_BIN=${_arm_desk_bin}
-            -P ${CMAKE_SOURCE_DIR}/cmake/qemu/armv7/check_desk.cmake
     COMMAND ${CINUX_ARM_QEMU} -M mcimx6ul-evk -kernel $<TARGET_FILE:arm_image>
-            -device loader,file=${CINUX_ARM_INIT_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
-            -drive if=sd,format=raw,file=${CINUX_ARM_SD_IMG}
+            -device loader,file=${CINUX_ARM_INIT_GUI_DTB},addr=${CINUX_ARM_DTB_ADDR},force-raw=on
+            -drive if=sd,format=raw,file=${CINUX_ARM_ROOTFS}
             -display gtk,gl=off -serial stdio -monitor none
             -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1
-    DEPENDS arm_image arm_init_dtb arm_sd_image
+    DEPENDS arm_image arm_init_gui_dtb buildroot_volume
     USES_TERMINAL
     COMMENT "Booting full Cinux on armv7 with the GUI desk")

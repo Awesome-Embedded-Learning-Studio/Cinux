@@ -4,7 +4,6 @@
 import argparse
 import json
 import shutil
-import socket
 import subprocess
 import tempfile
 import time
@@ -12,18 +11,17 @@ from pathlib import Path
 
 
 class Qmp:
-    def __init__(self, path):
-        self.socket = socket.socket(socket.AF_UNIX)
-        self.socket.settimeout(10)
-        self.socket.connect(str(path))
-        self.stream = self.socket.makefile("rwb")
+    def __init__(self, process):
+        # QMP over inherited pipes also works in sandboxes that deny bind().
+        self.stream = process.stdout
+        self.writer = process.stdin
         json.loads(self.stream.readline())
         self.call("qmp_capabilities")
 
     def call(self, command, **arguments):
         request = {"execute": command, "arguments": arguments}
-        self.stream.write(json.dumps(request).encode() + b"\n")
-        self.stream.flush()
+        self.writer.write(json.dumps(request).encode() + b"\n")
+        self.writer.flush()
         while True:
             reply = json.loads(self.stream.readline())
             if "error" in reply:
@@ -80,26 +78,25 @@ def main():
     after = build / "armv7-gui-keyboard-after.ppm"
     with tempfile.TemporaryDirectory(prefix="cinux-gui-keys-") as temporary:
         temporary = Path(temporary)
-        image = temporary / "sd.img"
-        shutil.copyfile(build / "armv7-sd.img", image)
+        image = build / "boot" / "native-build.ext2"
         with log.open("wb") as serial:
             process = subprocess.Popen([
                 args.qemu, "-M", "mcimx6ul-evk",
                 "-kernel", str(build / "kernel/arch/armv7/arm.elf"),
-                "-device", f"loader,file={build / 'armv7-init.dtb'},addr=0x81000000,force-raw=on",
+                "-device", f"loader,file={build / 'armv7-init-gui.dtb'},addr=0x81000000,force-raw=on",
                 "-drive", f"if=sd,format=raw,file={image}",
-                "-display", "none", "-serial", "stdio", "-monitor", "none",
-                "-qmp", f"unix:{temporary / 'qmp'},server=on,wait=off",
+                "-display", "none", "-serial", f"file:{log}", "-monitor", "none",
+                "-qmp", "stdio",
                 "-device", "usb-kbd,bus=usb-bus.0",
                 "-device", "usb-tablet,bus=usb-bus.1",
-            ], stdin=subprocess.DEVNULL, stdout=serial, stderr=subprocess.STDOUT)
+            ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=serial)
             try:
-                deadline = time.monotonic() + 45
+                deadline = time.monotonic() + 90
                 while b"vesper-fbdev: running" not in log.read_bytes():
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError(f"desktop did not start; see {log}")
                     time.sleep(0.2)
-                qmp = Qmp(temporary / "qmp")
+                qmp = Qmp(process)
                 qmp.terminal()
                 time.sleep(1)
                 qmp.call("screendump", filename=str(before))

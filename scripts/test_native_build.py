@@ -8,7 +8,7 @@ import re
 import shlex
 import subprocess
 import time
-from test_station34_kernel_selfhost import Guest
+from guest import Guest
 
 MARKER = b'[native-build] kernel rebuilt by native CMake'
 

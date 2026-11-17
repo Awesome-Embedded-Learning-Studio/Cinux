@@ -10,7 +10,12 @@
  *     -Wl,-Ttext-segment=0x40010000 -o assets/armv7_glibc_hello.elf <this>
  */
 
+#define _GNU_SOURCE
 #include <fcntl.h>
+#include <signal.h>
+#include <stdint.h>
+#include <sys/syscall.h>
+#include <time.h>
 
 #include <sys/mman.h>
 #include <errno.h>
@@ -20,7 +25,59 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 
+// Exercise the temporary ppoll mask on real ARM, then both kernel
+// trampolines. BusyBox additionally covers Thumb handlers/restorers.
+static volatile sig_atomic_t caught, temporary_mask_ok;
+static void signal_probe(int number) {
+    sigset_t mask;
+    if (number == SIGUSR1 && sigprocmask(SIG_SETMASK, NULL, &mask) == 0) {
+        temporary_mask_ok = !sigismember(&mask, SIGUSR2);
+        ++caught;
+    }
+}
+static void signal_info_probe(int number, siginfo_t* info, void* context) {
+    if (number == SIGUSR1 && info && info->si_signo == number && context) ++caught;
+}
+static int signal_roundtrip(void) {
+    struct sigaction action = {0}, before;
+    sigset_t blocked, saved, empty, after;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGUSR1);
+    sigaddset(&blocked, SIGUSR2);
+    sigemptyset(&empty);
+    action.sa_handler = signal_probe;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGUSR1, &action, &before) ||
+        sigprocmask(SIG_BLOCK, &blocked, &saved) || kill(getpid(), SIGUSR1)) return 1;
+    errno = 0;
+    long result = syscall(SYS_ppoll, NULL, 0, NULL, &empty, 8);
+    if (result != -1 || errno != EINTR || caught != 1 || !temporary_mask_ok ||
+        sigprocmask(SIG_SETMASK, NULL, &after) ||
+        !sigismember(&after, SIGUSR1) || !sigismember(&after, SIGUSR2)) return 2;
+    struct timespec zero = {0};
+    if (syscall(SYS_ppoll, NULL, 0, &zero, &empty, 8) != 0 || caught != 1) return 3;
+    if (sigprocmask(SIG_SETMASK, &saved, NULL)) return 4;
+    // Wire-format action without SA_RESTORER forces the kernel stubs.
+    struct { uint32_t handler, flags, restorer, mask[2]; } raw = {0};
+    raw.handler = (uintptr_t)signal_info_probe;
+    raw.flags = SA_SIGINFO;
+    if (syscall(SYS_rt_sigaction, SIGUSR1, &raw, NULL, 8) ||
+        kill(getpid(), SIGUSR1) || caught != 2) return 5;
+    raw.handler = (uintptr_t)signal_probe;
+    raw.flags = 0;
+    if (syscall(SYS_rt_sigaction, SIGUSR1, &raw, NULL, 8) ||
+        kill(getpid(), SIGUSR1) || caught != 3) return 6;
+    if (sigaction(SIGUSR1, &before, NULL)) return 7;
+    puts("[glibc] signal ok: ppoll EINTR once, temporary mask, sigreturn and rt_sigreturn");
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    int signal_result = signal_roundtrip();
+    if (signal_result) {
+        printf("[glibc] signal FAILED %d errno %d\n", signal_result, errno);
+        return 20 + signal_result;
+    }
     // The stdio face, first: a lock or buffer that only exists there
     // would show up before anything else the station does.
     {

@@ -225,4 +225,10 @@ void EventStream::release_owner(const void* owner) {
     }
 }
 
+bool EventStream::grabbed() const {
+    const arch::IrqGuard kIrq;
+    const auto           kGuard = gate_.guard();
+    return owner_ != nullptr;
+}
+
 }  // namespace cinux::driver
