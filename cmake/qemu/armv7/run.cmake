@@ -45,7 +45,7 @@ endforeach()
 add_test(NAME arm_boot
     COMMAND ${CMAKE_COMMAND}
             "-DQEMU_PROGRAM=${CINUX_ARM_QEMU}"
-            "-DIMAGE_FILE=$<TARGET_FILE:arm_image>"
+            "-DIMAGE_FILE=$<TARGET_FILE:arm_selftest>"
             "-DRUN_SECONDS=${CINUX_ARM_RUN_SECONDS}"
             "-DDEVICE_FILE=${CINUX_ARM_DTB}"
             "-DDEVICE_ADDR=${CINUX_ARM_DTB_ADDR}"

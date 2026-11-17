@@ -35,6 +35,7 @@ armv7 那条车道没有把自检拆成"一文件一 QEMU"，而是把整条端�
 
 ```bash
 cmake -S . -B build-armv7 -G Ninja -DCINUX_ARCHITECTURE=armv7
+cmake --build build-armv7 --target arm_image arm_selftest buildroot_volume
 ctest --test-dir build-armv7
 ```
 
@@ -46,7 +47,7 @@ x86 的能力测试与架构测试不受影响，还是上面那三条命令。
 键盘没有把字符泄漏给控制台 shell：
 
 ```bash
-cmake --build build-armv7 --target arm_image arm_init_dtb arm_sd_image
+cmake --build build-armv7 --target arm_image buildroot_volume
 ctest --test-dir build-armv7 -R '^arm_gui_keyboard$' --output-on-failure
 ```
 

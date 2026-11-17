@@ -23,19 +23,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 show_size() {
-    if [[ -f build-armv7/kernel/arch/armv7/arm.elf ]]; then
-        printf 'arm.elf %s bytes\n' "$(stat -c %s build-armv7/kernel/arch/armv7/arm.elf)"
-    fi
+    local image
+    for image in build-armv7/kernel/arch/armv7/arm.elf \
+                 build-armv7/kernel/arch/armv7/arm-selftest.elf; do
+        if [[ -f "${image}" ]]; then
+            printf '%s %s bytes\n' "$(basename "${image}")" "$(stat -c %s "${image}")"
+        fi
+    done
 }
 
 echo '== armv7 lane =='
 if [[ ! -f build-armv7/build.ninja ]]; then
     cmake -S . -B build-armv7 -G Ninja -DCINUX_ARCHITECTURE=armv7 || exit 1
 fi
-# The boot check opens the buildroot volume; arm_image itself does not
-# depend on it, so both targets have to be asked for on a cold build
-# directory. The desk joins the volume through the overlay stage.
-cmake --build build-armv7 --target arm_image buildroot_volume || exit 1
+# The boot check opens the buildroot volume and boots the self-check
+# image; neither rides on arm_image's dependency graph, so all three
+# targets have to be asked for on a cold build directory. The desk joins
+# the volume through the overlay stage.
+cmake --build build-armv7 --target arm_image arm_selftest buildroot_volume || exit 1
 
 fails=0
 for ((run = 1; run <= repeat; ++run)); do

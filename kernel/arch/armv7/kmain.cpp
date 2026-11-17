@@ -25,6 +25,7 @@
 #include "kernel/arch/armv7/firmware.hpp"
 #include "kernel/arch/armv7/lcdif.hpp"
 #include "kernel/drivers/usb/ehci.hpp"
+#include "kernel/arch/armv7/per_cpu.hpp"
 #include "kernel/arch/armv7/selfcheck.hpp"
 #include "kernel/arch/armv7/task_switch.hpp"
 #include "kernel/boot/boot_info.hpp"
@@ -51,6 +52,10 @@
 extern "C" unsigned long c_seat_irq_door;
 
 namespace {
+
+/// The boot core's scratch block. The self-check image swaps in its own
+/// during the probe; a production boot keeps this one for good.
+cinux::arch::per_cpu::PerCpu g_boot_per_cpu{};
 
 void PrintUnsigned(unsigned long long value) {
     char digits[21];
@@ -118,6 +123,9 @@ void run_init_lane() {
 
 extern "C" [[noreturn]] void kmain() {
     cinux::armv7::UartInit();
+    // The per-CPU block is bring-up, not a probe: the scheduler, the
+    // spin ledger and the task switch all read it through TPIDRPRW.
+    cinux::arch::per_cpu::Install(&g_boot_per_cpu);
     cinux::boot::BootInfo console_seat{};
     cinux::console::InitConsole(console_seat);
     cinux::armv7::UartWrite("\nCinux armv7: alive on i.MX6ULL\n");
@@ -198,18 +206,23 @@ extern "C" [[noreturn]] void kmain() {
                 cinux::armv7::UartWrite("[armv7] pmm free pages ");
                 PrintUnsigned(cinux::mm::Pmm::self().free_page_count());
                 cinux::armv7::UartWrite("\n");
+#if defined(CINUX_ARM_SELFTEST)
                 cinux::armv7::UartWrite(cinux::armv7::RunPmmSelfCheck()
                                             ? "[armv7] selfcheck pmm ok\n"
                                             : "[armv7] selfcheck pmm FAILED\n");
+#endif
                 cinux::print::Println("[armv7] console up, %u pages managed",
                                       cinux::mm::Pmm::self().managed_page_count());
+#if defined(CINUX_ARM_SELFTEST)
                 cinux::print::Println(cinux::armv7::RunHeapSelfCheck()
                                           ? "[armv7] selfcheck heap ok"
                                           : "[armv7] selfcheck heap FAILED");
+#endif
                 if (cinux::mm::BringUpHeap()) {
                     auto* const probe = new unsigned long(0x114514UL);
                     cinux::print::Println("[armv7] paged heap live, probe %X", *probe);
                     delete probe;
+#if defined(CINUX_ARM_SELFTEST)
                     cinux::print::Println(cinux::armv7::RunMapSelfCheck()
                                               ? "[armv7] mapped page ok"
                                               : "[armv7] mapped page FAILED");
@@ -219,6 +232,7 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunPerCpuSelfCheck()
                                               ? "[armv7] per-cpu ok"
                                               : "[armv7] per-cpu FAILED");
+#endif
                     {
                         // The identity probe exercises the port's MIDR
                         // decode on real hardware; QEMU's Cortex-A7
@@ -229,6 +243,7 @@ extern "C" [[noreturn]] void kmain() {
                                                                           : "unknown",
                                               kIdentity.model);
                     }
+#if defined(CINUX_ARM_SELFTEST)
                     cinux::print::Println(cinux::armv7::RunCowSelfCheck()
                                               ? "[armv7] cow ledger ok"
                                               : "[armv7] cow ledger FAILED");
@@ -241,6 +256,7 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::print::Println(cinux::armv7::RunSchedulerSelfCheck()
                                               ? "[armv7] sched roundtrip ok"
                                               : "[armv7] sched roundtrip FAILED");
+#endif
                     {
                         const unsigned long kFrame = cinux::armv7::lcdif::InitFramebuffer();
                         cinux::print::Println("[armv7] lcdif 640x480 fb %X",
@@ -350,12 +366,14 @@ extern "C" [[noreturn]] void kmain() {
                                               cinux::driver::UsdhcHost::self()
                                                   .last_fail());
                     }
+#if defined(CINUX_ARM_SELFTEST)
                     cinux::print::Println(cinux::armv7::RunForkSelfCheck()
                                               ? "[armv7] fork clone ok"
                                               : "[armv7] fork clone FAILED");
                     cinux::print::Println(cinux::armv7::RunTaskSelfCheck()
                                               ? "[armv7] two tasks ok"
                                               : "[armv7] two tasks FAILED");
+#endif
                     // The full-boot door: when the firmware words say
                     // so, the station is skipped and the very same
                     // kernel_init ladder x86 runs takes over -- pid 1
@@ -369,6 +387,7 @@ extern "C" [[noreturn]] void kmain() {
                             run_init_lane();
                         }
                     }
+#if defined(CINUX_ARM_SELFTEST)
                     // The bring-up task world is gone: the seated
                     // scheduler world is the one user-mode round trip.
                     const bool kSeatOk = cinux::armv7::RunSchedulerUserSelfCheck();
@@ -387,6 +406,7 @@ extern "C" [[noreturn]] void kmain() {
                     cinux::armv7::UartWrite("[armv7] kernel fault probe\n");
                     // Deliberately unmapped: the abort reporter should name it.
                     *reinterpret_cast<volatile unsigned long*>(0x51000000UL) = 0xDEADUL;
+#endif
                 } else {
                     cinux::print::Println("[armv7] paged heap FAILED");
                 }

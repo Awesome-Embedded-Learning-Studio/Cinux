@@ -1,5 +1,11 @@
 # armv7 bring-up image: a freestanding Cortex-A7 binary that QEMU's
 # mcimx6ul-evk can load with -kernel.
+#
+# One core, two images. arm_image is the production kernel: the init lane
+# and the desktop. arm_selftest is the self-check kernel the arm_boot lane
+# boots. The self-check suite and the seated world compile only into the
+# second one, so a production boot carries neither their code nor their
+# console noise.
 
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
@@ -15,11 +21,10 @@ add_custom_command(
     DEPENDS ${CMAKE_SOURCE_DIR}/assets/font.psf
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-add_executable(arm_image
+set(ARM_CORE_SOURCES
     start.S
     console_world.cpp
     root_port.cpp
-    kmain.cpp
     uart.cpp
     timer.cpp
     gic.cpp
@@ -28,13 +33,11 @@ add_executable(arm_image
     context_switch.S
     task_switch.cpp
     user_entry.S
-    selfcheck.cpp
     faults.cpp
     exception_dispatch.cpp
     svc.cpp
     lcdif.cpp
     entropy.cpp
-    seat_prog.S
     uart_input.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/demand.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/loader.cpp
@@ -95,7 +98,6 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/loader/exec_arguments.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/interpreter.cpp
     ${CMAKE_SOURCE_DIR}/kernel/loader/program_seat.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
     ${CMAKE_SOURCE_DIR}/kernel/drivers/framebuffer/framebuffer.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/device/device.cpp
     ${CMAKE_SOURCE_DIR}/kernel/drivers/serial/serial.cpp
@@ -130,7 +132,6 @@ add_executable(arm_image
     firmware.cpp
     vmm_bringup.cpp
     assert_hook.cpp
-    selfcheck.cpp
     user_fs.cpp
     user_seat.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/pmm.cpp
@@ -167,7 +168,6 @@ add_executable(arm_image
     ${CMAKE_SOURCE_DIR}/kernel/proc/signals.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/signal_trampoline.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/futex.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/syscall/uaccess.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/task_runtime.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/sched_class.cpp
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
@@ -190,7 +190,9 @@ add_executable(arm_image
     libc_support.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
-target_compile_options(arm_image PRIVATE
+add_library(arm_core OBJECT ${ARM_CORE_SOURCES})
+set_target_properties(arm_core PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+target_compile_options(arm_core PRIVATE
     -mcpu=cortex-a7
     -marm
     -mfloat-abi=hard
@@ -206,23 +208,59 @@ target_compile_options(arm_image PRIVATE
     -O2
     -g)
 
-target_link_options(arm_image PRIVATE
-    -nostdlib
-    -no-pie
-    -T${CMAKE_CURRENT_SOURCE_DIR}/link.ld
-    -Wl,--build-id=none
-    -Wl,--no-warn-rwx-segments)
-
-target_link_libraries(arm_image PRIVATE gcc)
-
-target_include_directories(arm_image PRIVATE
+target_include_directories(arm_core PRIVATE
     ${CMAKE_BINARY_DIR}/generated
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/base/include)
-set_target_properties(arm_image PROPERTIES
-    OUTPUT_NAME "arm"
-    SUFFIX ".elf"
-    LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/link.ld)
+
+# Both images share the core objects and add their own entry and extras.
+# ARGN is the list of sources only one image needs.
+function(add_arm_image target output_name)
+    add_executable(${target}
+        kmain.cpp
+        ${ARGN}
+        $<TARGET_OBJECTS:arm_core>
+        ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o)
+
+    target_compile_options(${target} PRIVATE
+        -mcpu=cortex-a7
+        -marm
+        -mfloat-abi=hard
+        -mfpu=vfpv4
+        -ffreestanding
+        -fno-exceptions
+        -fno-rtti
+        -fno-pie
+        -fno-stack-protector
+        -fno-threadsafe-statics
+        -Wall
+        -Wextra
+        -O2
+        -g)
+
+    target_link_options(${target} PRIVATE
+        -nostdlib
+        -no-pie
+        -T${CMAKE_CURRENT_SOURCE_DIR}/link.ld
+        -Wl,--build-id=none
+        -Wl,--no-warn-rwx-segments)
+
+    target_link_libraries(${target} PRIVATE gcc)
+
+    target_include_directories(${target} PRIVATE
+        ${CMAKE_BINARY_DIR}/generated
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/base/include)
+
+    set_target_properties(${target} PROPERTIES
+        OUTPUT_NAME "${output_name}"
+        SUFFIX ".elf"
+        LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/link.ld)
+endfunction()
+
+add_arm_image(arm_image arm)
+add_arm_image(arm_selftest arm-selftest selfcheck.cpp seat_probe.cpp seat_prog.S)
+target_compile_definitions(arm_selftest PRIVATE CINUX_ARM_SELFTEST=1)
 
 # The board's device tree: a minimal blob the lane loads at a fixed address.
 find_program(CINUX_DTC dtc)
@@ -260,3 +298,4 @@ add_custom_command(
 add_custom_target(arm_init_gui_dtb DEPENDS ${CINUX_ARM_INIT_GUI_DTB})
 add_dependencies(arm_image arm_init_gui_dtb)
 add_dependencies(arm_image arm_dtb)
+add_dependencies(arm_selftest arm_dtb)
