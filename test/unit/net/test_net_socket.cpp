@@ -755,8 +755,10 @@ void run_accept_flags_body() {
     frame.r10            = 0x80800;  // SOCK_NONBLOCK | SOCK_CLOEXEC on the new socket.
     const auto kAccepted = syscall::HandleAccept4(frame);
     ASSERT_TRUE(kAccepted >= 0);
+    // A socket is born read-write: the access mode is part of the open,
+    // and the accepted fd carries it beside the requested nonblocking bit.
     ASSERT_EQ(task.files->get(static_cast<unsigned long>(kAccepted)).value()->status_flags,
-              syscall::kOpenNonblock);
+              syscall::kOpenReadWrite | syscall::kOpenNonblock);
     frame.rdi = static_cast<Word>(kAccepted);
     frame.rsi = 3;
     ASSERT_EQ(syscall::HandleShutdown(frame), -syscall::kEinval);

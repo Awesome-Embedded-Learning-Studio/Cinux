@@ -241,7 +241,7 @@ long long accept_common(const SyscallFrame& frame, Word extra_flags) {
     const auto kSeat = CurrentTask()->files->alloc(
         net::SocketOps(), born.get(), kNode,
         {
-            .status  = (extra_flags & kSockNonblock) != 0 ? kOpenNonblock : 0,
+            .status  = kOpenReadWrite | ((extra_flags & kSockNonblock) != 0 ? kOpenNonblock : 0),
             .cloexec = (extra_flags & kSockCloexec) != 0,
             .limit   = FileDescriptorLimit(),
         });
@@ -340,7 +340,8 @@ long long HandleSocket(const SyscallFrame& frame) {
     const auto kSeat =
         CurrentTask()->files->alloc(net::SocketOps(), socket.get(), kNode,
                                     {
-                                        .status = (kFlags & kSockNonblock) != 0 ? kOpenNonblock : 0,
+                                        .status = kOpenReadWrite |
+                                                  ((kFlags & kSockNonblock) != 0 ? kOpenNonblock : 0),
                                         .cloexec = (kFlags & kSockCloexec) != 0,
                                         .limit   = FileDescriptorLimit(),
                                     });
@@ -741,7 +742,8 @@ long long HandleSocketpair(const SyscallFrame& frame) {
         const auto kSeat =
             files.alloc(net::SocketOps(), pair[index].get(), kNode,
                         {
-                            .status  = (frame.rsi & kSockNonblock) != 0 ? kOpenNonblock : 0,
+                            .status  = kOpenReadWrite |
+                                       ((frame.rsi & kSockNonblock) != 0 ? kOpenNonblock : 0),
                             .cloexec = (frame.rsi & kSockCloexec) != 0,
                         });
         if (!kSeat.ok()) {
