@@ -296,6 +296,16 @@ add_custom_command(
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init-gui.dts
     COMMENT "Compiling the GUI device tree")
 add_custom_target(arm_init_gui_dtb DEPENDS ${CINUX_ARM_INIT_GUI_DTB})
+
+# The desk check's session: the same full boot, with the trace variant
+# that makes vesper print its input and pty activity on the serial line.
+add_custom_command(
+    OUTPUT ${CINUX_ARM_INIT_GUI_TRACE_DTB}
+    COMMAND ${CINUX_DTC} -I dts -O dtb -o ${CINUX_ARM_INIT_GUI_TRACE_DTB}
+            ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init-gui-trace.dts
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qemu-init-gui-trace.dts
+    COMMENT "Compiling the GUI trace device tree")
+add_custom_target(arm_init_gui_trace_dtb DEPENDS ${CINUX_ARM_INIT_GUI_TRACE_DTB})
 add_dependencies(arm_image arm_init_gui_dtb)
 add_dependencies(arm_image arm_dtb)
 add_dependencies(arm_selftest arm_dtb)

@@ -1,6 +1,12 @@
 #!/bin/sh
-if [ "${CINUX_SESSION:-}" = gui ]; then
-    # su's login environment is fresh; set tracing inside it so the GUI
-    # checks can observe input and PTY activity on the serial console.
-    exec /bin/su - cinux -c 'export VESPER_FBDEV_TRACE=1; exec /bin/vesper /dev/fb0 /dev/event0 /dev/event1'
-fi
+# The GUI session boots the desk; `gui-trace` is the desk check's own
+# variant, which asks vesper to print its input and pty trace on the
+# serial line. A normal session stays quiet.
+case "${CINUX_SESSION:-}" in
+    gui)
+        exec /bin/su - cinux -c 'exec /bin/vesper /dev/fb0 /dev/event0 /dev/event1'
+        ;;
+    gui-trace)
+        exec /bin/su - cinux -c 'export VESPER_FBDEV_TRACE=1; exec /bin/vesper /dev/fb0 /dev/event0 /dev/event1'
+        ;;
+esac

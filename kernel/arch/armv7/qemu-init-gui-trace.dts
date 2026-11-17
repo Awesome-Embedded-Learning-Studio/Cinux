@@ -1,0 +1,22 @@
+/dts-v1/;
+
+/* The desk check's session: the same full boot as qemu-init-gui.dts,
+   with the trace variant so input and pty activity reach the serial
+   log. Production runs keep the plain gui variant and stay quiet. */
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    model = "QEMU i.MX6UL EVK full boot";
+
+    opt {
+        cinux {
+            init-env = "CINUX_SESSION=gui-trace";
+            init-lane = "yes";
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x10000000>;
+    };
+};

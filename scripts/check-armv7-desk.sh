@@ -27,10 +27,11 @@ seconds="${CINUX_ARM_RUN_SECONDS:-50}"
 echo '== armv7 desk lane =='
 cmake -S "${repo}" -B "${build}" >/dev/null
 # The desk and the volume both ride the build graph: the overlay stage
-# copies the desk onto the buildroot card, and the GUI dtb says
-# CINUX_SESSION=gui so the card's inittab lights the desk on its own.
+# copies the desk onto the buildroot card, and the GUI trace dtb says
+# CINUX_SESSION=gui-trace so the card's desktop script lights the desk
+# with its input and pty trace on the serial line.
 build_log="${build}/check-armv7-desk.build.log"
-if ! cmake --build "${build}" --target vesper_desk buildroot_volume arm_init_gui_dtb \
+if ! cmake --build "${build}" --target vesper_desk buildroot_volume arm_init_gui_trace_dtb \
         >"${build_log}" 2>&1; then
     echo "[check-armv7-desk] build failed, tail of ${build_log}:" >&2
     tail -n 40 "${build_log}" >&2
@@ -73,7 +74,7 @@ type_text() {
     timeout "$((settle + seconds))" "$(command -v qemu-system-arm)" \
         -M mcimx6ul-evk \
         -kernel "${build}/kernel/arch/armv7/arm.elf" \
-        -device "loader,file=${build}/armv7-init-gui.dtb,addr=0x81000000,force-raw=on" \
+        -device "loader,file=${build}/armv7-init-gui-trace.dtb,addr=0x81000000,force-raw=on" \
         -drive "file=${image},if=sd,format=raw" \
         -display none -serial stdio -monitor none -qmp "pipe:${qmp}" \
         -device usb-kbd,bus=usb-bus.0 -device usb-tablet,bus=usb-bus.1 \
