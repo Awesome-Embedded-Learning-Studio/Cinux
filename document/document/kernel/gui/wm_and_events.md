@@ -8,7 +8,7 @@
 
 ## 内核侧：EventStream 怎么接住事件
 
-EventStream 的家在 `kernel/driver/input/event_stream.hpp/cpp`，一台设备配一条自己的流。文件头注释给它的定位是事件花名册：一条条记录从 IRQ 递进来，读者领走的始终是整条的记录，独占的那个字决定还有谁能听见。生产的一侧是 publish，注释对它的要求是在中断上下文里也安全，publish 干的活是往队里放一条记录，做的全是整数运算，里面没有一条是拖节奏的动作。每条记录进门的时候打上自己的时间戳，秒与微秒从 Tick 的节拍换算出来，形状咱们对着 Linux 的 `struct input_event` 核过一遍，两边的 24 个字节一模一样。队列是 64 条的环形，`input_config.hpp` 的注释替队列表明了立场，丢掉的爆发只算一个错过的手势，到货的记录一句也不虚报。
+EventStream 的家在 `kernel/drivers/input/event_stream.hpp/cpp`，一台设备配一条自己的流。文件头注释给它的定位是事件花名册：一条条记录从 IRQ 递进来，读者领走的始终是整条的记录，独占的那个字决定还有谁能听见。生产的一侧是 publish，注释对它的要求是在中断上下文里也安全，publish 干的活是往队里放一条记录，做的全是整数运算，里面没有一条是拖节奏的动作。每条记录进门的时候打上自己的时间戳，秒与微秒从 Tick 的节拍换算出来，形状咱们对着 Linux 的 `struct input_event` 核过一遍，两边的 24 个字节一模一样。队列是 64 条的环形，`input_config.hpp` 的注释替队列表明了立场，丢掉的爆发只算一个错过的手势，到货的记录一句也不虚报。
 
 溢出的恢复，[键盘驱动](../drivers/keyboard.md) 那一页已经照着注释把次序走过一遍了。这一页补的是它没有写出名字的两个成员，publish 这头的 `dropped_` 标志与 read 这头的 `delivered_keys_` 花名册，咱们把它们挨个接进次序里认。队列满了的时候 publish 把整条队列清空，把 `dropped_` 立成丢了东西的标志，然后把当前的记录放进空出来的队列。下一次 read 领到的头一条记录是 SYN_DROPPED（EV_SYN 里 code 3 的那个码），它把丢过东西的消息报给读者。接着流按 `delivered_keys_` 的花名册把已经送出去的按键逐个补发释放，绝对轴的设备再把两根轴的当前位置重放一遍，末尾的一条 SYN_REPORT 把报告合上。读的人拿到的是一份自洽的状态，按住的键不会悬在半空。用户态那头见到 SYN_DROPPED 的反应是重置整份翻译状态，这个反应的现场归后面 vesper 的段落讲。同一段路的两头各有各的做法，内核补发记录、用户态清掉自己的翻译状态。
 
@@ -32,10 +32,10 @@ poll_next 把排空的节奏定成了非阻塞：一条一条 `input_event` 地�
 
 ## 源码位置
 
-- `kernel/driver/input/event_stream.hpp/cpp` — EventStream 本体：publish、溢出恢复、独占、问句
-- `kernel/driver/input/input_config.hpp` — 24 字节记录、64 条队列、问句字与主从号
+- `kernel/drivers/input/event_stream.hpp/cpp` — EventStream 本体：publish、溢出恢复、独占、问句
+- `kernel/drivers/input/input_config.hpp` — 24 字节记录、64 条队列、问句字与主从号
 - `kernel/fs/devfs/input_node.cpp` — event0 与 event1 的座位、InputOpen 的引用计数
-- `kernel/driver/keyboard/keyboard.cpp` — grab_hook 的接线处
+- `kernel/drivers/keyboard/keyboard.cpp` — grab_hook 的接线处
 - `third_party/vesper/src/host/evdev_input.hpp/cpp` — EvdevInput 与 EvdevTranslator：打开、独占、排空、两件折叠
 - `third_party/vesper/third_party/visor/include/visor/bindings/evdev/event_wire.hpp` — WireEvent、EvdevState 与 visor 的翻译器
 - `third_party/vesper/third_party/visor/include/visor/bindings/host.hpp` — HostTable 与 poll_event

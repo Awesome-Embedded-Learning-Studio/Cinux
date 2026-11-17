@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-这一页咱们把 `kernel/driver/serial` 里的串口驱动走一遍。它管的是 COM1 上那颗 16550 UART（PC 兼容机里最常见的一代串口芯片），全部的家当只有两个文件，露在外面的面孔只有五张：`SerialInit` 负责的是开工，`SerialPutChar` 与 `SerialDrain` 管的是发送和排空，`SerialTryGetChar` 与 `SerialHasKey` 管的则是接收。它是一颗纯轮询的驱动，中断从头到尾都是关着的，发一个字节的时候自己等线，收一个字节的时候自己到状态口去问。它的体量虽小，要紧的却是位置，内核打印链的末端落在它的身上，控制台 tty 取键盘字节时头一个问的也是它，断电前的排空等的还是它。咱们顺着寄存器、初始化写表、收发路径、启动早期与控制台接线的次序往下走，沿途的取舍都跟着源码的注释走。
+这一页咱们把 `kernel/drivers/serial` 里的串口驱动走一遍。它管的是 COM1 上那颗 16550 UART（PC 兼容机里最常见的一代串口芯片），全部的家当只有两个文件，露在外面的面孔只有五张：`SerialInit` 负责的是开工，`SerialPutChar` 与 `SerialDrain` 管的是发送和排空，`SerialTryGetChar` 与 `SerialHasKey` 管的则是接收。它是一颗纯轮询的驱动，中断从头到尾都是关着的，发一个字节的时候自己等线，收一个字节的时候自己到状态口去问。它的体量虽小，要紧的却是位置，内核打印链的末端落在它的身上，控制台 tty 取键盘字节时头一个问的也是它，断电前的排空等的还是它。咱们顺着寄存器、初始化写表、收发路径、启动早期与控制台接线的次序往下走，沿途的取舍都跟着源码的注释走。
 
 ## 寄存器与轮询词表
 
@@ -10,7 +10,7 @@
 
 数据口与中断允许的两个偏移是一口两用的。按 16550 的惯例，线路控制寄存器的最高位是 DLAB（除数锁存访问位的开关，除数是决定线上波特率的分频值），它竖起来的时候，0 号与 1 号两个口改扮的是除数的低字节与高字节，它落回去的时候，两个口又回到数据与中断允许的本职。这个开关的用法，咱们到初始化的一节看写表的原文。
 
-驱动说话用的词安在了 `kernel/driver/base/io.hpp`，咱们把这几件词挨个认一遍。`PortWrite` 是端口与值配成的一对记录，`OutB` 的模板版本能把整张写表按次序一口气交出去，`InB` 读回的是一个字节，`WaitBitsSet` 的活是在状态口上打转，等掩码里的位全部亮起才放行，io.cpp 里的实现每转一圈垫一发 `pause`（x86 的暂停指令）。io.hpp 给 `WaitBitsSet` 的注释说它是所有轮询驱动的发送等待，PS/2 那边的 host 层接的也是同一批词，它的 `delay` 槽接的则是 PIT 的微秒等待，那段故事在 [PIT 定时器](pit.md)里讲过了。
+驱动说话用的词安在了 `kernel/arch/x86_64/platform/io.hpp`，咱们把这几件词挨个认一遍。`PortWrite` 是端口与值配成的一对记录，`OutB` 的模板版本能把整张写表按次序一口气交出去，`InB` 读回的是一个字节，`WaitBitsSet` 的活是在状态口上打转，等掩码里的位全部亮起才放行，io.cpp 里的实现每转一圈垫一发 `pause`（x86 的暂停指令）。io.hpp 给 `WaitBitsSet` 的注释说它是所有轮询驱动的发送等待，PS/2 那边的 host 层接的也是同一批词，它的 `delay` 槽接的则是 PIT 的微秒等待，那段故事在 [PIT 定时器](pit.md)里讲过了。
 
 ## 初始化：一张七行的写表
 
@@ -30,9 +30,9 @@
 
 引导序列 `kInitSteps` 的表里，serial 这个名字占的是第一行，PMM（物理内存管理器、管物理页的分配和归还）这样的重头角色，都排在它的后面。这一步的实现就是一行 `SerialInit`，它是一个不可能答失败的步骤，RunInitSequence 里失败停机的机关与它无关。串口开得这么早是有讲究的，图的是后面任何一步出事的时候，还有一条说话的路在。咱们把这样安排的理由记下，下一节看打印链怎么把它用起来。
 
-这个内核的打印链咱们顺着捋一遍。`print::Println` 把参数交给了格式化引擎，结果写进一个 192 字节的栈缓冲，整串字符随后交给了 `console::PutString`，它的 `put_char` 给每个字符发两份，串口与文字屏幕各拿各的份。文字屏幕没就绪的时候，`put_char` 是安静的无操作，screen.hpp 的文件头注释说了这样安排的道理，console 才敢无条件地扇出。次序也是刻意的，console.hpp 给 `InitConsole` 的注释写的是串口在前面，调试不用等一块就绪的屏幕。生产世界的两步分开了走，串口占的是引导序列的第一行，文字屏幕的 init 排在第五步，中间的任何一步真打了失败行，字能走的就只剩串口一条路。ktest 的测试世界（test/kernel/test_main.cpp）把 `SerialInit` 放在了 PMM 的 init 之前，用的想法与生产世界是同一个，屏幕就绪之前的报错行打的就是串口。
+这个内核的打印链咱们顺着捋一遍。`print::Println` 把参数交给了格式化引擎，结果写进一个 192 字节的栈缓冲，整串字符随后交给了 `console::PutString`，它的 `put_char` 给每个字符发两份，串口与文字屏幕各拿各的份。文字屏幕没就绪的时候，`put_char` 是安静的无操作，screen.hpp 的文件头注释说了这样安排的道理，console 才敢无条件地扇出。次序也是刻意的，console.hpp 给 `InitConsole` 的注释写的是串口在前面，调试不用等一块就绪的屏幕。生产世界的两步分开了走，串口占的是引导序列的第一行，文字屏幕的 init 排在第五步，中间的任何一步真打了失败行，字能走的就只剩串口一条路。ktest 的测试世界（test/kernel/kernel/test_main.cpp）把 `SerialInit` 放在了 PMM 的 init 之前，用的想法与生产世界是同一个，屏幕就绪之前的报错行打的就是串口。
 
-引导的世界自带一份一样的表，咱们把 boot 的世界也看一眼。boot/early/console.hpp 里躺着同一个 0x3F8 的基址、同一组偏移常量与同一张七行写表，文件头的注释交代了这样复制的缘由：boot 镜像混着 16、32、64 位的代码，它的控制台做成了头内联的形状，每个编译的世界拿自己的一份实例，内核树保留驱动版的控制台，而拷贝本身只归 boot。内核接手的时候，`SerialInit` 把同一组寄存器再编程了一遍，这两次编程做的是同一组写表，`SerialInit` 是幂等的，而做两遍也无妨。
+引导的世界自带一份一样的表，咱们把 boot 的世界也看一眼。kernel/arch/x86_64/boot/early/console.hpp 里躺着同一个 0x3F8 的基址、同一组偏移常量与同一张七行写表，文件头的注释交代了这样复制的缘由：boot 镜像混着 16、32、64 位的代码，它的控制台做成了头内联的形状，每个编译的世界拿自己的一份实例，内核树保留驱动版的控制台，而拷贝本身只归 boot。内核接手的时候，`SerialInit` 把同一组寄存器再编程了一遍，这两次编程做的是同一组写表，`SerialInit` 是幂等的，而做两遍也无妨。
 
 ## 控制台与 tty 的接线
 
@@ -46,14 +46,14 @@ console.cpp 是串口今天最大的客户。它的 `put_char` 把字符交给�
 
 ## 源码位置
 
-- `kernel/driver/serial/serial.hpp`、`serial.cpp` — 16550 驱动的本体、七行写表与轮询的收发
-- `kernel/driver/base/io.hpp`、`io.cpp` — PortWrite、OutB、InB、WaitBitsSet 的轮询词表
+- `kernel/drivers/serial/serial.hpp`、`serial.cpp` — 16550 驱动的本体、七行写表与轮询的收发
+- `kernel/arch/x86_64/platform/io.hpp`、`io.cpp` — PortWrite、OutB、InB、WaitBitsSet 的轮询词表
 - `kernel/init/init_sequence.cpp` — 排在第一行的 serial 步与失败的停机机关
 - `kernel/console/console.hpp`、`console.cpp` — 双份的扇出、闸锁、InitConsole 与 Flush
 - `kernel/console/screen.hpp`、`screen.cpp` — 文字屏幕的静默、让位与收回
 - `kernel/fs/devfs/fb_node.cpp` — 文字屏幕让位与收回的触发方
-- `kernel/driver/tty/console_tty.hpp`、`console_tty.cpp` — 三路的取键、回显与让出
+- `kernel/drivers/tty/console_tty.hpp`、`console_tty.cpp` — 三路的取键、回显与让出
 - `kernel/boot/print.hpp` — 打印链走到 PutString 的那一截
 - `kernel/syscall/sys_reboot.cpp` — 断电之前的 Flush
-- `boot/early/console.hpp` — boot 世界的同表拷贝
-- `test/kernel/test_main.cpp` — ktest 世界的接线
+- `kernel/arch/x86_64/boot/early/console.hpp` — boot 世界的同表拷贝
+- `test/kernel/kernel/test_main.cpp` — ktest 世界的接线

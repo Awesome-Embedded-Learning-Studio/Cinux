@@ -1,6 +1,6 @@
 #include <api/syscall.hpp>
 
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/syscall/syscall.hpp"
 
 namespace {

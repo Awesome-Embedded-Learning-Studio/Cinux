@@ -1,6 +1,6 @@
 # 必跑验收
 
-BusyBox、GCC/G++、完整内核自编译和原生 CMake 构建均已有实弹脚本。这次补齐的是统一调度、构建类型与 CPU 维度、CI 门禁及失败证据，复用这些验证。
+BusyBox、GCC/G++ 和原生 CMake 构建均已有实弹脚本。这次补齐的是统一调度、构建类型与 CPU 维度、CI 门禁及失败证据，复用这些验证。
 
 代码最终验收运行四组构建，并在普通与 UBSan+lockdep 两套镜像上运行现有生态实弹：
 
@@ -28,26 +28,24 @@ bash scripts/checks/run-cell.sh kernel Debug ubsan build-debug-ubsan
 bash scripts/checks/run-cell.sh ecosystem Release checks build-checks
 ```
 
-`matrix.sh` 默认在 `build-matrix/` 创建隔离构建目录，日志和状态位于 `build-matrix/logs/`；通过 `CINUX_MATRIX_DIR` 改目录。`CINUX_COMPILER_LAUNCHER=ccache` 可启用编译缓存。selfhost/native 导出构建命令时会清空 launcher，保证客体使用真实编译器命令。
+`matrix.sh` 默认在 `build-matrix/` 创建隔离构建目录，日志和状态位于 `build-matrix/logs/`；通过 `CINUX_MATRIX_DIR` 改目录。`CINUX_COMPILER_LAUNCHER=ccache` 可启用编译缓存。native 导出构建命令时会清空 launcher，保证客体使用真实编译器命令。
 
 | CI 任务 | 构建矩阵 | 执行范围 |
 |---|---|---|
 | host-tests | Release × ASan+UBSan+LSan / TSan | 全部 host 套件，两格均开启 lockdep |
 | kernel-tests | Debug / Release × none / UBSan / lockdep | 六格，每格全部 host、单核/双核机内测试，并启动生产内核验证 PID1、BusyBox 与生态基础件 |
 | ecosystem | Release × none / UBSan+lockdep | 复用上表生态脚本；组合检查格额外跑全部 host 与机内测试 |
-| selfhost（独立 workflow） | Release × none / UBSan+lockdep | 从源码编译完整内核、提取并核对哈希、新内核启动及 GCC hello |
 | native（独立 workflow） | Release × none / UBSan+lockdep | Buildroot 空开发盘、原生 CMake 全量/增量/改源重建、新产物启动、GUI、命令行及 GUI 各三轮持久化/fsck |
 
-前三项与测试基础设施回归在 push/PR/手动触发。完整 selfhost/native 任务每周六北京时间 03:17（UTC 周五 19:17）运行，也可手动触发；本地完整矩阵不默认重复这四项长测试。单独运行：
+前三项与测试基础设施回归在 push/PR/手动触发。native 任务约一小时，只在手动触发时运行，本地完整矩阵不默认重复这类长测试。单独运行：
 
 ```sh
-bash scripts/checks/run-cell.sh selfhost Release none build-ci-selfhost
 bash scripts/checks/run-cell.sh native Release checks build-ci-native
 ```
 
 native 使用独立的新构建目录，发现已有开发盘就拒绝运行，避免覆盖日常开发成果。生态、网络与 GUI 冒烟使用 `ext2.img` 夹具及 QEMU snapshot，不依赖日常 `native-build.ext2`；完整自编译和持久化使用各自的专用磁盘。
 
-Debug 内核使用 `-O0`，Release 的 host 与内核统一使用 `-O2`，不再由固定 `-O2` 覆盖 Debug，也不沿用 CMake 的 host Release `-O3` 默认值。当前注册 82 个 host CTest 套件、22 个机内测试镜像：19 个镜像分别跑 CPU1/CPU2，`block`、`smp`、`smp_pipe` 的屏障明确要求双核，只注册 CPU2，共 41 个机内 CTest。CPU2 参数不代表每个测试都启动 AP；跨核参与由这三套测试及用户态 SMP 压测各自断言。
+Debug 内核使用 `-O0`，Release 的 host 与内核统一使用 `-O2`，不再由固定 `-O2` 覆盖 Debug，也不沿用 CMake 的 host Release `-O3` 默认值。当前注册 86 个 host CTest 套件、22 个机内测试镜像：19 个镜像分别跑 CPU1/CPU2，`block`、`smp`、`smp_pipe` 的屏障明确要求双核，只注册 CPU2，共 41 个机内 CTest。CPU2 参数不代表每个测试都启动 AP；跨核参与由这三套测试及用户态 SMP 压测各自断言。
 
 本机 GCC 16 的未优化构建会启用 libstdc++ 内部断言。freestanding 内核通过外部 ABI 符号将 `__glibcxx_assert_fail` 接到现有 panic，保留条件、文件、行号与函数；不链接宿主运行库，也不关闭检查。基础设施回归通过真实 `std::atomic` 违约验证该桥接。调度测试的 Shared 所有权放回任务，避免 Debug 引入内核不具备的全局析构注册。Release 首次全量检查另发现堆测试在构造拒绝输入时越过数组边界，已改用合法、但仍在已初始化堆范围外的指针。
 
@@ -64,18 +62,6 @@ lockdep 沿用 legacy 的锁顺序图思路，SpinLedger 记录 per-CPU 持锁�
 锁身份按地址记录。默认账本中的临时锁在存储回收前必须调用 `Spinlock::retire()`，或使用随测试世界一起销毁的独立 SpinLedger；RamFs 析构已接入 retire。常驻内核锁保持平凡析构，以满足常量初始化单例的约束。图最多记录 64 把锁、16 层同时持有，达到上限会失败，不能静默丢弃边。
 
 当前 lockdep 覆盖自旋锁获取顺序，不代表完整 Mutex 持有顺序验证或内核数据竞争检测。Host TSan 也不检测真实 IRQ/汇编上下文切换。这些边界必须与结果一起说明；后续真实并发逻辑应新增相应并发用例。
-
-站 34 的完整内核自编译实弹使用独立磁盘，先组装源码卷，再启动 KVM：
-
-```sh
-cmake -S . -B build
-cmake --build build --parallel 4 --target kernel_selfhost_volume
-python3 scripts/test_station34_kernel_selfhost.py
-```
-
-宿主导出当前 CMake 配置的编译、链接命令，准备 GCC/G++、binutils、Python 运行环境、源码、生成配置和引导器。源码卷不携带内核对象或已链接内核。Cinux 从空输出目录编译全部内核源文件，在机内生成资源对象和 kallsyms、完成两轮链接、核验镜像头并封装启动盘，经 `fsync` 落盘。验收脚本关闭 QEMU 后提取产物，核对机内 SHA-256，再用这个产物启动，并重新编译、运行 hello。
-
-产物是 `build/boot/cinux-selfhost.img` 和 `build/kernel/cinux_kernel_selfhost`；编译及重启日志分别为 `build/station34-kernel-selfhost.serial.log`、`build/station34-kernel-selfhost-reboot.serial.log`。源码卷为 256 MiB，guest 内存为 512 MiB。该步骤编译完整内核；引导器和用户态工具链作为自举输入保留。`build-checks` 可用同样的目标和 `--image build-checks/boot/cinux.img` 验证内核检查配置。全部构建树与 QEMU 仍须串行运行。
 
 第一批性能优化将根文件系统块缓存从固定 32 KiB 改为按初始化时空闲 RAM 的 1/32 预算、最大 64 MiB，缓存页按需分配，使用哈希索引与 CLOCK 淘汰。2026-10-26 在相同 KVM、2 vCPU、512 MiB、串行编译及原有 `-g -O2` 参数下，前后匹配的 138 个编译单元累计耗时为 834.685s / 281.288s，约快 2.97 倍；完整 188 次编译、两轮链接及镜像封装共 369.811s，产物启动与 GCC 编译运行通过。旧基线在后续目录容量限制处失败，因此只比较双方完成的相同单元，不作完整构建耗时对比。ext2 目录按需增长、动态描述符表及 `RLIMIT_NOFILE` 同时保证完整链接能够完成；统一文件页缓存、目录项缓存及并行构建留待后续测量。
 

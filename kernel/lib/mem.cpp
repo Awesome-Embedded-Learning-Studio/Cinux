@@ -1,5 +1,5 @@
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/arch/halt.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming,misc-include-cleaner,readability-identifier-length)
 // libc-spelled symbols the compiler may call

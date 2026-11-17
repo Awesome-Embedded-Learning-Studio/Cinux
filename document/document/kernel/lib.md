@@ -34,7 +34,7 @@ void* memmove(void* destination, const void* source, unsigned long bytes) {
 
 文件的末尾还有一个不显眼的落点，`std::terminate` 的定义安在这里。异常在这个内核里是关着的（编译旗标 `-fno-exceptions`），可标准库的头文件里依然留着 throw 的字样，真被走到的那一刻需要一个去处，注释把这层写成了 freestanding（不带操作系统与完整标准库的编译环境）世界对头文件的供给，这里的供给是 `Halt()`，机器当场就停了下来。还有一个编译事实咱们照实记录，`kernel/CMakeLists.txt` 把 `mem.cpp` 放进了无 SSE 的孤岛名单，整份文件是按 `-mgeneral-regs-only` 编译的，向量寄存器不在它的世界里。
 
-引导世界还带着自己的一份 `boot/early/libc.cpp`，里面是 `strlen` 与 64 位除法的两个 C 名字落点，它的名字也在内核镜像的编译名单里。不过它的服务对象是引导的早期阶段，那一层归 [引导链](../boot.md) 的故事，这个部分是本页没有认领的，咱们把它摆出来，图的只是边界的完整。
+引导世界还带着自己的一份 `kernel/arch/x86_64/boot/early/libc.cpp`，里面是 `strlen` 与 64 位除法的两个 C 名字落点，它的名字也在内核镜像的编译名单里。不过它的服务对象是引导的早期阶段，那一层归 [引导链](../boot.md) 的故事，这个部分是本页没有认领的，咱们把它摆出来，图的只是边界的完整。
 
 ## 断言的接缝
 
@@ -142,7 +142,7 @@ struct Arg {
 
 咱们从 `math.hpp` 认起，它的一组算术动词是 `Min`、`Max`、`Clamp`、`Floor`、`Ceil`、`Span`、`AlignUp`、`AlignDown`，注释里说这里的单位是参数，页、扇区或者别的粒度共用的都是这一套词，全程都是 constexpr 的算术。`addr.hpp` 的 `PhysAddr` 把物理地址立成了自己的类型，随手把它当整数算是它不许的，进来的那一道转换是显式的，零兼作没有地址的答案，注释里说分配器拿零当空的答案。`ptr.hpp` 的 `PtrAt<T>` 是整数地址变指针的唯一转接点，注释里说裸位就是它的意义，格式化的 `Arg` 把指针按位存，取回来的时候靠的也是它。`literal_types.hpp` 给了 KiB、MiB、GiB、TiB 的字面量与一个 `Hertz` 的强类型，节拍频率在接口上走的是它，光秃秃的无符号数是进不了场的。
 
-剩下的小件咱们两句一个带过。`byte_order.hpp` 管的是小端与大端的标量读写，网络栈的协议头靠它拆与装。`checksum.hpp` 的内容是 RFC 1071 的反码校验和，字节段是它可以分批收下的，跨奇数边界的部分也算得拢。`random.hpp` 的生成器注释写得坦率，种子的播撒只有一次，它是不可信的，内核的熵源拿它打底。`time.hpp` 的家当是日历时间的拆分与秒的强类型，RTC 读出来的字段进它，纪元秒的换算是纯算术。`parse.hpp` 干的是 ASCII 转数的解析，八进制与十进制的整字段解析，ustar 头部的长度字段是注释里的头一位调用者。`path.hpp` 干的是斜杠路径的视图游走，组件的行走、父与叶的拆分都有各自的入口，根路径与否的判断也有专门的入口。`result.hpp` 的本体是值与错误的判别联合，`Result<T>` 与 `Result<void>` 的声明都标着 `[[nodiscard]]`，丢弃返回值的代码会让编译器出声，错误码是 base 自己的 `KernelError`，名字表配的是 `ErrorString`，引用它的源文件在网络、文件系统与系统调用里都见得到。`async.hpp` 里有一块回调的板子，USB 设备的完成通知骑在 `AsyncCallback` 上，`region/memory_region.hpp` 的区间描述被 VMM 的布局配置引用，这两样的细节本页不展开。
+剩下的小件咱们两句一个带过。`byte_order.hpp` 管的是小端与大端的标量读写，网络栈的协议头靠它拆与装。`checksum.hpp` 的内容是 RFC 1071 的反码校验和，字节段是它可以分批收下的，跨奇数边界的部分也算得拢。`random.hpp` 的生成器注释写得坦率，种子的播撒只有一次，它是不可信的，内核的熵源拿它打底。`time.hpp` 的家当是日历时间的拆分与秒的强类型，RTC 读出来的字段进它，纪元秒的换算是纯算术。`parse.hpp` 干的是 ASCII 转数的解析，八进制与十进制的整字段解析，注释里拿磁带头的长度字段当典型形状。`path.hpp` 干的是斜杠路径的视图游走，组件的行走、父与叶的拆分都有各自的入口，根路径与否的判断也有专门的入口。`result.hpp` 的本体是值与错误的判别联合，`Result<T>` 与 `Result<void>` 的声明都标着 `[[nodiscard]]`，丢弃返回值的代码会让编译器出声，错误码是 base 自己的 `KernelError`，名字表配的是 `ErrorString`，引用它的源文件在网络、文件系统与系统调用里都见得到。`async.hpp` 里有一块回调的板子，USB 设备的完成通知骑在 `AsyncCallback` 上，`region/memory_region.hpp` 的区间描述被 VMM 的布局配置引用，这两样的细节本页不展开。
 
 ## host 测试怎么直接链它们
 
@@ -189,4 +189,4 @@ endfunction()
 - `base/include/cinux/async.hpp`、`region/memory_region.hpp` — 回调板子与区间描述
 - `test/CMakeLists.txt` — add_cinux_test 的骨架与各测试的源文件名单
 - `test/framework/assert_host.cpp` — 断言钩子的 host 定义
-- `test/unit/test_format.cpp`、`test_bitmap.cpp` 等 — 纯 base 直链的样例
+- `test/unit/base/test_format.cpp`、`test_bitmap.cpp` 等 — 纯 base 直链的样例

@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_getrandom.hpp"
 
-#include "kernel/arch/x86_64/rdrand.hpp"
+#include "kernel/arch/random.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/uaccess.hpp"
 #include "kernel/time/tick.hpp"
@@ -28,7 +28,7 @@ long long HandleGetrandom(const SyscallFrame& frame) {
         return -kEinval;
     }
     unsigned long long state = 0;
-    if (!cinux::arch::TryRdrand(state)) {
+    if (!cinux::arch::random::TryWord(state)) {
         state = time::Tick::self().since_boot() ^ (frame.rdi << 17U) ^ 0x9E3779B97F4A7C15ULL;
     }
     unsigned char out[256];

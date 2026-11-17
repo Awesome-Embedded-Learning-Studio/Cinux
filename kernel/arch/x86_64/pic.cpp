@@ -20,7 +20,7 @@
 
 #include <stdint.h>
 
-#include "kernel/driver/base/io.hpp"
+#include "kernel/arch/x86_64/platform/io.hpp"
 #include "kernel/interrupt/irq.hpp"
 
 namespace {

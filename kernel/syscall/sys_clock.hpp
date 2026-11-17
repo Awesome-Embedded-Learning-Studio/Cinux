@@ -46,6 +46,10 @@ long long HandleGettimeofday(const SyscallFrame& frame);
  */
 long long HandleClockGettime(const SyscallFrame& frame);
 
+/// The time64 door: the same clock laid down as two eight-byte words,
+/// which is what EABI's clock_gettime64 asks for on every port.
+long long HandleClockGettime64(const SyscallFrame& frame);
+
 /**
  * @brief         Monotonic nanoseconds since boot, finest source first.
  *

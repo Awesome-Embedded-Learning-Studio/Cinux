@@ -2,9 +2,9 @@
 
 #include "cinux/math.hpp"
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/vma.hpp"
@@ -49,24 +49,25 @@ long long HandleMprotect(const SyscallFrame& frame) {
     const auto       kTablesGuard = kSelf->space->guard();
     for (unsigned long spot = kStart; spot < kEnd; spot += cinux::arch::page::kSize) {
         const mm::walk::SlotAt kSlot = mm::walk::FindSlot(tables, kSelf->space->root(), spot);
-        if (kSlot.entry == nullptr || kSlot.level != mm::walk::WalkLevel::kPageTable) {
+        if (kSlot.entry == nullptr || kSlot.level != mm::walk::kLeafLevel) {
             continue;
         }
         const cinux::arch::page::Entry kLeaf = *kSlot.entry;
-        if (!kLeaf.has(cinux::arch::page::kPresent) || kLeaf.has(cinux::arch::page::kLarge)) {
+        if (!cinux::arch::page::IsPresent(kLeaf) || cinux::arch::page::IsLargeLeaf(kLeaf)) {
             continue;
         }
-        const bool               kShared = kLeaf.has(cinux::arch::page::kCow);
+        const bool               kShared = cinux::arch::page::LeafIsShareMarked(kLeaf);
         cinux::arch::page::Entry bits =
             cinux::arch::page::UserLeafTerms(kTerms.writable && !kShared, kTerms.executable);
         if (!kTerms.readable && !kTerms.writable && !kTerms.executable) {
             bits = bits & ~cinux::arch::page::kUser;
         }
         if (kShared) {
-            bits = bits | cinux::arch::page::kCow;
+            bits = cinux::arch::page::ShareMarked(bits);
         }
-        *kSlot.entry = cinux::arch::page::MakeTableEntry(mm::walk::EntryTarget(kLeaf), bits);
-        cinux::arch::InvalidatePage(spot);
+        *kSlot.entry =
+            cinux::arch::page::MakePageEntry(cinux::arch::page::LeafPhysical(kLeaf), bits);
+        cinux::arch::space::InvalidatePage(spot);
     }
     return 0;
 }

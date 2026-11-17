@@ -18,6 +18,8 @@
 #include <cinux/assert.hpp>
 #include <source_location>
 
+#include "kernel/arch/debug_frame.hpp"
+
 #include "kernel/boot/print.hpp"
 #include "kernel/debug/panic.hpp"
 
@@ -26,9 +28,7 @@ namespace cinux::base::safety {
 void AssertionFailed(const char* k_message, std::source_location loc) {
     cinux::print::Println("[panic] %s", k_message);
     cinux::print::Println("[kern] %s:%u in %s", loc.file_name(), loc.line(), loc.function_name());
-    unsigned long long frame = 0;  // NOLINT(misc-const-correctness) written by the asm output
-    __asm__ volatile("movq %%rbp, %0" : "=r"(frame));
-    cinux::debug::PanicDump(frame);
+    cinux::debug::PanicDump(cinux::arch::FramePointer());
 }
 
 }  // namespace cinux::base::safety

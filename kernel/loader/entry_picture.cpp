@@ -2,7 +2,8 @@
 #include <initializer_list>
 
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/abi.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/loader/loader.hpp"
 
 namespace cinux::loader {
@@ -10,6 +11,13 @@ namespace cinux::loader {
 namespace {
 
 using arch::page::kSize;
+
+/// The initial-stack word comes from the ABI the target supplies, so the
+/// frame's width cannot drift from the world the program will run in.
+using cinux::arch::abi::AbiWord;
+
+/// Bytes one initial-stack word occupies on the wire.
+using cinux::arch::abi::kAbiWordBytes;
 
 struct PicturePlane {
     unsigned char* page;
@@ -19,20 +27,20 @@ struct PicturePlane {
 };
 
 bool plane_room(const PicturePlane& plane) {
-    return plane.words_at + 16 <= plane.strings_at;
+    return plane.words_at + 2 * kAbiWordBytes <= plane.strings_at;
 }
 
-void put_word(PicturePlane& plane, unsigned long word) {
+void put_word(PicturePlane& plane, AbiWord word) {
     cinux::base::CopyBytes(plane.page + plane.words_at, &word, sizeof(word));
-    plane.words_at += 8;
+    plane.words_at += kAbiWordBytes;
 }
 
 bool put_pair(PicturePlane& plane, unsigned long type, unsigned long value) {
     if (!plane_room(plane)) {
         return false;
     }
-    put_word(plane, type);
-    put_word(plane, value);
+    put_word(plane, static_cast<AbiWord>(type));
+    put_word(plane, static_cast<AbiWord>(value));
     return true;
 }
 
@@ -44,20 +52,20 @@ bool put_string(PicturePlane& plane, const char* text) {
     while (text[length] != '\0') {
         ++length;
     }
-    if (length + 1 + 8 + 16 > plane.strings_at - plane.words_at) {
+    if (length + 1 + kAbiWordBytes + 2 * kAbiWordBytes > plane.strings_at - plane.words_at) {
         return false;
     }
     plane.strings_at -= length + 1;
     cinux::base::CopyBytes(plane.page + plane.strings_at, text, length + 1);
-    const unsigned long kLanded = plane.page_base + plane.strings_at;
+    const AbiWord kLanded = static_cast<AbiWord>(plane.page_base + plane.strings_at);
     cinux::base::CopyBytes(plane.page + plane.words_at, &kLanded, sizeof(kLanded));
-    plane.words_at += 8;
+    plane.words_at += kAbiWordBytes;
     return true;
 }
 
 unsigned long land_randomness(PicturePlane& plane, const EntryFacts& facts) {
     if (facts.randomness == nullptr || facts.random_bytes == 0 ||
-        facts.random_bytes > plane.strings_at - plane.words_at - 16) {
+        facts.random_bytes > plane.strings_at - plane.words_at - 2 * kAbiWordBytes) {
         return 0;
     }
     plane.strings_at -= facts.random_bytes;
@@ -70,7 +78,7 @@ unsigned long land_string(PicturePlane& plane, const char* text) {
     while (text[length] != '\0') {
         ++length;
     }
-    if (length + 1 + 16 > plane.strings_at - plane.words_at) {
+    if (length + 1 + 2 * kAbiWordBytes > plane.strings_at - plane.words_at) {
         return 0;
     }
     plane.strings_at -= length + 1;
@@ -88,7 +96,8 @@ auto fixed_pairs(const EntryFacts& facts) {
         AuxiliaryPair{.type = kAuxPhdr, .value = facts.program_headers},
         AuxiliaryPair{.type = kAuxPhent, .value = facts.header_entry_bytes},
         AuxiliaryPair{.type = kAuxPhnum, .value = facts.header_count},
-        AuxiliaryPair{.type = kAuxPageSize, .value = facts.page_bytes},
+        AuxiliaryPair{.type = kAuxPageSize,
+                      .value = (facts.page_bytes == 0 ? 4096ULL : facts.page_bytes)},
         AuxiliaryPair{.type = kAuxBase, .value = facts.interpreter_base},
         AuxiliaryPair{.type = kAuxEntry, .value = facts.program_entry},
         AuxiliaryPair{.type = kAuxUid, .value = 0},
@@ -168,7 +177,7 @@ unsigned long EntryPictureBytes(const EntryRuns& runs, const EntryFacts& facts) 
         (runs.arguments != nullptr && runs.arguments[0] != nullptr)) {
         ++pairs;
     }
-    return strings + ((count + 3 + (pairs * 2)) * sizeof(unsigned long));
+    return strings + ((count + 3 + (pairs * 2)) * kAbiWordBytes);
 }
 
 unsigned long WriteEntryPicture(unsigned char* stack_page, unsigned long entry_rsp,

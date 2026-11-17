@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_exit.hpp"
 
-#include "kernel/arch/x86_64/halt.hpp"
+#include "kernel/arch/halt.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/syscall/syscall.hpp"
 

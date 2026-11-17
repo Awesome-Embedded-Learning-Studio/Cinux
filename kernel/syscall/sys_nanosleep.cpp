@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_nanosleep.hpp"
 
-#include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/waiter.hpp"
 #include "kernel/proc/signals.hpp"
 #include "kernel/syscall/sys_clock.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -34,7 +34,7 @@ long long wait_until(unsigned long long deadline, unsigned long long remainder, 
             }
             return -kEintr;
         }
-        proc::Scheduler::self().yield();
+        proc::WaitForNextTurn();
     }
 }
 

@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_fsync.hpp"
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -28,7 +28,7 @@ long long HandleFsync(const SyscallFrame& frame) {
     if (kType != 8 && kType != 4) {
         return -kEinval;
     }
-    return fs::FileWorld::self().sync() ? 0 : -kEio;
+    return fs::kernel_vfs().sync_all() ? 0 : -kEio;
 }
 
 }

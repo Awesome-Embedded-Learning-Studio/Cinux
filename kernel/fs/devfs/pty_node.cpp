@@ -8,12 +8,12 @@
 #include "cinux/parse.hpp"
 #include "cinux/result.hpp"
 #include "cinux/singleton.hpp"
-#include "kernel/driver/device/device.hpp"
-#include "kernel/driver/tty/console_tty.hpp"
-#include "kernel/driver/tty/pty.hpp"
-#include "kernel/driver/tty/pty_config.hpp"
-#include "kernel/driver/tty/tty.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/device/device.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
+#include "kernel/drivers/tty/pty.hpp"
+#include "kernel/drivers/tty/pty_config.hpp"
+#include "kernel/drivers/tty/tty.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "kernel/fs/devfs/devfs.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/proc/scheduler.hpp"
@@ -127,6 +127,7 @@ void slave_release(void* context) {
 long long master_answer_number(const Seat& seat, unsigned long long argument);
 
 long long master_answer_lock(const Seat& seat, unsigned long long argument);
+long long master_answer_window_set(const Seat& seat, unsigned long long argument);
 
 /// One master question and the seat that answers it.
 struct MasterAnswer {
@@ -136,6 +137,7 @@ struct MasterAnswer {
 
 constexpr MasterAnswer kMasterAnswers[] = {
     {.word = driver::kTtyTiocgptn, .answer = master_answer_number},
+    {.word = driver::kTtyTiocswinsz, .answer = master_answer_window_set},
     {.word = driver::kTtyTiocsptlck, .answer = master_answer_lock},
 };
 
@@ -396,6 +398,18 @@ long long master_answer_number(const Seat& seat, unsigned long long argument) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto* const kWhere  = reinterpret_cast<unsigned int*>(argument);
     base::CopyBytes(kWhere, &kNumber, sizeof(kNumber));
+    return 0;
+}
+
+long long master_answer_window_set(const Seat& seat, unsigned long long argument) {
+    // The master and the slave name the same shape: a program that sets
+    // the window on either side is describing the terminal the shell is
+    // talking to.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto const* const kFrom = reinterpret_cast<const unsigned char*>(argument);
+    driver::TtyWindow shape{};
+    base::CopyBytes(&shape, kFrom, driver::kTtyWinsizeBytes);
+    seat.pair->slave().set_window(shape);
     return 0;
 }
 

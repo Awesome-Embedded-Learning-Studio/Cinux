@@ -14,17 +14,19 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/entropy.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
-#include "kernel/arch/x86_64/rdrand.hpp"
+#include "kernel/arch/random.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/user_entry.hpp"
+
 #include "kernel/fs/file_table.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/exec_arguments.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -42,8 +44,6 @@ namespace cinux::syscall {
 namespace {
 
 using base::operator""_KiB;
-
-constexpr unsigned long long kUserFlags = 0x202;
 
 /// Records the program's short and full names on the task that becomes it.
 void note_program_identity(proc::Task& self, const char* path) {
@@ -65,26 +65,11 @@ void note_program_identity(proc::Task& self, const char* path) {
     }
 }
 
-/// Draws the sixteen bytes the entry picture offers as AT_RANDOM; a
-/// machine without a working draw reports none and the picture omits
-/// the entry.
-const std::uint8_t* draw_entry_random(unsigned char (&bytes)[16]) {
-    if (!arch::HasRdrand()) {
-        return nullptr;
-    }
-    unsigned long long word  = 0;
-    unsigned long      drawn = 0;
-    if (arch::TryRdrand(word)) {
-        cinux::base::CopyBytes(bytes, &word, sizeof(word));
-        ++drawn;
-    }
-    if (arch::TryRdrand(word)) {
-        cinux::base::CopyBytes(bytes + sizeof(word), &word, sizeof(word));
-        ++drawn;
-    }
-    return drawn > 0 ? bytes : nullptr;
-}
-
+/// Draws the sixteen bytes the entry picture offers as AT_RANDOM. A
+/// port with a hardware source draws from it; a port without one falls
+/// back to its seeded pool, because every libc builds its stack guard
+/// from these bytes and a picture without them hands the program a
+/// null random pointer to dereference.
 /// One load bias for the seat the program image takes: zero serves the
 /// fixed-base shape whose link addresses already place it, the floor
 /// plus a page-aligned slide serves the relocatable shape whose link
@@ -94,7 +79,7 @@ unsigned long long image_load_bias(const unsigned char* program, std::size_t pro
         return 0;
     }
     constexpr unsigned long long kExecSlideMask = 0xFF'000;
-    return mm::kUserExecImageBase + (arch::RandomWord() & kExecSlideMask);
+    return mm::kUserExecImageBase + (arch::random::Word() & kExecSlideMask);
 }
 
 struct EntryStaging {
@@ -207,6 +192,10 @@ long long stage_arguments(const SyscallFrame& frame, const char* path, EntryStag
         return result;
     }
     if (argc == 0) {
+        // A NULL or empty vector still gets one word on the stack: the
+        // empty string. A caller that passed no name cannot be handed
+        // one, and the exec probe pins this shape: argc one, argv[0]
+        // empty, environment empty.
         if (staged.used == staged.capacity) {
             return -kE2big;
         }
@@ -246,7 +235,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     if (kFolded < 0) {
         return kFolded;
     }
-    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(path);
+    const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(path);
     if (!kView.ok()) {
         return -kEnoent;
     }
@@ -274,60 +263,27 @@ long long HandleExecve(const SyscallFrame& frame) {
     if (kStaged < 0) {
         return kStaged;
     }
+    // The one ladder every image climbs: world assembly, entry facts,
+    // the GNU stack flag, the process layout, the interpreter. Only the
+    // bias policy is this face's own word.
     const unsigned long long kImageBias = image_load_bias(program.get(), program_size);
-    const loader::LoadWorld  kWorld{
-        .space         = *fresh,
-        .vmas          = *ranges,
-        .file          = kNode.value(),
-        .file_bytes    = probed.size,
-        .file_ops      = kView.value().ops,
-        .file_self     = kView.value().self,
-        .file_lifetime = kView.value().lifetime,
-        .base          = kImageBias,
-    };
-    loader::EntryFacts facts{};
-    if (!loader::LoadElfIntoSpace(program.get(), program_size, kWorld, facts)) {
-        return -kEnomem;
+    const auto kSeat = loader::SeatProgram(program.get(), program_size, kNode.value(),
+                                           kView.value(), *fresh, *ranges, kImageBias);
+    if (!kSeat.ok()) {
+        return -ErrnoFrom(kSeat.error());
     }
-    facts.page_bytes             = cinux::arch::page::kSize;
-    facts.platform               = loader::kPlatformName;
-    unsigned int gnu_stack_flags = 0;
-    const bool   kStackExecutable =
-        loader::ReadGnuStackFlags(program.get(), program_size, gnu_stack_flags) &&
-        (gnu_stack_flags & loader::kSegmentExec) != 0;
-    constexpr unsigned long long kBrkSlideMask  = 0xFFF'000;
-    constexpr unsigned long long kMmapSlideMask = 0x3FFF'FF000;
-    ranges->seed_heap(cinux::base::math::AlignUp(ranges->max_end(), cinux::arch::page::kSize) +
-                          (arch::RandomWord() & kBrkSlideMask),
-                      mm::kUserBrkMmapSplit);
-    ranges->set_mmap_ceiling(mm::kUserMmapTop - (arch::RandomWord() & kMmapSlideMask));
-    char        interpreter_path[fs::kFsPathMax] = {};
-    const char* interpreter                      = nullptr;
-    if (loader::ReadInterpreterPath(program.get(), program_size, interpreter_path,
-                                    sizeof(interpreter_path))) {
-        if (facts.program_headers == 0) {
-            return -kEnoexec;
-        }
-        interpreter = interpreter_path;
-    }
-    const auto kDyn = loader::LoadInterpreter(interpreter, *fresh, *ranges);
-    if (!kDyn.ok()) {
-        return -ErrnoFrom(kDyn.error());
-    }
-    facts.interpreter_base = kDyn.value().interpreter_base;
-    const unsigned long long kFirstInstruction =
-        kDyn.value().program_entry != 0 ? kDyn.value().program_entry : facts.program_entry;
-    constexpr unsigned long long kStackSlideMask = 0x7FF'000;
-    const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::RandomWord() & kStackSlideMask);
+    loader::EntryFacts facts            = kSeat.value().facts;
+    const bool         kStackExecutable = kSeat.value().stack_executable;
+    const unsigned long long kFirstInstruction = kSeat.value().start_entry;
+    const unsigned long long kUserFlags = arch::UserEntryFlags(kFirstInstruction);
+    const unsigned long long kStackTop = loader::DrawEntryStackTop();
     if (!proc::MapSignalTrampoline(*fresh, *ranges)) {
         return -kEnomem;
     }
     unsigned char entry_random[16] = {};
-    facts.randomness               = draw_entry_random(entry_random);
-    if (facts.randomness != nullptr) {
-        facts.random_bytes = sizeof(entry_random);
-    }
+    loader::DrawEntryRandom(entry_random);
+    facts.randomness     = entry_random;
+    facts.random_bytes   = sizeof(entry_random);
     facts.executable = staged.text.get();
     const loader::EntryRuns kRuns{
         .arguments   = staged.arguments.get(),
@@ -377,7 +333,23 @@ long long HandleExecve(const SyscallFrame& frame) {
     kSelf->keep_capabilities = false;
     kSelf->clear_child_tid   = 0;
     kSelf->files->close_on_exec();
-    note_program_identity(*kSelf, path);
+    // A program that re-execs itself through /proc/self/exe must be
+    // recorded under the file that path really names: the node is a
+    // window onto the *current* program, and a task whose exe said
+    // "/proc/self/exe" would make every later read of that window
+    // resolve to itself.
+    char        identity_storage[fs::kFsPathMax] = {};
+    const char* identity                         = path;
+    if (std::string_view{path} == "/proc/self/exe" && kSelf->exe[0] == '/') {
+        unsigned long used = 0;
+        while (used + 1 < sizeof(identity_storage) && kSelf->exe[used] != '\0') {
+            identity_storage[used] = kSelf->exe[used];
+            ++used;
+        }
+        identity_storage[used] = '\0';
+        identity               = identity_storage;
+    }
+    note_program_identity(*kSelf, identity);
     // The dying worlds must not come apart while CR3 still walks them:
     // park the old holds aside, switch, and let them go at scope end.
     // NOLINTNEXTLINE(misc-const-correctness) the dying worlds go at scope end

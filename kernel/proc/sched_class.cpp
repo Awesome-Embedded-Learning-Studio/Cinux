@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/proc_config.hpp"
 #include "kernel/proc/task.hpp"
 

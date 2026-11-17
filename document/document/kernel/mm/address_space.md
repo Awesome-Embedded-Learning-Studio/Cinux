@@ -60,7 +60,7 @@ bool AddressSpace::init() {
 
 ## 映射与翻译：借道共享走表
 
-map、map_user 和 translate 三个方法是懒得自己走表的，它们把活转给了 `kernel/mm/page_walk.hpp` 里的模板（这个 concept 叫 TableWorld），配的世界是 `KernelTables`。走表的逻辑，整个仓库里只写了一份，page_walk 的头文件注释告诉咱们，每个世界只要答得上它的两个问题，同一套走表也就跑起来了。一个是给定物理地址怎么够到可写的表页，另一个是新的表页从哪里来。内核世界用直接映射够表、从 PMM 的库存里领清零页，host 测试世界把两个口都指到一个普通的内存池上，于是同一份走表的代码在真表与测试池上都跑得动，`test/kernel/test_cow.cpp` 里的用例就是这么驱动的。
+map、map_user 和 translate 三个方法是懒得自己走表的，它们把活转给了 `kernel/mm/page_walk.hpp` 里的模板（这个 concept 叫 TableWorld），配的世界是 `KernelTables`。走表的逻辑，整个仓库里只写了一份，page_walk 的头文件注释告诉咱们，每个世界只要答得上它的两个问题，同一套走表也就跑起来了。一个是给定物理地址怎么够到可写的表页，另一个是新的表页从哪里来。内核世界用直接映射够表、从 PMM 的库存里领清零页，host 测试世界把两个口都指到一个普通的内存池上，于是同一份走表的代码在真表与测试池上都跑得动，`test/kernel/mm/test_cow.cpp` 里的用例就是这么驱动的。
 
 map 走的是内核侧的 MapPage，沿途的表项一律写成 present 加 writable。map_user 多了一件咱们必须交代的事：走表经过的每一级都要带上 kUser 位，连沿途新建的表也一样，page_walk 的注释把原因写得很清楚，任何一级丢了通行位，它下面的整条路都走不下去，ring 3（用户态）就到不了那一页。叶子表项的权限则只由调用者给的 leaf_bits 决定，注释里的原话是表指针的写位只是供给的细节，叶子上的位才是这一页的法律。默认的参数保留了可写加用户的历史形状，页错误路径与加载器传进来的则是更窄的条件。
 
@@ -93,4 +93,4 @@ teardown 是这个类一生里的最后一站，咱们把它的顺序走清。�
 - `kernel/proc/fork.cpp` — BuildForkChild 里孩子世界的建立
 - `kernel/syscall/sys_exec.cpp` — execve 造新世界与旧持有的停放
 - `base/include/cinux/ref_count.hpp` — RefCount 侵入式计数
-- `test/kernel/test_cow.cpp`、`test/kernel/test_sched.cpp` — 克隆、共享与归还的 host 测试
+- `test/kernel/mm/test_cow.cpp`、`test/kernel/proc/test_sched.cpp` — 克隆、共享与归还的 host 测试

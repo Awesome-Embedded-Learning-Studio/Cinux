@@ -13,7 +13,7 @@
 #include "cinux/container/directed_graph.hpp"
 #include "cinux/container/slot_table.hpp"
 #include "cinux/container/static_stack.hpp"
-#include "kernel/arch/x86_64/per_cpu_config.hpp"
+#include "kernel/arch/per_cpu_config.hpp"
 
 namespace cinux::proc {
 

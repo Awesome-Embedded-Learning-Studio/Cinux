@@ -216,4 +216,4 @@ dup 与 dup2 的家也在 `sys_pipe.cpp` 里，咱们把它们的号码也念了
 - `kernel/fs/open_file.hpp` — OpenFile 与析构里的 release 钩子
 - `kernel/proc/sync.hpp`、`kernel/proc/sync.cpp` — Semaphore、Spinlock、retire
 - `base/include/cinux/container/ring_queue.hpp`、`base/include/cinux/ref_count.hpp` — 环与引用计数的库侧
-- `test/kernel/test_pipe.cpp`、`test/kernel/test_smp_pipe.cpp` — 往返、容量与告别、停车唤醒、跨核文件尾、锁身份回收的用例
+- `test/kernel/proc/test_pipe.cpp`、`test/kernel/proc/test_smp_pipe.cpp` — 往返、容量与告别、停车唤醒、跨核文件尾、锁身份回收的用例

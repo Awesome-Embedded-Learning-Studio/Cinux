@@ -1,10 +1,12 @@
 #include "kernel/syscall/sys_fstat.hpp"
+#include "kernel/syscall/sys_stat.hpp"
 
 #include <cstdint>
 
 #include "cinux/result.hpp"
+#include "kernel/arch/abi.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -13,7 +15,12 @@
 
 namespace cinux::syscall {
 
-long long HandleFstat(const SyscallFrame& frame) {
+namespace {
+
+/// One descriptor's record in the caller's shape: fstat asks for the
+/// 32-bit stat, fstat64 for the wider one, and a caller reads whichever
+/// it asked for.
+long long fstat_into(const SyscallFrame& frame, cinux::arch::abi::StatLayout layout) {
     const arch::IrqGuard                           kGuard;
     const base::Result<base::Shared<fs::OpenFile>> kSlot = LiveSlot(frame.rdi);
     if (!kSlot.ok()) {
@@ -31,17 +38,22 @@ long long HandleFstat(const SyscallFrame& frame) {
     if (!kProbed.ok()) {
         return -ErrnoFrom(kProbed.error());
     }
-    SyscallStat sink{};
-    sink.ino   = probed.ino;
-    sink.mode  = probed.mode;
-    sink.links = probed.links;
-    sink.size  = static_cast<std::int64_t>(probed.size);
-    sink.rdev  = probed.rdev;
-    sink.mtime = probed.mtime;
-    if (!uaccess::CopyToUser(frame.rsi, &sink, sizeof(sink))) {
+    unsigned char record[cinux::arch::abi::kStat64Layout.bytes] = {};
+    WriteStatRecord(record, probed, layout);
+    if (!uaccess::CopyToUser(frame.rsi, record, sizeof(record))) {
         return -kEfault;
     }
     return 0;
+}
+
+}  // namespace
+
+long long HandleFstat(const SyscallFrame& frame) {
+    return fstat_into(frame, cinux::arch::abi::kStatLayout);
+}
+
+long long HandleFstat64(const SyscallFrame& frame) {
+    return fstat_into(frame, cinux::arch::abi::kStat64Layout);
 }
 
 }  // namespace cinux::syscall

@@ -6,12 +6,12 @@
 
 ## 芯片的编程方式
 
-Pit 类的家在 `kernel/driver/pit/pit.hpp` 与 `pit.cpp`，它的形状是 Meyers 单例，构造发生在头一回取用的时候，跟 Pmm（物理内存管理器）与 Tick 用的是同一个模子。头文件的注释把这层分工写得直白，芯片把全部状态扛在了自己的身上，管通道 0 的节拍时，内核要会的东西只有三个旋钮，也就是命令字、除数的低字节、除数的高字节。露在外面的脸是 start 与 wait_microseconds 两张，脸之下的输入时钟、端口地址、除数算术全是器件事实，pit.hpp 的文件头注释说它们住进了 .cpp，消费的一方一概看不见。1.193182 MHz 的输入时钟就是其中一件，装它的 kPitInputHz 与另外三个常量，也就是两个端口的地址与一个命令字，一起待在 pit.cpp 的匿名命名空间里，咱们把器件与服务旋钮的分界记在这句注释上，后面 Tick 一节咱们还会回到它。
+Pit 类的家在 `kernel/arch/x86_64/platform/pit/pit.hpp` 与 `pit.cpp`，它的形状是 Meyers 单例，构造发生在头一回取用的时候，跟 Pmm（物理内存管理器）与 Tick 用的是同一个模子。头文件的注释把这层分工写得直白，芯片把全部状态扛在了自己的身上，管通道 0 的节拍时，内核要会的东西只有三个旋钮，也就是命令字、除数的低字节、除数的高字节。露在外面的脸是 start 与 wait_microseconds 两张，脸之下的输入时钟、端口地址、除数算术全是器件事实，pit.hpp 的文件头注释说它们住进了 .cpp，消费的一方一概看不见。1.193182 MHz 的输入时钟就是其中一件，装它的 kPitInputHz 与另外三个常量，也就是两个端口的地址与一个命令字，一起待在 pit.cpp 的匿名命名空间里，咱们把器件与服务旋钮的分界记在这句注释上，后面 Tick 一节咱们还会回到它。
 
 编程的动作只有一个口子 start(Hertz)，start 的写法咱们顺着表里的次序读。除数由 1.193182 MHz 除以请求的频率得出，商必须装得进 16 位的计数器。三笔端口写排的是同一张表，OutB 一口气把表交了出去，写入的次序就是表里的次序。0x36 这个命令字进的是 0x43 的命令口，它对芯片一次说定的是这几件事，通道取的是 0，装数走的是低字节在前、高字节在后，模式取的是方波，计数用的是二进制。跟着除数的低字节与高字节挨个进了 0x40 的数据口，方波一起振了起来，通道 0 的 OUT 线就按除数定下的周期翻面，中断的来源正是这根线。
 
 ```cpp
-// kernel/driver/pit/pit.cpp
+// kernel/arch/x86_64/platform/pit/pit.cpp
 void Pit::start(cinux::base::Hertz rate) {
     const auto kDivisor = static_cast<unsigned short>(kPitInputHz / rate.value);
 
@@ -48,7 +48,7 @@ concept TickSource = requires(Backend& backend, cinux::base::Hertz rate) {
 
 频率的旋钮 kTickHz 住在 `kernel/time/tick_config.hpp`，咱们认到的值是 100_Hz。tick_config.hpp 的文件头注释把分居的道理交代了，服务的旋钮进 config 文件，器件的事实留在驱动里，调系统的动作因此永远是动一个常量、碰不到类的脸。
 
-init 的动作一气呵成，咱们把它的两拍分开数。注册会把计数清了零，跟着按 kTickHz 把设备开了起来，注释对早开的态度很宽，中断的总闸还关着的时候，设备振得再早也是白振的，这样的早开是无害的。这一点咱们拿测试守着，`test/kernel/test_tick.cpp` 的两个用例，一个等的是三拍到位，另一个在闸关着的时候空转一圈、计数一格都不动，两头的说法都有实证。
+init 的动作一气呵成，咱们把它的两拍分开数。注册会把计数清了零，跟着按 kTickHz 把设备开了起来，注释对早开的态度很宽，中断的总闸还关着的时候，设备振得再早也是白振的，这样的早开是无害的。这一点咱们拿测试守着，`test/kernel/time/test_tick.cpp` 的两个用例，一个等的是三拍到位，另一个在闸关着的时候空转一圈、计数一格都不动，两头的说法都有实证。
 
 数拍的口 on_interrupt 咱们也要看一眼，它的实现只有一行 fetch_add，内存序取的是 relaxed。inline 的缘由注释交代了，它要在调用者那座无 SSE 的中断孤岛（整条路径不碰向量寄存器）里实例化，进门时中断已经是关着的，所以路径越短越好。计数器上的 static_assert 咱们也数到了，atomic<unsigned long long> 必须是无锁的，注释的立场是 IRQ 的计数器不许调带锁的运行时。since_boot() 把计数读了出去，服务开张之前答的是零。
 
@@ -88,20 +88,20 @@ local.stop_timer();
 
 ## HPET：不响铃的自由计数器
 
-HPET 的家在 `kernel/driver/hpet/`，头文件给它的定位是钟面，它的活只有自由计数，它与 PIT 的分界咱们就在此处画清。init 从 ACPI 的表里找 HPET，把它的 MMIO 窗口映射了进来，读能力寄存器核对的是两件事，计数器得是 64 位的，报出来的周期值得信，然后才把主计数器开了起来。有一处取舍 hpet.cpp 的注释写得明白，init 把 legacy 路由的那个位按了下去，IRQ0 与 IRQ8 的归属仍是 PIT 与 RTC，比较器（HPET 里能到点拉中断的定时单元）的中断使能位也没有动，这个驱动从不做武装比较器的事，它要的只是计数器自己在跑。
+HPET 的家在 `kernel/arch/x86_64/platform/hpet/`，头文件给它的定位是钟面，它的活只有自由计数，它与 PIT 的分界咱们就在此处画清。init 从 ACPI 的表里找 HPET，把它的 MMIO 窗口映射了进来，读能力寄存器核对的是两件事，计数器得是 64 位的，报出来的周期值得信，然后才把主计数器开了起来。有一处取舍 hpet.cpp 的注释写得明白，init 把 legacy 路由的那个位按了下去，IRQ0 与 IRQ8 的归属仍是 PIT 与 RTC，比较器（HPET 里能到点拉中断的定时单元）的中断使能位也没有动，这个驱动从不做武装比较器的事，它要的只是计数器自己在跑。
 
 since_boot_ns() 的读法咱们也要认一下，头文件的注释说底数取的是 init 那一刻的读数，当前计数减出来的差按飞秒（一飞秒是百万分之一纳秒）的周期折成了纳秒，两次读数的相减因此不管 init 跑得多晚都还是干净的。它最大的客户是 MonotonicNanoseconds()，sys_clock.cpp 里的分支很短，HPET 在就报 HPET 的纳秒，不在就退回 Tick 的拍数乘一千万，也就是 100 Hz 一拍 10 毫秒的粒度。init_sequence 里 HPET 缺席时打出的那行 `hpet absent, clocks stay tick-grained`，说的正是这件事。NVMe 的超时忙等读的是 HPET 的纳秒，事件流的戳与 [AHCI 与它脚下的 PCI 总线](ahci_pci.md) 的预算读的是 Tick 的拍，sys_getrandom 把 Tick 的拍数掺进了熵源，两路时钟的分工就是各喂各的客户。
 
 ## 源码位置
 
-- `kernel/driver/pit/pit.hpp`、`pit.cpp` — Pit 单例、start 的三笔编程、wait_microseconds 的通道 2 忙等
+- `kernel/arch/x86_64/platform/pit/pit.hpp`、`pit.cpp` — Pit 单例、start 的三笔编程、wait_microseconds 的通道 2 忙等
 - `kernel/time/tick.hpp`、`tick_config.hpp` — TickSource 概念、类型擦除的 init、无锁计数、kTickHz
 - `kernel/init/init_sequence.cpp` — tick、irq stubs、apic interrupt delivery、irq line 0、interrupts、hpet 各步的站位
 - `kernel/arch/x86_64/irq_stubs.cpp` — heartbeat 的座位、irq_entry 与 local_entry 的出口、无 SSE 孤岛
 - `kernel/interrupt/irq.hpp`、`irq.cpp` — 线的座位与开门、dispatch 内部应答
-- `kernel/driver/apic/local_apic.hpp`、`local_apic.cpp` — start_timer、timer_remaining、stop_timer、EOI
+- `kernel/arch/x86_64/platform/apic/local_apic.hpp`、`local_apic.cpp` — start_timer、timer_remaining、stop_timer、EOI
 - `kernel/arch/x86_64/smp.cpp`、`smp_config.hpp` — 校准的四行、ApMain 的周期起表、kTimerVector
-- `kernel/driver/hpet/hpet.hpp`、`hpet.cpp`、`hpet_layout.hpp` — 钟面定位、init 的核对与开关、纳秒折算
+- `kernel/arch/x86_64/platform/hpet/hpet.hpp`、`hpet.cpp`、`hpet_layout.hpp` — 钟面定位、init 的核对与开关、纳秒折算
 - `kernel/syscall/sys_clock.cpp` — MonotonicNanoseconds 的两条分支
-- `kernel/driver/ps2/controller_host.cpp` — host_delay 到 wait_microseconds 的接线
-- `test/kernel/test_tick.cpp`、`test_main.cpp` — 三拍到位、关闸无声两个用例与测试侧的接线
+- `kernel/arch/x86_64/platform/ps2/controller_host.cpp` — host_delay 到 wait_microseconds 的接线
+- `test/kernel/time/test_tick.cpp`、`test_main.cpp` — 三拍到位、关闸无声两个用例与测试侧的接线

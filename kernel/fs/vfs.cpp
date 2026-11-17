@@ -25,7 +25,7 @@
 #include "cinux/own.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/mount_lease.hpp"
 
 namespace cinux::fs {

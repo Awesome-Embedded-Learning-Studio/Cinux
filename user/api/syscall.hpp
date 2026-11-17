@@ -1,12 +1,13 @@
 /**
  * @file    syscall.hpp
- * @brief   The three-instruction bridge from ring 3 into the kernel.
+ * @brief   The user-side wrappers over the architecture's syscall bridge.
  *
- * Not a libc and not trying to be one: each wrapper is one SYSCALL
- * instruction with the Linux x86_64 register contract, nothing more.
- * The numbers come from the kernel's own header, so both worlds read
- * one table. When musl arrives it brings its own wrappers and this
- * file retires — the ABI it speaks is already ours.
+ * Not a libc and not trying to be one: each wrapper names its number and
+ * forwards. How the count reaches the kernel, and in which registers the
+ * arguments travel, is the arch's business (kernel/arch/syscall_abi.hpp).
+ * The numbers come from the kernel's own header, so both worlds read one
+ * table. When musl arrives it brings its own wrappers and this file
+ * retires; the ABI it speaks is already ours.
  *
  * @author  Charliechen114514
  * @date    2026-10-11
@@ -17,33 +18,26 @@
 
 #pragma once
 
+#include "kernel/arch/syscall_abi.hpp"
 #include "kernel/syscall/signal.hpp"
 #include "kernel/syscall/syscall.hpp"
 
 namespace user {
 
 /**
- * @brief         Issue one syscall; the ABI constant, spelled once.
- * @param[in]     number   Syscall number, lands in RAX.
- * @param[in]     arg1     First argument, lands in RDI.
- * @param[in]     arg2     Second argument, lands in RSI.
- * @param[in]     arg3     Third argument, lands in RDX.
- * @return        Whatever the kernel hands back in RAX.
- * @note          RCX and R11 are banked by the instruction itself;
- *                everything else the ABI calls caller-saved is listed
- *                as clobbered so the compiler cannot stash a live
- *                value across the hop.
+ * @brief         Issue one syscall with three arguments.
+ * @param[in]     number   Syscall number.
+ * @param[in]     arg1     First argument.
+ * @param[in]     arg2     Second argument.
+ * @param[in]     arg3     Third argument.
+ * @return        Whatever the kernel hands back.
+ * @note          A forwarder: the arch bridge decides the instruction and
+ *                the registers, this layer only spells the call site.
  * @since         0.1.0
  */
 inline long long Syscall3(unsigned long long number, unsigned long long arg1,
                           unsigned long long arg2, unsigned long long arg3) {
-    // NOLINTNEXTLINE(misc-const-correctness)
-    long long ret = 0;
-    __asm__ volatile("syscall"
-                     : "=a"(ret)
-                     : "a"(number), "D"(arg1), "S"(arg2), "d"(arg3)
-                     : "rcx", "r11", "memory");
-    return ret;
+    return cinux::arch::abi::CallKernel(number, arg1, arg2, arg3);
 }
 
 /**
@@ -323,31 +317,9 @@ inline long long Fork() {
 inline long long Clone(unsigned long long flags, const void* child_stack, unsigned long long tls,
                        void (*entry)(void*), const void* arg, unsigned long long parent_tid,
                        unsigned long long child_tid) {
-    // NOLINTBEGIN(misc-const-correctness) the syscall writes ret in the maker
-    long long                         ret      = 0;
-    const auto                        kEntryAt = reinterpret_cast<unsigned long long>(entry);
-    const auto                        kArgAt   = reinterpret_cast<unsigned long long>(arg);
-    register const unsigned long long kChildTid __asm__("r10") = child_tid;
-    register const unsigned long long kTls __asm__("r8")       = tls;
-    register const unsigned long long kEntry __asm__("r9")     = kEntryAt;
-    register const unsigned long long kArg __asm__("r15")      = kArgAt;
-    // NOLINTEND(misc-const-correctness)
-    __asm__ volatile(
-        "syscall\n\t"
-        "testl %%eax, %%eax\n\t"
-        "jnz 1f\n\t"
-        "xorl %%ebp, %%ebp\n\t"
-        "movq %%r9, %%rax\n\t"
-        "movq %%r15, %%rdi\n\t"
-        "andq $-16, %%rsp\n\t"
-        "call *%%rax\n\t"
-        "ud2\n"
-        "1:\n"
-        : "=a"(ret)
-        : "a"(static_cast<unsigned long long>(cinux::syscall::SyscallNr::kClone)), "D"(flags),
-          "S"(child_stack), "d"(parent_tid), "r"(kChildTid), "r"(kTls), "r"(kEntry), "r"(kArg)
-        : "rcx", "r11", "memory");
-    return ret;
+    return cinux::arch::abi::CallKernelClone(
+        static_cast<unsigned long long>(cinux::syscall::SyscallNr::kClone), flags, child_stack, tls,
+        entry, arg, parent_tid, child_tid);
 }
 
 /**
@@ -388,26 +360,19 @@ inline long long Wait4(long long pid, int* where) {
 
 /**
  * @brief         Issue one syscall with four arguments.
- * @param[in]     number   Syscall number, lands in RAX.
- * @param[in]     arg1     Lands in RDI.
- * @param[in]     arg2     Lands in RSI.
- * @param[in]     arg3     Lands in RDX.
- * @param[in]     arg4     Lands in R10.
- * @return        Whatever the kernel hands back in RAX.
+ * @param[in]     number   Syscall number.
+ * @param[in]     arg1     First argument.
+ * @param[in]     arg2     Second argument.
+ * @param[in]     arg3     Third argument.
+ * @param[in]     arg4     Fourth argument.
+ * @return        Whatever the kernel hands back.
+ * @note          A forwarder; the arch bridge owns the registers.
  * @since         0.5.0
  */
-// NOLINTNEXTLINE(readability-function-size) the syscall's own shape
 inline long long Syscall4(unsigned long long number, unsigned long long arg1,
                           unsigned long long arg2, unsigned long long arg3,
                           unsigned long long arg4) {
-    // NOLINTNEXTLINE(misc-const-correctness)
-    long long                         ret                    = 0;
-    register const unsigned long long kFourth __asm__("r10") = arg4;
-    __asm__ volatile("syscall"
-                     : "=a"(ret)
-                     : "a"(number), "D"(arg1), "S"(arg2), "d"(arg3), "r"(kFourth)
-                     : "rcx", "r11", "memory");
-    return ret;
+    return cinux::arch::abi::CallKernel4(number, arg1, arg2, arg3, arg4);
 }
 
 /**
@@ -528,34 +493,22 @@ inline long long Sigprocmask(int how, const cinux::syscall::SigSet* set,
 
 /**
  * @brief         Issue one syscall with the full six-argument contract.
- * @param[in]     number   Syscall number, lands in RAX.
- * @param[in]     arg1     Lands in RDI.
- * @param[in]     arg2     Lands in RSI.
- * @param[in]     arg3     Lands in RDX.
- * @param[in]     arg4     Lands in R10.
- * @param[in]     arg5     Lands in R8.
- * @param[in]     arg6     Lands in R9.
- * @return        Whatever the kernel hands back in RAX.
- * @note          The fourth argument is where this leaves the
- *                three-register door: R10 instead of RCX, because the
- *                syscall instruction banks the real RCX itself.
+ * @param[in]     number   Syscall number.
+ * @param[in]     arg1     First argument.
+ * @param[in]     arg2     Second argument.
+ * @param[in]     arg3     Third argument.
+ * @param[in]     arg4     Fourth argument.
+ * @param[in]     arg5     Fifth argument.
+ * @param[in]     arg6     Sixth argument.
+ * @return        Whatever the kernel hands back.
+ * @note          A forwarder; which registers carry the later arguments
+ *                is the arch bridge's business.
  * @since         0.4.0
  */
-// NOLINTNEXTLINE(readability-function-size) the ABI face itself is seven words wide
 inline long long Syscall6(unsigned long long number, unsigned long long arg1,
                           unsigned long long arg2, unsigned long long arg3, unsigned long long arg4,
                           unsigned long long arg5, unsigned long long arg6) {
-    // NOLINTNEXTLINE(misc-const-correctness)
-    long long                         ret                    = 0;
-    register const unsigned long long kFourth __asm__("r10") = arg4;
-    register const unsigned long long kFifth __asm__("r8")   = arg5;
-    register const unsigned long long kSixth __asm__("r9")   = arg6;
-    __asm__ volatile("syscall"
-                     : "=a"(ret)
-                     : "a"(number), "D"(arg1), "S"(arg2), "d"(arg3), "r"(kFourth), "r"(kFifth),
-                       "r"(kSixth)
-                     : "rcx", "r11", "memory");
-    return ret;
+    return cinux::arch::abi::CallKernel6(number, arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 /**

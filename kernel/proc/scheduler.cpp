@@ -5,9 +5,9 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
-#include "kernel/arch/x86_64/smp.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/per_cpu.hpp"
+#include "kernel/arch/smp_control.hpp"
 #include "kernel/proc/futex.hpp"
 #include "kernel/proc/sched_class.hpp"
 #include "kernel/proc/signals.hpp"
@@ -17,6 +17,34 @@
 #include "kernel/syscall/signal.hpp"
 
 namespace cinux::proc {
+
+namespace {
+
+/// Whether the retired list already holds this image.
+/// @note  A zombie is retired once by its exit and again by the walk
+///        that reparents a dying parent's children. A second push links
+///        a node that is already linked, which makes the list cyclic
+///        and the reaper spins on it with interrupts masked: the whole
+///        port wedges. The walk is capped so a list that is already
+///        broken still returns.
+template <auto Link>
+bool retired_holds(const cinux::base::container::SelfList<cinux::proc::Task, Link>& list,
+                   const cinux::proc::Task& item) {
+    unsigned long steps = 0;
+    for (const cinux::proc::Task* scan = list.head(); scan != nullptr;
+         scan = list.after(*scan)) {
+        if (scan == &item) {
+            return true;
+        }
+        if (++steps > 4096UL) {
+            return true;  // already cyclic: never push into it again
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 
 namespace {
 char state_letter(TaskState state) {
@@ -68,7 +96,7 @@ void Scheduler::QueuePolicy::exit(State& state) {
         local().notify_pending = false;
         state.scheduler.queue_lock_.unlock();
         if (kNotify) {
-            arch::smp::NotifyRunnable();
+            arch::NotifyRunnable();
         }
     }
     arch::RestoreIrq(state.irq);
@@ -476,7 +504,9 @@ void Scheduler::retire_claimed(Task& member, Task* self) {
         return;
     }
     const QueueGuard kQueue(*this);
-    retired_.push_back(member);
+    if (!retired_holds(retired_, member)) {
+        retired_.push_back(member);
+    }
 }
 
 void Scheduler::exit_group(long long code) {
@@ -613,7 +643,7 @@ void Scheduler::detach_offspring(Task& dying) {
                 tasks_.remove(*scan);
                 if (__atomic_load_n(&scan->on_cpu, __ATOMIC_ACQUIRE) == -1) {
                     reclaim_(sink_, *scan);
-                } else {
+                } else if (!retired_holds(retired_, *scan)) {
                     retired_.push_back(*scan);
                 }
             }
@@ -862,7 +892,12 @@ void Scheduler::reap_pending() {
         Task* ready = nullptr;
         {
             const QueueGuard kQueue(*this);
-            for (Task* scan = retired_.head(); scan != nullptr; scan = retired_.after(*scan)) {
+            unsigned long steps = 0;
+            for (Task* scan = retired_.head(); scan != nullptr;
+                 scan = retired_.after(*scan)) {
+                if (++steps > 4096UL) {
+                    break;  // a cyclic list must not spin here
+                }
                 if (__atomic_load_n(&scan->on_cpu, __ATOMIC_ACQUIRE) == -1) {
                     ready = scan;
                     break;

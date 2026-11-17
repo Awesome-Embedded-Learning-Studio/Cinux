@@ -7,7 +7,7 @@
  * line first, the text screen when its facts hold — live below and are
  * wired by this face's implementation, so no caller ever names one.
  * Parking the CPU is not a console concern; Halt lives in arch
- * (kernel/arch/x86_64/halt.hpp).
+ * (kernel/arch/halt.hpp).
  *
  * @author  Charliechen114514
  * @date    2026-10-02

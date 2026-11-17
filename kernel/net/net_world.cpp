@@ -1,15 +1,17 @@
+#include "kernel/net/ifaces.hpp"
 #include "kernel/net/net_world.hpp"
+#include "kernel/arch/halt.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/boot/print.hpp"
-#include "kernel/driver/net/loopback.hpp"
-#include "kernel/driver/net/net_config.hpp"
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/loopback.hpp"
+#include "kernel/drivers/net/net_config.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/arp.hpp"
 #include "kernel/net/icmp.hpp"
 #include "kernel/net/ipv4.hpp"
@@ -43,7 +45,33 @@ void send_via_ipv4(void* context, const OutboundDatagram& datagram) {
 
 }  // namespace
 
+namespace {
+
+/// The wired network's mask and frame ceiling, the ifconfig shapes.
+constexpr uint32_t kWireMask = 0xFFFFFF00;
+constexpr uint32_t kWireMtu  = 1500;
+constexpr uint16_t kHardwareEthernet = 1;
+
+/// The injected wire facts: the world knows its own wire, the roll
+/// does not. Installed once, when the world wakes.
+bool the_wire_facts(InterfaceFacts& into) {
+    const NetWorld& world = NetWorld::self();
+    if (!world.wired()) {
+        return false;
+    }
+    into.address       = kUserNetworkSelf;
+    into.netmask       = kWireMask;
+    into.broadcast     = (into.address & into.netmask) | ~into.netmask;
+    into.hardware_type = kHardwareEthernet;
+    into.mtu           = kWireMtu;
+    into.hardware      = world.wire()->mac();
+    return true;
+}
+
+}  // namespace
+
 void NetWorld::init() {
+    SetWireFactsSource(&the_wire_facts);
     wire_port_ = nullptr;
     driver::net::Loopback::self().init();
     loopback_port_.adopt(driver::net::Loopback::self());
@@ -220,13 +248,15 @@ unsigned long NetWorld::ping_sweep(uint32_t destination, unsigned long attempts)
     unsigned char       request[kEchoMessageBytes] = {};
     for (unsigned long attempt = 0; attempt < attempts; ++attempt) {
         BuildEchoRequest(request, sizeof(request), 0x1234, static_cast<uint16_t>(attempt + 1));
-        const bool kSent = ipv4_.send({
+        // A lane whose stack has no egress for this destination refuses
+        // the send; that is an answer -- zero of four -- not a fault,
+        // so the sweep reports and the caller's words stay honest.
+        static_cast<void>(ipv4_.send({
             .destination = destination,
             .protocol    = kIpv4ProtocolIcmp,
             .payload     = request,
             .length      = sizeof(request),
-        });
-        base::safety::Check(kSent, "the stack refused an echo request");
+        }));
         wait_for_answers(seen);
         if (icmp_.stats().replies_seen != seen) {
             print::Println("[net] echo answered: id=0x%x seq=%u", icmp_.stats().last_identifier,

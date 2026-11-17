@@ -7,7 +7,7 @@
 #include "cinux/own.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/shared_pages.hpp"
 
 namespace cinux::mm {

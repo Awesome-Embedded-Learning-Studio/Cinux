@@ -4,10 +4,10 @@
 #include "cinux/assert.hpp"
 #include "cinux/memory.hpp"
 #include "cinux/ptr.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
@@ -23,27 +23,43 @@ using walk::MapPage;
 using walk::MapUserPage;
 using walk::TranslatePage;
 
-constexpr unsigned long kKernelHalfSlots = 256;
 constexpr unsigned long kSlotBytes       = sizeof(Entry);
 
-constexpr int kPdptLevelsBelow = 2;
 constexpr int kLeafTable       = 0;
 
-void release_user_tables(Entry* table, int levels_below) {
+constexpr unsigned long kUpperLevelCount =
+    sizeof(walk::kUpperLevels) / sizeof(walk::kUpperLevels[0]);
+
+/// Retires a table and everything under it.
+/// @param level_index  Index into walk::kUpperLevels; one past the end
+///                     means the table holds leaf entries.
+void release_table(Entry* table, unsigned long level_index) {
+    const auto kLevel = (level_index < kUpperLevelCount)
+                            ? walk::kUpperLevels[level_index]
+                            : cinux::arch::page::kLeafLevel;
     for (unsigned long index = 0; index < walk::kEntriesPerTable; ++index) {
         Entry& slot = table[index];
-        if (!slot.has(cinux::arch::page::kPresent)) {
+        if (!cinux::arch::page::DescriptorPresent(slot)) {
             continue;
         }
-        unsigned long const kTarget = walk::EntryTarget(slot);
-        if (levels_below == kLeafTable) {
-            cow::ReleaseFrame(kTarget);
+        if (cinux::arch::page::DescriptorIsLeaf(slot, kLevel)) {
+            cow::ReleaseFrame(cinux::arch::page::LeafFrame(slot, kLevel));
             continue;
         }
-        cinux::base::safety::Check(!slot.has(cinux::arch::page::kLarge),
-                                   "user half holds a large page");
-        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), levels_below - 1);
-        Pmm::self().free_page(cinux::base::PhysAddr{kTarget});
+        const unsigned long kChild = walk::EntryTarget(slot);
+        auto* const kChildTable = cinux::base::PtrAt<Entry>(DirectMapVirt(kChild));
+        if (level_index + 1U >= kUpperLevelCount) {
+            for (unsigned long leaf = 0; leaf < walk::kEntriesPerTable; ++leaf) {
+                Entry& leaf_slot = kChildTable[leaf];
+                if (cinux::arch::page::DescriptorPresent(leaf_slot)) {
+                    cow::ReleaseFrame(
+                        cinux::arch::page::LeafFrame(leaf_slot, cinux::arch::page::kLeafLevel));
+                }
+            }
+        } else {
+            release_table(kChildTable, level_index + 1U);
+        }
+        Pmm::self().free_page(cinux::base::PhysAddr{kChild});
     }
 }
 
@@ -51,17 +67,19 @@ void release_user_tables(Entry* table, int levels_below) {
 
 bool AddressSpace::init() {
     const arch::IrqGuard kIrq;
-    const auto           kGate  = gate_.guard();
-    base::PhysAddr const kFrame = Pmm::self().allocate_page();
-    if (kFrame == base::PhysAddr{}) {
+    const auto           kGate = gate_.guard();
+    KernelTables         tables;
+    const unsigned long  kRoot = tables.take_root();
+    if (kRoot == 0) {
         return false;
     }
-    auto* const kFresh = cinux::base::PtrAt<Entry>(DirectMapVirt(kFrame.raw));
-    cinux::base::SetBytes(kFresh, 0, cinux::arch::page::kSize);
+    auto* const        kFresh  = cinux::base::PtrAt<Entry>(DirectMapVirt(kRoot));
     const Entry* const kKernel = cinux::base::PtrAt<Entry>(DirectMapVirt(KernelPageRoot()));
-    cinux::base::CopyBytes(kFresh + kKernelHalfSlots, kKernel + kKernelHalfSlots,
-                           kKernelHalfSlots * kSlotBytes);
-    root_ = kFrame.raw;
+    const unsigned long kTopSlots = cinux::arch::page::EntriesAt(walk::kUpperLevels[0]);
+    for (unsigned long index = 0; index < kTopSlots; ++index) {
+        kFresh[index] = cinux::arch::space::IsUserSlot(index) ? Entry{} : kKernel[index];
+    }
+    root_ = kRoot;
     return true;
 }
 
@@ -88,7 +106,7 @@ bool AddressSpace::map_user(unsigned long virtual_address, unsigned long physica
     }
     KernelTables tables;
     return MapUserPage(tables, root_, virtual_address,
-                       cinux::arch::page::MakeTableEntry(physical, leaf_bits));
+                       cinux::arch::page::MakePageEntry(physical, leaf_bits));
 }
 
 unsigned long AddressSpace::translate(unsigned long virtual_address) const {
@@ -103,7 +121,7 @@ unsigned long AddressSpace::translate(unsigned long virtual_address) const {
 
 void AddressSpace::activate() const {
     if (root_ != 0) {
-        cinux::arch::LoadCr3(root_);
+        cinux::arch::space::SwitchRoot(root_);
     }
 }
 
@@ -113,20 +131,23 @@ void AddressSpace::teardown() {
     if (root_ == 0) {
         return;
     }
+    KernelTables tables;
     // NOLINTNEXTLINE(misc-const-correctness) the walk rewrites leaf entries
     auto* const kRoot = cinux::base::PtrAt<Entry>(DirectMapVirt(root_));
-    for (unsigned long index = 0; index < kKernelHalfSlots; ++index) {
-        Entry& slot = kRoot[index];
-        if (!slot.has(cinux::arch::page::kPresent)) {
+    const unsigned long kTopSlots = cinux::arch::page::EntriesAt(walk::kUpperLevels[0]);
+    for (unsigned long index = 0; index < kTopSlots; ++index) {
+        if (!cinux::arch::space::IsUserSlot(index)) {
             continue;
         }
-        cinux::base::safety::Check(!slot.has(cinux::arch::page::kLarge),
-                                   "user half holds a large page");
+        Entry& slot = kRoot[index];
+        if (!cinux::arch::page::DescriptorPresent(slot)) {
+            continue;
+        }
         unsigned long const kTarget = walk::EntryTarget(slot);
-        release_user_tables(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), kPdptLevelsBelow);
+        release_table(cinux::base::PtrAt<Entry>(DirectMapVirt(kTarget)), 1U);
         Pmm::self().free_page(cinux::base::PhysAddr{kTarget});
     }
-    Pmm::self().free_page(cinux::base::PhysAddr{root_});
+    tables.release_root(root_);
     root_ = 0;
 }
 

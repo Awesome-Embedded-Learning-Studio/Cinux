@@ -21,7 +21,7 @@
 #pragma once
 
 #include "cinux/literal_types.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/layout.hpp"
 
 namespace cinux::proc {

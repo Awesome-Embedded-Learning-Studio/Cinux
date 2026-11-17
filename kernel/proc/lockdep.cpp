@@ -4,8 +4,8 @@
 
 #include "cinux/assert.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/per_cpu.hpp"
 
 namespace cinux::proc {
 

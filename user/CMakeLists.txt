@@ -186,7 +186,7 @@ set_target_properties(user_ttydemo PROPERTIES
     OUTPUT_NAME "ttydemo.elf")
 
 add_executable(user_smpstress programs/smpstress.cpp
-    ${CMAKE_SOURCE_DIR}/boot/early/libc.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/entry.cpp
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp)
 target_compile_options(user_smpstress PRIVATE ${USER_COMPILE_FLAGS})

@@ -6,7 +6,7 @@ import pathlib
 import re
 import time
 
-from test_station34_kernel_selfhost import Guest
+from guest import Guest
 from test_station35_gui import Monitor, changed_between, read_ppm
 
 

@@ -33,6 +33,23 @@ inline void CpuRelax() {
     __asm__ volatile("pause" : : : "memory");
 }
 
+/// Parks the core until an event: on this lane only the polite pause,
+/// this street never idles behind an emulator's single thread.
+inline void CpuIdle() {
+    __asm__ volatile("pause" : : : "memory");
+}
+
+/**
+ * @brief         Full memory barrier.
+ * @note          Orders loads and stores on this core, matching the
+ *                neutral arch contract the other lanes already honor.
+ * @since         0.9.0
+ * @ingroup       kernel_arch
+ */
+inline void MemoryBarrier() {
+    __asm__ volatile("mfence" : : : "memory");
+}
+
 /**
  * @brief         Read one model-specific register.
  * @param[in]     index  The MSR index the CPU expects in ECX.

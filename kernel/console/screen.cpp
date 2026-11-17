@@ -6,7 +6,7 @@
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/console/console_grid.hpp"
 #include "kernel/console/font.hpp"
-#include "kernel/driver/framebuffer/framebuffer.hpp"
+#include "kernel/drivers/framebuffer/framebuffer.hpp"
 
 namespace cinux::console {
 
@@ -52,12 +52,15 @@ void TextConsole::put_char(char glyph_char) {
         return;
     }
     cinux::driver::Framebuffer& screen = cinux::driver::Framebuffer::self();
-    uint32_t const              kGlyph =
-        (static_cast<uint32_t>(static_cast<unsigned char>(glyph_char)) < font_.glyph_count)
-            ? static_cast<uint32_t>(static_cast<unsigned char>(glyph_char))
-            : 0;
-    if (glyph_char != kCharNewline && glyph_char != kCharReturn && glyph_char != kCharBackspace) {
-        paint_glyph(kGlyph, caret_);
+    // ASCII only: the font's glyph index is the low byte, so a byte with
+    // its high bit set would paint an unrelated glyph. It still takes a
+    // cell, keeping the byte count -- and with it the columns -- honest.
+    const auto kByte = static_cast<unsigned char>(glyph_char);
+    const bool kPrintable = kByte < 0x80 && static_cast<uint32_t>(kByte) < font_.glyph_count &&
+                            glyph_char != kCharNewline && glyph_char != kCharReturn &&
+                            glyph_char != kCharBackspace;
+    if (kPrintable) {
+        paint_glyph(static_cast<uint32_t>(kByte), caret_);
     }
     CaretStep const kStep = AdvanceCaret(caret_, columns(), rows(), glyph_char);
     if (kStep.scrolled) {

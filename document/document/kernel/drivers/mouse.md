@@ -13,7 +13,7 @@
 一份报告占的是三个字节，布局是固定的。头一个字节装的全是零碎的位，低三位装的是按键（左 0x01、右 0x02、中 0x04），第四位是恒置着 1 的，再往上的两位装的是两根轴各自的符号，顶上清着的两位溢出标记也在头一个字节里，这样的恒置位与溢出标记合起来构成了包头的签名。第二与第三字节装的是 X 与 Y 的位移数值。feed 的找头纪律咱们原样搬一段下来：
 
 ```cpp
-// kernel/driver/mouse/mouse_packet.cpp
+// kernel/drivers/mouse/mouse_packet.cpp
 if (seated_ == 0) {
     if (!kHeadByte.has(base::bit::BitMask<uint8_t>{kHeadAlwaysOne}) ||
         kHeadByte.extract(kHeadOverflowSegment) != 0) {
@@ -30,7 +30,7 @@ if (seated_ == 0) {
 IRQ12 的线上来时，`irq12_thunk` 把 0x60 数据口的字节喂给 on_byte，咱们把这个字节变事件的枢纽整段搬下来：
 
 ```cpp
-// kernel/driver/mouse/ps2_mouse.cpp
+// kernel/drivers/mouse/ps2_mouse.cpp
 void Ps2Mouse::on_byte(uint8_t raw_byte) {
     MouseSample sample{};
     if (!grammar_.feed(raw_byte, sample)) {
@@ -102,15 +102,15 @@ RegisterInputDevices(
 
 ## 源码位置
 
-- `kernel/driver/mouse/ps2_mouse.hpp`、`ps2_mouse.cpp` — 设备本体、8042 第二端口的 bring-up、IRQ12 馈送
-- `kernel/driver/mouse/mouse_packet.hpp`、`mouse_packet.cpp` — 三字节包的语法、包头签名与再同步
-- `kernel/driver/usb/usb_tablet.hpp`、`usb_tablet.cpp` — 绝对轴数位板、端点检查、抽干钩子
-- `kernel/driver/usb/tablet_report.cpp` — DecodeTablet 的小端解码
-- `kernel/driver/ps2/controller.hpp`、`controller.cpp` — 8042 的命令词汇、SendAux 的应答与重试预算
-- `kernel/driver/input/event_stream.hpp`、`event_stream.cpp`、`input_config.hpp` — 事件流、24 字节记录、绝对轴配置、poll 钩子与 ioctl 词汇
+- `kernel/drivers/mouse/ps2_mouse.hpp`、`ps2_mouse.cpp` — 设备本体、8042 第二端口的 bring-up、IRQ12 馈送
+- `kernel/drivers/mouse/mouse_packet.hpp`、`mouse_packet.cpp` — 三字节包的语法、包头签名与再同步
+- `kernel/drivers/usb/usb_tablet.hpp`、`usb_tablet.cpp` — 绝对轴数位板、端点检查、抽干钩子
+- `kernel/drivers/usb/tablet_report.cpp` — DecodeTablet 的小端解码
+- `kernel/arch/x86_64/platform/ps2/controller.hpp`、`controller.cpp` — 8042 的命令词汇、SendAux 的应答与重试预算
+- `kernel/drivers/input/event_stream.hpp`、`event_stream.cpp`、`input_config.hpp` — 事件流、24 字节记录、绝对轴配置、poll 钩子与 ioctl 词汇
 - `kernel/fs/devfs/input_node.cpp` — event0 与 event1 的落座、从号 64 与 65
 - `kernel/fs/file_world.cpp` — 两条流的接线与 event1 的归属
 - `kernel/init/init_sequence.cpp` — keyboard 与 pointer 两个引导步骤及其失败态度
 - `kernel/arch/x86_64/irq_guard.hpp`、`vector_config.hpp` — 中断快照开关、0x20 起的向量分配
-- `test/unit/test_input.cpp`、`test/kernel/test_keyboard.cpp` — 解码器的 host 测试与内核态里鼠标的出场
+- `test/unit/drivers/test_input.cpp`、`test/kernel/drivers/test_keyboard.cpp` — 解码器的 host 测试与内核态里鼠标的出场
 - `third_party/vesper/src/host/evdev_input.cpp` — 桌面读 event1 的那一头

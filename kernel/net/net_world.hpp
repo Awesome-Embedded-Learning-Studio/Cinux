@@ -26,7 +26,7 @@
 #include <stdint.h>
 
 #include "cinux/singleton.hpp"
-#include "kernel/driver/net/net_device.hpp"
+#include "kernel/drivers/net/net_device.hpp"
 #include "kernel/net/arp.hpp"
 #include "kernel/net/icmp.hpp"
 #include "kernel/net/ipv4.hpp"

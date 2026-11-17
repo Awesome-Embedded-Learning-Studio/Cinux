@@ -1,0 +1,20 @@
+#include "framework_kernel.hpp"
+#include "kernel/drivers/usb/usb_keyboard.hpp"
+#include "kernel/drivers/usb/xhci.hpp"
+#include "test_assert.hpp"
+#include "test_case.hpp"  // NOLINT(misc-include-cleaner)
+
+namespace {
+
+TEST("xhci: the controller brings up and a keyboard answers") {
+    auto& host = cinux::driver::XhciHost::self();
+    ASSERT_TRUE(host.init());
+    ASSERT_TRUE(host.present());
+    ASSERT_GT(host.max_ports(), 0U);
+
+    auto& keyboard = cinux::driver::UsbKeyboard::self();
+    ASSERT_TRUE(keyboard.init());
+    ASSERT_TRUE(keyboard.seated());
+}
+
+}  // namespace

@@ -11,7 +11,7 @@ import subprocess
 import time
 
 from test_native_gui import type_line
-from test_station34_kernel_selfhost import Guest
+from guest import Guest
 from test_station35_gui import Monitor
 
 

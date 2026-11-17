@@ -33,7 +33,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/path.hpp"
 #include "cinux/result.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 #include "kernel/fs/ext2/ext2_layout.hpp"
 #include "kernel/fs/ext2/ext2_mutation.hpp"

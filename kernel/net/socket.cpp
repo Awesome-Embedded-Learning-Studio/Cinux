@@ -19,11 +19,16 @@
 #include "kernel/net/udp.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/sync.hpp"
+#include "kernel/net/ifaces.hpp"
 #include "kernel/syscall/sys_clock.hpp"
+#include "kernel/syscall/syscall_internal.hpp"
+#include "kernel/syscall/uaccess.hpp"
 
 namespace cinux::net {
 
 namespace {
+
+using cinux::syscall::Word;
 
 /// One boot-wide counter: every socket born gets the next number.
 std::atomic<unsigned long> g_socket_identities{0};
@@ -67,6 +72,145 @@ bool socket_readable(void* self, fs::FsNode /*node*/) {
     return static_cast<Socket*>(self)->holds_input();
 }
 
+/// The interface-question words, Linux-shaped: one ifreq in, one out.
+constexpr unsigned long long kSiocgifflags   = 0x8913;
+constexpr unsigned long long kSiocgifaddr    = 0x8915;
+constexpr unsigned long long kSiocgifdstaddr = 0x8917;
+constexpr unsigned long long kSiocgifbrdaddr = 0x8919;
+constexpr unsigned long long kSiocgifnetmask = 0x891b;
+constexpr unsigned long long kSiocgifmetric  = 0x891d;
+constexpr unsigned long long kSiocgifmtu     = 0x8921;
+constexpr unsigned long long kSiocgifhwaddr  = 0x8927;
+constexpr unsigned long long kSiocgiftxqlen  = 0x8942;
+
+/// The interface flag words the kernel answers: everything it serves
+/// is up and running; the loopback adds its own kind, the wire broadcast.
+constexpr unsigned short kIffUp        = 0x1;
+constexpr unsigned short kIffBroadcast = 0x2;
+constexpr unsigned short kIffLoopback  = 0x8;
+constexpr unsigned short kIffRunning   = 0x40;
+
+/// Bytes in one ifreq: sixteen of name, twenty-four of answer.
+constexpr unsigned long kIfreqBytes   = 40;
+/// The default transmit queue length the kernel books for any wire.
+constexpr unsigned int  kIfTxQueueLen = 1000;
+
+/// The one enumeration question: an ifconf is a length and a buffer,
+/// and the answer is one ifreq per interface, address family included.
+constexpr unsigned long long kSiocgifconf = 0x8912;
+/// Bytes in one ifconf: a four-byte length, padding, an eight-byte buffer word.
+constexpr unsigned long      kIfconfBytes = 16;
+
+/// One interface enumeration over one socket: one ifreq per seat.
+long long answer_ifconf(unsigned long long argument) {
+    unsigned char conf[kIfconfBytes] = {};
+    if (!cinux::syscall::uaccess::CopyFromUser(conf, argument, kIfconfBytes)) {
+        return -cinux::syscall::kEfault;
+    }
+    int  have   = 0;
+    Word buffer = 0;
+    base::CopyBytes(&have, conf, sizeof(have));
+    base::CopyBytes(&buffer, conf + 8, sizeof(buffer));
+    if (buffer == 0) {
+        return -cinux::syscall::kEfault;
+    }
+
+    unsigned long written = 0;
+    for (unsigned long ordinal = 0;; ++ordinal) {
+        char name[net::kIfNameMax] = {};
+        if (!net::NameInterfaceAt(ordinal, name)) {
+            break;
+        }
+        net::InterfaceFacts facts{};
+        if (!net::ReadInterfaceFacts(name, facts)) {
+            break;
+        }
+        if (have >= 0 && written + kIfreqBytes > static_cast<unsigned long>(have)) {
+            break;
+        }
+        unsigned char request[kIfreqBytes] = {};
+        for (unsigned long index = 0; name[index] != '\0'; ++index) {
+            request[index] = static_cast<unsigned char>(name[index]);
+        }
+        const auto kFamily = static_cast<uint16_t>(net::kAfInet);
+        base::CopyBytes(request + 16, &kFamily, sizeof(kFamily));
+        base::WriteWord32Be(request, 20, facts.address);
+        if (!cinux::syscall::uaccess::CopyToUser(buffer + written, request, kIfreqBytes)) {
+            return -cinux::syscall::kEfault;
+        }
+        written += kIfreqBytes;
+    }
+    base::CopyBytes(conf, &written,
+                    sizeof(written) < sizeof(have) ? sizeof(written) : sizeof(have));
+    base::SetBytes(conf + 4, 0, 4);
+    if (!cinux::syscall::uaccess::CopyToUser(argument, conf, kIfconfBytes)) {
+        return -cinux::syscall::kEfault;
+    }
+    return 0;
+}
+
+/// One interface question over one socket: find the roll, fill the ifreq.
+long long socket_if_ioctl_impl(unsigned long long word, unsigned long long argument) {
+    if (word == kSiocgifconf) {
+        return answer_ifconf(argument);
+    }
+    if (word == kSiocgifdstaddr) {
+        return -cinux::syscall::kEnotty;
+    }
+    unsigned char request[kIfreqBytes] = {};
+    if (!cinux::syscall::uaccess::CopyFromUser(request, argument, kIfreqBytes)) {
+        return -cinux::syscall::kEfault;
+    }
+    request[kIfreqBytes - 1] = '\0';
+    net::InterfaceFacts facts{};
+    if (!net::ReadInterfaceFacts(reinterpret_cast<const char*>(request), facts)) {
+        return -cinux::syscall::kEnodev;
+    }
+    const bool kLoopbackKind = facts.hardware_type == net::kHardwareLoopback;
+
+    base::SetBytes(request + 16, 0, kIfreqBytes - 16);
+    if (word == kSiocgifflags) {
+        unsigned short flags = kIffUp | kIffRunning;
+        flags |= kLoopbackKind ? kIffLoopback : kIffBroadcast;
+        base::CopyBytes(request + 16, &flags, sizeof(flags));
+    } else if (word == kSiocgifaddr || word == kSiocgifnetmask || word == kSiocgifbrdaddr) {
+        uint32_t chosen = facts.broadcast;
+        if (word == kSiocgifaddr) {
+            chosen = facts.address;
+        } else if (word == kSiocgifnetmask) {
+            chosen = facts.netmask;
+        }
+        const auto kFamily = static_cast<uint16_t>(net::kAfInet);
+        base::CopyBytes(request + 16, &kFamily, sizeof(kFamily));
+        base::WriteWord32Be(request, 20, chosen);
+    } else if (word == kSiocgifhwaddr) {
+        const auto kKind = facts.hardware_type;
+        base::CopyBytes(request + 16, &kKind, sizeof(kKind));
+        base::CopyBytes(request + 18, facts.hardware.bytes, 6);
+    } else if (word == kSiocgifmtu) {
+        const unsigned int kMtu = facts.mtu;
+        base::CopyBytes(request + 16, &kMtu, sizeof(kMtu));
+    } else if (word == kSiocgifmetric) {
+        const unsigned int kZero = 0;
+        base::CopyBytes(request + 16, &kZero, sizeof(kZero));
+    } else if (word == kSiocgiftxqlen) {
+        base::CopyBytes(request + 16, &kIfTxQueueLen, sizeof(kIfTxQueueLen));
+    } else {
+        return -cinux::syscall::kEnotty;
+    }
+    if (!cinux::syscall::uaccess::CopyToUser(argument, request, kIfreqBytes)) {
+        return -cinux::syscall::kEfault;
+    }
+    return 0;
+}
+
+
+/// The ops-table door the neutral ioctl walks: same answers, one seat.
+long long socket_if_ioctl(void* /*self*/, fs::FsNode /*node*/, unsigned long long word,
+                          unsigned long long argument) {
+    return socket_if_ioctl_impl(word, argument);
+}
+
 const fs::FsOps kOps{
     .lookup     = nullptr,
     .make_file  = nullptr,
@@ -79,7 +223,7 @@ const fs::FsOps kOps{
     .retain     = socket_retain,
     .release    = socket_release,
     .readable   = socket_readable,
-    .ioctl      = nullptr,
+    .ioctl      = socket_if_ioctl,
     .adopt_open = nullptr,
 };
 

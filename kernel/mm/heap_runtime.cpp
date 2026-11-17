@@ -4,14 +4,17 @@
 #include "cinux/assert.hpp"
 #include "cinux/math.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"  // NOLINT(misc-include-cleaner) IrqGuard is used below
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
+#include "kernel/arch/irq_guard.hpp"  // NOLINT(misc-include-cleaner) IrqGuard is used below
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/mm/heap.hpp"
 #include "kernel/mm/heap_config.hpp"
+#include "kernel/arch/space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/page_walk.hpp"
 #include "kernel/mm/pmm.hpp"
+#include <cstddef>
+
 #include "kernel/mm/vmm.hpp"
 
 namespace cinux::mm {
@@ -24,7 +27,7 @@ base::SpinMutex g_heap_gate;
 
 bool map_heap_pages(unsigned long spot, unsigned long bytes) {
     KernelTables        tables;
-    unsigned long const kRoot  = cinux::arch::ReadCr3();
+    unsigned long const kRoot  = cinux::arch::space::ActiveRoot();
     unsigned long const kPages = cinux::base::math::Ceil(bytes, kSize);
     for (unsigned long page = 0; page < kPages; ++page) {
         base::PhysAddr const kFrame = Pmm::self().allocate_page();
@@ -41,7 +44,7 @@ bool map_heap_pages(unsigned long spot, unsigned long bytes) {
 }  // namespace
 
 bool BringUpHeap() {
-    unsigned long const kBase = kHeapBase + kHeapLowerGuardBytes;
+    unsigned long const kBase = cinux::arch::space::kHeapBase + kHeapLowerGuardBytes;
     if (!map_heap_pages(kBase, kHeapInitialBytes)) {
         return false;
     }
@@ -71,14 +74,14 @@ bool HeapFree(void* block) {
 
 }  // namespace cinux::mm
 
-void* operator new(unsigned long bytes) {
-    void* const kBlock = cinux::mm::HeapAllocate(bytes);
+void* operator new(std::size_t bytes) {
+    void* const kBlock = cinux::mm::HeapAllocate(static_cast<unsigned long>(bytes));
     cinux::base::safety::Check(kBlock != nullptr, "kernel heap exhausted");
     return kBlock;
 }
 
-void* operator new[](unsigned long bytes) {
-    void* const kBlock = cinux::mm::HeapAllocate(bytes);
+void* operator new[](std::size_t bytes) {
+    void* const kBlock = cinux::mm::HeapAllocate(static_cast<unsigned long>(bytes));
     cinux::base::safety::Check(kBlock != nullptr, "kernel heap exhausted");
     return kBlock;
 }
@@ -90,7 +93,7 @@ void operator delete(void* block) noexcept {
     cinux::base::safety::Check(cinux::mm::HeapFree(block), "invalid heap free");
 }
 
-void operator delete(void* block, unsigned long size [[maybe_unused]]) noexcept {
+void operator delete(void* block, std::size_t size [[maybe_unused]]) noexcept {
     if (block == nullptr) {
         return;
     }
@@ -104,7 +107,7 @@ void operator delete[](void* block) noexcept {
     cinux::base::safety::Check(cinux::mm::HeapFree(block), "invalid heap free");
 }
 
-void operator delete[](void* block, unsigned long size [[maybe_unused]]) noexcept {
+void operator delete[](void* block, std::size_t size [[maybe_unused]]) noexcept {
     if (block == nullptr) {
         return;
     }

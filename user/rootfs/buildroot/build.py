@@ -35,6 +35,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build-dir', type=pathlib.Path, required=True)
     parser.add_argument('--defconfig', type=pathlib.Path, required=True)
+    parser.add_argument('--arch', default='x86_64', choices=['x86_64', 'armv7'],
+                        help='volume shape: bare ext2 (x86_64) or MBR card (armv7)')
     parser.add_argument('--fragment', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--configure-only', action='store_true')
     parser.add_argument('--jobs', type=int, default=4)
@@ -102,21 +104,60 @@ def main():
     if args.configure_only:
         print(f'[buildroot] configured: {output / ".config"}', flush=True)
         return
-    if not overlay.is_dir():
-        run(sys.executable, here / 'prepare.py', '--build-dir', build, '--overlay-only')
+    # The overlay always regenerates: a staged copy left from an earlier
+    # build silently feeds Buildroot yesterday's files (this bit once —
+    # an edited inittab reached the card only after a manual removal).
+    run(sys.executable, here / 'prepare.py', '--build-dir', build,
+        '--overlay-only', '--arch', args.arch)
     run(*make, f'-j{args.jobs}', 'all')
     image.parent.mkdir(parents=True, exist_ok=True)
+    # Volume geometry. x86_64 mounts a bare 1536 MiB ext2 image; armv7
+    # slides its volume inside an MBR card (one Linux partition at sector
+    # 2048), and QEMU's SD model only accepts power-of-two cards, so the
+    # card totals 2 GiB whatever the partition holds.
+    if args.arch == 'armv7':
+        card_sectors = 2 * 1024 * 1024 * 1024 // 512
+        partition_start = 2048
+    else:
+        card_sectors = 1536 * 1024 * 1024 // 512
+        partition_start = 0
     temporary = image.with_suffix('.ext2.tmp')
-    with temporary.open('wb') as disk:
-        disk.truncate(1536 * 1024 * 1024)
+    if args.arch == 'armv7':
+        volume = image.with_suffix('.ext2.partition.tmp')
+        with volume.open('wb') as disk:
+            disk.truncate((card_sectors - partition_start) * 512)
+    else:
+        volume = temporary
+        with volume.open('wb') as disk:
+            disk.truncate(card_sectors * 512)
     run('mkfs.ext2', '-q', '-F', '-b', '1024', '-O', 'none', '-N', '65536',
-        '-d', output / 'images/rootfs.tar', temporary)
-    with temporary.open('r+b') as disk:
+        '-d', output / 'images/rootfs.tar', str(volume))
+    with volume.open('r+b') as disk:
         disk.seek(512)
         disk.write(bytes(range(255, -1, -1)) * 2)
         disk.flush()
         os.fsync(disk.fileno())
-    temporary.replace(image)
+    if args.arch == 'armv7':
+        with image.open('wb') as card:
+            card.truncate(card_sectors * 512)
+        run('dd', f'if={volume}', f'of={image}', 'bs=512',
+            f'seek={partition_start}', 'conv=notrunc', 'status=none')
+        with image.open('r+b') as card:
+            card.seek(450)
+            card.write(b'\x83')  # partition type: Linux
+            card.seek(454)
+            card.write(partition_start.to_bytes(4, 'little'))
+            card.seek(458)
+            card.write((card_sectors - partition_start).to_bytes(4, 'little'))
+            card.seek(510)
+            card.write(b'\x55\xAA')  # boot signature
+            card.seek(512)
+            card.write(b'CINUXSDMK')  # the block street's marker
+            card.flush()
+            os.fsync(card.fileno())
+        volume.unlink()
+    else:
+        temporary.replace(image)
     print(f'[buildroot] Cinux development image: {image}', flush=True)
 
 

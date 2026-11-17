@@ -12,7 +12,8 @@
 
 #include "kernel/proc/fault_resolve.hpp"
 
-#include "kernel/arch/x86_64/isr.hpp"
+#include "kernel/arch/isr.hpp"
+#include "kernel/boot/print.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/demand.hpp"
 #include "kernel/mm/vma.hpp"
@@ -37,15 +38,22 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
     const mm::VmaRegion* const kRegion      = kCovered ? &region : nullptr;
     const bool                 kWrite       = (error_code & arch::isr::kFaultWasWrite) != 0;
     const bool                 kInstruction = (error_code & arch::isr::kFaultInstruction) != 0;
-    const bool kAllowed = kRegion != nullptr && (error_code & arch::isr::kFaultReserved) == 0 &&
-                          (!kWrite || kRegion->writable) &&
+    if ((error_code & arch::isr::kFaultReserved) != 0) {
+        return false;
+    }
+    // The range's terms come first: a write the range never promised is
+    // refused even when the leaf still carries a share mark from a fork.
+    // Copy-on-write answers only the faults the range allows, so a
+    // read-only promise costs the writer a fault, never a silent copy.
+    const bool kAllowed = kRegion != nullptr && (!kWrite || kRegion->writable) &&
                           (!kInstruction || kRegion->executable) &&
                           (kWrite || kInstruction || kRegion->readable) &&
                           (kRegion->kind != mm::VmaKind::kStack || address >= kRegion->stack_floor);
     if (!kAllowed) {
-        if ((error_code & arch::isr::kFaultFromUser) != 0) {
-            Scheduler::self().exit_current(cinux::syscall::kSigSegv);
-        }
+        // Whether a fatal fault ends the task or unwinds a seated
+        // episode is the port's business: this resolver answers the
+        // repair question only, and the arch door that called it owns
+        // the death (x86 exits the task, arm retires the episode).
         return false;
     }
     if (mm::cow::TryResolvePageFault(address, error_code)) {
@@ -59,9 +67,6 @@ bool resolve_current_fault(unsigned long long address, unsigned long long error_
         mm::demand::FillPage(*kSelf->space, *kSelf->vmas, address, error_code);
     if (kFill == mm::demand::FillOutcome::kFilled || kFill == mm::demand::FillOutcome::kRetry) {
         return true;
-    }
-    if ((error_code & arch::isr::kFaultFromUser) != 0) {
-        Scheduler::self().exit_current(cinux::syscall::kSigSegv);
     }
     return false;
 }

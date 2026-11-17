@@ -1,9 +1,9 @@
 /**
  * @file    address_space.hpp
- * @brief   One world of translations: a PML4 the kernel can enter.
+ * @brief   One world of translations: a top-level table the kernel can enter.
  *
  * An AddressSpace owns a fresh top-level table whose kernel half
- * (PML4 entries 256..511) is copied from the kernel's own root, so
+ * (top-level entries 256..511) is copied from the kernel's own root, so
  * kernel code keeps running no matter which world is active, while the
  * user half starts empty and grows only through this space's own
  * mappings. The owning process lifecycle ends here now: teardown
@@ -23,7 +23,7 @@
 
 #include "cinux/ref_count.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 
 namespace cinux::mm {
 
@@ -81,7 +81,7 @@ public:
     /**
      * @brief         Physical address of this space's root table.
      *
-     * @return        The PML4 to hand to LoadCr3, 0 before init.
+     * @return        The top-level table to hand to SwitchRoot, 0 before init.
      * @warning       None
      * @throws        None
      * @since         0.1.0
@@ -96,7 +96,7 @@ public:
      * @param[in]     physical          The frame it shows.
      * @return        true when the walk wrote the final entry.
      * @note          Goes through the shared walk with the kernel
-     *                world's table supply; the live CR3 does not matter.
+     *                world's table supply; the live root does not matter.
      * @warning       None
      * @throws        None
      * @since         0.1.0
@@ -164,7 +164,7 @@ public:
      *                      frames, the tables that routed to them, and
      *                      the root itself. The space returns to its
      *                      pre-init shape with root 0 and must not be
-     *                      the live CR3 of any CPU when this runs.
+     *                      the live root of any CPU when this runs.
      * @warning       None
      * @throws        None
      * @since         0.2.0
@@ -179,7 +179,7 @@ public:
      *                      out of scope returns its frames by itself, so
      *                      owners delete and nothing more. Explicit
      *                      teardown leaves root zero and this runs empty.
-     * @warning       Must not be the live CR3 of any CPU at destruction.
+     * @warning       Must not be the live root of any CPU at destruction.
      * @throws        None
      * @since         0.3.0
      * @ingroup       kernel_mm

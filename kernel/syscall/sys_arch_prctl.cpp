@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_arch_prctl.hpp"
 
-#include "kernel/arch/x86_64/context.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/context.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/syscall_internal.hpp"

@@ -76,7 +76,7 @@ __attribute__((interrupt)) void exception_with_code(InterruptFrame*    frame,
 
 异常族占的地盘是 0 到 31，InstallExceptionStubs 一批就装完了。设备线族占的是 0x20 到 0x2F，irq_stubs.cpp 的 InstallIrqStubs 把它们也一批装完了，注释还交代了心跳的座位为什么填在这里，向量 0x20 是心跳属于 x86 的接线知识，所以它归架构层管。心跳链怎么走、Tick 怎么计数的细节，[PIT 定时器](drivers/pit.md)那一页已经把节奏讲完了，桩的统一形状这里只立一条：设备线、本地向量与消息向量三家的桩走的是同一个节奏，救好了浮点现场，进出的是 FpuGate，`kernel/proc/fpu_gate` 的进出守卫（进门的一拍存现场，出门的一拍恢复，嵌套的层数按任务记），帧交给了中断服务，出口过的是调度器的抢占检查，咱们读桩的时候认这个节奏就够了。本地向量桩的走法另有一处不同，进门自己就 EOI 了本地控制器，计数与 on_timer_tick 的活都在桩内做完，不经过 `kernel/interrupt` 的 Irq 服务。整个 irq_stubs.cpp 住在无 SSE 的孤岛里，注释的理由是 iret 返回要路过的一切都不碰向量寄存器，向量寄存器说的就是 SSE 的浮点那组，孤岛纪律的来历 [PIT 定时器](drivers/pit.md) 也讲过了。
 
-芯片侧的前后有两任后端，咱们分开认。老的一任是 PIC（两枚 8259 中断控制器），pic.hpp 的注释说它的 remap 把 BIOS 惯用的 8 与 0x70 搬到 0x20 与 0x28，不搬的话芯片默认的向量就跟 CPU 的异常挤在同一个号段里，一来就串了线。两处细节的出处都在注释里，级连线 2 被顺带解开的原因是注释给的，从片的敲门要路过的是它。应答的讲究是从片的线两枚都要谢到，漏答一次这根线就哑了，tick 测试特意连收了三拍心跳才认，抓的就是这类一次性中断（test/kernel/test_tick.cpp）。新的一任走 InstallApicBackend，从 ACPI 的 MADT（固件交出来的中断拓扑表）找到本地与 IO 控制器，两枚分别做了 init，装上 0xFF 的假中断座并用它使能本地 APIC，之后 IO APIC 交给了中断服务，0x40 起 8 座的消息池注了进去，消息桩也装好了。消息中断的应答归本地 APIC，irq.hpp 的注释写明它从不落到线芯片头上，因为消息投递的终点就是本地控制器。
+芯片侧的前后有两任后端，咱们分开认。老的一任是 PIC（两枚 8259 中断控制器），pic.hpp 的注释说它的 remap 把 BIOS 惯用的 8 与 0x70 搬到 0x20 与 0x28，不搬的话芯片默认的向量就跟 CPU 的异常挤在同一个号段里，一来就串了线。两处细节的出处都在注释里，级连线 2 被顺带解开的原因是注释给的，从片的敲门要路过的是它。应答的讲究是从片的线两枚都要谢到，漏答一次这根线就哑了，tick 测试特意连收了三拍心跳才认，抓的就是这类一次性中断（test/kernel/time/test_tick.cpp）。新的一任走 InstallApicBackend，从 ACPI 的 MADT（固件交出来的中断拓扑表）找到本地与 IO 控制器，两枚分别做了 init，装上 0xFF 的假中断座并用它使能本地 APIC，之后 IO APIC 交给了中断服务，0x40 起 8 座的消息池注了进去，消息桩也装好了。消息中断的应答归本地 APIC，irq.hpp 的注释写明它从不落到线芯片头上，因为消息投递的终点就是本地控制器。
 
 ## 故障报告：ReportFault 的座次
 
@@ -161,4 +161,4 @@ void EnableCoreProtections() {
 - `kernel/arch/x86_64/irq_guard.hpp`、`irq_guard.cpp`、`halt.hpp` — 关中断守卫、sti 加 hlt 的停车、最终停靠
 - `kernel/arch/x86_64/gdt.hpp`、`gdt.cpp`、`tss.hpp`、`tss.cpp` — 段表、SYSRET 选择子算术、任务状态段
 - `kernel/interrupt/irq.hpp`、`irq_config.hpp` — 中断服务的两张座位表与消息池容量
-- `test/unit/test_context.cpp`、`test_idt.cpp`、`test_gdt.cpp`、`test_extable.cpp`、`test_cpu_bits.cpp` — host 世界对图像、门、描述符、修复表的复核
+- `test/unit/proc/test_context.cpp`、`test_idt.cpp`、`test_gdt.cpp`、`test_extable.cpp`、`test_cpu_bits.cpp` — host 世界对图像、门、描述符、修复表的复核

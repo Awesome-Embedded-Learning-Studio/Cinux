@@ -5,7 +5,7 @@
  */
 #pragma once
 #include "cinux/own.hpp"
-#include "kernel/driver/block/block_cache.hpp"
+#include "kernel/drivers/block/block_cache.hpp"
 #include "kernel/fs/ext2/ext2.hpp"
 namespace cinux::fs::ext2 {
 /** @brief Own unpublished metadata changes while the volume mutex is held. */

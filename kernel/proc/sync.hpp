@@ -29,7 +29,7 @@
 
 #include "cinux/container/self_list.hpp"
 #include "cinux/scoped_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu_config.hpp"
+#include "kernel/arch/per_cpu_config.hpp"
 #include "kernel/proc/checks_config.hpp"
 #include "kernel/proc/lockdep.hpp"
 #include "kernel/proc/task.hpp"

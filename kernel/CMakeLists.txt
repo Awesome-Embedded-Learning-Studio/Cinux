@@ -1,4 +1,9 @@
 set(CINUX_ARCHITECTURE "x86_64" CACHE STRING "Architecture directory under kernel/arch")
+if(NOT CINUX_ARCHITECTURE STREQUAL "x86_64")
+    message(FATAL_ERROR
+        "CINUX_ARCHITECTURE='${CINUX_ARCHITECTURE}' has no port under kernel/arch yet; "
+        "only x86_64 builds today.")
+endif()
 
 file(GLOB_RECURSE CINUX_KERNEL_TREE_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/kernel/*.cpp
@@ -18,6 +23,10 @@ endforeach()
 list(SORT CINUX_KERNEL_PORTABLE_SOURCES)
 list(SORT CINUX_KERNEL_ARCH_SOURCES)
 
+# The boot chain under kernel/arch/<isa>/boot speaks 16- and 32-bit worlds
+# of its own; it builds as separate boot targets, never into the kernel.
+list(FILTER CINUX_KERNEL_ARCH_SOURCES EXCLUDE REGEX "/arch/${CINUX_ARCHITECTURE}/boot/")
+
 # Packet processing nests on a 16 KiB thread stack. Reject accidental
 # connection-control-block temporaries before they corrupt a caller's stack.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/kernel/net/tcp.cpp
@@ -32,24 +41,24 @@ set(CINUX_KERNEL_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/base/src/format/radix.cpp
     ${CMAKE_SOURCE_DIR}/base/src/parse.cpp
     ${CMAKE_SOURCE_DIR}/base/src/path.cpp
-    ${CMAKE_SOURCE_DIR}/boot/early/libc.cpp)
+    ${CMAKE_SOURCE_DIR}/kernel/lib/freestanding.cpp)
 
 set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/syscall/sys_clock.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/hpet/hpet.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/hpet/hpet.cpp
     ${CMAKE_SOURCE_DIR}/kernel/lib/mem.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/isr.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/exception.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/pic.cpp
     ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/irq_stubs.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/apic/local_apic.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/apic/io_apic.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/xhci.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/xhci_layout.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_device.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_keyboard.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/usb_tablet.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/driver/usb/tablet_report.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/apic/local_apic.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/platform/apic/io_apic.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/xhci_layout.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_device.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_keyboard.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/usb_tablet.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/drivers/usb/tablet_report.cpp
     ${CMAKE_SOURCE_DIR}/kernel/interrupt/irq.cpp
     ${CMAKE_SOURCE_DIR}/kernel/debug/trace.cpp
     ${CMAKE_SOURCE_DIR}/kernel/debug/kallsyms.cpp
@@ -62,9 +71,11 @@ set(CINUX_KERNEL_NO_SSE_ISLAND
     ${CMAKE_SOURCE_DIR}/kernel/proc/lockdep.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fpu_gate.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/cow.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/cow_resolve.cpp
     ${CMAKE_SOURCE_DIR}/kernel/mm/demand.cpp
     ${CMAKE_SOURCE_DIR}/kernel/proc/fault_resolve.cpp
-    ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp)
+    ${CMAKE_SOURCE_DIR}/kernel/proc/fork.cpp
+    ${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/fork_resume.cpp)
 
 set_source_files_properties(${CINUX_KERNEL_NO_SSE_ISLAND} PROPERTIES COMPILE_OPTIONS "-mgeneral-regs-only")
 
@@ -119,22 +130,6 @@ add_custom_command(
     DEPENDS ${CMAKE_SOURCE_DIR}/assets/font.psf
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-file(GLOB CINUX_INITRD_FILES CONFIGURE_DEPENDS
-    ${CMAKE_SOURCE_DIR}/assets/initrd/* ${CMAKE_SOURCE_DIR}/assets/initrd/*/*)
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
-    COMMAND tar --format=ustar -C ${CMAKE_SOURCE_DIR}/assets/initrd -cf
-            ${CMAKE_CURRENT_BINARY_DIR}/initrd.tar readme.txt docs
-    COMMAND ${CMAKE_OBJCOPY} -I binary -O elf64-x86-64 -B i386:x86-64
-            --rename-section .data=.rodata.initrd
-            --redefine-sym _binary_initrd_tar_start=g_initrd_start
-            --redefine-sym _binary_initrd_tar_end=g_initrd_end
-            --set-section-flags .rodata.initrd=alloc,load,readonly,data
-            initrd.tar
-            initrd_blob.o
-    DEPENDS ${CINUX_INITRD_FILES}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
 function(add_cinux_kernel name bin_stem)
     set(kallsyms_source ${CMAKE_CURRENT_BINARY_DIR}/${name}_kallsyms.cpp)
     add_library(${name}_core OBJECT ${CINUX_KERNEL_CORE_SOURCES})
@@ -145,7 +140,6 @@ function(add_cinux_kernel name bin_stem)
         ${CMAKE_SOURCE_DIR}/kernel/kernel.cpp
         $<TARGET_OBJECTS:${name}_core>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
-        ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
         ${ARGN})
     cinux_kernel_compile_settings(${name}_unsym)
     cinux_kernel_link_settings(${name}_unsym)
@@ -158,7 +152,6 @@ function(add_cinux_kernel name bin_stem)
         ${CMAKE_SOURCE_DIR}/kernel/kernel.cpp
         $<TARGET_OBJECTS:${name}_core>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
-        ${CMAKE_CURRENT_BINARY_DIR}/initrd_blob.o
         ${ARGN}
         ${kallsyms_source})
     cinux_kernel_compile_settings(${name})
@@ -190,7 +183,7 @@ function(add_cinux_ktest name stage)
     cinux_kernel_compile_settings(${ktest_core})
 
     add_executable(cinux_ktest_${name}_unsym EXCLUDE_FROM_ALL
-        ${CMAKE_SOURCE_DIR}/test/kernel/test_main.cpp
+        ${CMAKE_SOURCE_DIR}/test/kernel/kernel/test_main.cpp
         $<TARGET_OBJECTS:${ktest_core}>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
         ${CMAKE_SOURCE_DIR}/test/framework/framework_kernel.cpp
@@ -206,7 +199,7 @@ function(add_cinux_ktest name stage)
     cinux_kallsyms_bridge(cinux_ktest_${name}_unsym ${kallsyms_source})
 
     add_executable(cinux_ktest_${name} EXCLUDE_FROM_ALL
-        ${CMAKE_SOURCE_DIR}/test/kernel/test_main.cpp
+        ${CMAKE_SOURCE_DIR}/test/kernel/kernel/test_main.cpp
         $<TARGET_OBJECTS:${ktest_core}>
         ${CMAKE_CURRENT_BINARY_DIR}/font_blob.o
         ${CMAKE_SOURCE_DIR}/test/framework/framework_kernel.cpp
@@ -242,7 +235,11 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/debug/kernel.gdb.in
 
 foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)
     string(REPLACE ":" ";" entry_parts "${entry}")
-    list(GET entry_parts 0 ktest)
+    list(GET entry_parts 0 ktest_path)
     list(GET entry_parts 1 ktest_stage)
-    add_cinux_ktest(${ktest} ${ktest_stage} ${CMAKE_SOURCE_DIR}/test/kernel/test_${ktest}.cpp)
+    get_filename_component(ktest "${ktest_path}" NAME)
+    string(REPLACE "/" ";" ktest_path_parts "${ktest_path}")
+    list(GET ktest_path_parts 0 ktest_module)
+    add_cinux_ktest(${ktest} ${ktest_stage}
+        ${CMAKE_SOURCE_DIR}/test/kernel/${ktest_module}/test_${ktest}.cpp)
 endforeach()

@@ -1,17 +1,18 @@
 #include "cinux/memory.hpp"
 #include "cinux/own.hpp"
 #include "cinux/text.hpp"
-#include "kernel/arch/x86_64/context.hpp"
-#include "kernel/arch/x86_64/halt.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
-#include "kernel/arch/x86_64/per_cpu_config.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
-#include "kernel/arch/x86_64/tss.hpp"
+#include "kernel/arch/context.hpp"
+#include "kernel/arch/halt.hpp"
+#include "kernel/arch/instructions.hpp"
+#include "kernel/arch/per_cpu.hpp"
+#include "kernel/arch/per_cpu_config.hpp"
+#include "kernel/arch/space_control.hpp"
+#include "kernel/arch/kernel_stack.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
 #include "kernel/mm/vmm.hpp"
 #include "kernel/proc/proc_config.hpp"
+#include "kernel/arch/task_switch.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 
@@ -28,22 +29,21 @@ static_assert((1U << static_cast<unsigned>(kStackOrder)) == kStackPages,
 }
 
 void arm_task_entry(const Task& task) {
-    unsigned long long const kStackTop              = task.stack_base + kStackBytes;
-    cinux::arch::tss::Tss::self().rsp0              = kStackTop;
-    cinux::arch::per_cpu::PerCpu::self().kernel_rsp = kStackTop;
+    unsigned long long const kStackTop = task.stack_base + kStackBytes;
+    cinux::arch::ArmTaskStack(kStackTop);
     unsigned long long const kRoot =
         (task.user_root != 0) ? task.user_root : cinux::mm::KernelPageRoot();
-    if (cinux::arch::ReadCr3() != kRoot) {
-        cinux::arch::LoadCr3(kRoot);
+    if (cinux::arch::space::ActiveRoot() != kRoot) {
+        cinux::arch::space::SwitchRoot(kRoot);
     }
 }
 
 void swap_address_regs(Task* outgoing, const Task* incoming) {
     if (outgoing != nullptr) {
-        cinux::arch::per_cpu::StoreTaskAddressRegs(outgoing->ctx.fs_base, outgoing->ctx.gs_base);
+        cinux::arch::StoreTaskAddressRegs(outgoing->ctx.fs_base, outgoing->ctx.gs_base);
     }
     if (incoming != nullptr) {
-        cinux::arch::per_cpu::LoadTaskAddressRegs(incoming->ctx.fs_base, incoming->ctx.gs_base);
+        cinux::arch::LoadTaskAddressRegs(incoming->ctx.fs_base, incoming->ctx.gs_base);
     }
 }
 
@@ -54,7 +54,7 @@ public:
         swap_address_regs(&outgoing, &incoming);
         __atomic_store_n(&incoming.on_cpu, static_cast<int>(arch::per_cpu::PerCpu::self().cpu_id),
                          __ATOMIC_RELEASE);
-        ContextSwitch(&outgoing.ctx, &incoming.ctx, &outgoing.on_cpu);
+        cinux::arch::SwitchTaskContext(outgoing.ctx, incoming.ctx, &outgoing.on_cpu);
     }
 
     void enter_from_main(Task& incoming) {
@@ -62,16 +62,18 @@ public:
         swap_address_regs(nullptr, &incoming);
         __atomic_store_n(&incoming.on_cpu, static_cast<int>(arch::per_cpu::PerCpu::self().cpu_id),
                          __ATOMIC_RELEASE);
-        ContextSwitch(&main_ctx_[arch::per_cpu::PerCpu::self().cpu_id], &incoming.ctx);
+        cinux::arch::SwitchTaskContext(main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
+                                       incoming.ctx, nullptr);
     }
 
     void return_to_main(Task& outgoing) {
-        if (cinux::arch::ReadCr3() != cinux::mm::KernelPageRoot()) {
-            cinux::arch::LoadCr3(cinux::mm::KernelPageRoot());
+        if (cinux::arch::space::ActiveRoot() != cinux::mm::KernelPageRoot()) {
+            cinux::arch::space::SwitchRoot(cinux::mm::KernelPageRoot());
         }
         swap_address_regs(&outgoing, nullptr);
-        ContextSwitch(&outgoing.ctx, &main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
-                      &outgoing.on_cpu);
+        cinux::arch::SwitchTaskContext(outgoing.ctx,
+                                       main_ctx_[arch::per_cpu::PerCpu::self().cpu_id],
+                                       &outgoing.on_cpu);
     }
 
     void reclaim(Task& dead) {

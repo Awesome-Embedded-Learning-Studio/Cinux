@@ -78,7 +78,16 @@ public:
      * @brief         Place one character: paint it, step the caret,
      *                scroll at the bottom. Control characters move the
      *                caret without painting.
+     *
      * @param[in]     glyph_char   Character to place.
+     * @note          This screen speaks ASCII and nothing else. A byte with
+     *                its high bit set -- a UTF-8 continuation or lead, or a
+     *                Latin-1 letter -- takes a cell and paints nothing: the
+     *                embedded font indexes glyphs by the low byte, so
+     *                painting such a byte would draw whatever sits at that
+     *                index, which is a lie about the text. Non-Latin text
+     *                belongs to the desktop, which decodes UTF-8 and carries
+     *                a CJK companion font.
      * @since         0.1.0
      * @ingroup       kernel_driver
      */

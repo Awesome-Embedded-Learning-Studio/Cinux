@@ -1,0 +1,1 @@
+echo armv7-shell-alive

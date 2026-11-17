@@ -133,6 +133,10 @@ public:
      */
     [[nodiscard]] unsigned long release_frame(PhysAddr phys);
 
+    /// How many worlds walk this frame right now: zero for a private
+    /// frame, the share count for a copy-on-write one.
+    [[nodiscard]] unsigned long frame_shares(PhysAddr phys) const;
+
 private:
     mutable base::SpinMutex            lock_;
     [[nodiscard]] PhysAddr             allocate_run(unsigned long page_count);

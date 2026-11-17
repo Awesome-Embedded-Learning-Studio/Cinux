@@ -6,7 +6,7 @@
  * family keeps its own fact book here: header lengths, ethertype and
  * protocol numbers, and the fixed ARP-over-Ethernet packet shape. The
  * device-side words (MAC length, frame ceiling) live with the device
- * family in kernel/driver/net and are reused, never restated.
+ * family in kernel/drivers/net and are reused, never restated.
  *
  * @author  Charliechen114514
  * @date    2026-10-23
@@ -20,7 +20,7 @@
 
 #include <stdint.h>
 
-#include "kernel/driver/net/net_config.hpp"
+#include "kernel/drivers/net/net_config.hpp"
 
 namespace cinux::net {
 

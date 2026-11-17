@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_sigtimedwait.hpp"
 
 #include "cinux/bit_ops/bitmask.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/signals.hpp"
 #include "kernel/syscall/signal.hpp"

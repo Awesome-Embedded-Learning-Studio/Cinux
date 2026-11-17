@@ -1,10 +1,10 @@
 #include "kernel/console/console.hpp"
 
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/boot/boot_info.hpp"
 #include "kernel/console/screen.hpp"
-#include "kernel/driver/serial/serial.hpp"
+#include "kernel/drivers/serial/serial.hpp"
 
 namespace cinux::console {
 

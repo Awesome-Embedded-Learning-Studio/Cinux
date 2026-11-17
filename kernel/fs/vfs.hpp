@@ -34,7 +34,7 @@
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/mount_lease.hpp"
 
@@ -188,6 +188,11 @@ struct FsOps {
      *                this absent and let callers fold strings instead.
      */
     base::Result<FsNode> (*lookup_at)(void* self, FsNode base, std::string_view rest)    = nullptr;
+    /// Flushes the whole backend to its volume; absent means nothing
+    /// to flush. Optional hook: EraseFs fills it only when the backend
+    /// speaks it. Declared last so the positional aggregate in EraseFs
+    /// stays untouched.
+    bool (*sync)(void* self)                                                                = nullptr;
     /// Creates one file directly under the held directory node.
     base::Result<FsNode> (*make_file_at)(void* self, FsNode base, std::string_view name) = nullptr;
     /**
@@ -278,6 +283,9 @@ template <FileSystem Fs>
             return static_cast<Fs*>(self)->adopt_open(node, path);
         },
     };
+    if constexpr (requires(Fs& backend) { { backend.sync() } -> std::same_as<bool>; }) {
+        ops.sync = [](void* self) { return static_cast<Fs*>(self)->sync(); };
+    }
     if constexpr (requires(Fs& backend, FsNode base, std::string_view rest) {
                       backend.lookup_at(base, rest);
                   }) {
@@ -540,6 +548,21 @@ private:
         char          prefix[kFsPathMax] = {};
     };
 
+public:
+    /// Flushes every backend that speaks sync; one refusal fails all.
+    [[nodiscard]] bool sync_all() {
+        const arch::IrqGuard kIrq;
+        const auto           kGuard = gate_.guard();
+        bool ok = true;
+        slots_.for_each([&ok](unsigned long, const Slot& slot) {
+            if (slot.ops != nullptr && slot.ops->sync != nullptr) {
+                ok = slot.ops->sync(slot.self) && ok;
+            }
+        });
+        return ok;
+    }
+
+private:
     base::container::SlotTable<Slot, kMountMax> slots_;
     mutable base::SpinMutex                     gate_;
 };

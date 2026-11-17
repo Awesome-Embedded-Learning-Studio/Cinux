@@ -1,3 +1,5 @@
+#include "kernel/arch/irq_guard.hpp"
+#include "cinux/platform/input.hpp"
 #include "kernel/syscall/sys_ppoll.hpp"
 
 #include "cinux/memory.hpp"
@@ -7,6 +9,7 @@
 #include "kernel/fs/pipe.hpp"
 #include "kernel/net/socket.hpp"
 #include "kernel/proc/scheduler.hpp"
+#include "kernel/proc/waiter.hpp"
 #include "kernel/proc/signals.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/signal.hpp"
@@ -166,7 +169,10 @@ long long HandlePpoll(const SyscallFrame& frame) {
             }
             return 0;
         }
-        proc::Scheduler::self().yield();
+        // One waiting turn: the port drains its input, the timer gets to
+        // tick, and the CPU goes elsewhere. Without the turn a parked task
+        // whose clock cannot advance waits forever.
+        proc::WaitForNextTurn();
     }
 }
 
@@ -204,7 +210,10 @@ long long HandlePoll(const SyscallFrame& frame) {
             }
             return 0;
         }
-        proc::Scheduler::self().yield();
+        // One waiting turn: the port drains its input, the timer gets to
+        // tick, and the CPU goes elsewhere. Without the turn a parked task
+        // whose clock cannot advance waits forever.
+        proc::WaitForNextTurn();
     }
 }
 

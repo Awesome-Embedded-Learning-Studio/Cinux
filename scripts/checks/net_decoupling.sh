@@ -12,6 +12,6 @@ done < <(grep -rn -E '#include ["<](kernel/(driver/(pci|usb|ahci|msi)|interrupt)
 while IFS= read -r offender; do
     echo "net decoupling: device family climbs into the protocol stack: $offender"
     status=1
-done < <(grep -rn '#include "kernel/net/' kernel/driver/net/ || true)
+done < <(grep -rn '#include "kernel/net/' kernel/drivers/net/ || true)
 
 exit "$status"

@@ -8,7 +8,7 @@
 #include "cinux/math.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/fs/file_table.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/pipe.hpp"

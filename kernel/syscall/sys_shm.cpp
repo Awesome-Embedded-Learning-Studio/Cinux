@@ -13,7 +13,7 @@
 #include "cinux/ptr.hpp"
 #include "cinux/shared.hpp"
 #include "cinux/singleton.hpp"
-#include "kernel/arch/x86_64/page.hpp"
+#include "kernel/arch/page.hpp"
 #include "kernel/mm/cow.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"

@@ -34,6 +34,7 @@
 
 namespace cinux::driver {
 class BlockCache;
+class BlockPort;
 class BlockQueue;
 }  // namespace cinux::driver
 
@@ -72,13 +73,37 @@ public:
      * @since   0.1.0
      * @ingroup kernel_fs
      */
-    void init();
+    void init(driver::BlockPort& root_port, unsigned long long (*wall_clock)() = nullptr);
+
+    /// Adopts a lane's own already-mounted tree: no fresh mount, no
+    /// device seats, no input taps -- the file faces simply answer
+    /// through the borrowed world. A bring-up lane that grew its own
+    /// vfs hands it here so the init lane's doors (resolve, console
+    /// streams, the mounts picture) work over the same tree.
+    void adopt(Vfs& borrowed_vfs);
+
+    /**
+     * @brief         True once a lane grew or adopted this world's tree.
+     * @note          The init thread asks before mounting its own root:
+     * a bring-up lane that already seated the card needs no second
+     * mount through the door.
+     * @since         0.8.0
+     * @ingroup       kernel_fs
+     */
+    [[nodiscard]] bool seated() const { return seated_; }
+
+    /// True when a lane handed its own tree: the kernel_init ladder
+    /// then skips its own mount and seats over the same world.
+    [[nodiscard]] bool adopted() const;
+
+    /// The device tree init() grew: the arch hook seats into it, and a
+    /// lane that wants its own leaves can reach the same tree.
+    [[nodiscard]] DevFs& devices();
 
     /**
      * @brief Flushes the persistent root cache and waits for the device.
      * @return True when every pending write and the device flush succeeded.
      */
-    [[nodiscard]] bool sync();
 
     /**
      * @brief         Maps an absolute path onto the deepest mount.
@@ -90,6 +115,16 @@ public:
      * @ingroup       kernel_fs
      */
     [[nodiscard]] base::Result<FsView> resolve(std::string_view path);
+
+    /**
+     * @brief   Hands out the mount table this world owns.
+     * @return  The one Vfs the kernel booted with.
+     * @note    The kernel_vfs() face backs onto this; read-only wiring
+     *          that only resolves paths should prefer that face.
+     * @since   0.1.0
+     * @ingroup kernel_fs
+     */
+    [[nodiscard]] Vfs& vfs();
 
     /**
      * @brief         Seats a table's standard streams on the console.
@@ -119,7 +154,6 @@ public:
      * @since         0.4.0
      * @ingroup       kernel_fs
      */
-    [[nodiscard]] base::Result<void> mount_tmpfs(std::string_view target);
 
     /**
      * @brief         Takes one tmpfs seat back, and only a tmpfs seat.
@@ -132,7 +166,6 @@ public:
      * @since         0.4.0
      * @ingroup       kernel_fs
      */
-    [[nodiscard]] base::Result<void> umount_tmpfs(std::string_view target, bool lazy = false);
 
     /**
      * @brief Formats the current mount table for procfs.
@@ -148,29 +181,37 @@ private:
     FileWorld() = default;
 
     Vfs    vfs_;
+    /// Set when a lane hands its own already-mounted tree instead of
+    /// growing one here; every read face goes through world() so both
+    /// lanes share the same doors.
+    Vfs*   borrowed_ = nullptr;
+    /// Set by init() and adopt(): the one flag the init thread's
+    /// second-mount guard reads.
+    bool seated_ = false;
+
+    /// The tree every read face answers through: the lane's own when
+    /// adopted, the one init() grew otherwise.
+    Vfs& world() const;
     DevFs  devfs_;
     ProcFs procfs_;
 
     driver::BlockQueue* queue_  = nullptr;
     driver::BlockCache* cache_  = nullptr;
     ext2::Ext2*         volume_ = nullptr;
-
-    static constexpr unsigned long kTmpFsSeats = 4;
-
-    /**
-     * @brief   One runtime-mounted memory volume and the prefix it owns.
-     * @since   0.4.0
-     * @ingroup kernel_fs
-     */
-    struct TmpFsSeat {
-        RamFs*        volume = nullptr;
-        MountLease*   lifetime{};  ///< Mount ownership; views and opens retain separate holds.
-        unsigned long prefix_len         = 0;
-        char          prefix[kFsPathMax] = {};
-    };
-
-    TmpFsSeat   tmpfs_seats_[kTmpFsSeats] = {};
-    proc::Mutex mount_gate_;  ///< Serializes runtime mount-seat updates.
+    /// The erased seat the queue points at; it must outlive the queue, so
+    /// it lives here rather than on init()'s stack.
+    driver::BlockPort* block_port_ = nullptr;
 };
+
+/**
+ * @brief         Seats the console's stream at descriptors 0 through 2.
+ * @param[in,out] vfs    The mounted tree holding /dev/console.
+ * @param[in,out] table  The process's table receiving the stream.
+ * @note          One shared open serves all three seats, the shape
+ *                every lane's seated process inherits.
+ * @since         0.8.0
+ * @ingroup       kernel_fs
+ */
+[[nodiscard]] base::Result<void> SeatConsoleStreams(Vfs& vfs, FileTable& table);
 
 }  // namespace cinux::fs

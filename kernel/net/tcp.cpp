@@ -640,11 +640,11 @@ base::Result<size_t, base::KernelError> TcpModule::send(const TcpTicket&     tic
     if (kInFlight >= kCeiling) {
         return static_cast<size_t>(0);
     }
-    const size_t kRoom     = kCeiling - kInFlight;
+    const size_t kRoom     = static_cast<size_t>(kCeiling) - kInFlight;
     const size_t kAccepted = std::min(length, kRoom);
     size_t       done      = 0;
     while (done < kAccepted) {
-        const size_t kChunk = std::min(kAccepted - done, kTcpMssBytes);
+        const size_t kChunk = std::min(kAccepted - done, static_cast<size_t>(kTcpMssBytes));
         transmit_segment(*connection, kTcpFlagAck | kTcpFlagPsh, payload + done, kChunk,
                          connection->snd_nxt);
         for (size_t index = 0; index < kChunk; ++index) {

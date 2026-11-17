@@ -57,4 +57,7 @@ long long HandleRtSigprocmask(const SyscallFrame& frame);
  */
 long long HandleRtSigreturn(const SyscallFrame& frame);
 
+/// ARM legacy sigreturn: the ucontext starts directly at sp.
+long long HandleArmSigreturn(const SyscallFrame& frame);
+
 }  // namespace cinux::syscall

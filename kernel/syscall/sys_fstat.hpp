@@ -25,4 +25,8 @@ namespace cinux::syscall {
  */
 long long HandleFstat(const SyscallFrame& frame);
 
+/// The 64-bit spelling: the caller reads the wider record, so the same
+/// probe is laid down in that shape.
+long long HandleFstat64(const SyscallFrame& frame);
+
 }  // namespace cinux::syscall

@@ -1,7 +1,7 @@
 #include "kernel/syscall/sys_mount.hpp"
 
 #include "cinux/result.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/tmpfs_mount.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/proc/task.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -55,7 +55,7 @@ long long HandleMount(const SyscallFrame& frame) {
     if (!kIsTmpfs) {
         return -kEnodev;
     }
-    const base::Result<void> kSeated = fs::FileWorld::self().mount_tmpfs(target);
+    const base::Result<void> kSeated = fs::mount_tmpfs(target);
     if (!kSeated.ok()) {
         return -ErrnoFrom(kSeated.error());
     }
@@ -76,7 +76,7 @@ long long HandleUmount2(const SyscallFrame& frame) {
         return kTarget;
     }
     const base::Result<void> kGone =
-        fs::FileWorld::self().umount_tmpfs(target, frame.rsi == kDetach);
+        fs::umount_tmpfs(target, frame.rsi == kDetach);
     if (!kGone.ok()) {
         if (kGone.error() == base::KernelError::kWouldBlock) {
             return -kEbusy;

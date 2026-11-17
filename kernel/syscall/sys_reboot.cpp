@@ -1,8 +1,8 @@
 #include "kernel/syscall/sys_reboot.hpp"
 
 #include "kernel/console/console.hpp"
-#include "kernel/driver/acpi/acpi.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/platform/firmware.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/syscall/syscall.hpp"
 #include "kernel/syscall/syscall_internal.hpp"
 
@@ -25,7 +25,7 @@ long long HandleReboot(const SyscallFrame& frame) {
     if (kFadt == nullptr) {
         return -kEnosys;
     }
-    if (!fs::FileWorld::self().sync()) {
+    if (!fs::kernel_vfs().sync_all()) {
         return -kEio;
     }
     console::Flush();

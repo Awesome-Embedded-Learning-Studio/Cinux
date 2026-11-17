@@ -23,20 +23,25 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/entropy.hpp"
-#include "kernel/arch/x86_64/firmware_config.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
-#include "kernel/arch/x86_64/registers.hpp"
-#include "kernel/arch/x86_64/usermode.hpp"
+#include "kernel/arch/firmware.hpp"
+#include "kernel/arch/root_port.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
+#include "kernel/arch/user_entry.hpp"
+#include "kernel/arch/random.hpp"
+#include "kernel/arch/space_control.hpp"
 #include "kernel/boot/print.hpp"
-#include "kernel/driver/tty/console_tty.hpp"
+#include "kernel/drivers/tty/console_tty.hpp"
 #include "kernel/fs/devfs/console_node.hpp"
 #include "kernel/fs/file_world.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/loader/loader.hpp"
+#include "kernel/drivers/ahci/ahci.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/loader/program_seat.hpp"
 #include "kernel/mm/address_space.hpp"
 #include "kernel/mm/layout.hpp"
 #include "kernel/mm/pmm.hpp"
@@ -66,7 +71,7 @@ public:
     /// Where the shell's first instruction sits.
     std::uint64_t entry = 0;
 
-    /// The shell world's PML4.
+    /// The shell world's top-level table.
     unsigned long root = 0;
 
     /// Where the shell's stack picture landed.
@@ -116,60 +121,24 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
     if (!kNode.ok()) {
         return {};
     }
-    fs::FsStat probed{};
-    if (view.ops->stat == nullptr || !view.ops->stat(view.self, kNode.value(), probed).ok()) {
+    // The one ladder every image climbs: world assembly, entry facts,
+    // the GNU stack flag, the process layout, the interpreter. The
+    // first shell is seated exactly the way exec seats a replacement.
+    const auto kSeat = loader::SeatProgram(program.get(), program_bytes, kNode.value(), view,
+                                           *space, *vmas);
+    if (!kSeat.ok()) {
         return {};
     }
-    const loader::LoadWorld kWorld{
-        .space         = *space,
-        .vmas          = *vmas,
-        .file          = kNode.value(),
-        .file_bytes    = probed.size,
-        .file_ops      = view.ops,
-        .file_self     = view.self,
-        .file_lifetime = view.lifetime,
-    };
-    loader::EntryFacts facts{};
-    if (!loader::LoadElfIntoSpace(program.get(), program_bytes, kWorld, facts)) {
-        return {};
-    }
-    entry                        = facts.program_entry;
-    facts.page_bytes             = cinux::arch::page::kSize;
-    facts.platform               = loader::kPlatformName;
-    unsigned int gnu_stack_flags = 0;
-    const bool   kStackExecutable =
-        loader::ReadGnuStackFlags(program.get(), program_bytes, gnu_stack_flags) &&
-        (gnu_stack_flags & loader::kSegmentExec) != 0;
-    constexpr unsigned long long kBrkSlideMask  = 0xFFF'000;
-    constexpr unsigned long long kMmapSlideMask = 0x3FFF'FF000;
-    vmas->seed_heap(cinux::base::math::AlignUp(vmas->max_end(), cinux::arch::page::kSize) +
-                        (arch::RandomWord() & kBrkSlideMask),
-                    mm::kUserBrkMmapSplit);
-    vmas->set_mmap_ceiling(mm::kUserMmapTop - (arch::RandomWord() & kMmapSlideMask));
-    char        interpreter_path[fs::kFsPathMax]{};
-    const char* interpreter = nullptr;
-    if (loader::ReadInterpreterPath(program.get(), program_bytes, interpreter_path,
-                                    sizeof(interpreter_path))) {
-        interpreter = interpreter_path;
-    }
-    const auto kInterpreter = loader::LoadInterpreter(interpreter, *space, *vmas);
-    if (!kInterpreter.ok()) {
-        return {};
-    }
-    facts.interpreter_base = kInterpreter.value().interpreter_base;
-    if (kInterpreter.value().program_entry != 0) {
-        entry = kInterpreter.value().program_entry;
-    }
+    loader::EntryFacts facts = kSeat.value().facts;
+    entry                    = kSeat.value().start_entry;
+    cinux::print::Println("[kern] shell seat: entry %X phnum %X", entry,
+                          static_cast<unsigned>(facts.program_headers));
+    const bool kStackExecutable = kSeat.value().stack_executable;
     unsigned char randomness[16]{};
-    const auto    kRandomLow  = arch::RandomWord();
-    const auto    kRandomHigh = arch::RandomWord();
-    base::CopyBytes(randomness, &kRandomLow, sizeof(kRandomLow));
-    base::CopyBytes(randomness + sizeof(kRandomLow), &kRandomHigh, sizeof(kRandomHigh));
-    facts.randomness                             = randomness;
-    facts.random_bytes                           = sizeof(randomness);
-    constexpr unsigned long long kStackSlideMask = 0x7FF'000;
-    const unsigned long long     kStackTop =
-        proc::kUserProgramStackTop - (arch::RandomWord() & kStackSlideMask);
+    loader::DrawEntryRandom(randomness);
+    facts.randomness   = randomness;
+    facts.random_bytes = sizeof(randomness);
+    const unsigned long long kStackTop = loader::DrawEntryStackTop();
     mm::VmaRegion stack_range{};
     stack_range.start      = kStackTop - mm::kUserStackBytes - cinux::arch::page::kSize;
     stack_range.end        = kStackTop;
@@ -188,7 +157,7 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
                           cinux::arch::page::kSize);
     const char* const kShellArgv[2] = {"/sbin/init", nullptr};
     char              boot_environment[128]{};
-    static_cast<void>(arch::ReadFirmwareString("opt/cinux/init-env", boot_environment));
+    static_cast<void>(arch::firmware::ReadString("opt/cinux/init-env", boot_environment));
     const auto        kSeparator          = std::string_view{boot_environment}.find('=');
     const bool        kEnvironmentPresent = kSeparator != std::string_view::npos && kSeparator != 0;
     const char* const kShellEnvp[]        = {
@@ -229,9 +198,9 @@ void enter_initial_process() {
     const ShellSeats& seats = ShellSeats::self();
     proc::Task* const kSelf = proc::Scheduler::self().current();
     kSelf->user_root        = seats.root;
-    asm volatile("cli" : : : "memory");
-    cinux::arch::LoadCr3(seats.root);
-    JumpToRing3(seats.entry, seats.rsp);
+    static_cast<void>(cinux::arch::SaveAndDisableIrq());
+    cinux::arch::space::SwitchRoot(seats.root);
+    cinux::arch::EnterUserMode(seats.entry, seats.rsp);
 }
 
 proc::Task* prepare_initial_process(proc::Task& parent) {
@@ -282,7 +251,17 @@ bool seat_shell_task(proc::Task& parent) {
 
 void StartInitThread() {
     auto kernel_init = +[] {
-        fs::FileWorld::self().init();
+        // The root volume's door: one port adopted over the SATA host
+        // this lane owns. A lane with another block device hands its
+        // own port; the mount ladder above it is shared.
+        // A lane that already adopted its own tree (the arm bring-up
+        // mounted its card into the very world) needs no second mount:
+        // the seats below then answer over that tree.
+        if (!fs::FileWorld::self().seated()) {
+            unsigned long long (*wall_clock)() = nullptr;
+            driver::BlockPort* const kRootPort = arch::MakeRootPort(&wall_clock);
+            fs::FileWorld::self().init(*kRootPort, wall_clock);
+        }
         fs::StartConsoleInputPump();
         base::safety::Check(net::NetWorld::self().start_pump(), "net pump refused its seat");
         {

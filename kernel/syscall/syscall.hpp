@@ -48,7 +48,8 @@ enum class SyscallNr : std::uint16_t {
     kLstat            = 6,    ///< lstat(path, out): the same promise — no links exist to follow
     kLseek            = 8,    ///< lseek(fd, offset, whence): move one open's shared cursor
     kMmap             = 9,    ///< mmap(hint, len, prot, flags, fd, offset)
-    kMprotect         = 10,   ///< mprotect(addr, len, prot)
+    kMprotect         = 10,
+    kMsync            = 26,   ///< msync(addr, len, flags): the write-back promise   ///< mprotect(addr, len, prot)
     kMunmap           = 11,   ///< munmap(addr, len)
     kBrk              = 12,   ///< brk(target): returns the break, not an errno
     kRtSigaction      = 13,   ///< rt_sigaction(sig, act, oact, size): install a handler

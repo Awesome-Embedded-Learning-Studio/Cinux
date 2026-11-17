@@ -35,7 +35,7 @@
 #include "cinux/math.hpp"
 #include "cinux/result.hpp"
 #include "cinux/spin_mutex.hpp"
-#include "kernel/driver/block/block_device_concept.hpp"
+#include "kernel/drivers/block/block_device_concept.hpp"
 #include "kernel/fs/ext2/ext2_layout.hpp"
 #include "kernel/fs/vfs.hpp"
 #include "kernel/proc/sync.hpp"

@@ -92,4 +92,21 @@ using IrqGuard = cinux::base::ScopedGuard<IrqLockPolicy>;
  */
 void EnableIrqAndHalt();
 
+
+/**
+ * @brief         Lets interrupts back in for a blocking wait.
+ * @return        The snapshot to hand RestoreIrq afterwards.
+ * @note          A syscall entered through a gate runs with interrupts
+ *                masked on some ports. A wait that parks the task needs
+ *                the tick to arrive meanwhile, or its deadline can
+ *                never pass and the loop spins with the clock frozen.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+inline unsigned long long SaveAndEnableIrq() {
+    unsigned long long flags = 0;
+    asm volatile("pushfq; popq %0" : "=r"(flags) :: "memory");
+    asm volatile("sti" ::: "memory");
+    return flags;
+}
 }  // namespace cinux::arch

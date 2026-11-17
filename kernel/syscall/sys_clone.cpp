@@ -1,6 +1,6 @@
 #include "kernel/syscall/sys_clone.hpp"
 
-#include "kernel/arch/x86_64/context.hpp"
+#include "kernel/arch/context.hpp"
 #include "kernel/proc/clone.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/sync.hpp"

@@ -6,9 +6,9 @@
 #include "cinux/path.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/driver/tty/tty_config.hpp"
+#include "kernel/drivers/tty/tty_config.hpp"
 #include "kernel/fs/file_table.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/fs/vfs.hpp"
@@ -36,7 +36,7 @@ long long HandleOpen(const SyscallFrame& frame) {
 }
 
 long long OpenPath(const char* path, Word flags, Word mode) {
-    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(path);
+    const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(path);
     if (!kView.ok()) {
         return -ErrnoFrom(kView.error());
     }

@@ -22,7 +22,7 @@
 
 #include <stdint.h>
 
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/boot/boot_info.hpp"
 
 namespace cinux::mm {
@@ -58,6 +58,31 @@ public:
      * @ingroup       kernel_mm
      */
     unsigned long take_page();
+
+    /**
+     * @brief         Draws and zeroes a space's top-level table.
+     *
+     * @return        Physical address of the root table, 0 on refusal.
+     * @note          The top level differs per port: x86-64 wants one
+     *                4 KiB PML4, armv7 wants sixteen contiguous KiB on a
+     *                16 KiB boundary. The caller gets a zeroed table of
+     *                the right size and alignment either way.
+     * @warning       None
+     * @throws        None
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    unsigned long take_root();
+
+    /**
+     * @brief         Returns a space's top-level table.
+     * @param[in]     physical   What take_root handed out.
+     * @note          The port knows how many pages and how much alignment
+     *                it asked for, so it also knows how much to give back.
+     * @since         0.1.0
+     * @ingroup       kernel_mm
+     */
+    void release_root(unsigned long physical);
 };
 
 /**
@@ -115,9 +140,9 @@ const cinux::boot::BootInfo* BringUpAddressSpace(const cinux::boot::BootInfo& ha
 /**
  * @brief         The kernel's own page-table root, fixed at takeover.
  *
- * @return        Physical address of the kernel PML4.
+ * @return        Physical address of the kernel's top-level table.
  * @note          Capture of the moment switching began: once other
- *                address spaces activate, CR3 names the live one, while
+ *                address spaces activate, the active root names the live one, while
  *                this stays the road home.
  * @warning       None
  * @throws        None

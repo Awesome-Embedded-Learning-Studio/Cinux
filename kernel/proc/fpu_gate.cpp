@@ -1,8 +1,8 @@
 #include "kernel/proc/fpu_gate.hpp"
 
 #include "cinux/assert.hpp"
-#include "kernel/arch/x86_64/context.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
+#include "kernel/arch/context.hpp"
+#include "kernel/arch/irq_guard.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
 

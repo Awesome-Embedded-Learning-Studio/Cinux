@@ -30,7 +30,7 @@ namespace cinux::base {
  *                        space or NUL ends the number.
  * @return        The value, or kInvalidArgument when a non-octal
  *                character sits inside the number.
- * @note          The ustar header's size field is the first caller:
+ * @note          The classic shape is a tape header's size field:
  *                eleven octal digits plus a NUL, and an all-NUL field
  *                reads as zero.
  * @since         0.1.0

@@ -1,8 +1,8 @@
 #include "kernel/syscall/sys_readlink.hpp"
 
 #include "cinux/result.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/fs/file_world.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/fs/kernel_vfs.hpp"
 #include "kernel/fs/fs_config.hpp"
 #include "kernel/fs/procfs/procfs.hpp"
 #include "kernel/fs/vfs.hpp"
@@ -16,7 +16,10 @@ namespace cinux::syscall {
 namespace {
 
 long long readlink_path(const char* path, Word destination, Word capacity) {
-    const base::Result<fs::FsView> kView = fs::FileWorld::self().resolve(path);
+    // The neutral face, not the x86 mount world: kernel_vfs() backs onto
+    // FileWorld there and onto the port's own VFS elsewhere, so this
+    // path walk compiles and resolves on every lane.
+    const base::Result<fs::FsView> kView = fs::kernel_vfs().resolve(path);
     if (!kView.ok()) {
         return -ErrnoFrom(kView.error());
     }

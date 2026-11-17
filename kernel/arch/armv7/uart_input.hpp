@@ -1,0 +1,63 @@
+/**
+ * @file    uart_input.hpp
+ * @brief   Serial and USB keyboard input, sharing event0.
+ *
+ * UART bytes become key events on the USB keyboard's EventStream, so
+ * both the serial terminal and the QEMU display can type into the desk.
+ *
+ * @author  Charliechen114514
+ * @date    2026-11-13
+ * @version 0.1.0
+ * @since   0.1.0
+ * @ingroup kernel_arch
+ * @copyright Copyright (c) 2026
+ */
+
+#pragma once
+
+namespace cinux::driver {
+
+class EventStream;
+
+}  // namespace cinux::driver
+
+namespace cinux::armv7 {
+
+/**
+ * @brief         Drains the serial line into both keyboard consumers.
+ * @note          One byte source, two consumers: the console queue and
+ *                the evdev stream event0 reads. Called from the tick so
+ *                a running desktop hears keys even when no console
+ *                reader is asking.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void PollSerialKeyboard();
+
+/**
+ * @brief         Publishes one character as a key event.
+ * @param[in]     character   The byte the serial line just handed out.
+ * @note          Called at the byte source, so the console's reader and
+ *                the tick's pump both land their keys in event0 without
+ *                either one owning the line.
+ * @since         0.1.0
+ * @ingroup       kernel_arch
+ */
+void NoteSerialByte(char character);
+
+/// The shared serial/USB keyboard stream, event0's source.
+[[nodiscard]] cinux::driver::EventStream& UartKeyboardEvents();
+
+/// The pointer's seat: real but quiet, no source on this board.
+[[nodiscard]] cinux::driver::EventStream& BoardPointerEvents();
+
+/**
+ * @brief         Drains the UART receive line into the key stream.
+ * @note          Non-blocking: takes whatever waits, publishes one
+ *                press and release per byte, closes each with a
+ *                report. Call from the tick or console poll path.
+ * @since         0.1.0
+ * @ingroup kernel_arch
+ */
+
+}  // namespace cinux::armv7

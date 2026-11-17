@@ -1,4 +1,7 @@
+#include "kernel/arch/abi.hpp"
 #include "kernel/loader/loader.hpp"
+
+#include "kernel/arch/random.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,8 +11,8 @@
 #include "cinux/ptr.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
-#include "kernel/arch/x86_64/page.hpp"
-#include "kernel/arch/x86_64/page_entry.hpp"
+#include "kernel/arch/page.hpp"
+#include "kernel/arch/page_entry.hpp"
 #include "kernel/fs/open_file.hpp"
 #include "kernel/loader/elf_layout.hpp"
 #include "kernel/mm/address_space.hpp"
@@ -83,22 +86,73 @@ bool map_segment(const LoadWorld& world, const ElfSegment& segment,
     region.end   = kMemoryEnd;
     region.kind  = mm::VmaKind::kAnonymous;
     region.file_offset += kWholeEnd - kPageBase;
-    if (region.start < region.end && !world.vmas.register_range(region).ok()) {
-        return false;
+    if (region.start < region.end) {
+        if (!world.vmas.register_range(region).ok()) {
+            return false;
+        }
     }
-    return segment.file_bytes == 0 || kFileEnd == kWholeEnd ||
+    // The partial page at the tail carries INITIALIZED data neither
+    // region above serves: the file-backed one stops at the last full
+    // page, and the anonymous one zero-fills. glibc's stdio FILE
+    // structures live exactly there, and zeroed pointers sent the first
+    // stdio call through address zero. The seat fills the page eagerly:
+    // file bytes up to segment.file_bytes, zeros above, mapped writable
+    // or executable per the segment. The demand pager never fires for it.
+    bool tail_filled = false;
+    if (kFileEnd > kWholeEnd) {
+        const auto kTailFrame = mm::Pmm::self().allocate_page();
+        if (kTailFrame == mm::Pmm::PhysAddr{}) {
+            return false;
+        }
+        auto* const kBytes =
+            base::PtrAt<unsigned char>(mm::DirectMapVirt(kTailFrame.raw));
+        base::SetBytes(kBytes, 0, kSize);
+        const unsigned long long kFileOff =
+            segment.file_offset + (kWholeEnd - kSegmentVa);
+        const unsigned long long kCount =
+            base::math::Min(kFileEnd - kWholeEnd,
+                            static_cast<unsigned long long>(kSize));
+        const base::Result<unsigned long> kRead = world.file_ops->read(
+            world.file_self, world.file, kFileOff, kBytes, kCount);
+        if (!kRead.ok() || kRead.value() != kCount ||
+            !world.space.map_user(kWholeEnd, kTailFrame.raw,
+                                  arch::page::UserLeafTerms(region.writable,
+                                                            region.executable))) {
+            mm::Pmm::self().free_page(kTailFrame);
+            return false;
+        }
+        tail_filled = true;
+    }
+    return segment.file_bytes == 0 || kFileEnd == kWholeEnd || tail_filled ||
            (world.file_ops != nullptr && map_tail(world, region, kFileEnd));
 }
 
 }  // namespace
 
+void SeedProcessLayout(mm::VmaStore& ranges) {
+    // Both slides stay page aligned: a crooked break start or mmap
+    // ceiling would hand out unaligned promises.
+    const unsigned long long kPageMask     = cinux::arch::page::kSize - 1ULL;
+    const unsigned long long kBrkSlideMask =
+        (arch::space::kBrkSlideBytes - 1ULL) & ~kPageMask;
+    const unsigned long long kMmapSlideMask =
+        (arch::space::kMmapSlideBytes - 1ULL) & ~kPageMask;
+    ranges.seed_heap(cinux::base::math::AlignUp(ranges.max_end(), cinux::arch::page::kSize) +
+                         (arch::random::Word() & kBrkSlideMask),
+                     mm::kUserBrkMmapSplit);
+    ranges.set_mmap_ceiling(mm::kUserMmapTop - (arch::random::Word() & kMmapSlideMask));
+}
+
 bool LoadElfIntoSpace(const std::uint8_t* data, std::size_t bytes, const LoadWorld& world,
                       EntryFacts& facts) {
-    const base::Result<ElfImage> kParsed = ParseElf64(data, bytes, world.role);
+    const base::Result<ElfImage> kParsed = ParseElf(data, bytes, world.role);
     if (!kParsed.ok()) {
         return false;
     }
-    const ElfImage             kImage = kParsed.value();
+    const ElfImage kImage = kParsed.value();
+    if (!ImageRunsHere(kImage)) {
+        return false;
+    }
     base::Shared<fs::OpenFile> backing;
     if (world.file_ops != nullptr) {
         backing = base::Shared<fs::OpenFile>(

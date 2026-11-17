@@ -4,9 +4,9 @@
 #include <type_traits>
 
 #include "cinux/assert.hpp"
-#include "kernel/arch/x86_64/instructions.hpp"
-#include "kernel/arch/x86_64/irq_guard.hpp"
-#include "kernel/arch/x86_64/per_cpu.hpp"
+#include "kernel/arch/instructions.hpp"
+#include "kernel/arch/irq_guard.hpp"
+#include "kernel/arch/per_cpu.hpp"
 #include "kernel/proc/lockdep.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/proc/task.hpp"
@@ -149,6 +149,11 @@ void Mutex::lock() {
     // park_current() has committed the task's blocked state.
     const cinux::arch::IrqGuard kParkGuard;
     Task* const                 kSelf = Scheduler::self().current();
+    // The uncontended fast path tolerates a task-less caller (the boot
+    // main line before its seat); parking cannot, because the waiters
+    // list would thread through a null task.
+    base::safety::Check(owner_ == nullptr || kSelf != nullptr,
+                        "mutex contended outside any task");
     {
         const SpinGuard kGuard(spin_);
         if (owner_ == nullptr) {
