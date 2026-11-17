@@ -13,6 +13,7 @@
 #include "cinux/memory.hpp"
 #include "cinux/result.hpp"
 #include "cinux/shared.hpp"
+#include "kernel/arch/abi.hpp"
 #include "kernel/arch/per_cpu.hpp"
 #include "kernel/drivers/net/loopback.hpp"
 #include "kernel/drivers/net/net_config.hpp"
@@ -790,12 +791,9 @@ TEST("socket syscall: accept honors listener flags and signals; accept4 flags be
 
 namespace {
 
-struct TimerImage {
-    long long interval_seconds      = 0;
-    long long interval_microseconds = 0;
-    long long value_seconds         = 0;
-    long long value_microseconds    = 0;
-};
+/// The caller's record as this ABI lays it out, so the test arms and
+/// reads exactly the shape the syscall copies.
+using TimerImage = cinux::arch::abi::Itimerval;
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) a body walks one story in order
 void run_timer_body() {
@@ -812,7 +810,9 @@ void run_timer_body() {
     ASSERT_TRUE(proc::HasPendingSignal(task));
     ASSERT_EQ(task.state, proc::TaskState::kRunning);
     task.signals->reset();
-    TimerImage image{.interval_microseconds = 1000, .value_microseconds = 500};
+    TimerImage image{};
+    image.interval.microseconds = 1000;
+    image.value.microseconds    = 500;
     frame     = plain_frame();
     frame.rsi = reinterpret_cast<Word>(&image);
     ASSERT_EQ(syscall::HandleSetitimer(frame), 0);
@@ -823,8 +823,8 @@ void run_timer_body() {
     frame.rsi                    = reinterpret_cast<Word>(&old);
     syscall::g_test_monotonic_ns = 5'010'000'000;
     ASSERT_EQ(syscall::HandleGetitimer(frame), 0);
-    ASSERT_EQ(old.interval_microseconds, 1000LL);
-    ASSERT_EQ(old.value_microseconds, 500LL);
+    ASSERT_EQ(old.interval.microseconds, 1000LL);
+    ASSERT_EQ(old.value.microseconds, 500LL);
     frame     = plain_frame();
     frame.rdi = 1;
     ASSERT_EQ(syscall::HandleAlarm(frame), 1);
@@ -832,13 +832,31 @@ void run_timer_body() {
     ASSERT_EQ(syscall::HandleAlarm(frame), 1);
     ASSERT_EQ(task.real_deadline_ns, 0ULL);
     ASSERT_EQ(task.real_interval_ns, 0ULL);
-    image.value_microseconds = 1'000'000;
+    image.value.microseconds = 1'000'000;
     frame.rsi                = reinterpret_cast<Word>(&image);
     ASSERT_EQ(syscall::HandleSetitimer(frame), -syscall::kEinval);
     frame.rsi = syscall::kUserAddressLimit;
     ASSERT_EQ(syscall::HandleSetitimer(frame), -syscall::kEfault);
     frame.rdi = 1;
     ASSERT_EQ(syscall::HandleGetitimer(frame), -syscall::kEinval);
+    // A second arm reports the timer it replaced, spelled in the same ABI
+    // shape the caller handed over.
+    TimerImage first{};
+    first.value.microseconds = 4000;
+    frame                    = plain_frame();
+    frame.rsi                = reinterpret_cast<Word>(&first);
+    ASSERT_EQ(syscall::HandleSetitimer(frame), 0);
+    TimerImage second{};
+    second.value.microseconds = 5000;
+    TimerImage replaced{};
+    frame     = plain_frame();
+    frame.rsi = reinterpret_cast<Word>(&second);
+    frame.rdx = reinterpret_cast<Word>(&replaced);
+    ASSERT_EQ(syscall::HandleSetitimer(frame), 0);
+    ASSERT_EQ(replaced.value.microseconds, 4000LL);
+    frame     = plain_frame();
+    frame.rdi = 0;
+    ASSERT_EQ(syscall::HandleAlarm(frame), 1);
     scheduler.exit_current();
 }
 

@@ -213,6 +213,27 @@ inline constexpr TimePairLayout kTimespecLayout = {
 inline constexpr TimePairLayout kTimevalLayout = kTimespecLayout;
 
 /**
+ * @brief One timeval as this ABI lays it out: two eight-byte words.
+ * @note  setitimer and getitimer hand the caller's record over whole, so
+ *        the kernel reads this shape rather than a struct of its own
+ *        word width. The EABI port spells the same two fields four
+ *        bytes wide, which is a different record, not a narrower one.
+ */
+struct Timeval {
+    std::int64_t seconds;
+    std::int64_t microseconds;
+};
+
+/// One itimerval: the reload interval first, then the value that fires.
+struct Itimerval {
+    Timeval interval;
+    Timeval value;
+};
+
+static_assert(sizeof(Timeval) == 16);
+static_assert(sizeof(Itimerval) == 32);
+
+/**
  * @brief The 64-bit stat record: the shape EABI's stat64 spells.
  * @note  A 64-bit port has one stat record, so this names the same
  *        layout there. EABI's stat64 is not its stat: every field is

@@ -1,5 +1,6 @@
 #include "kernel/syscall/sys_itimer.hpp"
 
+#include "kernel/arch/abi.hpp"
 #include "kernel/proc/scheduler.hpp"
 #include "kernel/syscall/sys_clock.hpp"
 #include "kernel/syscall/syscall.hpp"
@@ -15,20 +16,13 @@ namespace cinux::syscall {
 namespace {
 constexpr Word kNanosecondsPerSecond      = 1'000'000'000;
 constexpr Word kNanosecondsPerMicrosecond = 1'000;
-// The ARM32 Linux ABI's own shapes: tv_sec and tv_usec are 32-bit longs,
-// so a timeval is eight bytes and an itimerval sixteen. The neutral 64-bit
-// Words are the internal currency; the conversion to and from the ABI's
-// fields happens here and nowhere else.
-struct Timeval {
-    std::int32_t seconds      = 0;
-    std::int32_t microseconds = 0;
-};
-struct Itimerval {
-    Timeval interval;
-    Timeval value;
-};
-static_assert(sizeof(Timeval) == 8);
-static_assert(sizeof(Itimerval) == 16);
+// The caller's itimerval is the ABI's record, not the kernel's: a timeval
+// is two `long` words, so the record is sixteen bytes on EABI and
+// thirty-two on the 64-bit port. The neutral Word nanoseconds stay the
+// internal currency, and every conversion between the two happens here.
+using cinux::arch::abi::Itimerval;
+using cinux::arch::abi::Timeval;
+using TimeWord = decltype(Timeval::seconds);
 
 bool to_nanoseconds(const Timeval& value, Word& out) {
     if (value.seconds < 0 || value.microseconds < 0 || value.microseconds >= 1'000'000) {
@@ -47,8 +41,8 @@ Timeval from_nanoseconds(Word value) {
     const Word kMicros =
         (value / kNanosecondsPerMicrosecond) + (value % kNanosecondsPerMicrosecond != 0 ? 1 : 0);
     return {
-        .seconds      = static_cast<std::int32_t>(kMicros / 1'000'000),
-        .microseconds = static_cast<std::int32_t>(kMicros % 1'000'000),
+        .seconds      = static_cast<TimeWord>(kMicros / 1'000'000),
+        .microseconds = static_cast<TimeWord>(kMicros % 1'000'000),
     };
 }
 }
@@ -57,7 +51,7 @@ long long HandleGetitimer(const SyscallFrame& frame) {
     if (frame.rdi != 0) {
         return -kEinval;
     }
-    proc::RealTimerValue timer;
+    proc::RealTimerValue timer{};
     proc::Scheduler::self().real_timer(*CurrentTask(), MonotonicNanoseconds(), timer, false);
     const Itimerval kOld{
         .interval = from_nanoseconds(timer.interval_ns),
@@ -81,14 +75,18 @@ long long HandleSetitimer(const SyscallFrame& frame) {
         !to_nanoseconds(wanted.interval, armed.interval_ns)) {
         return -kEinval;
     }
-    // The previous state comes back through the out-parameter: a fresh
-    // caller reads zeros, a re-arm reads the still-running timer.
+    if (armed.value_ns > ~0ULL - kNow) {
+        return -kEinval;
+    }
+    // Read the running timer before arming. real_timer writes the state it
+    // replaced back through its out-parameter, but keeping the read in its
+    // own call leaves "what the caller had" apart from "what we set".
     proc::Scheduler::self().real_timer(*CurrentTask(), kNow, previous, false);
     proc::Scheduler::self().real_timer(*CurrentTask(), kNow, armed, true);
     if (frame.rdx != 0) {
         const Itimerval kOld{
-            .interval = from_nanoseconds(armed.interval_ns),
-            .value    = from_nanoseconds(armed.value_ns),
+            .interval = from_nanoseconds(previous.interval_ns),
+            .value    = from_nanoseconds(previous.value_ns),
         };
         if (!uaccess::CopyToUser(frame.rdx, &kOld, sizeof(kOld))) {
             return -kEfault;
