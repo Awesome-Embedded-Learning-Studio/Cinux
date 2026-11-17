@@ -44,11 +44,14 @@ void SeatConsoleWorld(fs::DevFs& devices) {
             return driver::Keyboard::self().poll() || driver::UsbKeyboard::self().poll();
         },
     });
-    [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
-    const bool                  kTablet      = driver::UsbTablet::self().init();
+    const bool kTablet = driver::UsbTablet::self().init();
+    // The tree comes first: SeatDeviceTree binds the devfs to the
+    // device model, and the keyboard hand-over below seats a character
+    // row, which the model refuses before a devfs is bound.
     fs::SeatDeviceTree(devices, driver::Keyboard::self().events(),
                        kTablet ? driver::UsbTablet::self().events()
                                : driver::Ps2Mouse::self().events());
+    [[maybe_unused]] const bool kUsbKeyboard = driver::SeatUsbKeyboard();
     const base::Result<void> kSata = driver::DeviceModel::self().seat({
         .klass       = driver::DeviceClass::kBlock,
         .name        = "sata0",
