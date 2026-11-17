@@ -130,7 +130,7 @@ ShellWorld build_shell_world(std::uint64_t& entry) {
         return {};
     }
     loader::EntryFacts facts = kSeat.value().facts;
-    entry                    = facts.program_entry;
+    entry                    = kSeat.value().start_entry;
     cinux::print::Println("[kern] shell seat: entry %X phnum %X", entry,
                           static_cast<unsigned>(facts.program_headers));
     const bool kStackExecutable = kSeat.value().stack_executable;

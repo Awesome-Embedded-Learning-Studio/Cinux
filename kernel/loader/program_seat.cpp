@@ -73,10 +73,14 @@ base::Result<ProgramSeat> SeatProgram(const unsigned char* image,
         return kInterpreter.error();
     }
     facts.interpreter_base = kInterpreter.value().interpreter_base;
-    if (kInterpreter.value().program_entry != 0) {
-        facts.program_entry = kInterpreter.value().program_entry;
-    }
-    return ProgramSeat{.facts = facts, .stack_executable = kStackExecutable};
+    // AT_ENTRY names the main program's entry; a dynamic image starts at
+    // the interpreter's instead. Keeping them in two words is what lets
+    // ld.so find the program it was seated for.
+    const std::uint64_t kStartEntry = kInterpreter.value().program_entry != 0
+                                          ? kInterpreter.value().program_entry
+                                          : facts.program_entry;
+    return ProgramSeat{
+        .facts = facts, .stack_executable = kStackExecutable, .start_entry = kStartEntry};
 }
 
 void DrawEntryRandom(unsigned char (&bytes)[16]) {

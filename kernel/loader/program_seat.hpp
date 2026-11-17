@@ -33,6 +33,9 @@ namespace cinux::loader {
 struct ProgramSeat {
     EntryFacts facts{};            ///< Entry picture with page_bytes and platform filled.
     bool       stack_executable{}; ///< The GNU stack flag carried kSegmentExec.
+    std::uint64_t start_entry{};   ///< Where the CPU starts: the interpreter's
+                                   ///< entry for a dynamic image, AT_ENTRY's
+                                   ///< value for a static one.
 };
 
 /**

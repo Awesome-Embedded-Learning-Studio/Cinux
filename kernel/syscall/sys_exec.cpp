@@ -276,7 +276,7 @@ long long HandleExecve(const SyscallFrame& frame) {
     }
     loader::EntryFacts facts            = kSeat.value().facts;
     const bool         kStackExecutable = kSeat.value().stack_executable;
-    const unsigned long long kFirstInstruction = facts.program_entry;
+    const unsigned long long kFirstInstruction = kSeat.value().start_entry;
     const unsigned long long kUserFlags = arch::UserEntryFlags(kFirstInstruction);
     const unsigned long long kStackTop = loader::DrawEntryStackTop();
     if (!proc::MapSignalTrampoline(*fresh, *ranges)) {
