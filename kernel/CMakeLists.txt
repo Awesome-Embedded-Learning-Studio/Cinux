@@ -99,6 +99,10 @@ function(cinux_kernel_link_settings name)
         -nostdlib
         -Wl,-T,${CMAKE_SOURCE_DIR}/kernel/arch/x86_64/kernel.ld
         -Wl,--build-id=none
+        # The blob objects (font, kallsyms) carry no .note.GNU-stack, so
+        # binutils 2.39+ warns an executable stack into every link; the
+        # kernel stack is data, never code.
+        -Wl,-z,noexecstack
         -Wl,--no-warn-rwx-segments
         -Wl,--gc-sections
         -Wl,-e,KernelEntry)

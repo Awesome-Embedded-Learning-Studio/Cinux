@@ -1,7 +1,7 @@
 {
     "image": "cinux-boot.img",
     "format": "raw",
-    "size_bytes": 1048576,
+    "size_bytes": "auto",
     "entries": [
         {
             "kind": "payload",

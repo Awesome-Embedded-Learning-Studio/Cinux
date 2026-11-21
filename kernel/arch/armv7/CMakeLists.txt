@@ -243,6 +243,9 @@ function(add_arm_image target output_name)
         -no-pie
         -T${CMAKE_CURRENT_SOURCE_DIR}/link.ld
         -Wl,--build-id=none
+        # The font blob object carries no .note.GNU-stack; state the
+        # stack is data explicitly instead of taking a warning per link.
+        -Wl,-z,noexecstack
         -Wl,--no-warn-rwx-segments)
 
     target_include_directories(${target} PRIVATE
