@@ -8,7 +8,7 @@ bash user/rootfs/busybox/build.sh
 
 这一条命令下载并校验 BusyBox 1.38.0、按仓内配置编译动态 BusyBox、构建内核和用户程序、生成 ext2 系统盘，再启动双核 KVM。依赖 GCC/G++ 14 或更新版本、glibc 开发环境、CMake、make、QEMU、e2fsprogs、Python 3、curl、tar 和 bzip2。编译工具链及复制进盘的 glibc 必须来自同一套宿主运行时。
 
-整条链已并入 CMake 依赖图，也可以直接用构建系统入口：`cmake --build build --target run`（窗口启动，桌面即默认姿态）、`run_card`（单盘形态）、`run_debug`（冻结复位加 gdb stub），三者都会先备齐镜像和系统盘再开机。`user/rootfs/busybox/build.sh` 是同一入口的薄壳，只负责挑选出口。
+整条链已并入 CMake 依赖图，也可以直接用构建系统入口：`cmake --build build --target run`（串口档）、`run_gui`（GTK 窗口，桌面即默认姿态）、`run_debug` / `run_gui_debug`（冻结复位加 gdb stub），全部走单盘形态，都会先备齐镜像和系统盘再开机。`user/rootfs/busybox/build.sh` 是同一入口的薄壳，只负责挑选出口。
 
 ```sh
 bash user/rootfs/busybox/build.sh build
@@ -28,7 +28,7 @@ bash user/rootfs/busybox/build.sh verify
 
 BusyBox 缓存按源码内容、配置、构建脚本、编译器及 libc 校验值失效。上游归档的 SHA-256 固定在 `build.sh` 中；网络失败、校验失败、库缺失和 KVM 缺席都直接报错。
 
-系统盘只装 glibc 动态运行时：解释器位于 `/lib64`，libc、libm、libresolv 位于 `/lib`，程序显式使用 `/lib` 搜索路径。`/sbin/init` 和 `/bin/sh` 是同一个 BusyBox 的硬链接，inittab 的 console 项打开控制终端。默认盘为 64 MiB；musl 造盘模式仅保留作旧站回归入口，不参与本入口。
+系统盘只装 glibc 动态运行时：解释器位于 `/lib64`，libc、libm、libresolv 位于 `/lib`，程序显式使用 `/lib` 搜索路径。`/sbin/init` 和 `/bin/sh` 是同一个 BusyBox 的硬链接，inittab 的 console 项打开控制终端。默认盘为 64 MiB。
 
 NVMe 是块设备的第二个实现，系统根盘继续使用 AHCI。默认 QEMU 另挂构建目录内生成的 NVMe scratch 盘；仅识别为 `cinux-nvme` 的测试控制器会执行写读回与队列绕回检查，其他控制器不会被启动自检写入。传输按单个 DMA 页分批，支持 512 至 4096 字节扇区；要求固件已分配 BAR、控制器支持 4 KiB 页，完成记录的命令号、队列号、phase 和错误状态都必须匹配。
 

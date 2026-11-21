@@ -49,7 +49,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .cache/rootfs
-        key: rootfs-v2-${{ runner.os }}-${{ hashFiles('scripts/build-busybox-glibc.sh', 'user/rootfs/buildroot/source.json', 'user/rootfs/buildroot/configs/**') }}
+        key: rootfs-v2-${{ runner.os }}-${{ hashFiles('scripts/create/build-busybox-glibc.sh', 'user/rootfs/buildroot/source.json', 'user/rootfs/buildroot/configs/**') }}
 
     - name: Check KVM access
       if: inputs.kvm == 'true'

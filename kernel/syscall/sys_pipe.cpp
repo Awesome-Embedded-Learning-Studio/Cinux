@@ -42,13 +42,13 @@ long long seat_pipe_pair(unsigned long long user_fds, unsigned long long flags) 
     const proc::Task* const           kSelf    = CurrentTask();
     const base::Result<unsigned long> kReadEnd = kSelf->files->alloc(
         fs::PipeOps(), kPipe.get(), kReadMark,
-        {.status = kStatus, .cloexec = kCloexec, .limit = FileDescriptorLimit()});
+        {.status = static_cast<unsigned long>(kStatus), .cloexec = kCloexec, .limit = FileDescriptorLimit()});
     if (!kReadEnd.ok()) {
         return -kEmfile;
     }
     const base::Result<unsigned long> kWriteEnd = kSelf->files->alloc(
         fs::PipeOps(), kPipe.get(), kWriteMark,
-        {.status = kOpenWriteOnly | kStatus, .cloexec = kCloexec, .limit = FileDescriptorLimit()});
+        {.status = static_cast<unsigned long>(kOpenWriteOnly | kStatus), .cloexec = kCloexec, .limit = FileDescriptorLimit()});
     if (!kWriteEnd.ok()) {
         cinux::base::safety::Check(kSelf->files->free(kReadEnd.value()).ok(),
                                    "pipe read end vanished while seating the write end");

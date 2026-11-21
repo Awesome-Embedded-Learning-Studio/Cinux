@@ -1,50 +1,82 @@
 # The USB device list is a knob: the station lanes keep the default
 # keyboard; desktop lanes put keyboard and tablet on separate buses.
-math(EXPR _grace "${RUN_SECONDS} + 20")
 if(NOT DEFINED USB_DEVICES)
     set(USB_DEVICES "-device usb-kbd")
 endif()
 # A -D value with spaces arrives as a semicolon list; the shell branch
-# wants the plain string back, and the direct branch wants real argv
-# words, so keep both forms.
+# wants the plain string back, so rebuild one string.
 string(REPLACE ";" " " USB_DEVICES "${USB_DEVICES}")
-separate_arguments(USB_DEVICE_ARGS UNIX_COMMAND "${USB_DEVICES}")
 
-# Runs the bring-up image for a fixed window and checks the serial banner.
-# With STDIN_FILE set, the file's bytes drip into the guest's UART after
-# a delay: bytes that arrive before the kernel's UART bring-up are
-# dropped by the model, and the legacy task world's pending reads would
-# swallow them right after, so the wait skips both windows.
+# Event-driven runner: QEMU starts detached with its serial line teed
+# into SERIAL_LOG, and this script polls the log instead of sleeping out
+# a fixed window. The run ends the moment every EXPECTED_* literal this
+# lane passed has landed (success), or at the grace deadline (failure --
+# the expect_literal tail below then names the missing marker).
+# With STDIN_FILE set, a feeder shell holds the probe lines back until
+# the guest prints STDIN_AFTER (default: the sysinit banner), then
+# streams them with short gaps -- the bytes used to race the kernel's
+# UART bring-up when they arrived early, so they wait for the guest's
+# own word. -snapshot keeps concurrent boots off each other's card: the
+# selftest lane writes sectors into the shared image, and parallel ctest
+# runs would both lock and corrupt it.
+math(EXPR _grace "${RUN_SECONDS} + 20")
 if(STDIN_FILE)
-    execute_process(
-        COMMAND /bin/sh -c "{ sleep ${STDIN_DELAY}; head -n 1 '${STDIN_FILE}'; sleep ${STDIN_DELAY2}; sed -n 2p '${STDIN_FILE}'; sleep ${STDIN_DELAY3}; tail -n +3 '${STDIN_FILE}'; } | 'timeout' '${RUN_SECONDS}' '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -nographic -monitor none ${USB_DEVICES}"
-        TIMEOUT ${_grace}
-        OUTPUT_VARIABLE serial_out
-        ERROR_VARIABLE serial_err
-        RESULT_VARIABLE run_result)
+    if(NOT DEFINED STDIN_AFTER)
+        set(STDIN_AFTER "Cinux up")
+    endif()
+    set(_feeder
+        "until grep -aq -- '${STDIN_AFTER}' '${SERIAL_LOG}' 2>/dev/null; do sleep 0.2; done; sleep 1; while IFS= read -r _line; do printf '%s\\n' \"\$_line\"; sleep 0.4; done < '${STDIN_FILE}'")
 else()
-    execute_process(
-        COMMAND ${QEMU_PROGRAM} -M mcimx6ul-evk -kernel ${IMAGE_FILE}
-                -device loader,file=${DEVICE_FILE},addr=${DEVICE_ADDR},force-raw=on
-                -sd ${SD_FILE}
-                -nographic -monitor none ${USB_DEVICE_ARGS}
-        TIMEOUT ${RUN_SECONDS}
-        OUTPUT_VARIABLE serial_out
-        ERROR_VARIABLE serial_err
-        RESULT_VARIABLE run_result)
+    set(_feeder "sleep ${_grace}")
 endif()
-file(WRITE "${SERIAL_LOG}" "${serial_out}")
+set(_err_log "${SERIAL_LOG}.qemu.err")
+set(_pid_file "${SERIAL_LOG}.qemu.pid")
+get_filename_component(_tmp_dir "${SERIAL_LOG}" DIRECTORY)
+execute_process(COMMAND /bin/sh -c
+    "export TMPDIR='${_tmp_dir}'; { { ${_feeder}; } | '${QEMU_PROGRAM}' -M mcimx6ul-evk -kernel '${IMAGE_FILE}' -device loader,file='${DEVICE_FILE}',addr=${DEVICE_ADDR},force-raw=on -sd '${SD_FILE}' -snapshot -nographic -monitor none ${USB_DEVICES} > '${SERIAL_LOG}' 2> '${_err_log}'; } > /dev/null 2>&1 < /dev/null & echo \$! > '${_pid_file}'"
+    OUTPUT_QUIET ERROR_QUIET)
 
-if(NOT EXISTS ${SERIAL_LOG})
-    message(FATAL_ERROR
-        "arm_boot: the runner produced no log (result ${run_result}).")
+# The verdict is every expected literal present in the log.
+get_cmake_property(_all_vars VARIABLES)
+set(_expected_names "")
+foreach(_name IN LISTS _all_vars)
+    if(_name MATCHES "^EXPECTED_" AND NOT "${${_name}}" STREQUAL "")
+        list(APPEND _expected_names "${_name}")
+    endif()
+endforeach()
+string(TIMESTAMP _deadline "%s")
+math(EXPR _deadline "${_deadline} + ${_grace}")
+set(_complete FALSE)
+while(NOT _complete)
+    if(EXISTS "${SERIAL_LOG}")
+        file(READ "${SERIAL_LOG}" serial_out)
+        set(_missing FALSE)
+        foreach(_name IN LISTS _expected_names)
+            string(FIND "${serial_out}" "${${_name}}" _at)
+            if(_at EQUAL -1)
+                set(_missing TRUE)
+            endif()
+        endforeach()
+        if(NOT _missing)
+            set(_complete TRUE)
+        endif()
+    endif()
+    if(NOT _complete)
+        string(TIMESTAMP _now "%s")
+        if(_now GREATER_EQUAL _deadline)
+            # Let the guest drain what it was printing before judging.
+            execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 1)
+            set(_complete TRUE)
+        else()
+            execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 0.2)
+        endif()
+    endif()
+endwhile()
+if(EXISTS "${_pid_file}")
+    file(READ "${_pid_file}" _qemu_pid)
+    string(STRIP "${_qemu_pid}" _qemu_pid)
+    execute_process(COMMAND /bin/sh -c "kill '${_qemu_pid}' 2>/dev/null || true")
 endif()
-file(READ ${SERIAL_LOG} serial_out)
-if(serial_out STREQUAL "")
-    message(FATAL_ERROR "arm_boot: the runner produced an empty log (err: ${serial_err}).")
-endif()
-
-file(WRITE "${SERIAL_LOG}" "${serial_out}")
 
 # Expectations are literal text, not regular expressions: a checked line
 # may contain '+', '(', or any other metacharacter without changing what

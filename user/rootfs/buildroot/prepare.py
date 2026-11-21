@@ -112,7 +112,7 @@ def main():
         # The boot ladder's mount check reads this one fixture from the
         # card. Staged after the overlay merge so the 99-byte motd wins
         # over the banner.
-        seeds = repo / 'scripts/ext2_seed'
+        seeds = repo / 'scripts/create/ext2_seed'
         shutil.copy2(seeds / 'motd.txt', root / 'etc' / 'motd')
         for name in ('zh.txt', 'zh_ascii.txt'):
             shutil.copy2(seeds / name, root / 'etc' / name)
@@ -137,7 +137,7 @@ def main():
     shutil.copy2(repo / 'cmake/platform/Platform/Cinux.cmake',
                  root / str(cmake_root / 'Modules/Platform/Cinux.cmake').lstrip('/'))
     subprocess.run(['gcc', '-D_GNU_SOURCE', '-O2', '-Wall', '-Wextra', '-Werror',
-                    str(repo / 'scripts/ext2_seed/nativeprobe.c'), '-o', str(root / 'bin/nativeprobe')], check=True)
+                    str(repo / 'scripts/create/ext2_seed/nativeprobe.c'), '-o', str(root / 'bin/nativeprobe')], check=True)
     for name, target in (('cc', 'gcc'), ('c++', 'g++')):
         (root / 'usr/bin' / name).unlink(missing_ok=True)
         (root / 'usr/bin' / name).symlink_to(target)

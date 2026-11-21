@@ -113,11 +113,11 @@ def main():
     image.parent.mkdir(parents=True, exist_ok=True)
     # Volume geometry. x86_64 mounts a bare 1536 MiB ext2 image; armv7
     # slides its volume inside an MBR card whose every offset lives in
-    # scripts/meta/cinux-sdcard-armv7.json (one image, one table file),
+    # scripts/create/meta/cinux-sdcard-armv7.json (one image, one table file),
     # so the card constants have exactly one home and the assembler
     # bakes the same bytes.
     root = here.parents[2]
-    sdcard_table = root / 'scripts' / 'meta' / 'cinux-sdcard-armv7.json'
+    sdcard_table = root / 'scripts' / 'create' / 'meta' / 'cinux-sdcard-armv7.json'
     if args.arch == 'armv7':
         sdcard = json.loads(sdcard_table.read_text(encoding='utf-8'))
         mbr_entry = next(entry for entry in sdcard['entries']
@@ -144,7 +144,7 @@ def main():
         disk.flush()
         os.fsync(disk.fileno())
     if args.arch == 'armv7':
-        run(sys.executable, root / 'scripts' / 'assemble_image.py',
+        run(sys.executable, root / 'scripts' / 'create' / 'assemble_image.py',
             '--layout', sdcard_table,
             '--output', image,
             '--source', f'volume={volume}')

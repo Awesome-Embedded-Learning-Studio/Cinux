@@ -98,7 +98,7 @@ long long HandleIoctl(const SyscallFrame& frame) {
         const auto kCap   = driver::InputKeyCodeBytes();
         dynamic           = {
             .word         = frame.rsi,
-            .bytes        = kBytes < kCap ? kBytes : kCap,
+            .bytes        = static_cast<unsigned long>(kBytes < kCap ? kBytes : kCap),
             .caller_gives = false,
         };
         span = &dynamic;

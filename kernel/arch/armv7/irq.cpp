@@ -124,7 +124,9 @@ void HandleIrq() {
 /// image is still in the registers at that point, so the stub may only
 /// load this word - a call would eat the user's r0-r3, lr. The seat
 /// world raises it for its episodes and drops it on the way out.
-extern "C" unsigned long c_seat_irq_door = 0;
+extern "C" {
+unsigned long c_seat_irq_door = 0;
+}
 
 /// The seated IRQ service: the frame is homed on the interrupted
 /// task's own supervisor stack, so the tick may switch this task away

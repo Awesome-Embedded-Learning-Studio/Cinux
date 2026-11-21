@@ -241,7 +241,7 @@ long long accept_common(const SyscallFrame& frame, Word extra_flags) {
     const auto kSeat = CurrentTask()->files->alloc(
         net::SocketOps(), born.get(), kNode,
         {
-            .status  = kOpenReadWrite | ((extra_flags & kSockNonblock) != 0 ? kOpenNonblock : 0),
+            .status  = static_cast<unsigned long>(kOpenReadWrite | ((extra_flags & kSockNonblock) != 0 ? kOpenNonblock : 0)),
             .cloexec = (extra_flags & kSockCloexec) != 0,
             .limit   = FileDescriptorLimit(),
         });
@@ -340,8 +340,8 @@ long long HandleSocket(const SyscallFrame& frame) {
     const auto kSeat =
         CurrentTask()->files->alloc(net::SocketOps(), socket.get(), kNode,
                                     {
-                                        .status = kOpenReadWrite |
-                                                  ((kFlags & kSockNonblock) != 0 ? kOpenNonblock : 0),
+                                        .status = static_cast<unsigned long>(
+                                             kOpenReadWrite | ((kFlags & kSockNonblock) != 0 ? kOpenNonblock : 0)),
                                         .cloexec = (kFlags & kSockCloexec) != 0,
                                         .limit   = FileDescriptorLimit(),
                                     });
@@ -586,7 +586,8 @@ long long HandleSendmsg(const SyscallFrame& frame) {
         if (target.family != socket->family()) { return -kEafnosupport; }
     } else if (!socket->report_peer(target).ok()) { return -kEdestaddrreq; }
     return transmit_wait(*socket, *held,
-        {.source = payload, .count = capacity, .flags = frame.rdx, .destination = target});
+        {.source = payload, .count = static_cast<unsigned long>(capacity), .flags = frame.rdx,
+         .destination = target});
 }
 
 long long HandleRecvmsg(const SyscallFrame& frame) {
@@ -742,8 +743,8 @@ long long HandleSocketpair(const SyscallFrame& frame) {
         const auto kSeat =
             files.alloc(net::SocketOps(), pair[index].get(), kNode,
                         {
-                            .status  = kOpenReadWrite |
-                                       ((frame.rsi & kSockNonblock) != 0 ? kOpenNonblock : 0),
+                            .status  = static_cast<unsigned long>(
+                                       kOpenReadWrite | ((frame.rsi & kSockNonblock) != 0 ? kOpenNonblock : 0)),
                             .cloexec = (frame.rsi & kSockCloexec) != 0,
                         });
         if (!kSeat.ok()) {

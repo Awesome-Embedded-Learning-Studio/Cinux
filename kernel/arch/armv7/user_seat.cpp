@@ -53,7 +53,9 @@ extern "C" unsigned long c_seat_irq_door;
 
 /// The trap frame the seat is servicing; born in user_mode.cpp with
 /// the bring-up world, now the seat's own word.
-extern "C" cinux::arch::UserTrap* g_current_trap = nullptr;
+extern "C" {
+cinux::arch::UserTrap* g_current_trap = nullptr;
+}
 
 extern "C" char SeatProgStart[];
 extern "C" char SeatProgEnd[];

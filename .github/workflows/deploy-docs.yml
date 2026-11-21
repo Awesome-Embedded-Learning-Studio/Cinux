@@ -14,8 +14,8 @@ on:
       - 'base/**'
       - 'boot/**'
       - 'user/**'
-      - 'scripts/build.ts'
-      - 'scripts/check-links.ts'
+      - 'scripts/docs/build.ts'
+      - 'scripts/docs/check-links.ts'
       - 'project.config.ts'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: site/.vitepress/.build-cache
-          key: cinux-pages-${{ runner.os }}-${{ hashFiles('document/**', 'site/.vitepress/config/**', 'site/.vitepress/plugins/**', 'site/.vitepress/public/**', 'site/.vitepress/theme/**', 'project.config.ts', 'scripts/build.ts', 'package.json', 'pnpm-lock.yaml') }}
+          key: cinux-pages-${{ runner.os }}-${{ hashFiles('document/**', 'site/.vitepress/config/**', 'site/.vitepress/plugins/**', 'site/.vitepress/public/**', 'site/.vitepress/theme/**', 'project.config.ts', 'scripts/docs/build.ts', 'package.json', 'pnpm-lock.yaml') }}
           restore-keys: |
             cinux-pages-${{ runner.os }}-
 

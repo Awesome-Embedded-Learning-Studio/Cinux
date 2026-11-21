@@ -46,7 +46,7 @@ bool UsbDevice<Owner>::detach(HostDriver& host) {
     }
     host.detach(seat_);
     if (report_page_ != 0) {
-        mm::Pmm::self().free_page(base::PhysAddr{report_page_});
+        mm::Pmm::self().free_page(base::PhysAddr{static_cast<unsigned long>(report_page_)});
         report_page_ = 0;
     }
     seat_ = nullptr;

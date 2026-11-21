@@ -80,7 +80,7 @@ def call_tool(name, args):
     if name == "debug_boot":
         # Validate before replacing an existing machine.
         timeout = timeout_arg(args)
-        image = gdb.resolve(args.get("image"), "build/boot/cinux.img", "image")
+        image = gdb.resolve(args.get("image"), "build/boot/cinux-boot.img", "image")
         elf = gdb.resolve(args.get("elf"), "build/kernel/cinux_kernel", "elf")
         if SESSION is not None:
             SESSION.close()
@@ -156,7 +156,7 @@ TOOLS = [
         "description": (
             "Start QEMU frozen at reset (KVM, local gdbstub), attach a persistent "
             "gdb with kernel symbols, hardware-break at stop_at and continue until it "
-            "hits. Defaults: image build/boot/cinux.img, elf build/kernel/cinux_kernel, "
+            "hits. Defaults: image build/boot/cinux-boot.img, elf build/kernel/cinux_kernel, "
             "stop_at KernelEntry. If no stop occurs within timeout (default 10s), "
             "returns running and keeps the session. Replaces the previous machine."
         ),

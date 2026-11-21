@@ -13,7 +13,9 @@ constexpr std::uint32_t kCntpTval = 0;
 constexpr std::uint32_t kCntpCtl  = 1;
 constexpr std::uint32_t kCntpCval = 2;
 
-std::uint32_t ReadTimerRegister(std::uint32_t index) {
+// The TVAL readback is not on the bring-up path yet; the register pair
+// stays documented here for the lane that will need it.
+[[maybe_unused]] std::uint32_t ReadTimerRegister(std::uint32_t index) {
     std::uint32_t value = 0;
     asm volatile("mrc p15, 0, %0, c14, c2, %1" : "=r"(value) : "I"(index));
     return value;

@@ -23,9 +23,11 @@
 // destructor with the ARM EABI atexit entry point. The kernel never
 // exits, so the registry is accepted and dropped: registration "succeeds"
 // and nothing ever runs.
-extern "C" void* __dso_handle = &__dso_handle;
+extern "C" {
+void* __dso_handle = &__dso_handle;
+}
 
-extern "C" int __aeabi_atexit(void* /*object*/, void (*)(void*) /*destructor>,
+extern "C" int __aeabi_atexit(void* /*object*/, void (*)(void*) /*destructor*/,
                               void* /*dso_handle*/) {
     return 1;  // registration accepted; the table is intentionally absent
 }

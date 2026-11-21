@@ -97,7 +97,7 @@ long long HandleEventfd2(const SyscallFrame& frame) {
     const auto kDescriptor =
         CurrentTask()->files->alloc(&kCounterOps, kCounter.get(), {},
                                     {
-                                        .status  = kOpenReadWrite | (frame.rsi & kOpenNonblock),
+                                        .status  = static_cast<unsigned long>(kOpenReadWrite | (frame.rsi & kOpenNonblock)),
                                         .cloexec = (frame.rsi & kOpenCloexec) != 0,
                                         .limit   = FileDescriptorLimit(),
                                     });

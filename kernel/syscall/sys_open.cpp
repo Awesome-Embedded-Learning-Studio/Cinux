@@ -72,7 +72,7 @@ long long OpenPath(const char* path, Word flags, Word mode) {
     const base::Result<unsigned long> kFd =
         kSelf->files->alloc(flat.ops, flat.self, node.value(),
                             {
-                                .status   = flags & kOpenStatusMask,
+                                .status   = static_cast<unsigned long>(flags & kOpenStatusMask),
                                 .cloexec  = (flags & kOpenCloexec) != 0,
                                 .lifetime = flat.lifetime,
                                 .limit    = FileDescriptorLimit(),
@@ -173,7 +173,7 @@ long long OpenPathAt(Word descriptor, const char* relative, Word flags, Word mod
     const base::Result<unsigned long> kFd =
         kSelf->files->alloc(anchor->ops, anchor->backend, node.value(),
                             {
-                                .status   = flags & kOpenStatusMask,
+                                .status   = static_cast<unsigned long>(flags & kOpenStatusMask),
                                 .cloexec  = (flags & kOpenCloexec) != 0,
                                 .lifetime = anchor->lifetime,
                                 .limit    = FileDescriptorLimit(),

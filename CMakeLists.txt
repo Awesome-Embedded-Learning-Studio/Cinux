@@ -62,6 +62,17 @@ foreach(platform_header IN LISTS CINUX_PLATFORM_HEADERS)
          CONTENT "#pragma once\n#include \"kernel/arch/${CINUX_ARCHITECTURE}/platform/${platform_header}.hpp\"\n")
 endforeach()
 
+# The warning interface loads before the arch lane: the armv7 lane
+# attaches its kernel directory inside cinux_arch_lane(), and the kernel
+# targets must see cinux_warnings as a real target (with -Werror) rather
+# than a bare -l name on the link line.
+include(cmake/compilers/warning_standard.cmake)
+
+# Registered at the root so a plain `ctest --test-dir <build>` sees
+# every lane: host and ktest from test/, the guest boots from
+# cmake/qemu/run.cmake, the armv7 suite from cmake/qemu/armv7.
+enable_testing()
+
 cinux_arch_lane()
 # The buildroot volume is lane-uniform: one set of target names
 # (buildroot_configure, buildroot_volume) on every architecture; the
@@ -72,7 +83,6 @@ if(CINUX_ARCH_LANE_TERMINAL)
     return()
 endif()
 
-include(cmake/compilers/warning_standard.cmake)
 include(cmake/compilers/boot_modes.cmake)
 include(cmake/compilers/kernel_modes.cmake)
 include(cmake/checks/options.cmake)

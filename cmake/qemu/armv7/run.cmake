@@ -22,7 +22,7 @@ set(CINUX_ARM_BUILDROOT_VOLUME ${CMAKE_BINARY_DIR}/boot/native-build.ext2)
 # buildroot card, so the volume target declares the dependency and a
 # plain cmake --build produces everything.
 add_custom_target(vesper_desk
-    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build-armv7-vesper-desk.sh
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/create/build-armv7-vesper-desk.sh
             ${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk
     COMMENT "armv7 vesper desk (cached by the script's input fingerprint)")
 # Every -D value that contains a space must be quoted: an unquoted one is
@@ -98,30 +98,30 @@ add_test(NAME arm_init
     COMMAND ${CMAKE_COMMAND} -E env
             "CINUX_ARM_BUILD=${CMAKE_BINARY_DIR}"
             "CINUX_ARM_RUN_SECONDS=${CINUX_ARM_RUN_SECONDS}"
-            bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-init.sh")
+            bash "${CMAKE_SOURCE_DIR}/scripts/checks/check-armv7-init.sh")
 set_tests_properties(arm_init PROPERTIES TIMEOUT 300)
 
-# The GUI lane is a test too, when the desktop artifact is there: it
-# boots the desktop, clicks the terminal icon, types, and judges the
-# screen's pixels. The desk never exits, so the script owns its own run.
-set(_arm_desk_test_bin "")
-foreach(_arm_candidate "${CMAKE_SOURCE_DIR}/build/armv7-vesper/desk"
-        "${CMAKE_BINARY_DIR}/armv7-vesper/desk")
-    if(EXISTS "${_arm_candidate}" AND NOT _arm_desk_test_bin)
-        set(_arm_desk_test_bin "${_arm_candidate}")
-    endif()
-endforeach()
-if(_arm_desk_test_bin AND EXISTS "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
+# The GUI lane is a test too: it boots the desktop, clicks the terminal
+# icon, types, and judges the screen's pixels. The desk never exits, so
+# the script owns its own run. The desk script builds the desk artifact
+# itself, so there is no configure-time existence guard: the test_arm
+# target below carries every input the suite boots.
     add_test(NAME arm_desk
         COMMAND ${CMAKE_COMMAND} -E env
                 "CINUX_ARM_BUILD=${CMAKE_BINARY_DIR}"
-                bash "${CMAKE_SOURCE_DIR}/scripts/check-armv7-desk.sh")
+                bash "${CMAKE_SOURCE_DIR}/scripts/checks/check-armv7-desk.sh")
     set_tests_properties(arm_desk PROPERTIES TIMEOUT 900)
     add_test(NAME arm_gui_keyboard
-        COMMAND python3 "${CMAKE_SOURCE_DIR}/scripts/test_armv7_gui_keyboard.py"
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/test/test_armv7_gui_keyboard.py"
                 --build "${CMAKE_BINARY_DIR}" --qemu "${CINUX_ARM_QEMU}")
     set_tests_properties(arm_gui_keyboard PROPERTIES TIMEOUT 90)
-endif()
+
+# One target that carries every input the ctest suite boots: the
+# selftest kernel (arm_boot), the real image with all three dtb doors
+# plus the buildroot card (arm_init, arm_gui_keyboard), and the desk
+# (arm_desk). `cmake --build <build> --target test_arm && ctest` works
+# cold; no test demands a manually prebuilt artifact.
+add_custom_target(test_arm DEPENDS arm_selftest arm_image buildroot_volume vesper_desk)
 
 # The interactive door the x86 lane has always had: `run` boots the
 # real system, not the self-check world. kernel_init takes over, pid 1

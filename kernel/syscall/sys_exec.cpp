@@ -318,9 +318,9 @@ long long HandleExecve(const SyscallFrame& frame) {
     const auto               kEntryRsp = kStackTop - kPictureBytes;
     const loader::EntryStack kStack{
         .bytes    = kStackBytes.get(),
-        .base     = kEntryRsp,
+        .base     = static_cast<unsigned long>(kEntryRsp),
         .capacity = kPictureBytes,
-        .rsp      = kEntryRsp,
+        .rsp      = static_cast<unsigned long>(kEntryRsp),
     };
     if (loader::WriteEntryPicture(kStack, kRuns, facts) == 0) {
         return -kE2big;
