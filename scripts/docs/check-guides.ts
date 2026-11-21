@@ -8,10 +8,10 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { ApiBundle, ApiSymbol } from '../site/api-gen/src/model/symbol'
-import { guideEntryOf, loadGuide } from '../site/api-gen/src/emit/group-rich'
+import type { ApiBundle, ApiSymbol } from '../../site/api-gen/src/model/symbol'
+import { guideEntryOf, loadGuide } from '../../site/api-gen/src/emit/group-rich'
 
-const PROJECT_ROOT = resolve(import.meta.dirname, '..')
+const PROJECT_ROOT = resolve(import.meta.dirname, '../..')
 const BUNDLE = resolve(PROJECT_ROOT, 'site/api-gen/dist/api-bundle.json')
 const verbose = process.argv.includes('--verbose')
 

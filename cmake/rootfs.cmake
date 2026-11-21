@@ -65,6 +65,10 @@ file(COPY ${CMAKE_SOURCE_DIR}/test/kernel/fs/fixtures/hello.txt
 set(CINUX_EXT2_KTEST_IMG ${CMAKE_BINARY_DIR}/boot/ext2_ktest.img)
 add_custom_command(
     OUTPUT ${CINUX_EXT2_KTEST_IMG}
+    # The fixture must not lean on another target having created boot/
+    # first: on a fresh build directory the parallel graph can schedule
+    # this command before anything else touches the directory.
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/boot
     COMMAND ${CMAKE_COMMAND} -E rm -f ${CINUX_EXT2_KTEST_IMG}
     COMMAND mke2fs -q -t ext2 -b 1024 -O none
             -d ${CINUX_KTEST_FIXTURE_DIR}

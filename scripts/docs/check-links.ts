@@ -15,9 +15,9 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, posix, relative, resolve } from 'node:path'
-import projectConfig from '../project.config'
+import projectConfig from '../../project.config'
 
-const PROJECT_ROOT = resolve(import.meta.dirname, '..')
+const PROJECT_ROOT = resolve(import.meta.dirname, '../..')
 const DOCS = join(PROJECT_ROOT, projectConfig.documentsDir)
 const BASE_NO_SLASH = projectConfig.base.replace(/\/$/, '')
 

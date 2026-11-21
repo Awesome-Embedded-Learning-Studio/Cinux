@@ -62,6 +62,12 @@ long long HandlePrlimit64(const SyscallFrame& frame) {
 }
 
 long long HandleGetrlimit(const SyscallFrame& frame, const RlimitLayout& layout) {
+    // The callers seat 4 or 8; the guard gives the compiler the same
+    // bound it cannot see across the call, and a stray layout gets
+    // EINVAL instead of a write past the record.
+    if (layout.field_bytes == 0 || layout.field_bytes > sizeof(unsigned long long)) {
+        return -kEinval;
+    }
     if (frame.rdi >= proc::kResourceLimitCount) {
         return -kEinval;
     }
@@ -70,18 +76,20 @@ long long HandleGetrlimit(const SyscallFrame& frame, const RlimitLayout& layout)
     }
     const proc::Task* const kSelf = CurrentTask();
     // One record per width: the narrow one carries two four-byte words,
-    // the wide one the same pair at eight bytes. Written field by field
-    // so the caller's layout is the only thing that decides the shape.
-    unsigned char record[2 * sizeof(unsigned long long)] = {};
+    // the wide one the same pair at eight bytes. Each word is staged in
+    // a fixed-width buffer first, so the store bounds are visible to
+    // the compiler; the caller's layout only decides how many of those
+    // bytes travel to the user seat.
     for (unsigned field = 0; field < 2; ++field) {
-        unsigned long long value = kSelf->limits[frame.rdi][field];
-        for (unsigned long long byte = 0; byte < layout.field_bytes; ++byte) {
-            record[field * layout.field_bytes + byte] =
-                static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
+        const unsigned long long value = kSelf->limits[frame.rdi][field];
+        unsigned char word[sizeof(unsigned long long)] = {};
+        for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+            word[byte] = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
         }
-    }
-    if (!uaccess::CopyToUser(frame.rsi, record, 2 * layout.field_bytes)) {
-        return -kEfault;
+        if (!uaccess::CopyToUser(frame.rsi + field * layout.field_bytes, word,
+                                 layout.field_bytes)) {
+            return -kEfault;
+        }
     }
     return 0;
 }
