@@ -115,7 +115,7 @@ else()
 endif()
 
 set(CINUX_QEMU_ROOTFS "${CINUX_BUILDROOT_VOLUME}"
-    CACHE FILEPATH "Root filesystem used by run, run_debug and run_gui")
+    CACHE FILEPATH "Root filesystem used by every run target")
 set(CINUX_QEMU_MEMORY 1024 CACHE STRING "QEMU runtime memory in MiB")
 set(CINUX_QEMU_DEVICE_ARGS
     -accel;${CINUX_QEMU_ACCEL_SELECTED}
@@ -125,7 +125,7 @@ set(CINUX_QEMU_DEVICE_ARGS
     -no-reboot
     -device;isa-debug-exit,iobase=0xf4,iosize=0x04
     -device;ahci,id=sata0
-    -drive;format=raw,file=${CINUX_EXT2_IMG},if=none,id=spare
+    -drive;format=raw,file=${CINUX_QEMU_ROOTFS},if=none,id=spare
     -device;ide-hd,drive=spare,bus=sata0.0
     -device;qemu-xhci,id=xhci0
     -device;usb-kbd,bus=xhci0.0

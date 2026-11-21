@@ -112,12 +112,18 @@ def main():
     run(*make, f'-j{args.jobs}', 'all')
     image.parent.mkdir(parents=True, exist_ok=True)
     # Volume geometry. x86_64 mounts a bare 1536 MiB ext2 image; armv7
-    # slides its volume inside an MBR card (one Linux partition at sector
-    # 2048), and QEMU's SD model only accepts power-of-two cards, so the
-    # card totals 2 GiB whatever the partition holds.
+    # slides its volume inside an MBR card whose every offset lives in
+    # scripts/create/meta/cinux-sdcard-armv7.json (one image, one table file),
+    # so the card constants have exactly one home and the assembler
+    # bakes the same bytes.
+    root = here.parents[2]
+    sdcard_table = root / 'scripts' / 'create' / 'meta' / 'cinux-sdcard-armv7.json'
     if args.arch == 'armv7':
-        card_sectors = 2 * 1024 * 1024 * 1024 // 512
-        partition_start = 2048
+        sdcard = json.loads(sdcard_table.read_text(encoding='utf-8'))
+        mbr_entry = next(entry for entry in sdcard['entries']
+                         if entry['kind'] == 'mbr')
+        card_sectors = sdcard['size_bytes'] // 512
+        partition_start = mbr_entry['partition']['start_lba']
     else:
         card_sectors = 1536 * 1024 * 1024 // 512
         partition_start = 0
@@ -138,23 +144,10 @@ def main():
         disk.flush()
         os.fsync(disk.fileno())
     if args.arch == 'armv7':
-        with image.open('wb') as card:
-            card.truncate(card_sectors * 512)
-        run('dd', f'if={volume}', f'of={image}', 'bs=512',
-            f'seek={partition_start}', 'conv=notrunc', 'status=none')
-        with image.open('r+b') as card:
-            card.seek(450)
-            card.write(b'\x83')  # partition type: Linux
-            card.seek(454)
-            card.write(partition_start.to_bytes(4, 'little'))
-            card.seek(458)
-            card.write((card_sectors - partition_start).to_bytes(4, 'little'))
-            card.seek(510)
-            card.write(b'\x55\xAA')  # boot signature
-            card.seek(512)
-            card.write(b'CINUXSDMK')  # the block street's marker
-            card.flush()
-            os.fsync(card.fileno())
+        run(sys.executable, root / 'scripts' / 'create' / 'assemble_image.py',
+            '--layout', sdcard_table,
+            '--output', image,
+            '--source', f'volume={volume}')
         volume.unlink()
     else:
         temporary.replace(image)

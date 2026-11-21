@@ -11,9 +11,9 @@ SESSION = None
 def resolve_image(image):
     if image:
         return image
-    matches = sorted(glob.glob("build/boot/cinux.img"))
+    matches = sorted(glob.glob("build/boot/cinux-boot.img"))
     if not matches:
-        raise RuntimeError("no image given and build/boot/cinux.img is missing")
+        raise RuntimeError("no image given and build/boot/cinux-boot.img is missing")
     return matches[0]
 
 
@@ -44,7 +44,7 @@ def call_tool(name, args):
 TOOLS = [
     {
         "name": "qemu_boot",
-        "description": "Boot a Cinux image under QEMU with KVM (no display, serial to file, monitor on a unix socket) and wait for the first [kern] line. Defaults to build/boot/cinux.img.",
+        "description": "Boot a Cinux image under QEMU with KVM (no display, serial to file, monitor on a unix socket) and wait for the first [kern] line. Defaults to build/boot/cinux-boot.img.",
         "inputSchema": {
             "type": "object",
             "properties": {"image": {"type": "string", "description": "Path to the raw disk image"}},

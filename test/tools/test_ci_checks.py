@@ -268,7 +268,8 @@ class MatrixTests(unittest.TestCase):
 printf '%s\\n' "$1:$2:$3" >> "$CINUX_MATRIX_DIR/worker-calls"
 if [ "$1:$2:$3" = "$FAIL_WORKER" ]; then exit 7; fi
 ''')
-        (root / 'scripts/test_station33_ecosystem.py').write_text('''import os, sys
+        (root / 'test').mkdir()
+        (root / 'test/test_ecosystem.py').write_text('''import os, sys
 with open(os.environ['CINUX_MATRIX_DIR'] + '/smoke-calls', 'a') as log:
     log.write(sys.argv[2] + '\\n')
 if os.environ['FAIL_SMOKE'] and os.environ['FAIL_SMOKE'] in sys.argv[2]:

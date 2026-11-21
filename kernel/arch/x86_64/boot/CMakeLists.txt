@@ -1,4 +1,5 @@
 include(${CMAKE_SOURCE_DIR}/cmake/boot/boot_target.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/boot/layout_table.cmake)
 
 add_executable(mbr mbr.cpp)
 add_cinux_boot_binary(mbr 16 mbr.ld -Wl,--gc-sections)
@@ -65,23 +66,29 @@ add_custom_target(stage2_size_check ALL
     DEPENDS stage2_bin
 )
 
+# Every offset and size decision lives in scripts/create/meta/cinux-boot-x86_64.json;
+# this wiring only feeds the artifacts in. The ktest images ride the same
+# table through the same function.
 function(add_cinux_image name image_file kernel_bin kernel_dep)
-    add_custom_target(${name}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/boot
-        COMMAND ${CMAKE_COMMAND} -E remove ${image_file}
-        COMMAND dd if=/dev/zero of=${image_file} bs=1M count=1 status=none
-        COMMAND dd if=${CMAKE_CURRENT_BINARY_DIR}/mbr.bin
-                of=${image_file} bs=512 count=1 conv=notrunc status=none
-        COMMAND dd if=${CMAKE_CURRENT_BINARY_DIR}/stage2.bin
-                of=${image_file} bs=512 seek=1 conv=notrunc status=none
-        COMMAND dd if=${kernel_bin}
-                of=${image_file} bs=512 seek=32 conv=notrunc status=none
-        DEPENDS mbr_bin stage2_size_check ${kernel_dep}
-    )
+    # An empty image_file takes the table's own name (cinux-boot.img);
+    # the ktest seats name theirs explicitly.
+    if(image_file)
+        add_cinux_layout_image(${name} cinux-boot-x86_64.json
+            OUTPUT ${image_file}
+            SOURCES mbr=${CMAKE_CURRENT_BINARY_DIR}/mbr.bin
+                    stage2=${CMAKE_CURRENT_BINARY_DIR}/stage2.bin
+                    kernel=${kernel_bin}
+            DEPENDS mbr_bin stage2_size_check ${kernel_dep})
+    else()
+        add_cinux_layout_image(${name} cinux-boot-x86_64.json
+            SOURCES mbr=${CMAKE_CURRENT_BINARY_DIR}/mbr.bin
+                    stage2=${CMAKE_CURRENT_BINARY_DIR}/stage2.bin
+                    kernel=${kernel_bin}
+            DEPENDS mbr_bin stage2_size_check ${kernel_dep})
+    endif()
 endfunction()
 
-add_cinux_image(boot_image
-    ${CMAKE_BINARY_DIR}/boot/cinux.img
+add_cinux_image(boot_image ""
     ${CMAKE_BINARY_DIR}/kernel/kernel.bin kernel_bin)
 
 foreach(entry IN LISTS CINUX_KTESTS CINUX_KTESTS_INTEGRATION)

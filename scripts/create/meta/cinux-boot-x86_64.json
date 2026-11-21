@@ -1,0 +1,26 @@
+{
+    "image": "cinux-boot.img",
+    "format": "raw",
+    "size_bytes": "auto",
+    "entries": [
+        {
+            "kind": "payload",
+            "name": "mbr",
+            "at_lba": 0,
+            "source": "mbr"
+        },
+        {
+            "kind": "payload",
+            "name": "stage2",
+            "at_lba": 1,
+            "capacity_sectors": 28,
+            "source": "stage2"
+        },
+        {
+            "kind": "payload",
+            "name": "kernel",
+            "at_lba": 32,
+            "source": "kernel"
+        }
+    ]
+}

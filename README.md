@@ -46,12 +46,21 @@
 git clone --recursive https://github.com/Awesome-Embedded-Learning-Studio/Cinux-Book.git
 cd Cinux-Book
 cmake -B build -S .
-cmake --build build --target run_gui -j
+cmake --build build --target run -j
 ```
 
-QEMU 窗口里亮起来的就是 Cinux：开机日志滚完，直接进 Vesper 桌面。第一次构建会联网下载固定版本的 Buildroot，烤一张 1.5 GiB 的开发盘，视网速可能要等一会儿；之后全部走本地缓存复用。
+串口里滚完开机日志就是 shell。想要 QEMU 窗口里亮起 Vesper 桌面，把 `run` 换成 `run_gui`。第一次构建会联网下载固定版本的 Buildroot，烤一张 1.5 GiB 的开发盘，视网速可能要等一会儿；之后全部走本地缓存复用。
 
-只想看命令行就把 `run_gui` 换成 `run`，要带调试符号的内核用 `run_debug`。
+所有启动目标都走单盘形态：引导链和 rootfs 烤成同一个 img（`build/boot/cinux.img`），内核开机自己认 MBR 分区，对真机 dd 就是成品。要停在复位处用 GDB 单步跟内核，就用 `run_debug`（串口）或 `run_gui_debug`（窗口）。
+
+想换一张自己的 rootfs 盘，配置时指个路就行：
+
+```bash
+cmake -B build -S . -DCINUX_QEMU_ROOTFS=/path/to/your.ext2      # x86_64
+cmake -B build -S . -DCINUX_ARCHITECTURE=armv7 -DCINUX_ARM_ROOTFS=/path/to/your.ext2
+```
+
+盘是 ext2 不带特性就能挂，所有启动目标都吃这一份。挂不上的时候先 `tune2fs -l` 看一眼卷上开了哪些 feature。外来 ext2 指过去就填进卷槽，单盘形态照烤。
 
 <p align="center">
   <img src="assets/README/boot_cli.gif" width="720" alt="从 run 开始：开机日志滚完就是 shell">

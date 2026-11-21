@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Add scripts/doxygen to path to import lint module
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "scripts" / "doxygen"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "scripts" / "docs" / "doxygen"))
 
 import lint
 

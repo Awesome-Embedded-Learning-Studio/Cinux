@@ -40,7 +40,7 @@ void share_leaf(Entry& slot, unsigned long spot, const CloneWalk& context) {
         return;
     }
     if (kRegion != nullptr && kRegion->shared.holds()) {
-        Pmm::self().retain_frame(base::PhysAddr{kTarget});
+        Pmm::self().retain_frame(base::PhysAddr{static_cast<unsigned long>(kTarget)});
         return;
     }
     cinux::base::safety::Check(MarkPageShared(context.parent_root, spot),

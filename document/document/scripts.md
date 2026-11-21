@@ -24,7 +24,7 @@ base 的 CMakeLists 是挑卡目录里最短的一份，咱们数下来里头装
 
 MBR 是头一层的活，stage2 的组成要多几件。boot_pm 是一个 OBJECT 类型的库，装着保护模式进出与 32 位搬运的几个源文件，kernel/driver 的 io.cpp 被它收编了，serial.cpp 也一并进来了，引导世界要用串口的时候，就借了内核驱动的源码一程。lm_blob 是一段单独链接的 64 位代码，用的是自己的 lm.ld 与 -mcmodel=small，objcopy 把它转成 elf32-i386 的目标文件，段名改成了 .lm_blob，16 位的 stage2 把它当数据背在身上，跳进去的那一刻机器就进了长模式。stage2_size_check 是一个 ALL 类型的目标，它用正则从 kernel/arch/x86_64/boot/layout.hpp 里抠出了 .sectors 的数值，咱们今天看到的值是 28，stage2.bin 一旦超过 28 个扇区的话就 FATAL_ERROR，报错文本指了路，去抬高 kStage2Spot 的扇区数，MBR 的 DAP（磁盘地址包，INT 0x13 扩展读用的参数包）会跟着走。改 layout.hpp 的话配置会自己重来，CMAKE_CONFIGURE_DEPENDS 也把它看住了。
 
-stage2 说完了，镜像里剩下的两个座位归 add_cinux_image 填，咱们跟着四条 dd 命令走一遍。它造一张 1 MiB 的空盘，mbr.bin 写到了 0 号扇区，stage2.bin 落在了 LBA 1 起的位置，kernel.bin 落在了 LBA 32 上，对上的正是 layout.hpp 里定下的数。常数的名字是 kKernelImageLba，家安在了 layout.hpp 里。主线产物写在了 build/boot/cinux.img 里，目标的名字是 boot_image，再往上的 cinux_image 挂了 ALL，日常构建顺手就有了。每个机内测试内核也各有一张拼出来的盘，目标的名字是 boot_ktest_名字，盘落在了 build/boot/ 的 cinux_ktest_名字.img 上，内核换成了 cinux_ktest_名字.bin。至于座位背后的道理，[引导链](boot.md)在磁盘布局一节讲过了。
+stage2 说完了，镜像里剩下的两个座位归 add_cinux_image 填，咱们跟着四条 dd 命令走一遍。它按表自动定大小造一张空盘，mbr.bin 写到了 0 号扇区，stage2.bin 落在了 LBA 1 起的位置，kernel.bin 落在了 LBA 32 上，对上的正是 layout.hpp 里定下的数。常数的名字是 kKernelImageLba，家安在了 layout.hpp 里。主线产物写在了 build/boot/cinux-boot.img 里，目标的名字是 boot_image，再往上的 cinux_image 挂了 ALL，日常构建顺手就有了。每个机内测试内核也各有一张拼出来的盘，目标的名字是 boot_ktest_名字，盘落在了 build/boot/ 的 cinux_ktest_名字.img 上，内核换成了 cinux_ktest_名字.bin。至于座位背后的道理，[引导链](boot.md)在磁盘布局一节讲过了。
 
 内核本体是另一摊的事。kernel 的 CMakeLists.txt 把整棵树 GLOB 了进来，配置带了 CONFIGURE_DEPENDS，新增的文件不用重配，分堆的法子是按路径来，/arch/${CINUX_ARCHITECTURE}/ 的归到了架构侧，其余的归 portable 侧，两边各自排了序，链接顺序就稳定了。CINUX_ARCHITECTURE 是缓存型的变量，今天认的是 x86_64。特例也是有的，kernel/net/tcp.cpp 有专属的旗标，-Wframe-larger-than=4096 是它独享的，源码注释交代了缘由，咱们读注释就知道，包处理在 16 KiB 的线程栈上嵌套，连接控制块的临时对象若在栈上冒出来会破坏调用者的栈，编译期就把这样的意外拒掉了。还有一份写死的名单，名单的名字是 CINUX_KERNEL_NO_SSE_ISLAND，三十个文件被单独加上了 -mgeneral-regs-only，调度器、中断入口与核心驱动的一些文件都在内，谁要进出名单就得改这里的 CMakeLists。
 
@@ -42,15 +42,11 @@ Linux 上还有一个默认就开的开关，名字落在了 CINUX_QEMU_SLIRP_WA
 
 这套参数的用处不止 CMake 一家，咱们自己写脚本起 QEMU 的话也吃现成的。qemu-command.txt 存的是命令，qemu-device-args.txt 存的是设备参数，run 目标要用的在 qemu-run-args.txt，GUI 目标 run_gui 要用的在 qemu-gui-args.txt，每个文件的格式是一行一个参数，落在了构建目录里，scripts/mcp/qemu_args.py 读的就是它们，所以脚本起的 QEMU 与 CMake 起的 QEMU 看到的是同一套参数，两条路就不会漂了。
 
-参数备齐了，cmake/qemu/run.cmake 用它们造了三个目标。run 是日常的驾驶档，参数里的生态夹具盘会被换成日常用的开发卷，默认的卷是 build/boot/native-build.ext2，Buildroot 烤出来的 1536 MiB，盘里带着整份的源码，烤它的是 buildroot_volume 目标，串口接的是 stdio。run_debug 多了 -S -s 两个参数，机器冻在了复位处等调试器，屏幕会提示你用 gdb -q -x build/kernel.gdb 挂上来。run_gui 是最讲究的，脚本里有一段成对的循环把 -device 与 -display 逐对摘出来重排，源码注释解释了为什么不用按值删除，按值删会删掉头一个碰见的 -device 字样，参数串就被孤立掉了。USB 键盘被摘掉了，键盘改走 PS/2 了，tablet 是留着的，显示换成了 GTK 并开了 zoom-to-fit，再由 fw_cfg 给内核递上初始的环境，值定的是 CINUX_SESSION=gui。三个目标起手都要过 cmake/qemu/check_rootfs.cmake 的关，默认卷缺失的话会自动烤出来，-DCINUX_QEMU_ROOTFS 指来的自定义路径，不存在的话就直接 FATAL_ERROR。
+参数备齐了，cmake/qemu/run.cmake 用它们造了四个目标，全部走单盘形态：引导链和 rootfs 由 card_image 目标烤成同一个 img（build/boot/cinux.img），盘占的是 AHCI 座，卷槽从命令行里消失了，默认卷是 build/boot/native-build.ext2，Buildroot 烤出来的 1536 MiB，盘里带着整份的源码，烤它的是 buildroot_volume 目标。run 与 run_debug 是串口档，参数原样用，显示不亮，串口接的是 stdio；run_debug 多了 -S -s 两个参数，机器冻在了复位处等调试器，屏幕会提示你用 gdb -q -x build/kernel.gdb 挂上来。run_gui 与 run_gui_debug 是窗口档，脚本里有一段成对的循环把 -device 与 -display 逐对摘出来重排，源码注释解释了为什么不用按值删除，按值删会删掉头一个碰见的 -device 字样，参数串就被孤立掉了。USB 键盘被摘掉了，键盘改走 PS/2 了，tablet 是留着的，显示换成了 GTK 并开了 zoom-to-fit，再由 fw_cfg 给内核递上初始的环境，值定的是 CINUX_SESSION=gui；run_gui_debug 同样带上 -S -s。四个目标起手都要过 cmake/qemu/check_rootfs.cmake 的关，默认卷缺失的话会自动烤出来，-DCINUX_QEMU_ROOTFS 指来的自定义路径，不存在的话就直接 FATAL_ERROR。
 
 ## 磁盘卷怎么烤
 
-磁盘侧的总装文件是 cmake/rootfs.cmake，生态卷的活归 ext2_img 目标管，管的是 build/boot/ext2.img，它把活交给了 scripts/create_ext2_disk.sh。喂过去的是环境变量，咱们数下来十几个用户态的 ELF 在列，从 user_hello 一直排到 user_smpstress 的位置，配角的名单有四样，busybox-glibc 与 hello-glibc 是其中的两样，toolchain-staging 算的是第三样，vesper 的桌面补上画面，种子文件变了也会重烤，fstab 与 inittab 是其中的例子，其余的 passwd、group、smp-stress.sh 也算。ext2_ktest_img 复制了一份，给机内的测试当 scratch，怎么写都不心疼共享的夹具盘。
-
-create_ext2_disk.sh 认的是两条路，默认的是 glibc 路，咱们把搭树的过程看一遍。build/rootfs-assemble 被它当目录树搭了起来，/etc 放的是种子文件，/bin 放的是 busybox，二十多个 applet 的名字硬链到了同一个 inode 上，cat、ls、ps 也是名单上的，一直排到了 sh 与 mount，sbin/init 的座位也在，十二个教学 ELF 各就各位了，glibc 的运行库用 gcc -print-file-name 就地取材，vesper 桌面在场时往 inittab 里补了一行 respawn，工具链 staging 树整个叠在了最上层。mkfs.ext2 用 -d 把目录树一把灌进了镜像，规格是 192 MiB 的盘，1 KiB 的块，特性是全关的，inode 给到了 16384。走目录树而不走逐文件的 debugfs，这是脚本注释解释过的，mkfs.ext2 -d 保住了硬链接，busybox 一个 inode 挂所有的 applet 名字，SONAME 的符号链接也保住了，这样的规模 debugfs 表达不了，192 MiB 的规格是教学盘的分量。
-
-CINUX_LIBC=musl 的话是另一条 16 MiB 小盘路，咱们想轻装就用它，inode 的数目是 512，逐个地用 debugfs 写进去。动态链接器在 ~/.local/musl 与系统的 musl 路径里找，找得到的话就装进 /lib，找不到的话只留一行提示，盘照常烤出来了。静态的 busybox 由 build-busybox.sh 编出来，源码树是现成的，落在了 ~/.local/src/busybox-1.38.0 里。
+磁盘侧的总装文件是 cmake/rootfs.cmake。生态卷换成了 Buildroot 开发卷，管它的是 buildroot_volume 目标，烤的是 build/boot/native-build.ext2，整条链的家在 user/rootfs/buildroot/README.md，咱们这里不重讲；它上层的 overlay 由 prepare.py 合树，宿主的工具链、vesper 的桌面、仓库的源码都叠在树上。test_kernel 用的夹具盘 ext2_ktest_img 还在这边，mke2fs -d 从 ktest-fixture 目录直接灌，规格是 16 MiB，给机内的测试当 scratch，怎么写都不心疼共享的夹具盘。
 
 动态版的 busybox 费事得多，build-busybox-glibc.sh 管的就是这一摊。busybox 1.38.0 的压缩包带 SHA-256 校验，压缩包落在了 .cache/rootfs，缓存的位置由 CINUX_ROOTFS_CACHE 改，配置里关掉了静态，加上了 -fno-pie，动态链接器的路径指向 /lib64/ld-linux-x86-64.so.2，编出一份带 PT_INTERP 的动态 busybox。它还算了一份输入指纹，配置、脚本、源码树的逐文件哈希、libc 与编译器版本都在内，指纹没变的话就直接复用上次的产物，重跑构建就不用重编 1.38.0 了，咱们改一行配置的话指纹立刻跟着变，该重编的还是会重编。
 
@@ -58,7 +54,7 @@ CINUX_LIBC=musl 的话是另一条 16 MiB 小盘路，咱们想轻装就用它�
 
 客人那侧的桌面有专门的一段，build-vesper-desk.sh 干的就是从源码把它烤出来。源码是 third_party/vesper 的 git 子模块，缺了它的话脚本会大声报错，报错信息给了补法的命令（`git submodule update --init --recursive`），咱们照着敲就行。构建做在自己的 out-of-tree 目录里，用的是 Ninja，选的是 Release，链接是全静态的，后端定的是 fbdev。产物在拷走之前还要过 file 的一眼，不是 statically linked 的话就拒收。脚本注释交代了这么绕一圈的道理，客人拿到的桌面二进制必须来自本仓库自己的构建。桌面仓库构建目录里上一轮剩下的成品拿不得，真出了对不上的现象，咱们说不出它是从哪一份代码来的。
 
-动态链接的验收由两份 hello 承担，两边的参数咱们对下来是一个用意。glibc 的版本住在 scripts/glibc/ 里，musl 的版本住在 scripts/musl/ 里，两边都编非 PIE 的 ET_EXEC，两边都把客人那侧的解释器路径用 `-Wl,-dynamic-linker` 烤进了程序，脚本注释说清了原因，宿主工具链自带的路径在客人的盘上是不存在的。
+动态链接的验收由一份 hello 承担，它住在 scripts/glibc/ 里，编的是非 PIE 的 ET_EXEC，把客人那侧的解释器路径用 `-Wl,-dynamic-linker` 烤进了程序，脚本注释说清了原因，宿主工具链自带的路径在客人的盘上是不存在的。
 
 ## 测试的两层：host 套件与机内 ktest
 
@@ -84,7 +80,7 @@ suite 的四个范围，咱们一格一格跑下来。host 格跑的是 test_hos
 
 scripts/checks 里的工具还有三件。setup-mke2fs.sh 的差事是装 mke2fs，源码的来处是 kernel.org，版本定的是 e2fsprogs 1.47.2，校验是 SHA-256 的，libarchive 也是开着的，装的位置是给定的前缀，末了拿 tar 实测了一把装盘，scripts/checks/README.md 解释了为什么不用发行版自带的 mke2fs，Ubuntu 24.04 的 1.47.0 只认目录输入，Buildroot 那套用户与组的元数据装盘走不通。test-inventory.py 前面说过了。net_decoupling.sh 是两行 grep 的边界检查，kernel/net 不许去 include 驱动与中断层的头，kernel/drivers/net 反手抱协议栈的头也不许，谁越了线谁就会被报出来。咱们往 kernel/net 与 kernel/drivers/net 里添代码的时候，头别伸错了边。
 
-scripts/ 根下散着的一群 test_*.py 都是 QEMU 实弹的各家脚本。`test_execve_busybox.py` 验的是 fork、exec 与 SIGCHLD 的回归，跑在盘的副本上。`test_execve_dyn.py` 用键盘敲出动态链接端到端的那一发。`test_gui_tab.py` 验的是桌面终端不抢焦点也能补全。`test_smp.py` 验的是多核，默认打的是 `build/boot/cinux.img`。`test_persistence.py` 在盘的副本上验的是 sync、机内的编译、关机再冷启后数据都在。`test_station35_gui.py` 自起 QEMU 的时候把 USB 的键盘与 tablet 都从设备表里摘掉了，桌面的事件节点走的是 PS/2，证据的存放点是 build/station35/，截图与 monitor 的 socket 都在。mcp/ 目录是它们的公共地基，qemu.py 起 QEMU 并通过 monitor 的 Unix socket 操作，frame.py 解析 P6 格式的截图。mcp 自己的 README 把 GDB 那套写得很全，gdb_server.py 通过 stdio 提供的是 MCP 工具，gdb.py 里的 Session 养着一台冻在复位的 QEMU 与一个常驻的 GDB/MI 会话，读寄存器不用每次重走 file 加 target remote 的仪式，协议的回归用 unittest 跑，跑的命令是 `python3 -m unittest discover -s scripts/mcp -p 'test_gdb*.py'`，真实 GDB 加 QEMU 的集成测试可选开，咱们想开的话设 CINUX_GDB_QEMU_TEST=1 就行。
+scripts/ 根下散着的一群 test_*.py 都是 QEMU 实弹的各家脚本。`test_gui_tab.py` 验的是桌面终端不抢焦点也能补全。`test_persistence.py` 在盘的副本上验的是 sync、机内的编译、关机再冷启后数据都在。`test_station35_gui.py` 自起 QEMU 的时候把 USB 的键盘与 tablet 都从设备表里摘掉了，桌面的事件节点走的是 PS/2，证据的存放点是 build/station35/，截图与 monitor 的 socket 都在。mcp/ 目录是它们的公共地基，qemu.py 起 QEMU 并通过 monitor 的 Unix socket 操作，frame.py 解析 P6 格式的截图。mcp 自己的 README 把 GDB 那套写得很全，gdb_server.py 通过 stdio 提供的是 MCP 工具，gdb.py 里的 Session 养着一台冻在复位的 QEMU 与一个常驻的 GDB/MI 会话，读寄存器不用每次重走 file 加 target remote 的仪式，协议的回归用 unittest 跑，跑的命令是 `python3 -m unittest discover -s scripts/mcp -p 'test_gdb*.py'`，真实 GDB 加 QEMU 的集成测试可选开，咱们想开的话设 CINUX_GDB_QEMU_TEST=1 就行。
 
 ## 代码卫生与资源生成
 
@@ -137,7 +133,7 @@ pnpm check:links
 - `cmake/qemu/` — 设备清单，run 三目标，scratch 盘，slirp 唤醒库，rootfs 检查
 - `cmake/rootfs.cmake` — ext2 生态卷，ktest 副本，自编译卷的总装
 - `cmake/test/` — ktest 编目，机内判卷，镜像头用例
-- `scripts/create_ext2_disk.sh`、`scripts/build-busybox-glibc.sh`、`scripts/build-toolchain-staging.sh`、`scripts/build-vesper-desk.sh` — 磁盘与用户态的烤制
+- `scripts/build-busybox-glibc.sh`、`scripts/build-toolchain-staging.sh`、`scripts/build-vesper-desk.sh` — 磁盘与用户态的烤制
 - `scripts/checks/` — acceptance，matrix，run-cell，test-inventory，net_decoupling，setup-mke2fs
 - `scripts/checks/README.md`、`scripts/tags.json` — 验收与 CI 的说明，标签词表
 - `scripts/test_*.py` — QEMU 实弹脚本

@@ -57,22 +57,23 @@ case "$suite" in
         cmake --build "$build_dir" --parallel "$check_jobs" --target test_host
         ;;
     kernel)
-        cmake --build "$build_dir" --parallel "$check_jobs" --target test_host test_kernel boot_image
+        cmake --build "$build_dir" --parallel "$check_jobs" --target test_host test_kernel boot_image eco_img qemu_disks
+        # The production kernel boots under every instrumentation mode:
+        # one guest check on the eco volume, straight through ctest.
+        ctest --test-dir "$build_dir" -R '^guest_ecosystem$' --output-on-failure
         ;;
     ecosystem)
-        cmake --build "$build_dir" --parallel "$check_jobs" --target boot_image ext2_img qemu_disks
-        python3 scripts/test_station33_ecosystem.py --image "$build_dir/boot/cinux.img"
-        python3 scripts/test_station34_selfhost.py --image "$build_dir/boot/cinux.img"
-        python3 scripts/test_net_ping.py --image "$build_dir/boot/cinux.img" --log "$build_dir/station31-ping.log"
-        python3 scripts/test_net_tcp.py --build-dir "$build_dir" --log-dir "$build_dir/tcp-smoke"
-        python3 scripts/test_station35_gui.py --image "$build_dir/boot/cinux.img" --keep
+        cmake --build "$build_dir" --parallel "$check_jobs" --target test_guest
+        # Every guest boot rides -snapshot on the eco volume, so the
+        # whole lane runs as one parallel ctest sweep.
+        ctest --test-dir "$build_dir" -R '^guest_' -j "$check_jobs" --output-on-failure
         ;;
     native)
         cmake --build "$build_dir" --parallel "$check_jobs" --target buildroot_rootfs
-        python3 scripts/test_native_build.py --image "$build_dir/boot/cinux.img"
-        python3 scripts/test_native_gui.py --image "$build_dir/boot/cinux.img"
-        python3 scripts/test_persistence.py --image "$build_dir/boot/cinux.img"
-        python3 scripts/test_persistence.py --image "$build_dir/boot/cinux.img" --gui
+        python3 test/test_native_build.py --image "$build_dir/boot/cinux-boot.img"
+        python3 test/test_native_gui.py --image "$build_dir/boot/cinux-boot.img"
+        python3 test/test_persistence.py --image "$build_dir/boot/cinux-boot.img"
+        python3 test/test_persistence.py --image "$build_dir/boot/cinux-boot.img" --gui
         ;;
 esac
 echo "[cell] PASS $suite/$build_type/$mode"

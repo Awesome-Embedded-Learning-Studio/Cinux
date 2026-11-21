@@ -103,7 +103,7 @@ cat <<EOF
 [cinux-wsl2] 环境就绪。下一步：
 
   # 生成内核镜像和 ext2 根盘（第一次会下载 Buildroot，可能要等）
-  cmake --build "$build_dir" --target boot_image ext2_img -j "$jobs"
+  cmake --build "$build_dir" --target boot_image eco_img -j "$jobs"
 
   # 跑一个内核冒烟测试。CTest 会在没有 /dev/kvm 时改用 TCG
   ctest --test-dir "$build_dir/test" -R ^kernel_test_console_cpu1$ --output-on-failure

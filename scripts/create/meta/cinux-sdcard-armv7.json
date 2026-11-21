@@ -1,0 +1,28 @@
+{
+    "format": "raw",
+    "size_bytes": 2147483648,
+    "entries": [
+        {
+            "kind": "mbr",
+            "name": "mbr",
+            "partition": {
+                "index": 0,
+                "type_hex": "83",
+                "start_lba": 2048,
+                "size": "fill"
+            }
+        },
+        {
+            "kind": "marker",
+            "name": "card-marker",
+            "at_lba": 1,
+            "hex": "43494E555853444D4B"
+        },
+        {
+            "kind": "payload",
+            "name": "volume",
+            "at_lba": 2048,
+            "source": "volume"
+        }
+    ]
+}

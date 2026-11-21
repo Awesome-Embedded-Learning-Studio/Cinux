@@ -35,7 +35,7 @@ void put_word(PicturePlane& plane, AbiWord word) {
     plane.words_at += kAbiWordBytes;
 }
 
-bool put_pair(PicturePlane& plane, unsigned long type, unsigned long value) {
+bool put_pair(PicturePlane& plane, AbiWord type, AbiWord value) {
     if (!plane_room(plane)) {
         return false;
     }
@@ -87,25 +87,26 @@ unsigned long land_string(PicturePlane& plane, const char* text) {
 }
 
 struct AuxiliaryPair {
-    unsigned long type;
-    unsigned long value;
+    AbiWord type;
+    AbiWord value;
 };
 
 auto fixed_pairs(const EntryFacts& facts) {
     return std::array{
-        AuxiliaryPair{.type = kAuxPhdr, .value = facts.program_headers},
-        AuxiliaryPair{.type = kAuxPhent, .value = facts.header_entry_bytes},
-        AuxiliaryPair{.type = kAuxPhnum, .value = facts.header_count},
+        AuxiliaryPair{.type = kAuxPhdr, .value = static_cast<AbiWord>(facts.program_headers)},
+        AuxiliaryPair{.type = kAuxPhent, .value = static_cast<AbiWord>(facts.header_entry_bytes)},
+        AuxiliaryPair{.type = kAuxPhnum, .value = static_cast<AbiWord>(facts.header_count)},
         AuxiliaryPair{.type = kAuxPageSize,
-                      .value = (facts.page_bytes == 0 ? 4096ULL : facts.page_bytes)},
-        AuxiliaryPair{.type = kAuxBase, .value = facts.interpreter_base},
-        AuxiliaryPair{.type = kAuxEntry, .value = facts.program_entry},
+                      .value = static_cast<AbiWord>(facts.page_bytes == 0 ? 4096ULL
+                                                                          : facts.page_bytes)},
+        AuxiliaryPair{.type = kAuxBase, .value = static_cast<AbiWord>(facts.interpreter_base)},
+        AuxiliaryPair{.type = kAuxEntry, .value = static_cast<AbiWord>(facts.program_entry)},
         AuxiliaryPair{.type = kAuxUid, .value = 0},
         AuxiliaryPair{.type = kAuxEuid, .value = 0},
         AuxiliaryPair{.type = kAuxGid, .value = 0},
         AuxiliaryPair{.type = kAuxEgid, .value = 0},
         AuxiliaryPair{.type = kAuxSecure, .value = 0},
-        AuxiliaryPair{.type = kAuxHwcap, .value = facts.hwcap},
+        AuxiliaryPair{.type = kAuxHwcap, .value = static_cast<AbiWord>(facts.hwcap)},
     };
 }
 

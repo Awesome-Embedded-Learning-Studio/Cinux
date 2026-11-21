@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-这一页咱们把 Cinux 自带的命令行解释器完整地走一遍。它的本体是 `user/programs/shell.cpp`，一个不带 C 库的独立程序（编译的时候不带 C 库与 C 启动文件，系统调用全由咱们自己发），编出来的 `shell.elf` 能不能坐上 `/bin/sh` 这个座位，烤盘说了算：busybox 在场的烤法座位归 busybox 的 ash，咱们编的 `shell.elf` 根本进不了卷，busybox 缺席的烤法才轮到它，而这样的烤法只住在 musl 小盘路上，默认的 glibc 烤法把 busybox 备齐了才动工（烤盘就是把根卷镜像烤出来的那一步，具体的做法归[构建脚本](../scripts.md)那一页管）。开机之后教学卷的控制台上坐的是 ash，教学 shell 的横幅要它自己真坐上 `/bin/sh` 才打得出来。它自己的本事咱们照旧一件件认：内建的就地办掉，文件类的转给系统调用，`run` 负责把别的程序拉起来跑。
+这一页咱们把 Cinux 自带的命令行解释器完整地走一遍。它的本体是 `user/programs/shell.cpp`，一个不带 C 库的独立程序（编译的时候不带 C 库与 C 启动文件，系统调用全由咱们自己发），编出来的 `shell.elf` 能不能坐上 `/bin/sh` 这个座位，烤盘说了算：现在的 Buildroot 卷把座位给了 busybox 的 ash，咱们编的 `shell.elf` 根本进不了卷（烤盘就是把根卷镜像烤出来的那一步，具体的做法归[构建脚本](../scripts.md)那一页管）。开机之后卷的控制台上坐的是 ash，教学 shell 的横幅要它自己真坐上 `/bin/sh` 才打得出来。它自己的本事咱们照旧一件件认：内建的就地办掉，文件类的转给系统调用，`run` 负责把别的程序拉起来跑。
 
 咱们把范围也得交代清楚。行编辑的纪律（回显、退格、^C 怎么折成信号）是内核终端的家当，[Terminal 终端](../kernel/gui/terminal.md)按条文讲过了，咱们这一页只认结果：shell 拿到的已经是编好的行。fork、execve、wait 在内核里是怎么走的，[进程的复制与替换：fork、execve 与 wait](../kernel/proc/fork_exec.md)讲的是内核那一侧。打开的文件在内核里怎么变成一张打开描述，要看它的话，咱们得走到[文件与路径](../kernel/fs/file_and_path.md)那一页。桌面窗口那半个世界（vesper 的 PtySession 把 shell 拉在伪终端上，窗口里的控件把字节画成字符网格）同样在 Terminal 终端页。咱们这一页守着 shell 程序自己。
 
@@ -16,16 +16,16 @@
 
 这些活住的正是 `kernel/init/init_thread.cpp`，细节咱们在[Init 任务](../kernel/proc/init.md)里已经走过一遍，这里咱们只借结果：1 号进程跑的是 busybox 的 init。busybox 是把几十个常用 Unix 工具装进一个可执行文件的小工具箱，`/sbin/init` 是它的一个别名。
 
-第二棒落在了 busybox init 的身上，它读的是 `/etc/inittab`，照着里面的记载决定拉什么。教学盘的种子 inittab（`scripts/ext2_seed/inittab`），咱们看到的就两行：
+第二棒落在了 busybox init 的身上，它读的是 `/etc/inittab`，照着里面的记载决定拉什么。咱们先把一份最小的 inittab 摆出来认字段（教学种子用过的就是这两行的形状）：
 
 ```
 ::sysinit:/bin/echo Cinux up
 console::respawn:/bin/sh
 ```
 
-冒号把一行分成了四段，末段是要跑的命令，respawn 是动作段的名字，意思是命令退出了就再拉一次。头一行开机的时候打一句 Cinux up，第二行才是咱们要认的正座：在控制台上跑的是 `/bin/sh`。种子喂的是教学卷。日常开发默认用的是 Buildroot 卷，它跟教学卷是分开烤的两卷，两边的配置互不通用。教学卷在[构建脚本](../scripts.md)那一页的名字是生态卷，说的是同一份烤法烤出来的默认产物，同一份烤法里还带着一条 `CINUX_LIBC=musl` 的 16 MiB 小盘路，仓库里另外还有一张装整份源码的自编译卷，卷的清单归那一页讲，咱们这里不铺开。Buildroot 卷的 `/etc/inittab` 来自 `user/rootfs/buildroot/overlay/etc/inittab`，桌面那行走的是 `::once` 的门控（只拉一次），控制台 respawn 的换成了 `/bin/su - cinux`，咱们这一页讲的 respawn 直拉 `/bin/sh` 是教学卷才有的排法。
+冒号把一行分成了四段，末段是要跑的命令，respawn 是动作段的名字，意思是命令退出了就再拉一次。头一行开机的时候打一句 Cinux up，第二行才是咱们要认的正座：在控制台上跑的是 `/bin/sh`。这是种子 inittab 的排法；日常开发默认用的 Buildroot 卷走的是另一份配置，它的 `/etc/inittab` 来自 `user/rootfs/buildroot/overlay/etc/inittab`，桌面那行走的是 `::once` 的门控（只拉一次），控制台 respawn 的换成了 `/bin/su - cinux`，咱们这一页讲的 respawn 直拉 `/bin/sh` 是种子文件的排法。
 
-`/bin/sh` 这个名字底下坐的是谁，烤盘的脚本说了算。`scripts/create_ext2_disk.sh` 认的是两条烤路，默认的 glibc 路与 `CINUX_LIBC=musl` 的 16 MiB 小盘路，那个 if 加一个 elif 的座位安排只住在小盘路上。小盘路上 busybox 在场的话，它就把 busybox 硬链到了一排工具名上，`sh` 的名字在名单里，`/sbin/init` 也是 busybox 的别名，座位就归了 busybox 的 ash，ash 是 busybox 自带的 shell。busybox 缺席的话，它才把咱们编的 `shell.elf`（构建系统用变量 `CINUX_SHELL_ELF` 指着的那个产物）写进 `/bin/sh`，打印的那句话自己都招了，说的是 teaching shell seated，括号里注明的是 no busybox source tree。默认的 glibc 路没有这个顶替的分支，busybox 是备齐了才放行的，缺了它脚本当场报错退场，盘也就烤不出来了。所以咱们的 shell 程序是教学烤法的兜底正座，只是这个座位安在了 musl 小盘路上，平时的正座是 ash 的，咱们这个程序是替补，烤盘的时候 busybox 不在了，顶上去的就是它。
+`/bin/sh` 这个名字底下坐的是谁，烤盘说了算。Buildroot 卷把 busybox 硬链到了一排工具名上，`sh` 的名字在名单里，`/sbin/init` 也是 busybox 的别名，座位归了 busybox 的 ash，ash 是 busybox 自带的 shell。咱们编的 `shell.elf` 是自己能独立站住的教学程序，不依赖任何 libc，如今它不进任何卷，座位是 ash 的；要验它的话，把它拷进卷里手动 exec 一发就行。
 
 第三棒又回到了内核收尸。kernel_init 守着收尸的循环，`wait_child` 是停下来等 1 号的，收到了退出就往串口打一行 respawn，回到循环的头顶，把 `/sbin/init` 又拉了一遍。串口上咱们能看到 `shell exited with 0, respawning` 这样的字样。shell 自己退了，链条又把它转了回来，循环是不停的，控制台上的提示符就总有回来的一天。
 

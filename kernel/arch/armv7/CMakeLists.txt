@@ -203,10 +203,10 @@ target_compile_options(arm_core PRIVATE
     -fno-pie
     -fno-stack-protector
     -fno-threadsafe-statics
-    -Wall
-    -Wextra
     -O2
     -g)
+
+target_link_libraries(arm_core PRIVATE cinux_warnings)
 
 target_include_directories(arm_core PRIVATE
     ${CMAKE_BINARY_DIR}/generated
@@ -233,19 +233,20 @@ function(add_arm_image target output_name)
         -fno-pie
         -fno-stack-protector
         -fno-threadsafe-statics
-        -Wall
-        -Wextra
         -O2
         -g)
+
+    target_link_libraries(${target} PRIVATE cinux_warnings gcc)
 
     target_link_options(${target} PRIVATE
         -nostdlib
         -no-pie
         -T${CMAKE_CURRENT_SOURCE_DIR}/link.ld
         -Wl,--build-id=none
+        # The font blob object carries no .note.GNU-stack; state the
+        # stack is data explicitly instead of taking a warning per link.
+        -Wl,-z,noexecstack
         -Wl,--no-warn-rwx-segments)
-
-    target_link_libraries(${target} PRIVATE gcc)
 
     target_include_directories(${target} PRIVATE
         ${CMAKE_BINARY_DIR}/generated
@@ -307,5 +308,6 @@ add_custom_command(
     COMMENT "Compiling the GUI trace device tree")
 add_custom_target(arm_init_gui_trace_dtb DEPENDS ${CINUX_ARM_INIT_GUI_TRACE_DTB})
 add_dependencies(arm_image arm_init_gui_dtb)
+add_dependencies(arm_image arm_init_dtb)
 add_dependencies(arm_image arm_dtb)
 add_dependencies(arm_selftest arm_dtb)

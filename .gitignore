@@ -3,7 +3,7 @@
 helpers
 .claude/
 CLAUDE.md
-meta/
+/meta/
 .notes/
 FAILED_DOXYGEN.md
 

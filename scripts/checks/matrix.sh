@@ -12,8 +12,8 @@ run_cell() {
     echo "[matrix] RUN $name"
     echo RUNNING >"$root/logs/$name.status"
     if bash scripts/checks/run-cell.sh "$suite" "$build_type" "$mode" "$directory" >"$root/logs/$name.log" 2>&1 &&
-        { [[ "$suite" != kernel ]] || python3 scripts/test_station33_ecosystem.py \
-            --image "$directory/boot/cinux.img" >>"$root/logs/$name.log" 2>&1; }; then
+        { [[ "$suite" != kernel ]] || python3 test/test_ecosystem.py \
+            --image "$directory/boot/cinux-boot.img" >>"$root/logs/$name.log" 2>&1; }; then
         echo OK >"$root/logs/$name.status"
         echo "[matrix] PASS $name"
     else

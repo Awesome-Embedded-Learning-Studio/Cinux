@@ -14,6 +14,7 @@
 
 #include "kernel/drivers/ahci/ahci.hpp"
 #include "kernel/drivers/block/block_device_concept.hpp"
+#include "kernel/drivers/block/mbr_window.hpp"
 #include "kernel/drivers/rtc/rtc.hpp"
 
 namespace cinux::arch {
@@ -27,11 +28,19 @@ unsigned long long rtc_wall_clock() {
 }  // namespace
 
 driver::BlockPort* MakeRootPort(unsigned long long (**wall_clock)()) {
-    static driver::BlockPort sata_port;
-    sata_port.adopt(driver::Ahci::self());
     if (wall_clock != nullptr) {
         *wall_clock = rtc_wall_clock;
     }
+    // The same SATA seat carries either disk shape: a card whose volume
+    // lives inside an MBR Linux partition, or a bare ext2 volume that is
+    // the whole disk. The scan decides, so both shapes mount through
+    // this one port with no caller-side switch.
+    static driver::MbrWindow root_window;
+    if (root_window.adopt(driver::Ahci::self())) {
+        return root_window.port();
+    }
+    static driver::BlockPort sata_port;
+    sata_port.adopt(driver::Ahci::self());
     return &sata_port;
 }
 

@@ -4,7 +4,7 @@
 # and this wrapper only picks the exit. `run` boots interactive KVM,
 # `build` assembles the images, `verify` fires the non-interactive
 # ecosystem verdict. BusyBox download, checksum and cache live inside
-# scripts/build-busybox-glibc.sh, so the cmake targets reach them too.
+# scripts/create/build-busybox-glibc.sh, so the cmake targets reach them too.
 # This file's home is user/rootfs/busybox/, three levels under the repo.
 set -euo pipefail
 
@@ -19,7 +19,7 @@ cmake -S . -B "$CINUX_BUILD_DIR"
 cmake --build "$CINUX_BUILD_DIR" --parallel "$CINUX_ROOTFS_JOBS" --target boot_image ext2_img
 
 if [ "$action" = "verify" ]; then
-    python3 scripts/test_station33_ecosystem.py --image "${CINUX_BUILD_DIR}/boot/cinux.img"
+    python3 test/test_station33_ecosystem.py --image "${CINUX_BUILD_DIR}/boot/cinux-boot.img"
     exit 0
 fi
 if [ "$action" = "run" ]; then
